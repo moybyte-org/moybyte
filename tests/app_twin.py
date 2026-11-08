@@ -670,7 +670,7 @@ _SERVED = {
               "hydrate images save_image encode_image"),
     "nav": ("open_app is_system_app projects edit open_image open_text edit_file "
             "play run_script text_mode"),
-    "notify": "achieve award count has found_on progress today",
+    "notify": "award groups today",
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
                 "writable op rescan free find net keep wifi wifi_open consent"),

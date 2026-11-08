@@ -814,6 +814,11 @@ def _load(path, whole, folder=None):
             # manifest has them; None without the field. Its queue's open
             # takes the strings (scheduler._open).
             "receives": ven.get("receives"),
+            # The badges the cart declares (docs/moy_cart_api.md,
+            # "Achievements"), as the manifest has them; None without the
+            # field. runtime/system/achievements.py's `declared` reads it
+            # strictly where it is used.
+            "achievements": ven.get("achievements"),
             # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).
@@ -1751,10 +1756,7 @@ try:
     from moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
                           _wifi_networks, load_wifi, save_wifi, remember_wifi, forget_wifi,
                           SYSTEM_DIR, SETTINGS_NAME, system_store_path, parse_settings,
-                          settings_text, load_system, save_system, save_system_steps,
-                          ACHIEVEMENTS_STORE_NAME, ACHIEVEMENTS_FORMAT,
-                          achievements_store_path, achievements_doc, achievements_text,
-                          load_achievements, save_achievements)
+                          settings_text, load_system, save_system, save_system_steps)
     from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, adopt,
                           import_archive)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -1762,11 +1764,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                   _wifi_networks, load_wifi, save_wifi, remember_wifi,
                                   forget_wifi, SYSTEM_DIR, SETTINGS_NAME,
                                   system_store_path, parse_settings, settings_text,
-                                  load_system, save_system, save_system_steps,
-                                  ACHIEVEMENTS_STORE_NAME,
-                                  ACHIEVEMENTS_FORMAT, achievements_store_path,
-                                  achievements_doc, achievements_text, load_achievements,
-                                  save_achievements)
+                                  load_system, save_system, save_system_steps)
     from runtime.moy_pack import (save_package, rename_package, pack_skip, pack, unpack,
                                   adopt, import_archive)
 try:

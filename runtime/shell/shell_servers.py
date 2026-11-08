@@ -699,7 +699,6 @@ DOOR_ARGS = {
     "nav.play": "c",
     "nav.run_script": "ss",
     "nav.text_mode": "i",
-    "notify.achieve": "so",
     "wallpaper.current": "",
     "wallpaper.carts": "",
     "wallpaper.id_for": "c",

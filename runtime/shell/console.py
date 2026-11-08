@@ -338,21 +338,16 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH,
                                     _CODE_SYMBOLS)
 
-# Self-contained support widgets (see widgets.py): the Achievements milestone
-# tracker (+ its ACHIEVEMENTS catalog), Pmem (cart persistent RAM) and the
-# Popup, the one popover, and the Pointer cursor (moy_input.py). Leaves;
-# imported back here so
-# console.Pointer / console.Popup / console.ACHIEVEMENTS / ... resolve for
-# Workstation + host_app + tests.
+# Self-contained support widgets (see widgets.py): Pmem (cart persistent RAM)
+# and the Popup, the one popover, and the Pointer cursor (moy_input.py).
+# Leaves; imported back here so console.Pointer / console.Popup / ... resolve
+# for Workstation + host_app + tests.
 try:
-    from widgets import (Achievements, Pmem, Popup,
-                         ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W)
+    from widgets import (Pmem, Popup, _POPUP_X, _POPUP_Y, _POPUP_W)
     from moy_input import Pointer, ball_coast as _ball_coast
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, Pmem,
-                                 Popup, ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X,
-                                 _POPUP_Y, _POPUP_W)
+    from runtime.widgets import (Pmem, Popup, _POPUP_X, _POPUP_Y, _POPUP_W)
     from runtime.moy_input import Pointer, ball_coast as _ball_coast
     from runtime.audio_session import console_volume
 
@@ -1249,9 +1244,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # the banner draws, which is read only while its deadline is up.
         self._toast_until = 0          # _ticks_ms the unlock banner hides at
         self._toast_at = 0             # _ticks_ms it was armed (a secret's confetti bursts from it)
-        # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
-        # rewards, held by the achievements process (runtime/system/achievements.py),
-        # which load_achievements() starts over the store's document.
+        # Achievements: the console's own badges and every game's, held by the
+        # achievements process (runtime/system/achievements.py), which
+        # load_achievements() starts.
         self.ach = _AchLink(self)
         # The three Easter eggs (#21, achievements_ui.py): their trigger state
         # (_konami_pos/_clock_taps/_secret_taps), reset on screen changes
@@ -2682,10 +2677,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.menu_view = "cards"
         self._set_text_mode(False)
         self._start()
-        # Achievements (#21): opening a cart is "First Steps"; opening _PLAY_GOAL
-        # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
-        # the SAME identity the launcher uses (distinct carts, not repeat opens).
-        self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
+        # First Steps, and Cart Explorer's distinct carts: keyed by the
+        # cart's path or title, the identity the launcher uses.
+        self.ach.played(self.cart.get("path") or self.cart.get("title"))
         return True
 
     def app_context(self, app_id, needs=(), prefs_ns=None, run=False, kind=None,
@@ -3412,8 +3406,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         sched = _scheduler.SCHED
         if sched.wakes.queued or sched.svc_mail:
             sched.mail()              # messages the input sent: served before the draw
-        if self.ach.pending is not None:
-            self.ach.flush()          # the badges the achievements process handed back
         if self._press_owed:
             self._press_owed = False
             if not self._press_taken:

@@ -94,9 +94,8 @@ enum {
     MOY_T_NAV_OPEN_APP, MOY_T_NAV_IS_SYSTEM_APP, MOY_T_NAV_PROJECTS, MOY_T_NAV_EDIT,
     MOY_T_NAV_OPEN_IMAGE, MOY_T_NAV_OPEN_TEXT, MOY_T_NAV_EDIT_FILE, MOY_T_NAV_PLAY,
     MOY_T_NAV_RUN_SCRIPT, MOY_T_NAV_TEXT_MODE, MOY_T_NAV_COVER, MOY_T_NAV_COVER_GEN,
-    MOY_T_PREFS_GET, MOY_T_PREFS_SET, MOY_T_PREFS_CLEAR, MOY_T_NOTIFY_ACHIEVE,
-    MOY_T_NOTIFY_AWARD, MOY_T_NOTIFY_COUNT, MOY_T_NOTIFY_HAS, MOY_T_NOTIFY_FOUND_ON,
-    MOY_T_NOTIFY_PROGRESS, MOY_T_NOTIFY_TODAY, MOY_T_WALLPAPER_CURRENT, MOY_T_WALLPAPER_CARTS,
+    MOY_T_PREFS_GET, MOY_T_PREFS_SET, MOY_T_PREFS_CLEAR, MOY_T_NOTIFY_AWARD,
+    MOY_T_NOTIFY_GROUPS, MOY_T_NOTIFY_TODAY, MOY_T_WALLPAPER_CURRENT, MOY_T_WALLPAPER_CARTS,
     MOY_T_WALLPAPER_ID_FOR, MOY_T_WALLPAPER_TITLE, MOY_T_WALLPAPER_SELECT,
     MOY_T_WALLPAPER_PREVIEW, MOY_T_WALLPAPER_THUMBNAIL, MOY_T_WALLPAPER_LOAD_COPY,
     MOY_T_WALLPAPER_SAVE_COPY, MOY_T_ARTWORK_CURRENT, MOY_T_ARTWORK_FOLLOW,
@@ -115,9 +114,10 @@ enum {
     MOY_T_UI_TEXT_VIEW, MOY_T_UI_TABLE_PART, MOY_T_UI_PART_AT, MOY_T_UI_SPLIT,
     MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
     MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
-    MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND,
+    MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
+    MOY_T_MOYBYTE_PROGRESS,
 };
-#define MOY_APP_TABLE_N 169u
+#define MOY_APP_TABLE_N 167u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -201,12 +201,8 @@ enum {
     { "prefs.get", MOY_ROLE_PREFS, MOY_ROW_PREFS_GET }, \
     { "prefs.set", MOY_ROLE_PREFS, MOY_ROW_PREFS_SET }, \
     { "prefs.clear", MOY_ROLE_PREFS, MOY_ROW_PREFS_CLEAR }, \
-    { "notify.achieve", MOY_ROLE_NOTIFY, -1 }, \
     { "notify.award", MOY_ROLE_NOTIFY, -1 }, \
-    { "notify.count", MOY_ROLE_NOTIFY, -1 }, \
-    { "notify.has", MOY_ROLE_NOTIFY, -1 }, \
-    { "notify.found_on", MOY_ROLE_NOTIFY, -1 }, \
-    { "notify.progress", MOY_ROLE_NOTIFY, -1 }, \
+    { "notify.groups", MOY_ROLE_NOTIFY, -1 }, \
     { "notify.today", MOY_ROLE_NOTIFY, -1 }, \
     { "wallpaper.current", MOY_ROLE_WALLPAPER, -1 }, \
     { "wallpaper.carts", MOY_ROLE_WALLPAPER, -1 }, \
@@ -290,6 +286,8 @@ enum {
     { "moybyte.open_with", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.share", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.send", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.award", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.progress", MOY_ROLE_MOYBYTE, -1 }, \
 }
 
 // The permission each role is granted by: a role absent here is never

@@ -61,12 +61,6 @@ class _AngryStore:
     def save_system(self, settings, root):
         raise OSError("card gone")
 
-    def load_achievements(self, root):
-        raise OSError("card gone")
-
-    def save_achievements(self, doc, root):
-        raise OSError("card gone")
-
 
 # ---------------------------------------------------------------------------
 # 1. the store identity
@@ -213,9 +207,7 @@ def test_every_store_touch_runs_inside_one_sd_session(tmp_path):
     ws._with_sd = counting
     ws.system.set("k", 1)
     ws.prefs.load()
-    ws.prefs.load_achievements()
-    ws.prefs.save_achievements(ws.ach.doc())
-    assert len(sessions) == 4
+    assert len(sessions) == 2
 
 
 def test_a_stepped_save_is_two_sessions_and_yields_to_a_newer_write(tmp_path):
@@ -255,7 +247,6 @@ def test_a_read_only_console_attempts_no_write(tmp_path):
     ws._with_sd = lambda fn: attempts.append(1)
     ws.can_manage = False
     ws.system.set("k", 1)
-    ws.prefs.save_achievements(ws.ach.doc())
     assert attempts == []
     assert ws.system.get("k") == 1 and not ws.system.dirty()   # not a failure
 
@@ -273,15 +264,6 @@ def test_a_failing_write_is_not_fatal(tmp_path):
     assert moy_carts.load_system(ws.carts_root)["theme"] == "berry"
 
 
-def test_achievements_round_trip_through_the_handle(tmp_path):
-    ws = _ws(tmp_path)
-    doc = {"found": {"first_open": 20261012, "konami": 0}, "count": {}}
-    ws.prefs.save_achievements(doc)
-    assert ws.prefs.load_achievements() == doc
-    ws.carts_store = _AngryStore()
-    assert ws.prefs.load_achievements() is None    # a bad card is none, never a raise
-
-
 # ---------------------------------------------------------------------------
 # 4. the event push (rev 3): every arm site -> one flat kernel field
 # ---------------------------------------------------------------------------
@@ -292,7 +274,7 @@ def test_an_unlock_arms_the_toast_deadline(tmp_path):
     assert ws.ach.award("first_open") is True
     settle_badges(ws)                       # the achievements process's post
     assert ws._toast_until, "the unlock hook did not arm the banner"
-    assert ws.ach.toast[0] == "first_open"
+    assert ws.ach.toast[1] == "First Steps"
     assert ws._animating(DT) is True
 
 
@@ -307,7 +289,7 @@ def test_a_second_unlock_replaces_the_banner_and_extends_it(tmp_path):
     ws._toast_until = first - 1000          # as if 1s of it had elapsed
     ws.ach.award("konami")
     settle_badges(ws)
-    assert ws.ach.toast[0] == "konami"
+    assert ws.ach.toast[1] == "Secret Coder"
     assert ws._toast_until >= first
 
 

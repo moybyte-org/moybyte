@@ -75,7 +75,7 @@ class StoreHandle:
     """The (store, root, can_manage, with_sd) guard 4-tuple, as an object.
 
     Four bodies re-derived it before this landing (`_persist_system`, the
-    wallpaper's, `_save_achievements`, `rescan_carts`) -- which is why
+    wallpaper's, the badges', `rescan_carts`) -- which is why
     this is a standalone object and not private to `SystemStore`: CartManager
     and the storage roles' servers (runtime/shell/shell_servers.py) take one too.
 
@@ -226,33 +226,3 @@ class SystemStore:
             rows.flush()
         finally:
             self._landed = None
-
-    # -- achievements.json (#21) ---------------------------------------------
-
-    def load_achievements(self):
-        """The badges' document off the store (moy_carts.achievements_doc), or
-        None on an embedded/no-store boot or a store that holds none of this
-        format (the badges then start empty -- still awarded and shown this
-        session, remembered once a write lands)."""
-        if not self.store.ready():
-            return None
-        ws = self.ws
-        try:
-            return self.store.call(
-                lambda: ws.carts_store.load_achievements(ws.carts_root))
-        except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-            print("Moybyte achievements load failed:", _err_text(exc))
-            return None
-
-    def save_achievements(self, doc):
-        """Persist the badges' document -- `Achievements`' `on_save` hook.
-
-        No try/except here on purpose: `Achievements.award` already wraps the
-        hook and prints the failure, so a second one would only decide the same
-        thing twice. A disabled write is simply not remembered (the badge still
-        shows this session)."""
-        if not self.store.writable():
-            return
-        ws = self.ws
-        self.store.call(
-            lambda: ws.carts_store.save_achievements(doc, ws.carts_root))

@@ -1180,6 +1180,45 @@ what the world may tell it. Messages from the console itself come from
 `"system"`: `moybyte.on("net", fn)` hears WiFi come and go as
 `fn("system", up, why)`. `docs/os_2026-11/processes.md` §1 has the rule.
 
+### Achievements (Moybyte-side)
+
+A game declares its badges in its manifest and tells the console when it
+earns one. The console keeps them, shows the unlock banner ("Harpoon Pop:
+badge found!") and lists them in Settings -> About -> Achievements under the
+game's name, where they stay after the game is deleted.
+
+```json
+"moybyte": {"achievements": [
+  {"id": "first_clear", "title": "Bubble Buster", "icon": "star", "hint": "Clear level 1"},
+  {"id": "high_tide", "title": "High Tide", "icon": "run", "hint": "Reach level 5", "goal": 5},
+  {"id": "untouchable", "title": "Untouchable", "icon": "heart",
+   "hint": "Clear a level without losing a life", "secret": true}]}
+```
+
+`id`, `title`, `icon` (a name of the console's icon set) and `hint` are
+text, the id at most 32 bytes and unique; `goal` is a whole number of 1 or
+more; `secret` keeps the badge "Secret" until it is found. The list is read
+strictly: one entry that breaks a rule, or a key it does not know, and the
+game declares no badges.
+
+```python
+import moybyte
+
+moybyte.award("first_clear")          # found
+moybyte.progress("high_tide", level)  # the goal's current value: found once it reaches 5
+```
+
+The game does its own counting: `progress` reports the game's value, which
+the console stores as it is told (the last value, not the best) and draws as
+the badge's bar; a best, a total or a set is the game's to keep, in its
+`pmem` for one that must outlast a run. Each is `moybyte.send` to the
+achievements process (`moybyte.send("moybyte.achievements", "award", id)`),
+which hears the two names from any app. The console stamps the sender, so a
+game reaches only the badges its own manifest declares; any other id is
+refused, and the refusal logged. In Lua a service holds both names.
+`system_carts/moybyte.harpoon_pop.moy` is a seed game that uses all three
+kinds; `docs/os_2026-11/processes.md` §8 is the process.
+
 ---
 
 ## Palette

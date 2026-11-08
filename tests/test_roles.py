@@ -210,31 +210,29 @@ def test_the_achievements_process_serves_the_notify_role():
     else, is `proc:achievements`, and the grant stays `never`."""
     procs = _proc_rows()
     assert set(procs) == {"achievements"}
-    assert [r["verb"] for r in procs["achievements"]] == [
-        "achieve", "award", "count", "has", "found_on", "progress", "today"]
+    assert [r["verb"] for r in procs["achievements"]] == ["award", "groups", "today"]
     assert all(r["role"] == "notify" and r["grant"] == "never" and r["wasm"] is None
                for r in procs["achievements"])
 
 
 def test_the_proc_rows_are_the_processs_and_the_links():
-    """Each `proc:<name>` row is the process's: a message it wakes on
-    (`moybyte.on(verb, fn)`) or a function of its main;
-    and a method of the role's link, taking the grant first (the link is
-    what the console registers, runtime/system/achievements.py)."""
+    """Each `proc:<name>` row is a method of the role's link, taking the
+    grant first (the link is what the console registers,
+    runtime/system/achievements.py): a message the process wakes on
+    (`moybyte.on(verb, fn)`), or a read of what the process keeps."""
     import ast
     import inspect
-    from runtime import achievements, moybyte
+    from runtime import achievements
     links = {"achievements": achievements.NotifyRole}
+    messages = {"achievements": {"award", "progress"}}
     for name, rows in _proc_rows().items():
         src = (ROOT / "system_carts" / ("moybyte.%s.moy" % name) / "main.py").read_text()
         tree = ast.parse(src)
-        fns = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         ons = {c.args[0].value for c in ast.walk(tree)
                if isinstance(c, ast.Call) and getattr(c.func, "attr", None) == "on"
                and isinstance(c.args[0], ast.Constant)}
+        assert ons == messages[name]
         verbs = {r["verb"] for r in rows}
-        assert verbs == ons | (fns & verbs), sorted(verbs - ons - fns)
-        assert not ons & fns
         cls = links[name]
         have = {n for n in dir(cls) if not n.startswith("_") and callable(getattr(cls, n))}
         assert have == verbs, sorted(have ^ verbs)

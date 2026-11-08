@@ -181,10 +181,9 @@ def no_unlock_banner(ws):
     """Every badge already found, so nothing a test opens raises the unlock
     banner (achievements_ui), whose card at the top of the glass would cover
     the pixels it reads."""
-    from runtime.widgets import ACHIEVEMENTS
+    from runtime import achievements
     settle_badges(ws)
-    for a in ACHIEVEMENTS:
-        ws.ach.unlocked.setdefault(a[0], 0)
+    ws.ach.seed({a["id"]: 0 for a in achievements.SHELL})
     return ws
 
 

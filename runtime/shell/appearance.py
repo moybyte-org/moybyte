@@ -655,7 +655,7 @@ class Appearance:
                     guard.forgive(value)
             ach = getattr(ws, "ach", None)
             if ach is not None:
-                ach.note("wallpaper_change")   # "Home Decorator" (#21)
+                ach.award("decorator")
         return 0
 
     def _take(self, c, look, over, kind, pic):

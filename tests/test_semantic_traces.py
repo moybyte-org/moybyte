@@ -848,7 +848,7 @@ seed Seed One=5.1/2 Seed Two=6.1/1
 seed warm Seed One=5.1/2 Seed Two=6.1/1
 seed bump Seed One=5.1/3 Seed Two=6.1/1
 load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
-loaded ['audio_ring', 'author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'handles', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'native', 'palette', 'permissions', 'pictures', 'receives', 'required', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
+loaded ['achievements', 'audio_ring', 'author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'handles', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'native', 'palette', 'permissions', 'pictures', 'receives', 'required', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
 publish True
 recover True True
 journal 1 None False False
@@ -2259,18 +2259,17 @@ def roles_trace(ws):
     ws.go_home()
 
     # -- notify
-    # achieve and award are messages to the achievements process, served at
-    # the start of the console's next frame (`mail`)
+    # award is a message to the achievements process, served at the start of
+    # the console's next frame (`mail`); groups reads what it keeps
     import scheduler
     nt = ctx.notify
-    nt.achieve("open", "trace")
-    scheduler.SCHED.mail()
-    c0 = nt.count()
     a1 = nt.award("konami")
     scheduler.SCHED.mail()
-    say("notify", a1, nt.award("konami"), nt.count() - c0,
-        nt.has("konami"), nt.found_on("konami") == nt.today(),
-        nt.progress("play_five") is not None, nt.found_on("decorator"))
+    shell = {}
+    for b in nt.groups()[0][2]:
+        shell[b[0]] = b
+    say("notify", a1, nt.award("konami"), nt.groups()[0][1],
+        shell["konami"][6] == nt.today(), shell["play_five"][4], shell["decorator"][6])
 
     # -- wallpaper
     w = ctx.wallpaper
@@ -2508,7 +2507,7 @@ text_mode True False
 cover None
 cover_gen True
 play desktop
-notify True False 1 True True True None
+notify True False Moybyte True 5 None
 wallpaper None 'moybyte.wall_z'
 wallpaper carts True None True
 selected None custom

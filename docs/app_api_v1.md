@@ -93,7 +93,7 @@ roles it declared:
 | `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | the shell | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
 | `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `launch` | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
 | `ctx.prefs` | per-app settings on `system/settings`' rows, namespaced per app (the grant's namespace), a write saved as it is made | `prefs` | `get()`, `set()`, `clear()` |
-| `ctx.notify` | achievement events, and the badges themselves: one awarded by its id, how many are found, whether one is, the day it was and its progress, and today's date on the bar's clock as the badges record it | the shell | `achieve()`, `award()`, `count()`, `has()`, `found_on()`, `progress()`, `today()` |
+| `ctx.notify` | the console's own badges and every game's, as Settings lists them: one of the console's awarded by its id, the badges by game (each found one's day, each goal's last value), and today's date on the bar's clock as the badges record it | the shell | `award()`, `groups()`, `today()` |
 | `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | the shell | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
 | `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | the shell | `current()`, `follow()` |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `clipboard` | `put_text()`, `text()`, `kind()`, `seq()` |
@@ -137,6 +137,8 @@ there (`docs/os_2026-11/tiers.md` §1; the toolkit's `ui` rows are
 | `moybyte.open_with` | `front` | `moybyte.open_with` | `moybyte.open_with` |  | `moy_open_with` |
 | `moybyte.share` | `front` | `moybyte.share` | `moybyte.share` |  | `moy_share` |
 | `moybyte.send` | none | `moybyte.send` | `moybyte.send` | `moybyte.os.send` | `moy_send` |
+| `moybyte.award` | none | `moybyte.award` | `moybyte.award` |  |  |
+| `moybyte.progress` | none | `moybyte.progress` | `moybyte.progress` |  |  |
 | `moybyte.on` | none | `moybyte.on` | `moybyte.on` | `moybyte.os.on` | `moy_on` |
 | `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |

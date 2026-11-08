@@ -1729,21 +1729,13 @@ SERVED_ROLE(nav, Nav)
 
 // notify
 
-SERVED(notify, NOTIFY, achieve)
 SERVED(notify, NOTIFY, award)
-SERVED(notify, NOTIFY, count)
-SERVED(notify, NOTIFY, has)
-SERVED(notify, NOTIFY, found_on)
-SERVED(notify, NOTIFY, progress)
+SERVED(notify, NOTIFY, groups)
 SERVED(notify, NOTIFY, today)
 
 static const mp_rom_map_elem_t notify_locals_table[] = {
-    ROW(notify, achieve)
     ROW(notify, award)
-    ROW(notify, count)
-    ROW(notify, has)
-    ROW(notify, found_on)
-    ROW(notify, progress)
+    ROW(notify, groups)
     ROW(notify, today)
 };
 SERVED_ROLE(notify, Notify)

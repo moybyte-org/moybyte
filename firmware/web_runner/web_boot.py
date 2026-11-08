@@ -25,7 +25,7 @@ Make tile and the editors are reachable in the browser. Every write lands in the
 browser's MEMFS first, and the sweep (`_build_watchers`) carries it to where the
 page's store of record is: a site-mode page's OPFS -- the carts with their
 journals and pmem, the drawings, and the console's own documents
-(system/settings, achievements.json, the shared sheet), so a reload comes back on the same shelf,
+(system/settings with the badges among its rows, the shared sheet), so a reload comes back on the same shelf,
 theme, Settings and badges -- or the serving board for its carts, files,
 portable Settings and badges (`moy_sync.SYSTEM_KEYS`; a board answering no
 /console.json leaves them in the tab). A page with no OPFS keeps everything in
@@ -333,12 +333,11 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # The Moybyte shell's achievements are gamification for the kid console,
     # which the console page is, as on a board; they are no part of the
     # one-cart player (`cart`: an export, the gallery, a kiosk bundle), whose
-    # frames are the cart's. The trigger is the Achievements core's note()
-    # (ach.note("open", ...) -> toast "First Steps", which console.py's own
-    # _draw_toast renders, so stubbing achievements_ui alone is not enough):
-    # the player kills the core's verbs.
+    # frames are the cart's. The shell's own sends go quiet (`ws.ach.mute`:
+    # opening the cart would be "First Steps"), and no find raises the
+    # banner, which console.py's own _draw_toast renders.
     if cart:
-        ws.ach.note = lambda *a, **k: None
+        ws.ach.mute = True
         ws.ach.toast = None
         ws._achievement_unlocked = lambda *a, **k: None
     # The Pointer boots visible (a device shows the trackball cursor until its
@@ -722,11 +721,11 @@ def start_edit(name, tab=None):
     not a thing the visitor did, and a banner over the first frame would hide
     the code the start option is there to show. Returns edit_cart's JSON."""
     ws = _S["ws"]
-    note, ws.ach.note = ws.ach.note, lambda *a, **k: None
+    was, ws.ach.mute = ws.ach.mute, True
     try:
         return edit_cart(name, tab)
     finally:
-        ws.ach.note = note
+        ws.ach.mute = was
 
 
 def import_p8_json(path, name, out_dir):
@@ -898,7 +897,7 @@ def state_json():
     (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
-    st["ach"] = sorted(_S["ws"].ach.unlocked)
+    st["ach"] = sorted(_S["ws"].ach.doc().get("system", {}).get("found", {}))
     st["system"] = json.loads(_S["ws"].system.dump() or "{}")
     st["show_fps"] = bool(_S["ws"].show_fps)
     st["sync"] = {"acked": _S.get("sync_acked", 0),

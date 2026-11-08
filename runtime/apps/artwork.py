@@ -965,7 +965,7 @@ class ArtworkService:
             return False
         self._set_doc_name(got, kind)
         self.last_error = ""
-        self._notify.achieve("paint_save")
+        self._notify.award("first_paint")
         return True
 
     def new_doc(self, width, height):

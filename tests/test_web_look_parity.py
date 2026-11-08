@@ -183,7 +183,7 @@ def test_the_browser_console_awards_achievements_as_a_board_does():
 # cursor), and achievements stay quiet (a toast's slide is timed by the clock).
 _STEADY = ("_ws.bar_layer._clock_text = lambda: '12:00'\n"
            "_ws.pointer.visible = False\n"
-           "_ws.ach.note = lambda *a, **k: None\n"
+           "_ws.ach.mute = True\n"
            "_ws.ach.toast = None\n"
            "_ws.look.set_theme(%r, persist=False, variant=%r)\n")
 _EDITOR = ("_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Sky Run'][0])\n"

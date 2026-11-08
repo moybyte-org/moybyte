@@ -63,7 +63,8 @@ the same watcher into a site-mode browser's OPFS, and between a board and the
 page it serves as the board's VM decides key by key (`SYSTEM_KEYS`): the
 board is of record, its C parks a system batch for the VM, and the VM merges
 it (`SystemReceiver`) -- the portable Settings that changed set and re-applied,
-the badges a union. A board's pin, update channel and NTP server are never
+the badges among them (the achievements process's prefs row, a cart
+namespace's). A board's pin, update channel and NTP server are never
 sent to a page and never taken from one, and its consent records stay its own. A fourth root, the apps'
 private folders (`apps/<id>/<key>`, what a compiled cart wrote: `APPS_ROOT`),
 crosses between a board and the page it serves, every file as bytes.
@@ -98,9 +99,9 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     refuses single-segment file paths outright. The console's own documents
     (`SYSTEM_FILES`) are the third root, `SYSTEM_ROOT`: a SITE-mode browser
     keeps all of them in its own OPFS; a board serves its settings' portable
-    rows and achievements.json through its VM (`system_pull`) and merges a
-    page's changes to those two (`merge_system`, `merge_achievements`), while
-    the edited icons and the shared sheet stay on each console.
+    rows through its VM (`system_pull`) and merges a page's changes to them
+    (`merge_system`), while the edited icons and the shared sheet stay on
+    each console.
   * In the files root, anything whose first segment is not one of the
     shared folders (moy_store_base.SHARED_FOLDERS) -- which is how
     `files/.history/` and `files/.Trash/` stay home, in BOTH directions, with
@@ -156,12 +157,11 @@ In practice no files batch is ever aimed at such a board: the browser only
 builds a files watcher when the board answered GET /files.json (web_boot),
 so the version check is the second line of defense, not the first.
 
-A system batch names the third root the same way, and carries the two
-documents a board takes from its page:
+A system batch names the third root the same way, and carries the one
+document a board takes from its page:
 
     {"v": 2, "root": "system", "ops": [
-      {"p": "system/settings", "t": "<the page's whole settings file>"},
-      {"p": "achievements.json", "t": "{\"unlocked\": [...]}"}]}
+      {"p": "system/settings", "t": "<the page's whole settings file>"}]}
 
     -> {"ok": <applied count>, "err": [[index, "reason"], ...]}
 
@@ -492,8 +492,8 @@ FILES_ROOT = Root(
 
 # The console's own documents, the files a board keeps BESIDE its carts
 # folder (moy_carts' sibling stores): `system/settings` (the Settings rows and
-# everything else `ws.system` holds), the earned badges and the shared sprite
-# sheet. A site-mode browser is its own
+# everything else `ws.system` holds, the badges among the apps' prefs) and the
+# shared sprite sheet. A site-mode browser is its own
 # console, so it keeps them in its own OPFS the way a board keeps them on its
 # card, and a reload comes back on the same theme, Settings and badges.
 # Left out on purpose: wifi.json (a browser has no radio, and it is a secret),
@@ -503,12 +503,12 @@ FILES_ROOT = Root(
 # (staging).
 SYSTEM_ROOT_ID = "system"
 SYSTEM_SETTINGS = "system/settings"
-SYSTEM_FILES = (SYSTEM_SETTINGS, "achievements.json", "shared.moygfx")
+SYSTEM_FILES = (SYSTEM_SETTINGS, "shared.moygfx")
 # What crosses between a board and the page it serves: the pull, and the
 # documents a system batch may carry. The shared sheet stays on each console
 # in board mode.
 SYSTEM_PULL = "/console.json"
-SYSTEM_WIRE_FILES = (SYSTEM_SETTINGS, "achievements.json")
+SYSTEM_WIRE_FILES = (SYSTEM_SETTINGS,)
 
 
 def system_root(carts_root):
@@ -823,18 +823,15 @@ def rebase_value(key, value, carts_root):
     return value
 
 
-def system_pull(rows, badges):
-    """The /console.json document: `{"system/settings": text,
-    "achievements.json": text}` -- the PORTABLE rows of `rows` (a Settings)
-    as the settings file holds them, cart paths as folder names, and `badges`
-    (an `Achievements.doc()`) as achievements.json holds it."""
+def system_pull(rows):
+    """The /console.json document: `{"system/settings": text}` -- the
+    PORTABLE rows of `rows` (a Settings) as the settings file holds them,
+    cart paths as folder names."""
     doc = {}
     for key in rows.keys():
         if key_class(key) == PORTABLE:
             doc[key] = rebase_value(key, rows.get(key), None)
-    mc = _moy_carts()
-    return {SYSTEM_SETTINGS: mc.settings_text(doc),
-            "achievements.json": mc.achievements_text(badges)}
+    return {SYSTEM_SETTINGS: _moy_carts().settings_text(doc)}
 
 
 def rebase_system(text, carts_root):
@@ -877,46 +874,29 @@ def merge_system(rows, text, carts_root):
     return changed
 
 
-def merge_achievements(text, award):
-    """Award every badge a browser's achievements.json `text` holds through
-    `award(id, day)`, with the day it was found there -- a union, never a
-    replacement: a badge one console earned is never taken away by the
-    other's list. How many were new; ValueError when the text is not
-    achievements.json's format."""
-    doc = _moy_carts().achievements_doc(_json.loads(text))
-    if doc is None:
-        raise ValueError("not achievements.json")
-    n = 0
-    for i, day in doc["found"].items():
-        if award(i, day):
-            n += 1
-    return n
-
-
 class SystemReceiver:
     """A board's apply for system batches (the C parks them for the VM): a
-    `system/settings` goes through `merge_system`, an `achievements.json` through
-    `merge_achievements`, a document sent in parts is held here until its
+    `system/settings` goes through `merge_system`, a document sent in parts is held here until its
     `pub` (a part 0 starts it again). A delete, a binary op and any other file
     are refused: a page cannot take a console's documents away."""
 
     def __init__(self):
         self._parts = {}
 
-    def apply(self, ops, rows, award, carts_root):
+    def apply(self, ops, rows, carts_root):
         """(applied, [(index, reason)], changed keys) of one batch's `ops`."""
         applied = 0
         errors = []
         changed = []
         for i, op in enumerate(ops if isinstance(ops, list) else ()):
-            why = self._one(op, rows, award, carts_root, changed)
+            why = self._one(op, rows, carts_root, changed)
             if why is None:
                 applied += 1
             elif len(errors) < 8:
                 errors.append((i, why))
         return applied, errors, changed
 
-    def _one(self, op, rows, award, carts_root, changed):
+    def _one(self, op, rows, carts_root, changed):
         if not isinstance(op, dict):
             return "bad op"
         p = op.get("p")
@@ -943,12 +923,9 @@ class SystemReceiver:
         if type(text) is not str:
             return "not a document"
         try:
-            if p == SYSTEM_SETTINGS:
-                for key in merge_system(rows, text, carts_root):
-                    if key not in changed:
-                        changed.append(key)
-            else:
-                merge_achievements(text, award)
+            for key in merge_system(rows, text, carts_root):
+                if key not in changed:
+                    changed.append(key)
         except (ValueError, TypeError):
             return "bad document"
         return None

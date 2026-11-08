@@ -717,7 +717,11 @@ def _surface_plan(ws, cfg):
     # home; then the unlock banner over the home, a secret's with its confetti
     # out whole.
     def achievements():
-        ws.ach.tracker().unlocked = dict(GOLDEN_BADGES)
+        ws.ach.seed(dict(GOLDEN_BADGES))
+        ws.system.set(ws.ach.key, dict(ws.system.get(ws.ach.key), **{
+            "moybyte.harpoon_pop": {"name": "Harpoon Pop", "value": {"high_tide": 3},
+                                    "found": {"first_clear": [20261020, "Bubble Buster",
+                                                              "star", "Clear level 1"]}}}))
         ws.open_settings()
         ws.settings_layer.open_page("achievements")
 
@@ -752,7 +756,7 @@ def _surface_plan(ws, cfg):
     def unlock():
         ws._golden_about = False
         ws._about = False
-        ws.ach.unlocked.pop("konami", None)
+        ws.ach.seed({k: d for k, d in GOLDEN_BADGES if k != "konami"})
         ws._golden_toast = True
         ws.ach.award("konami")
         settle_badges(ws)

@@ -2,10 +2,8 @@
 #   _load_store_json        a system JSON store's value, healed from its backup
 #   -- known WiFi networks  load_wifi, save_wifi, remember_wifi, forget_wifi
 #   -- system settings      parse_settings, settings_text, load_system, save_system(_steps)
-#   -- achievements         achievements_doc, load_achievements, save_achievements
 """The console's own documents beside the carts folder: the known WiFi
-networks and the achievements, each one JSON file read back through
-`_load_store_json`, and the settings, the plain-text `system/settings`; each
+networks, a JSON file read back through `_load_store_json`, and the settings, the plain-text `system/settings`; each
 written atomically and read back through a reader that heals a truncated
 store from the backup `_write_atomic` leaves.
 
@@ -238,75 +236,3 @@ def save_system_steps(settings, root=CARTS_DIR):
     ensure_dirs(root)
     _mkdir(_sibling_path(root, SYSTEM_DIR))
     yield from _write_atomic_steps(system_store_path(root), settings_text(settings))
-
-
-# --- achievements (#21) -----------------------------------------------------
-#
-# The badges a kid found (milestones hit naturally, plus the hidden Easter-egg
-# rewards) persist to a single achievements.json that lives BESIDE the carts
-# dir (a sibling of `root`, like system.json/wifi.json/the shared sheet) -- it
-# is system state, not tied to any cart. Stored as
-#   {"v": 2, "found": {id: YYYYMMDD, ...}, "count": {badge: [key, ...]}}
-# -- the day each was found (0 where the console had no clock) and a counter
-# badge's progress (Cart Explorer's carts, Toolbox Master's editors); the
-# catalog of what each id MEANS lives in the shared console (host == device).
-# The reader is strict: any other document, the ids-only one before it
-# included, reads as ABSENT (CLAUDE.md, no store migrations). Written
-# atomically (same crash-safe path as the cart saves) so an interrupted write
-# can never lose a kid's earned badges. MicroPython-safe (json + os only).
-
-ACHIEVEMENTS_STORE_NAME = "achievements.json"
-ACHIEVEMENTS_FORMAT = 2
-
-
-def achievements_store_path(root=CARTS_DIR):
-    """Well-known path of the achievements store."""
-    return _sibling_path(root, ACHIEVEMENTS_STORE_NAME)
-
-
-def achievements_doc(data):
-    """achievements.json's document out of its parsed JSON, `{"found": {id:
-    day}, "count": {badge: [key, ...]}}`, or None when it is not one of
-    this format (so _load_store_json falls through to the backup)."""
-    if not isinstance(data, dict) or data.get("v") != ACHIEVEMENTS_FORMAT:
-        return None
-    found, count = data.get("found"), data.get("count", {})
-    if not isinstance(found, dict) or not isinstance(count, dict):
-        return None
-    out = {}
-    for k, v in found.items():
-        if not isinstance(k, str) or type(v) is not int or v < 0:
-            return None
-        out[k] = v
-    keys = {}
-    for k, v in count.items():
-        if not isinstance(k, str) or not isinstance(v, list):
-            return None
-        got = []
-        for i in v:
-            if not isinstance(i, str):
-                return None
-            if i not in got:
-                got.append(i)
-        keys[k] = got
-    return {"found": out, "count": keys}
-
-
-def achievements_text(doc):
-    """achievements.json's text for `doc` (an `Achievements.doc()`)."""
-    return json.dumps({"v": ACHIEVEMENTS_FORMAT, "found": doc.get("found", {}),
-                       "count": doc.get("count", {})})
-
-
-def load_achievements(root=CARTS_DIR):
-    """The badges' document (`achievements_doc`), or None when nothing of this
-    format has been saved (a corrupt store must never crash boot); recovers
-    from the .bak like load_wifi."""
-    return _load_store_json(achievements_store_path(root), achievements_doc)
-
-
-def save_achievements(doc, root=CARTS_DIR):
-    """Persist the badges' document (`Achievements.doc()`), atomically.
-    Ensures the parent dir exists."""
-    ensure_dirs(root)
-    _write_atomic(achievements_store_path(root), achievements_text(doc))

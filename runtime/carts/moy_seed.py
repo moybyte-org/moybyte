@@ -166,6 +166,8 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
             ven["handles"] = cart["handles"]
         if cart.get("receives") is not None:     # the message names other apps may send it
             ven["receives"] = cart["receives"]
+        if cart.get("achievements") is not None:  # the badges it declares
+            ven["achievements"] = cart["achievements"]
         if cart.get("glass") is True:             # a per-glass wallpaper
             ven["glass"] = True
         if cart.get("animates") is True:          # an app drawn every frame

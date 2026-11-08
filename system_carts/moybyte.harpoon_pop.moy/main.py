@@ -26,6 +26,13 @@
 #
 # AUTOPLAY (in "Make it mine") is OFF by default -- YOU play. Flip it on to watch
 # the console play itself (attract mode / the demo GIF path).
+#
+# BADGES: the manifest declares four (docs/moy_cart_api.md, "Achievements"), and
+# the game does its own counting: it tells the console when one is found
+# (moybyte.award) and how far the level badge has got (moybyte.progress, the
+# best level reached, kept in pmem(1)). Autoplay earns none.
+
+import moybyte
 
 # -- arena geometry ----------------------------------------------------------
 # The arena IS the tilemap -- open the Map tab and the floor and the two wall
@@ -85,6 +92,10 @@ level = 1
 clear_t = 0.0              # >0 = "level clear" banner
 over = 0.0                 # >0 = game-over banner timer (autoplay auto-restarts)
 blink = 0.0                # drives the invulnerability flicker
+popped = 0                 # bubbles popped this game (Pop Star)
+lost = 0                   # lives lost this level (Untouchable)
+LEVEL_GOAL = 5             # the level High Tide's goal names
+POP_GOAL = 30              # the pops in one game Pop Star asks for
 
 H_X = 0                    # field names for a hunter, so the code below reads
 H_ROPE = 1                 # like prose instead of like an index puzzle
@@ -132,8 +143,9 @@ def _spawn_level():
     # Root bubbles for the current level: more (and a touch faster) as you climb.
     # Deterministic -- positions and directions come through rnd() so a seeded
     # replay matches frame-for-frame (the #65 lockstep contract).
-    global bubbles
+    global bubbles, lost
     bubbles = []
+    lost = 0
     for hu in hunters:
         hu[H_ROPE] = None
     n = int(cfg("start_bubbles", 2)) + (level - 1) // 2
@@ -153,7 +165,7 @@ def _spawn_level():
 def _init():
     background(col("dark_blue"))     # the arena sky, restored by the engine each frame
     _measure_arena()
-    global hunters, score, best, level, clear_t, over, blink
+    global hunters, score, best, level, clear_t, over, blink, popped
     # ONE hunter per connected player. players() is 1 on a console nobody has
     # joined, so this is the single-player game verbatim; it becomes co-op the
     # moment a second controller exists, with no mode to pick and no menu.
@@ -165,6 +177,7 @@ def _init():
     for i in range(n):
         hunters.append([_spawn_x(i, n), None, lives, 0.0, 0.0, i])
     score = 0
+    popped = 0
     best = pmem(0)
     level = 1
     clear_t = 0.0
@@ -243,10 +256,13 @@ def _hits_hunter(hu, x, y, r):
 def _pop(i):
     # Pop bubble i: score it, and (unless it is the smallest) split it into two
     # smaller bubbles that leap apart in fixed arcs. The score is SHARED.
-    global score, best
+    global score, best, popped
     b = bubbles[i]
     x, y, size = b[0], b[1], b[4]
     score += POINTS[size]
+    popped += 1
+    if popped == POP_GOAL and not cfg("autoplay", 0):
+        moybyte.award("pop_star")
     if score > best:
         best = score
         pmem(0, best)
@@ -268,10 +284,11 @@ def _playing():
 
 
 def _lose_life(hu):
-    global over
+    global over, lost
     if hu[H_INV] > 0.0 or hu[H_DEAD] > 0.0 or over > 0.0:
         return
     hu[H_LIVES] -= 1
+    lost += 1
     hu[H_ROPE] = None
     sfx(1)
     if hu[H_LIVES] <= 0:
@@ -392,6 +409,22 @@ def _update(dt):
     # -- level cleared ------------------------------------------------------
     if not bubbles and clear_t <= 0.0 and over <= 0.0:
         clear_t = 1.2
+        _badges_on_clear()
+
+
+def _badges_on_clear():
+    # A level just cleared: what the console is told. The best level reached
+    # is the game's to keep; the console stores the last value it hears.
+    if cfg("autoplay", 0):
+        return
+    if level == 1:
+        moybyte.award("first_clear")
+    if lost == 0:
+        moybyte.award("untouchable")
+    reached = level + 1
+    if reached > pmem(1):
+        pmem(1, reached)
+        moybyte.progress("high_tide", min(reached, LEVEL_GOAL))
 
 
 def _bubble(b):

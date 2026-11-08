@@ -91,19 +91,19 @@ int32_t moy_os_moy_clipboard_put_text(const char *text) {
     const moy_os_arg_t a[1] = {
         { text, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(98u, MOY_OS_HOP, a, 1, NULL, 0u);   // clipboard.put_text
+    return moy_os_call(94u, MOY_OS_HOP, a, 1, NULL, 0u);   // clipboard.put_text
 }
 
 int32_t moy_os_moy_clipboard_text(void *text, size_t text_cap) {
-    return moy_os_call(99u, MOY_OS_SEQ, NULL, 0, text, text_cap);   // clipboard.text
+    return moy_os_call(95u, MOY_OS_SEQ, NULL, 0, text, text_cap);   // clipboard.text
 }
 
 int32_t moy_os_moy_clipboard_kind(void) {
-    return moy_os_call(100u, MOY_OS_SEQ, NULL, 0, NULL, 0u);   // clipboard.kind
+    return moy_os_call(96u, MOY_OS_SEQ, NULL, 0, NULL, 0u);   // clipboard.kind
 }
 
 int32_t moy_os_moy_clipboard_seq(void) {
-    return moy_os_call(101u, MOY_OS_SEQ, NULL, 0, NULL, 0u);   // clipboard.seq
+    return moy_os_call(97u, MOY_OS_SEQ, NULL, 0, NULL, 0u);   // clipboard.seq
 }
 
 int32_t moy_os_moy_notify(const char *summary, const char *body) {
@@ -111,7 +111,7 @@ int32_t moy_os_moy_notify(const char *summary, const char *body) {
         { summary, 0u, 0, MOY_OS_ARG_STR },
         { body, 0u, 0, MOY_OS_ARG_OPT },
     };
-    return moy_os_call(165u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.notify
+    return moy_os_call(161u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.notify
 }
 
 int32_t moy_os_moy_open_with(const char *item, int32_t choose) {
@@ -119,7 +119,7 @@ int32_t moy_os_moy_open_with(const char *item, int32_t choose) {
         { item, 0u, 0, MOY_OS_ARG_STR },
         { NULL, 0u, choose, MOY_OS_ARG_INT },
     };
-    return moy_os_call(166u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.open_with
+    return moy_os_call(162u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.open_with
 }
 
 int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime) {
@@ -127,7 +127,7 @@ int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime) {
         { data, data_len, 0, MOY_OS_ARG_BYTES },
         { mime, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(167u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.share
+    return moy_os_call(163u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.share
 }
 
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.

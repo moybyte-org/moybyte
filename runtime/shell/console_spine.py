@@ -463,7 +463,7 @@ class SpineVerbs:
         app.open()
         self.wm.activate(app.id)
         self._set_text_mode(bool(text))
-        self.ach.note("open", cart.get("path") or cart.get("title"))
+        self.ach.played(cart.get("path") or cart.get("title"))
         return True
 
     def is_system_app(self, cart):

@@ -3,106 +3,79 @@
 -- process (docs/os_2026-11.md, phase 5; tests/test_achievements_proc.py runs
 -- the same test bodies over both).
 --
--- It wakes only on the notify role's messages: achieve(kind, key), a
--- milestone, and award(id, quiet, day), a badge by its id. It records into
--- its document, hands it back through badges_save(doc), and posts a
--- notification on a fresh find. The console hands it `badges` (the
--- document its store holds, or nil), `badges_save` and `clock_day` (today as
--- YYYYMMDD off the bar's clock, 0 without one); the role's reads answer from
--- the document it hands back.
+-- It wakes only on award(id) and progress(id, value), from a game or the
+-- console, the sender the app id the OS stamped: an id the sender's
+-- manifest does not declare is refused and the refusal logged. What is found
+-- and each goal's last value live in its prefs ("badges", read strictly by
+-- the console: runtime/system/achievements.py's read_badges); a fresh find
+-- posts a notification. The console hands it game(app) (the app's name and
+-- declared badges, nil for one that declares none) and clock_day() (today
+-- as YYYYMMDD, 0 without a clock).
 
--- id, title, glyph, hidden, how (runtime/toolkit/widgets.py's ACHIEVEMENTS)
-local CATALOGUE = {
-    {"first_open",   "First Steps",     "app",      false, "Open a cart"},
-    {"first_run",    "Lift Off!",       "run",      false, "Run a game"},
-    {"first_paint",  "Little Artist",   "paint",    false, "Save a drawing"},
-    {"first_map",    "Map Maker",       "map",      false, "Save a map"},
-    {"first_code",   "Code Wizard",     "code",     false, "Save some code"},
-    {"play_five",    "Cart Explorer",   "star",     false, "Play 5 carts"},
-    {"toolbox",      "Toolbox Master",  "settings", false, "Use 3 editors"},
-    {"decorator",    "Home Decorator",  "heart",    false, "Pick a wallpaper"},
-    {"konami",       "Secret Coder",    "spark",    true,  "Type the secret code"},
-    {"clock_tinker", "Time Traveler",   "smile",    true,  "Tap the clock 7 times"},
-    {"secret_door",  "Secret Finder",   "key",      true,  "Knock on Settings 5 times"},
-}
-local TITLE, GLYPH, HINT = {}, {}, {}
-for _, a in ipairs(CATALOGUE) do
-    TITLE[a[1]], GLYPH[a[1]], HINT[a[1]] = a[2], a[3], a[5]
-end
+local KEY = "badges"
 
-local EVENT = {
-    open = "first_open", run = "first_run", paint_save = "first_paint",
-    map_save = "first_map", code_save = "first_code", wallpaper_change = "decorator",
-}
-local TOOLBOX = {"code", "paint", "map"}
-local PLAY_GOAL = 5
-
-local found = {}                -- id -> the day it was found (0 unknown)
-local played, played_keys = {}, {}
-local seen, seen_keys = {}, {}
-
--- achievements.json's document: an empty map is left out (the store writes
--- it as {}), so no empty table crosses as a list.
-local function doc()
-    local d, count = {}, {}
-    if next(found) then d.found = found end
-    if #played_keys > 0 and not found.play_five then count.play_five = played_keys end
-    if #seen_keys > 0 and not found.toolbox then count.toolbox = seen_keys end
-    if next(count) then d.count = count end
-    return d
-end
-
-local function save()
-    if badges_save then badges_save(doc()) end
-end
-
-local function award(id, quiet, day)
-    if found[id] or not TITLE[id] then return false end
-    if day == nil then
-        day = clock_day and clock_day() or 0
+local function head(who, name, secret)
+    if who == "system" then
+        return secret and "You found a secret!" or "You found a badge!"
     end
-    found[id] = day or 0
-    save()
-    if not quiet then
-        moybyte.notify(TITLE[id], HINT[id], GLYPH[id] or "trophy")
-    end
-    return true
+    return name .. (secret and ": secret found!" or ": badge found!")
 end
 
-local function note(event, key)
-    if event == "open" then
-        if key ~= nil and not found.play_five and not played[key] then
-            played[key] = true
-            played_keys[#played_keys + 1] = key
-            if #played_keys >= PLAY_GOAL then award("play_five") else save() end
+local function refuse(who, id, why)
+    print("achievements: " .. tostring(who) .. "'s " .. tostring(id) .. " refused: " .. why)
+end
+
+-- The row as the console's strict reader takes it, or {} where it does not
+-- read; an empty map is left out (the store writes it as {}).
+local function read()
+    local doc = prefs.get(KEY)
+    if type(doc) ~= "table" then return {} end
+    for app, rec in pairs(doc) do
+        if type(app) ~= "string" or type(rec) ~= "table" or type(rec.name) ~= "string" then
+            return {}
         end
-        award("first_open")
-    elseif event == "editor" then
-        local tool = false
-        for _, v in ipairs(TOOLBOX) do tool = tool or v == key end
-        if tool and not found.toolbox and not seen[key] then
-            seen[key] = true
-            seen_keys[#seen_keys + 1] = key
-            if #seen_keys >= #TOOLBOX then award("toolbox") else save() end
-        end
-    elseif EVENT[event] then
-        award(EVENT[event])
+    end
+    return doc
+end
+
+local function take(who, id, value)
+    local g = game(who)
+    local a
+    for _, b in ipairs(g and g.achievements or {}) do
+        if b.id == id then a = b end
+    end
+    if a == nil then return refuse(who, id, "not declared") end
+    if value ~= nil then
+        if a.goal == nil then return refuse(who, id, "no goal") end
+        if math.type(value) ~= "integer" then return refuse(who, id, "not a whole number") end
+    end
+    local doc = read()
+    local rec = doc[who] or {}
+    local found, values = rec.found or {}, rec.value or {}
+    if found[id] then return end
+    local fresh = value == nil or value >= a.goal
+    if fresh then
+        found[id] = {clock_day() or 0, a.title, a.icon, a.hint}
+        values[id] = nil
+    elseif values[id] == value then
+        return
+    else
+        values[id] = value
+    end
+    rec = {name = g.name}
+    if next(found) then rec.found = found end
+    if next(values) then rec.value = values end
+    doc[who] = rec
+    prefs.set(KEY, doc)
+    if fresh then
+        moybyte.notify(head(who, g.name, a.secret), a.title, a.icon)
     end
 end
 
 function moy_start()
-    if badges then
-        for k, v in pairs(badges.found or {}) do
-            if TITLE[k] then found[k] = v end
-        end
-        local count = badges.count or {}
-        for _, k in ipairs(count.play_five or {}) do
-            if not played[k] then played[k] = true; played_keys[#played_keys + 1] = k end
-        end
-        for _, k in ipairs(count.toolbox or {}) do
-            if not seen[k] then seen[k] = true; seen_keys[#seen_keys + 1] = k end
-        end
-    end
-    moybyte.on("achieve", function(who, ...) note(...) end)
-    moybyte.on("award", function(who, ...) award(...) end)
+    moybyte.on("award", function(who, id) take(who, id, nil) end)
+    moybyte.on("progress", function(who, id, value)
+        if value == nil then return refuse(who, id, "no value") end
+        take(who, id, value)
+    end)
 end

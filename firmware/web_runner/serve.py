@@ -19,8 +19,9 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # directory. The no-hardware way to
                                             # watch a browser edit land as files
                                             # on disk. The console's own
-                                            # documents beside D (system/settings,
-                                            # achievements.json) are the
+                                            # documents beside D
+                                            # (system/settings, the badges
+                                            # among its rows) are the
                                             # board's too: GET /console.json,
                                             # and a system batch merged key by
                                             # key (moy_sync.SYSTEM_KEYS). So
@@ -160,35 +161,29 @@ else:
     from runtime import moy_sync                        # noqa: E402
 
     class TwinConsole:
-        """The board's Settings and badges, as a board keeps them beside its
-        carts (D/../system/settings, D/../achievements.json), merged through the
-        same bodies a board's VM runs (moy_webhost.ConsoleSystem's): what a
-        page served by this twin may change is moy_sync.SYSTEM_KEYS'."""
+        """The board's Settings, the badges among them, as a board keeps them
+        beside its carts (D/../system/settings), merged through the same
+        bodies a board's VM runs (moy_webhost.ConsoleSystem's): what a page
+        served by this twin may change is moy_sync.SYSTEM_KEYS'."""
 
         def __init__(self, carts):
             import threading
             from runtime import moy_carts
             from runtime.moy_spine import Settings
-            from runtime.widgets import Achievements
             self.carts = carts
             self.lock = threading.Lock()
             self.rows = Settings(
                 lambda text: moy_carts.save_system(text, carts) or True)
             self.rows.adopt(moy_carts.load_system(carts))
-            self.ach = Achievements(
-                moy_carts.load_achievements(carts),
-                on_save=lambda doc: moy_carts.save_achievements(doc, carts))
             self.rx = moy_sync.SystemReceiver()
 
         def pull(self):
             with self.lock:
-                return moy_sync.system_pull(self.rows, self.ach.doc())
+                return moy_sync.system_pull(self.rows)
 
         def apply(self, ops):
             with self.lock:
-                applied, errors, _changed = self.rx.apply(
-                    ops, self.rows, lambda i, day: self.ach.award(i, quiet=True, day=day),
-                    self.carts)
+                applied, errors, _changed = self.rx.apply(ops, self.rows, self.carts)
             return applied, errors
 
     console = None if no_system else TwinConsole(carts_dir)

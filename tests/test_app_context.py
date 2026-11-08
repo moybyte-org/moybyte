@@ -754,22 +754,19 @@ def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
 
 def test_notify_reads_the_badges_live_across_a_store_load(tmp_path):
     """The badge rows answer the achievements process as it is NOW: a store
-    load restarts it, and a role that had captured the old one would count
+    load restarts it, and a role that had captured the old one would list
     badges nobody can see."""
     ws = _ws(tmp_path)
     notify = ws.app_context("probe_badges", ("notify",)).notify
-    assert notify.count() == ws.ach.count()
+    assert notify.groups() is ws.ach.groups()
     assert notify.award("konami") is True
     settle_badges(ws)                                  # the achievements process takes it
     assert notify.award("konami") is False             # a repeat is no find
-    assert notify.has("konami") and notify.count() == ws.ach.count()
-    assert notify.found_on("konami") == ws.ach.found_on("konami")
-    assert notify.found_on("decorator") is None
-    assert notify.progress("play_five") == ws.ach.progress("play_five")
+    shell = {b[0]: b for b in notify.groups()[0][2]}
+    assert shell["konami"][6] == ws._today_ymd() and shell["decorator"][6] is None
     assert notify.today() == ws._today_ymd()
     ws.load_achievements()
-    assert notify.count() == ws.ach.count()
-    assert notify.has("konami") == ws.ach.has("konami")
+    assert notify.groups() is ws.ach.groups()
 
 
 def test_nav_opens_a_registered_app_by_id_and_refuses_an_unknown_one(tmp_path):

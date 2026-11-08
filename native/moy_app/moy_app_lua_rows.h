@@ -32,5 +32,7 @@
     X("open_with") \
     X("share") \
     X("send") \
+    X("award") \
+    X("progress") \
 
 #endif // MOY_APP_LUA_ROWS_H

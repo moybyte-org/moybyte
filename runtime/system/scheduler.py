@@ -168,6 +168,8 @@ _CALLS = {
     "moybyte.open_with": _moybyte.open_with,
     "moybyte.share": _moybyte.share,
     "moybyte.send": _moybyte.send,
+    "moybyte.award": _moybyte.award,
+    "moybyte.progress": _moybyte.progress,
 }
 # END GENERATED
 

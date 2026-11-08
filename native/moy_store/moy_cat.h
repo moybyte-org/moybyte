@@ -76,7 +76,8 @@ typedef struct {
     size_t main_n;
     // The manifest's fields as they stand; the defaults are the binding's.
     moy_cat_json_t title, author, type, runtime, format, fps, palette,
-        extensions, edit, permissions, required, handles, receives, writable, pictures,
+        extensions, edit, permissions, required, handles, receives, achievements, writable,
+        pictures,
         native;                 // moybyte.native: a native cart's chips, when a list
     int writable_ok;            // a compiled cart's "writable" is a list of strings
     moy_cat_int_t version, memory;

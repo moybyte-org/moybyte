@@ -1015,7 +1015,7 @@ class BlockEditorUI:
             ws.run.project.cart["blocks"] = _clone_tree(prog)
             be.dirty = False
             self.blk_status = None        # save is invisible (#111): no "SAVED"
-            ws.ach.note("code_save")
+            ws.ach.award("first_code")
             return True
         try:
             status, smsg = ws._with_sd(
@@ -1025,7 +1025,7 @@ class BlockEditorUI:
                 return False
             be.dirty = False
             self.blk_status = None        # save is invisible (#111): no "SAVED"
-            ws.ach.note("code_save")          # "Code Wizard": a program saved (#21)
+            ws.ach.award("first_code")        # Code Wizard: a program saved
             ws.cart_error = None
             return True
         except Exception as exc:  # noqa: BLE001

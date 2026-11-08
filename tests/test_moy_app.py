@@ -199,7 +199,7 @@ def run(sp, ap, say, mi, root):
     for role in ("carts", "nav", "notify", "wallpaper", "install"):
         app.serve(role, srv2)
     say("carts", ap.Carts(app, every).journal("c", "m", "s", grad=1))
-    say("nav", ap.Nav(app, every).play("cart"), ap.Notify(app, every).achieve("open"),
+    say("nav", ap.Nav(app, every).play("cart"), ap.Notify(app, every).award("first_open"),
         ap.Wallpaper(app, every).thumbnail(4, 3), ap.Install(app, every).op(None))
     try:
         ap.Files(app, sg).list("docs")

@@ -237,6 +237,7 @@ USER_NS_KEY = "author"
 # of these at the top level reads as absent: the readers are strict.
 VENDOR_KEY = "moybyte"
 VENDOR_FIELDS = ("type", "system", "order", "permissions", "required", "handles", "receives",
+                 "achievements",
                  "config", "edit", "targets", "age_mode", "app", "assets",
                  "graduated", "glass", "pictures", "animates", "native")
 

@@ -94,7 +94,7 @@ def test_going_home_with_paint_never_opened_writes_nothing(tmp_path):
     ws.go_home()
     assert app._doc is None
     assert not list(tmp_path.rglob("drawing_*"))
-    assert not ws.ach.has("first_paint")       # the paint_save event's award
+    assert not ws.ach.has("system", "first_paint")     # a save's award
 
 
 def test_touch_stroke_undo_redo_and_shared_save(tmp_path):

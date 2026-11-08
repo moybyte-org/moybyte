@@ -49,7 +49,7 @@ class SaveVerbs:
             self.crash_line = None           # a re-run will re-detect any crash
         if not (self.cart.get("path") and self.can_manage):
             if ok:
-                self.ach.note("code_save")   # "Code Wizard": valid code saved (#21)
+                self.ach.award("first_code")   # Code Wizard: valid code saved
             return True
         # The store-write half moved to Project.commit_code (Stage 1b); the compile-
         # check + code-UI half above stays here (the code surface).
@@ -96,7 +96,7 @@ class SaveVerbs:
             self.carts_store.set_source(self.cart, self.code_file_name(),
                                         self.editor.text())
         if self._start():
-            self.ach.note("run")                # "Lift Off!": a cart was RUN (#21)
+            self.ach.award("first_run")         # Lift Off!: a cart was RUN
             self._set_text_mode(False)
             # PLAY from the code tab (Stage 3b): caller = the Editor, so the cart's
             # exit returns to the code tab (not the launcher home).
@@ -243,7 +243,7 @@ class SaveVerbs:
         ok = self._start()
         self.play(self.editor_app)
         if ok:
-            self.ach.note("run")                # "Lift Off!": GO re-ran the cart (#21)
+            self.ach.award("first_run")         # Lift Off!: GO re-ran the cart
             self._save_config()
 
     def _save_config(self):

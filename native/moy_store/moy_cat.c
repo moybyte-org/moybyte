@@ -917,6 +917,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     e->required = vfield(man, mend, "required");
     e->handles = vfield(man, mend, "handles");
     e->receives = vfield(man, mend, "receives");
+    e->achievements = vfield(man, mend, "achievements");
     e->pictures = vfield(man, mend, "pictures");
     moy_cat_json_t v = field(man, mend, "version");
     if (v.v != NULL) {

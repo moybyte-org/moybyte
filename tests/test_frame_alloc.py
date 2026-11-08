@@ -1095,8 +1095,8 @@ def achievements(loop, info):
     import moy_loop
     from gc import mem_alloc
     ws = loop.ws
-    earned = ws.ach.unlocked
-    ws.ach.tracker().unlocked = {"first_open": 20261012, "first_run": 0, "konami": 0}
+    earned = ws.system.get(ws.ach.key, None)
+    ws.ach.seed({"first_open": 20261012, "first_run": 0, "konami": 0})
     ws.open_settings()
     # the rows page swiped, its pictures met once: what each frame of a drag
     # and its coast allocates, and which shifted
@@ -1140,7 +1140,7 @@ def achievements(loop, info):
         gc.enable()
         moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 25)
     ws._exit_settings()
-    ws.ach.tracker().unlocked = earned
+    ws.system.set(ws.ach.key, earned if earned is not None else {})
     for _ in range(30):
         loop.step()
 

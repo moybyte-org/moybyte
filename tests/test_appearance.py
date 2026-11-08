@@ -65,9 +65,9 @@ def test_the_size_cap_is_style_jsons():
 
 
 def _notes(ws):
-    """Record every achievement the shell notes, without the store."""
+    """Record every badge of its own the shell awards, without the store."""
     seen = []
-    ws.ach.note = lambda name: seen.append(name)
+    ws.ach.award = lambda name: seen.append(name)
     return seen
 
 
@@ -330,7 +330,7 @@ def test_only_a_pick_earns_home_decorator_and_it_lands_in_the_theme(tmp_path):
     assert seen == []
     assert ws.look.select_wallpaper(None) == 0
     _settle(ws)
-    assert seen == ["wallpaper_change"]
+    assert seen == ["decorator"]
     assert ws.look.theme_name == CUSTOM and ws.look.wallpaper_id is None
     assert "wallpaper" not in _stored(ws)
     assert _package(ws)["wallpapers"] == {}

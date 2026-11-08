@@ -479,7 +479,7 @@ def test_an_unreadable_store_does_not_blank_the_saved_password(tmp_path):
 
 
 def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
-    """system/settings and achievements.json are the same read-modify-write over the
+    """system/settings and wifi.json are the same read-modify-write over the
     same _write_atomic. One loader, one rule -- and the backup carries the LAST
     save, so a publish lost to a crash costs nothing (#154)."""
     import os
@@ -489,17 +489,10 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
     moy_carts.ensure_dirs(carts)
     moy_carts.save_system({"wallpaper": "moybyte.moy_night"}, carts)
     moy_carts.save_system({"wallpaper": "moybyte.moy_night", "theme": "outline"}, carts)
-    moy_carts.save_achievements({"found": {"first_open": 0}, "count": {}}, carts)
-    moy_carts.save_achievements({"found": {"first_open": 0, "first_run": 1}, "count": {}}, carts)
-
-    for path in (moy_carts.system_store_path(carts),
-                 moy_carts.achievements_store_path(carts)):
-        os.remove(path)                  # the crash window, again
+    os.remove(moy_carts.system_store_path(carts))      # the crash window, again
 
     assert moy_carts.load_system(carts) == {"wallpaper": "moybyte.moy_night",
                                             "theme": "outline"}
-    assert moy_carts.load_achievements(carts) == {"found": {"first_open": 0, "first_run": 1},
-                                                  "count": {}}
 
 
 # -- the radio is a LEASE (2026-09-07) ----------------------------------------

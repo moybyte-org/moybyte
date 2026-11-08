@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 13,
+  "version": 14,
   "title": "Harpoon Pop",
   "id": "moybyte.harpoon_pop",
   "fps": "free",
@@ -17,6 +17,34 @@
       "graphics",
       "input",
       "multiplayer"
+    ],
+    "achievements": [
+      {
+        "id": "first_clear",
+        "title": "Bubble Buster",
+        "icon": "star",
+        "hint": "Clear level 1"
+      },
+      {
+        "id": "high_tide",
+        "title": "High Tide",
+        "icon": "run",
+        "hint": "Reach level 5",
+        "goal": 5
+      },
+      {
+        "id": "pop_star",
+        "title": "Pop Star",
+        "icon": "spark",
+        "hint": "Pop 30 bubbles in one game"
+      },
+      {
+        "id": "untouchable",
+        "title": "Untouchable",
+        "icon": "heart",
+        "hint": "Clear a level without losing a life",
+        "secret": true
+      }
     ],
     "config": {
       "start_bubbles": 2,

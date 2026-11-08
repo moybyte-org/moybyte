@@ -316,15 +316,24 @@ def capture(cfg, carts_dir):
     out["about"] = _shot(ws, lambda: ws.menu_ui._draw_about())
     ws._about = False
 
-    # The Achievements page (locked AND found cards) with a badge opened,
-    # the unlock banner (a secret's, its confetti out whole) and the notice.
-    ws.ach.tracker().unlocked = {"first_open": 20261012, "secret_door": 0}
+    # The Achievements page (locked AND found cards, the console's and a
+    # game's, a goal under way) with a badge opened and a goal's bar, the
+    # unlock banner (a secret's, its confetti out whole) and the notice.
+    ws.ach.seed({"first_open": 20261012, "secret_door": 0})
+    ws.system.set(ws.ach.key, dict(ws.system.get(ws.ach.key), **{
+        "moybyte.harpoon_pop": {"name": "Harpoon Pop", "value": {"high_tide": 3}}}))
     ws.open_settings()
     sl.open_page("achievements")
     out["ach_page"] = page(sl._sub)
     pg = sl.achievements
-    pg._open(pg._by_id["Badge first_open"])
+    pg._open(pg._by_id["Badge system first_open"])
     out["ach_popover"] = page(sl._sub)
+    pg.back()
+    pg._focus = "Badge moybyte.harpoon_pop high_tide"
+    sl._draw_page()
+    sl._draw_page()
+    pg._open(pg._by_id["Badge moybyte.harpoon_pop high_tide"])
+    out["ach_goal"] = page(sl._sub)
     sl.close_page()
     sl.open_page("licences")
     out["licences"] = page(sl._sub)

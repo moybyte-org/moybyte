@@ -28,7 +28,6 @@ sys.path.insert(0, str(ROOT / "device"))
 import moy_webhost as wh                                       # noqa: E402
 from runtime import moy_sync, net_binding as nb               # noqa: E402
 from runtime.moy_spine import Settings                        # noqa: E402
-from runtime.widgets import Achievements                      # noqa: E402
 from runtime.moy_carts import parse_settings as _doc, settings_text as _text  # noqa: E402
 
 SETTINGS = moy_sync.SYSTEM_SETTINGS
@@ -116,19 +115,13 @@ def test_every_system_app_that_keeps_prefs_has_its_namespace_listed():
 
 # -- the pull ------------------------------------------------------------------
 
-_NONE = {"found": {}, "count": {}}
-
-
-def _badges(**found):
-    return json.dumps({"v": 2, "found": found, "count": {}})
-
+BADGES_KEY = "moybyte.achievements_badges"     # the achievements process's prefs row
 
 
 def test_the_pull_carries_the_portable_rows_and_never_the_boards_own():
-    rows = _Rows(BOARD_DOC)
-    pull = moy_sync.system_pull(rows, {"found": {"first_open": 20261012, "first_run": 0},
-                                       "count": {"play_five": ["a"]}})
-    assert set(pull) == {SETTINGS, "achievements.json"}
+    rows = _Rows(dict(BOARD_DOC, milestones={"played": ["a"]}))
+    pull = moy_sync.system_pull(rows)
+    assert set(pull) == {SETTINGS}
     sent = _doc(pull[SETTINGS])
     assert sent == {
         "theme": "dusk", "theme_variant": "dark", "name": "Mia",
@@ -137,9 +130,22 @@ def test_the_pull_carries_the_portable_rows_and_never_the_boards_own():
     for key in ("ota_channel", "consent", "volume",
                 "app_guard", "retired_thing"):
         assert key not in sent
-    assert json.loads(pull["achievements.json"]) == {
-        "v": 2, "found": {"first_open": 20261012, "first_run": 0},
-        "count": {"play_five": ["a"]}}
+    assert "milestones" not in sent           # the shell's own count stays each console's
+
+
+def test_the_badges_cross_as_the_achievements_processs_prefs_row():
+    """The badges are a row of the settings file (an app's prefs, its
+    namespace a cart id), so they cross with the portable rows: the board's
+    in its pull, the page's in its batch."""
+    row = {"system": {"name": "Moybyte", "found": {"first_open": [20261012, "First Steps",
+                                                                  "app", "Open a cart"]}}}
+    assert moy_sync.key_class(BADGES_KEY) == moy_sync.PORTABLE
+    pull = moy_sync.system_pull(_Rows(dict(BOARD_DOC, **{BADGES_KEY: row})))
+    assert _doc(pull[SETTINGS])[BADGES_KEY] == row
+    rows = _Rows(BOARD_DOC)
+    page = dict(_doc(moy_sync.system_pull(rows)[SETTINGS]), **{BADGES_KEY: row})
+    assert BADGES_KEY in moy_sync.merge_system(rows, _text(page), "/c")
+    assert rows.get(BADGES_KEY) == row
 
 
 def test_a_pulled_document_lands_under_the_pages_carts_root():
@@ -163,7 +169,7 @@ def _merge(doc, board=None, root="/sd/moybyte/carts"):
 
 
 def test_a_portable_change_lands_and_reports_its_key():
-    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC), _NONE)[SETTINGS])
+    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC))[SETTINGS])
     page["theme"] = "night"
     rows, changed = _merge(page)
     assert changed == ["theme"]
@@ -172,7 +178,7 @@ def test_a_portable_change_lands_and_reports_its_key():
 
 
 def test_an_unchanged_document_changes_nothing_and_writes_nothing():
-    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC), _NONE)[SETTINGS])
+    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC))[SETTINGS])
     rows, changed = _merge(page)
     assert changed == [] and rows.saves == []
     assert json.loads(rows.dump()) == BOARD_DOC
@@ -213,7 +219,7 @@ def test_a_value_of_the_wrong_shape_is_passed_over():
 
 
 def test_a_portable_key_the_page_dropped_is_dropped_here():
-    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC), _NONE)[SETTINGS])
+    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC))[SETTINGS])
     del page["paint_doc"]
     rows, changed = _merge(page)
     assert changed == ["paint_doc"] and rows.get("paint_doc") is None
@@ -246,55 +252,29 @@ def test_a_document_that_is_not_text_is_refused_and_its_bad_lines_say_nothing():
     assert json.loads(rows.dump()) == BOARD_DOC
 
 
-# -- the badges ---------------------------------------------------------------------
-
-
-def test_badges_are_a_union_never_the_last_writers_list():
-    saved = []
-    armed = []
-    ach = Achievements({"found": {"first_run": 0}}, on_save=saved.append,
-                       on_unlock=armed.append)
-    n = moy_sync.merge_achievements(
-        _badges(first_open=20261003, no_such_badge=1),
-        lambda i, day: ach.award(i, quiet=True, day=day))
-    assert n == 1
-    assert sorted(ach.unlocked) == ["first_open", "first_run"]
-    assert ach.found_on("first_open") == 20261003, "the day it was found there"
-    assert saved == [{"found": {"first_run": 0, "first_open": 20261003}, "count": {}}]
-    assert armed == [], "a badge earned in the page is not celebrated twice"
-    # A page whose list lacks a badge the board has takes nothing away.
-    assert moy_sync.merge_achievements(_badges(), ach.award) == 0
-    assert sorted(ach.unlocked) == ["first_open", "first_run"]
-    for bad in ("[]", '{"unlocked": ["first_open"]}'):
-        with pytest.raises(ValueError):
-            moy_sync.merge_achievements(bad, ach.award)
-
-
 # -- the receiver -------------------------------------------------------------------
 
 
-def _rx_apply(ops, rows=None, ach=None, rx=None):
+def _rx_apply(ops, rows=None, rx=None):
     rows = rows if rows is not None else _Rows(BOARD_DOC)
-    ach = ach if ach is not None else Achievements()
     rx = rx or moy_sync.SystemReceiver()
-    return rx.apply(ops, rows, lambda i, day: ach.award(i, quiet=True, day=day),
-                    "/sd/moybyte/carts"), rows, ach
+    return rx.apply(ops, rows, "/sd/moybyte/carts"), rows, None
 
 
-def test_the_receiver_takes_the_two_documents_and_refuses_the_rest():
-    (applied, errors, changed), rows, ach = _rx_apply([
+def test_the_receiver_takes_the_settings_and_refuses_the_rest():
+    (applied, errors, changed), rows, _ = _rx_apply([
         {"p": SETTINGS, "t": _text({"theme": "night"})},
-        {"p": "achievements.json", "t": _badges(first_open=0)},
         {"p": SETTINGS, "d": 1},
         {"p": "shared.moygfx", "b": "AAAA"},
         {"p": "wifi.json", "t": "[]"},
-        {"p": "achievements.json", "t": "nope"},
+        {"p": "achievements.json", "t": "{}"},
+        {"p": SETTINGS, "t": 3},
         "junk"], rows=_Rows({"theme": "dusk", "volume": 3}))
-    assert applied == 2 and changed == ["theme"]
-    assert errors == [(2, "kept on the console"), (3, "stays on the console"),
-                      (4, "stays on the console"), (5, "bad document"),
-                      (6, "bad op")]
-    assert rows.get("theme") == "night" and ach.has("first_open")
+    assert applied == 1 and changed == ["theme"]
+    assert errors == [(1, "kept on the console"), (2, "stays on the console"),
+                      (3, "stays on the console"), (4, "stays on the console"),
+                      (5, "not a document"), (6, "bad op")]
+    assert rows.get("theme") == "night"
 
 
 def test_a_document_in_parts_lands_at_its_publish_across_batches():
@@ -320,12 +300,11 @@ def test_a_document_in_parts_lands_at_its_publish_across_batches():
 
 
 class _Ws:
-    """What ConsoleSystem reads of a console: its rows, its badges, its carts
-    root and the re-apply verb."""
+    """What ConsoleSystem reads of a console: its rows, its carts root and
+    the re-apply verb."""
 
-    def __init__(self, doc=None, ids=()):
+    def __init__(self, doc=None):
         self.system = _Rows(BOARD_DOC if doc is None else doc)
-        self.ach = Achievements({"found": {i: 0 for i in ids}})
         self.carts_root = "/sd/moybyte/carts"
         self.applied = []
 
@@ -384,20 +363,18 @@ def test_the_pull_and_a_system_batch_need_a_paired_page(tmp_path):
 
 
 def test_a_system_batch_is_merged_and_its_keys_re_applied(tmp_path):
-    ws = _Ws(ids=["first_run"])
+    ws = _Ws()
     h = _host(tmp_path, ws)
-    page = _doc(moy_sync.system_pull(ws.system, _NONE)[SETTINGS])
+    page = _doc(moy_sync.system_pull(ws.system)[SETTINGS])
     page.update(theme="night", show_fps=False, consent=NATIVE)
     st, doc = _paired(h).json("POST", "/sync", json.loads(_batch([
-        {"p": SETTINGS, "t": _text(page)},
-        {"p": "achievements.json", "t": _badges(first_open=0)}])))
-    assert st == 200 and doc == {"ok": 2, "err": []}
+        {"p": SETTINGS, "t": _text(page)}])))
+    assert st == 200 and doc == {"ok": 1, "err": []}
     assert ws.system.get("theme") == "night"
     assert ws.system.get("show_fps") is False
     assert ws.system.get("consent") == BOARD_DOC["consent"]
     assert ws.system.get("favorites") == BOARD_DOC["favorites"]
     assert [sorted(k) for k in ws.applied] == [["show_fps", "theme"]]
-    assert sorted(ws.ach.unlocked) == ["first_open", "first_run"]
 
 
 def test_a_host_without_the_system_root_refuses_its_batch(tmp_path):
@@ -463,7 +440,7 @@ def test_over_a_socket_the_c_parks_the_batch_for_the_vm(tmp_path):
                                  % (method, target, len(body))).encode() + body)
         page = _paired(h, send)
         st, doc = page.json("POST", "/sync", json.loads(_batch([{"p": SETTINGS, "t": _text(
-            dict(_doc(moy_sync.system_pull(ws.system, _NONE)[SETTINGS]),
+            dict(_doc(moy_sync.system_pull(ws.system)[SETTINGS]),
                  theme="night"))}])))
         assert st == 200 and doc == {"ok": 1, "err": []}
         assert ws.system.get("theme") == "night"

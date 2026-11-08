@@ -731,59 +731,70 @@ tier-conformance test (`tiers.md` §2). It is the first user
 of background processes, events, notifications and the task manager on every
 board, and it is testable with no LoRa.
 
-As built, the process is the system cart
-`system_carts/moybyte.achievements.moy`, a Python service (§3, §5) holding
-the tracker (`Achievements` in `runtime/toolkit/widgets.py`, over its
-`ACHIEVEMENTS` catalogue, which the console keeps for drawing). The console's
-end of it is `runtime/system/achievements.py`: `ws.ach`, the link, and
-`NotifyRole`, the `notify` role's server.
+**Decision (owner, 2026-11-08, #246 decision 8): every game's badges.** A
+game declares its badges in its manifest and unlocks them with messages to
+this process; the console's own badges are declared the same way and are the
+`"system"` sender's; the game does its own counting. `docs/moy_cart_api.md`
+("Achievements") is the author's side.
 
-- **It wakes only on events.** A cart's `achieve(kind, key)` and `award(id)`
-  are OS-routed MESSAGES from the system, not ring records: the process
-  holds `moybyte.on("achieve", fn)` and `moybyte.on("award", fn)`, and the
-  link posts each call on its event queue (`Scheduler.send`, §1's service
-  model). A message wake waits apart
-  from the timer and input wakes and costs no frame while nothing is queued:
-  a tick returns at once and a board makes no service upcall, and a send
-  asks for none. A queued message is served under the guard and the rungs
-  at the start of the console's next frame, before it draws
-  (`Scheduler.mail`), so the banner an unlock raises shows in the frame of
-  the input that earned it, or by a tick that runs first. A run the kernel
-  drives (a compiled cart) makes no crossing for the `open` its launch
-  sent: the process takes it when the console frames again.
-- **The `notify` role is its API.** In `native/os_calls.json` its rows' `server` is
-  `"proc:achievements"` and the grant stays `never`. The console registers
-  the link for the role (to `native/moy_app` the row is served as a shell
-  row): `achieve` and `award` are the messages (the scheduler's `send`,
-  which reaches a Lua service's row as well), and `count`, `has`,
-  `found_on`, `progress` and `today` call a Python process's functions of
-  those names; a Lua process, whose state is its own task's, is read from
-  the document it last handed back, which holds all of its state. Settings'
-  Achievements page reads them through the role as before.
-  `award` answers True where the badge is unfound and the process took the
-  message.
-- **Its store.** The console starts the process when it loads its store
-  (`load_achievements`, again on a reload; one process a host, so a second
-  console on a host stops the first's), handing it, in its namespace, the
-  document `achievements.json` holds, the write and the day off the bar's
-  clock (`Workstation.service_env`): `achievements.json` is a system
-  document beside the carts that the sync and the web console carry, in no
-  files kind and no prefs namespace, so no role serves it and the console
-  hands it over. The process records into its document
-  and hands it back; the console writes it at its next frame, outside any
-  slice, because a store write on a card can outlast a callback's 20 ms and
-  its abort. Before a VM stop the console writes what is waiting.
-- **It posts.** A fresh find is a `moybyte.notify` of the badge's title, how
-  it was found and its glyph. The console shows the process's banner as the
-  unlock banner: its card with the kernel's words ("You found a badge!", a
-  secret's "You found a secret!" and its burst), the beep and the kernel's toast copy; the
-  notification stays in the task manager's list. A badge kept from another
-  console (the web console's sync, `quiet`) is recorded and not posted.
+As built, the process is the system cart
+`system_carts/moybyte.achievements.moy`, a Python service (§3, §5) whose
+manifest lists `award` and `progress` under `receives` and grants it
+`notifications` and `prefs`. The console's end of it is
+`runtime/system/achievements.py`: `ws.ach`, the link, `NotifyRole`, the
+`notify` role's server, the console's own declaration (`SHELL`) and the
+strict readers both ends share.
+
+- **It wakes only on two messages**, `award(id)` and `progress(id,
+  value)`, sent by a game (`moybyte.award`, `moybyte.progress`: rows of
+  `native/os_calls.json`, each `moybyte.send` to the process) or by the
+  console for its own badges (`Scheduler.send`, from the system). They are
+  §1's messages: a message wake costs no frame while nothing is queued, and
+  a queued one is served under the guard and the rungs at the start of the
+  console's next frame, before it draws (`Scheduler.mail`), so the banner
+  an unlock raises shows in the frame of the input that earned it, or by a
+  tick that runs first.
+- **The sender is the OS's stamp.** The process asks the console for the
+  sender's declaration (`game(app)`, handed at its start with `clock_day()`
+  by `Workstation.service_env`; for `"system"` the console's own), so a game
+  reaches only the badges its own manifest declares, read strictly
+  (`achievements.declared`). An id the sender does not declare, a `progress`
+  on a badge with no goal and a value that is no whole number are refused,
+  and the refusal goes to the OS log under the process's pid.
+- **It counts nothing.** `award` finds a badge; `progress` stores the
+  sender's last value and finds the badge once it reaches the manifest's
+  `goal`. Sets, totals, bests and streaks are the sender's logic: the
+  console keeps its own distinct carts and editors in its own row of
+  `system/settings` (`milestones`) and reports the counts (`Link.played`,
+  `Link.used`), as a game keeps its best in its pmem.
+- **Its store is its prefs** (one row, `badges`; `read_badges` is the strict
+  reader): a record a sender, its name, each found badge's day, title, icon
+  and hint, and each goal's last value, read and written whole on each
+  message. A deleted game's badges stay in the row and stay listed under
+  its name. The row is a cart namespace's, so the system root carries it
+  between a board and its page with the portable Settings
+  (`moy_sync.SYSTEM_KEYS`). There is no migration: a console's old
+  `achievements.json` is never read again (CLAUDE.md, no store migrations).
+- **The `notify` role is the console's face of it.** In
+  `native/os_calls.json` its rows' `server` is `"proc:achievements"` and the
+  grant stays `never`: `award` (one of the console's own, the eggs' and the
+  saves', sent as a message), `groups` (Settings' list: the console's own
+  first, then each game on the shelf that declares a badge, then each game
+  gone from the shelf whose badges were found, each badge with its day and
+  its goal's last value) and `today`. The reads answer the process's row
+  whatever its tier and whether or not it runs.
+- **It posts.** A fresh find is a `moybyte.notify` whose summary is the
+  banner's head, the console's own "You found a badge!" (a secret's "You
+  found a secret!") or the game's name ("Harpoon Pop: badge found!", a
+  secret's "...: secret found!"), its body the badge's title and its icon
+  the badge's. The console shows the process's banner as the unlock banner:
+  its card, a secret's burst, the beep and the kernel's toast copy; the
+  notification stays in the task manager's list.
 - **The task manager** lists it as a service, with its CPU and memory, and
   can stop it.
 - **When it is not running** (stopped, crashed, a build without its cart),
-  an event goes nowhere and the reads answer the last document the console
-  holds; the next store load starts it again.
+  a message goes nowhere and the reads answer its row; the next store load
+  starts it again.
 
 ## 9. The system log and crash reports
 

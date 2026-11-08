@@ -277,7 +277,7 @@ class _Keep:
 
 
 def _badges(ws, state):
-    ws.ach.tracker().unlocked = {k: _FOUND_ON.get(k, 20261001) for k in _FOUND[state]}
+    ws.ach.seed({k: _FOUND_ON.get(k, 20261001) for k in _FOUND[state]})
     ws.ach.toast = None
 
 
@@ -305,17 +305,18 @@ def _achievements(config, state, focus, pop=False, scroll=False):
         sl = ws.settings_layer
         sl.open_page("achievements")
         page = sl.achievements
-        page._focus = "Badge " + focus
+        page._focus = "Badge system " + focus
         _settle(g, ws, 3)
         if pop:
-            page._open(page._by_id["Badge " + focus])
+            page._open(page._by_id["Badge system " + focus])
     return setup
 
 
 def _unlock(config, badge, game=False, secret=False):
     def setup(g, ws):
         _badges(ws, "many" if not secret else "few")
-        ws.ach.unlocked.pop(badge, None)
+        found = ws.ach.doc().get("system", {}).get("found", {})
+        ws.ach.seed({k: v[0] for k, v in found.items() if k != badge})
         if game:
             ws.go_home()
             if getattr(ws.wm, "mode", None) is not None:

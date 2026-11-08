@@ -144,18 +144,16 @@ class _CardVerb:
 class Notices:
 
     def load_achievements(self):
-        """(Re)start the achievements process over the badges the store
-        remembers (#21; runtime/system/achievements.py,
-        docs/os_2026-11/processes.md section 8). Call after the store +
-        carts_root are injected (host build_workstation / device
-        run_desktop)."""
+        """(Re)start the achievements process (runtime/system/achievements.py,
+        docs/os_2026-11/processes.md section 8), whose prefs hold the badges.
+        Call after the store + carts_root are injected (host
+        build_workstation / device run_desktop)."""
         self.ach.start()
 
     def service_env(self, cart):
         """What the console hands service `cart` in its namespace beside
-        its app's roles: the achievements process's document, write and day
-        (achievements.json is a system document no role serves); None for
-        any other."""
+        its app's roles: the achievements process's `game` and `clock_day`;
+        None for any other."""
         if _ach.is_proc(cart):
             return self.ach.env()
         return None
@@ -166,10 +164,11 @@ class Notices:
         y, m, d = self.bar_layer._today()
         return y * 10000 + m * 100 + d if y >= 2020 else 0
 
-    def _achievement_unlocked(self, ach_id):
-        """A fresh unlock's EFFECTS: arm the banner, then celebrate with a
-        short rising beep when audio is wired (#21, rev-3 event push). The
-        achievements process's notification brings it (`_note_shown`).
+    def _achievement_unlocked(self, badge):
+        """A fresh unlock's EFFECTS: arm the banner over `badge`, (head,
+        title, icon, secret), then celebrate with a short rising beep when
+        audio is wired (#21, rev-3 event push). The achievements process's
+        notification brings it (`_note_shown`).
 
         The deadline is written HERE, at the unlock, rather than polled per frame off
         the object -- `_animating` and the WM's overlay signature read the flat
@@ -181,15 +180,13 @@ class Notices:
 
         The deadline is armed BEFORE the beep so a silent (or broken) backend
         cannot cost the kid the banner; the beep itself is best-effort."""
-        t = self.ach.toast = self.ach.payload(ach_id)
+        t = self.ach.toast = badge
         now = _ticks_ms()
         self._toast_at = now
         self._toast_until = now + TOAST_MS
         # ...and the kernel's copy, which a run it drives draws over its frames.
         if t:
-            _ch._moy_play().chrome_toast_arm(
-                _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE, t[1], t[2], bool(t[3]),
-                self._toast_until)
+            _ch._moy_play().chrome_toast_arm(t[0], t[1], t[2], bool(t[3]), self._toast_until)
         au = self.run.audio
         if au is not None:
             try:
@@ -271,9 +268,7 @@ class Notices:
         if t[3]:
             el = _ticks_diff(_ticks_ms(), self._toast_at)
             burst = 255 if el >= _ach_ui.BURST_MS else max(1, el * 255 // _ach_ui.BURST_MS)
-        _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, top,
-                        _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE,
-                        t[1], t[2], burst, desk)
+        _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, top, t[0], t[1], t[2], burst, desk)
 
     # -- notifications (docs/os_2026-11/processes.md §7) ----------------------
 

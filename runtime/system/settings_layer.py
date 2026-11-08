@@ -62,13 +62,11 @@ try:
     from about_ui import LicencesPage, version_words, board_words
     from log_ui import LogPage
     from perms_ui import PermsPage
-    from widgets import ACHIEVEMENTS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.achievements_ui import AchievementsPage
     from runtime.about_ui import LicencesPage, version_words, board_words
     from runtime.log_ui import LogPage
     from runtime.perms_ui import PermsPage
-    from runtime.widgets import ACHIEVEMENTS
 try:
     from editors_base import TextEntry
     from audio_session import console_volume
@@ -416,6 +414,7 @@ class SettingsLayer:
         # Licences with a licence's text a page under it
         self.page = None              # "achievements", "licences", "log" or None
         self._ach_n = -1              # the badges the Achievements row last said
+        self._ach_t = -1              # ...of how many
         self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
         self._ach_words = ""
         self.achievements = AchievementsPage(
@@ -1667,15 +1666,18 @@ class SettingsLayer:
                 n += 1
         lvl = ws.battery_level()
         a = ws.ach.count()
-        if (lvl != self._lvl or a != self._ach_n or self._about is not self._about_was
+        t = ws.ach.total()
+        if (lvl != self._lvl or a != self._ach_n or t != self._ach_t
+                or self._about is not self._about_was
                 or ws.can_type() != self._could_type):
             self._lvl = lvl
             self._about_was = self._about
             self._could_type = ws.can_type()
             moved = True
-        if a != self._ach_n:
+        if a != self._ach_n or t != self._ach_t:
             self._ach_n = a
-            self._ach_words = "%d of %d" % (a, len(ACHIEVEMENTS))
+            self._ach_t = t
+            self._ach_words = "%d of %d" % (a, t)
         if moved:
             self._gen += 1
             self._page_o["gen"] = self._gen

@@ -317,6 +317,8 @@ def build_carts(system_carts_dir):
             cart["handles"] = vendor(man)["handles"]
         if "receives" in vendor(man):            # the message names other apps may send it
             cart["receives"] = vendor(man)["receives"]
+        if "achievements" in vendor(man):        # the badges it declares
+            cart["achievements"] = vendor(man)["achievements"]
         if vendor(man).get("glass") is True:   # a per-glass wallpaper
             cart["glass"] = True
         if "pictures" in vendor(man):           # a picture wallpaper

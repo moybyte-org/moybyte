@@ -253,8 +253,9 @@ class ConsoleSystem:
     """The system root's board half: the pull a page seeds its console from,
     and the merge of what it sends back, over the live console. A changed
     Setting is re-applied through the verbs boot uses (`apply_system_keys`),
-    so a theme picked in the page is the board's when its glass comes back;
-    a badge earned there is kept here without a second celebration."""
+    so a theme picked in the page is the board's when its glass comes back,
+    and a badge earned there (the achievements process's prefs row) is the
+    board's too."""
 
     def __init__(self, ws):
         self.ws = ws
@@ -262,14 +263,12 @@ class ConsoleSystem:
 
     def pull(self):
         ws = self.ws
-        return moy_sync.system_pull(ws.system, ws.ach.doc())
+        return moy_sync.system_pull(ws.system)
 
     def apply(self, ops):
         """(applied, [(index, reason)]) of one batch's ops."""
         ws = self.ws
-        applied, errors, changed = self._rx.apply(
-            ops, ws.system, lambda i, day: ws.ach.award(i, quiet=True, day=day),
-            ws.carts_root)
+        applied, errors, changed = self._rx.apply(ops, ws.system, ws.carts_root)
         if changed:
             ws.apply_system_keys(changed)
         return applied, errors

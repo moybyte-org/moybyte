@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 1,
+  "version": 2,
   "title": "Achievements",
   "id": "moybyte.achievements",
   "runtime": "lua",
@@ -11,7 +11,12 @@
     "system": true,
     "order": 370,
     "permissions": [
-      "notifications"
+      "notifications",
+      "prefs"
+    ],
+    "receives": [
+      "award",
+      "progress"
     ],
     "config": {},
     "edit": []

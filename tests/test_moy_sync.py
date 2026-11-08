@@ -809,7 +809,7 @@ def _console_dir(tmp_path):
     (top / "system").mkdir()
     (top / "system" / "settings").write_text('show_fps = false\ntheme = "dusk"\n')
     (top / "system.json").write_text('{"theme": "dusk"}')
-    (top / "achievements.json").write_text('{"unlocked": ["first_open"]}')
+    (top / "achievements.json").write_text('{"v": 2, "found": {}}')
     (top / "shared.moygfx").write_bytes(bytes(range(40)))
     (top / "wifi.json").write_text('[{"ssid": "Home", "pw": "secret"}]')
     (top / "installed.json").write_text("{}")
@@ -827,26 +827,24 @@ def test_the_system_root_is_the_carts_folders_parent():
     assert moy_sync.SYSTEM_ROOT.path("/moy/carts") == "/moy"
     assert moy_sync.SYSTEM_ROOT.path("/sd/moybyte/carts") == "/sd/moybyte"
     assert moy_sync.SYSTEM_ROOT.endpoint == moy_sync.SYSTEM_PULL
-    assert moy_sync.SYSTEM_ROOT.wire_top == ("system/settings", "achievements.json")
+    assert moy_sync.SYSTEM_ROOT.wire_top == ("system/settings",)
 
 
 def test_the_system_files_are_the_stores_own_names():
     """The list names moy_carts' sibling stores, so a renamed store cannot
     leave the browser keeping a file nothing writes."""
     from runtime import moy_carts
-    assert moy_sync.SYSTEM_FILES == (
-        moy_carts.SETTINGS_NAME, moy_carts.ACHIEVEMENTS_STORE_NAME,
-        moy_carts.SHARED_SHEET_NAME)
+    assert moy_sync.SYSTEM_FILES == (moy_carts.SETTINGS_NAME, moy_carts.SHARED_SHEET_NAME)
     assert moy_carts.WIFI_STORE_NAME not in moy_sync.SYSTEM_FILES
 
 
 def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
-    assert set(w._snap) == {"system/settings", "achievements.json", "shared.moygfx"}
+    assert set(w._snap) == {"system/settings", "shared.moygfx"}
     assert not w.sweep(), "the store as seeded has nothing to tell"
     for name in ("wifi.json", "installed.json", "system.json", "system/settings.bak",
-                 "system/sources"):
+                 "system/sources", "achievements.json"):
         p = top / name
         p.write_text('{"changed": true}')
         _bump_mtime(p)
@@ -881,9 +879,9 @@ def test_a_vanished_system_file_is_a_plain_delete_never_a_folder_one(tmp_path):
     a folder by that name."""
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
-    (top / "achievements.json").unlink()
+    (top / "shared.moygfx").unlink()
     assert w.sweep()
-    assert w.take() == [{"p": "achievements.json", "d": 1}]
+    assert w.take() == [{"p": "shared.moygfx", "d": 1}]
 
 
 def test_the_c_apply_refuses_every_op_of_a_system_batch(tmp_path):

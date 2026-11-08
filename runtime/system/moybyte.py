@@ -27,6 +27,13 @@ one, `time.ticks_us()`.
                      app only where the receiver's manifest lists `name`
                      under `receives`, always from the system. How many took
                      it (native/moy_kernel/moy_evq.h, THE RULE)
+  award(id)          unlock badge `id` of this app's manifest's
+                     `achievements`: `send("moybyte.achievements", "award",
+                     id)` (docs/moy_cart_api.md, "Achievements")
+  progress(id, value)
+                     badge `id`'s goal stands at `value`, the game's own
+                     count: the badge is found once it reaches the goal.
+                     `send("moybyte.achievements", "progress", id, value)`
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
@@ -724,6 +731,17 @@ def open_with(item, choose=False):
 
 def send(app, name, *args):
     return WAKES.send(_pid(), app, name, args)
+
+
+ACHIEVEMENTS = "moybyte.achievements"
+
+
+def award(ach_id):
+    return send(ACHIEVEMENTS, "award", ach_id)
+
+
+def progress(ach_id, value):
+    return send(ACHIEVEMENTS, "progress", ach_id, value)
 
 
 def share(data, mime):

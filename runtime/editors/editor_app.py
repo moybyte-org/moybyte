@@ -457,9 +457,7 @@ class EditorApp:
         if desk is None:
             self._relayout_tab(view)
         ws._set_text_mode(view == "code")
-        # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
-        # Master". "cards" isn't an editor, so it's ignored by note().
-        ws.ach.note("editor", view)
+        ws.ach.used(view)               # Toolbox Master counts code, paint and map
 
     def focus_tab(self, view):
         """The desk Editor moved the keys to the pane showing tab `view`
@@ -470,7 +468,7 @@ class EditorApp:
         self.tab = view
         self.build_tab(view)
         ws._set_text_mode(view == "code" or view == "theme_config")
-        ws.ach.note("editor", view)
+        ws.ach.used(view)
 
     def _desk(self):
         """The desk Editor where it shows workspaces, else None."""
