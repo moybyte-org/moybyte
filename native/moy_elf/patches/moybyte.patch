@@ -1,0 +1,201 @@
+Moybyte's changes to Espressif's elf_loader 2.1.0 (native/moy_elf/UPSTREAM.md).
+The first two were silent at load and fatal at a module's first call on the
+S3 (the elf_loader spike, 2026-11-07, branch elfspike):
+
+1. .text's size is kept exact, not rounded up to a word. A rounded size claims
+   the first bytes of a byte-aligned .rodata that follows, elf_remap_text()
+   points them at the instruction bus, and a byte load there is a
+   LoadStoreError.
+2. R_XTENSA_RELATIVE to one past a section's end (a loop's bound, &tab[N])
+   maps through the section's last byte instead of becoming 0, and an address
+   in no section fails the load.
+3. The validation pass's section-name table comes from the loader's own
+   allocator (PSRAM), not malloc (internal RAM on the S3s).
+4. The file loader's two size messages print a long, not a PRId64: the
+   boards' newlib nano printf takes no long long length
+   (tests/test_board_c_formats.py).
+
+diff -ru a/src/arch/esp_elf_xtensa.c b/src/arch/esp_elf_xtensa.c
+--- a/src/arch/esp_elf_xtensa.c	2026-11-08 03:50:59.521695937 +0100
++++ b/src/arch/esp_elf_xtensa.c	2026-11-08 03:50:59.544696346 +0100
+@@ -102,6 +102,18 @@
+     switch (ELF_R_TYPE(rela->info)) {
+     case R_XTENSA_RELATIVE:
+         val = esp_elf_map_sym(elf, *where);
++        /* A pointer one past a section's end (a loop bound, &tab[N]) is in
++         * no section's half-open range; map it through its last byte. An
++         * address in no section at all fails the load instead of becoming
++         * a silent 0. */
++        if (!val && *where) {
++            val = esp_elf_map_sym(elf, *where - 1);
++            if (!val) {
++                ESP_LOGE(TAG, "relative target 0x%x is in no loaded section", (int)*where);
++                return -EINVAL;
++            }
++            val += 1;
++        }
+ #ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
+         *where = elf_remap_text(elf, val);
+ #else
+diff -ru a/src/esp_elf.c b/src/esp_elf.c
+--- a/src/esp_elf.c	2026-11-08 03:50:59.517695865 +0100
++++ b/src/esp_elf.c	2026-11-08 03:51:10.675894207 +0100
+@@ -110,7 +110,7 @@
+     }
+     /* Ensure the file length fits both the allocator and the signed read length. */
+     if (!esp_elf_file_size_valid(size)) {
+-        ESP_LOGE(TAG, "Invalid ELF file size: %" PRId64, (int64_t)size);
++        ESP_LOGE(TAG, "Invalid ELF file size: %ld", (long)size);
+         errno = EFBIG;
+         goto errout_lseek_end;
+     }
+@@ -123,7 +123,7 @@
+ 
+     pbuf = esp_elf_malloc(size, false);
+     if (!pbuf) {
+-        ESP_LOGE(TAG, "Failed to malloc %" PRId64 " bytes", (int64_t)size);
++        ESP_LOGE(TAG, "Failed to malloc %ld bytes", (long)size);
+         goto errout_lseek_end;
+     }
+ 
+@@ -331,7 +331,12 @@
+ 
+                 elf->sec[ELF_SEC_TEXT].v_addr  = shdr[i].addr;
+                 text_size = shdr[i].size;
+-                elf->sec[ELF_SEC_TEXT].size    = ELF_ALIGN(text_size, 4);
++                /* Exact, not word-rounded: a rounded size claims the first
++                 * bytes of a byte-aligned .rodata that follows, and
++                 * elf_remap_text() then points them at the instruction
++                 * bus, where a byte load is a LoadStoreError. The
++                 * allocation rounds on its own (text_alloc_span). */
++                elf->sec[ELF_SEC_TEXT].size    = text_size;
+                 elf->sec[ELF_SEC_TEXT].offset  = shdr[i].offset;
+ 
+                 ESP_LOGD(TAG, ".text   offset is 0x%lx size is 0x%x",
+diff -ru a/src/esp_elf_validate.c b/src/esp_elf_validate.c
+--- a/src/esp_elf_validate.c	2026-11-08 03:50:59.517695865 +0100
++++ b/src/esp_elf_validate.c	2026-11-08 03:50:59.545696364 +0100
+@@ -14,6 +14,7 @@
+ #include "private/elf_types.h"
+ #include "private/elf_lifecycle.h"
+ #include "private/elf_validate.h"
++#include "private/elf_platform.h"
+ 
+ #define ELF_PF_EXEC           1
+ #define ELF_WORD_SIZE         sizeof(uint32_t)
+@@ -244,12 +245,12 @@
+ 
+     /* Stage the section-name table once: every name comparison below reads
+      * through it, and a streamed source must not pay a read per strcmp. */
+-    char *names = malloc(shstr.size);
++    char *names = esp_elf_malloc(shstr.size, false);
+     if (!names) {
+         return -ENOMEM;
+     }
+     if (elf_reader_read(r, shstr.offset, names, shstr.size)) {
+-        free(names);
++        esp_elf_free(names);
+         return -EINVAL;
+     }
+ 
+@@ -263,7 +264,7 @@
+     for (size_t i = 0; i < ehdr.phnum; ++i) {
+         elf32_phdr_t phdr;
+         if (elf_segment(r, &ehdr, i, &phdr)) {
+-            free(names);
++            esp_elf_free(names);
+             return -EINVAL;
+         }
+         if (phdr.type != PT_LOAD) {
+@@ -274,7 +275,7 @@
+         if (phdr.filesz > phdr.memsz ||
+                 !elf_file_range(size, phdr.offset, phdr.filesz) ||
+                 (uint64_t)phdr.vaddr + phdr.memsz > UINT32_MAX) {
+-            free(names);
++            esp_elf_free(names);
+             return -EINVAL;
+         }
+         /* The entry must contain actual executable file bytes, not BSS. */
+@@ -286,7 +287,7 @@
+ 
+ #if !CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
+     if (!has_load_segment || (!executable_entry && !no_entry_shared_object)) {
+-        free(names);
++        esp_elf_free(names);
+         return -EINVAL;
+     }
+ #else
+@@ -301,12 +302,12 @@
+     for (size_t i = 0; i < ehdr.shnum; ++i) {
+         elf32_shdr_t sec;
+         if (elf_section(r, &ehdr, i, &sec)) {
+-            free(names);
++            esp_elf_free(names);
+             return -EINVAL;
+         }
+         if ((sec.type != SHT_NOBITS && !elf_file_range(size, sec.offset, sec.size)) ||
+                 ((sec.flags & SHF_ALLOC) && (uint64_t)sec.addr + sec.size > UINT32_MAX)) {
+-            free(names);
++            esp_elf_free(names);
+             return -EINVAL;
+         }
+     }
+@@ -328,7 +329,7 @@
+     for (size_t i = 0; i < ehdr.shnum; ++i) {
+         elf32_shdr_t sec;
+         if (elf_section(r, &ehdr, i, &sec)) {
+-            free(names);
++            esp_elf_free(names);
+             return -EINVAL;
+         }
+         if (!elf_string_in_range(&shstr, sec.name)) {
+@@ -364,7 +365,7 @@
+             for (size_t j = 0; j < ehdr.phnum; j++) {
+                 elf32_phdr_t seg;
+                 if (elf_segment(r, &ehdr, j, &seg)) {
+-                    free(names);
++                    esp_elf_free(names);
+                     return -EINVAL;
+                 }
+                 if (seg.type == PT_LOAD &&
+@@ -510,7 +511,7 @@
+     if (ehdr.phnum > sizeof(inline_ranges) / sizeof(inline_ranges[0])) {
+         loaded_ranges = malloc((size_t)ehdr.phnum * sizeof(*loaded_ranges));
+         if (!loaded_ranges) {
+-            free(names);
++            esp_elf_free(names);
+             return -ENOMEM;
+         }
+     }
+@@ -521,7 +522,7 @@
+             if (loaded_ranges != inline_ranges) {
+                 free(loaded_ranges);
+             }
+-            free(names);
++            esp_elf_free(names);
+             return -EINVAL;
+         }
+         if (phdr.type == PT_LOAD) {
+@@ -541,7 +542,7 @@
+             if (loaded_ranges != inline_ranges) {
+                 free(loaded_ranges);
+             }
+-            free(names);
++            esp_elf_free(names);
+             return -EINVAL;
+         }
+     }
+@@ -625,11 +626,11 @@
+         free(loaded_ranges);
+     }
+ #endif
+-    free(names);
++    esp_elf_free(names);
+     return result;
+ 
+ invalid:
+-    free(names);
++    esp_elf_free(names);
+     return -EINVAL;
+ }
+ 
