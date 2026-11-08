@@ -224,9 +224,11 @@ def sig_scheme():
     return _define("MOY_WASM_SIG_SCHEME")
 
 
-def signed_text(module, chip):
-    """What a module's signature covers (moy_wasm_key.h)."""
-    return ("%s\n%s\n%d\n%s" % (sig_scheme(), chip, len(module),
+def signed_text(module, chip, scheme=None):
+    """What a module's signature covers (moy_wasm_key.h): `scheme` names the
+    kind of module, an AOT module's by default (a native module's is
+    native/moy_elf/moy_elf.h's)."""
+    return ("%s\n%s\n%d\n%s" % (scheme or sig_scheme(), chip, len(module),
                                  hashlib.sha256(module).hexdigest())).encode()
 
 
@@ -259,11 +261,11 @@ def signing_key(source=None):
     return key
 
 
-def sign(module, chip, key):
+def sign(module, chip, key, scheme=None):
     """The signed module file for `module` (bytes) built for `chip`. `key` is
     the signing key as PEM bytes, or a callable taking the signed text and
     returning the signature's bytes (how a test signs with a throwaway key)."""
-    text = signed_text(module, chip)
+    text = signed_text(module, chip, scheme)
     sig = key(text) if callable(key) else bytes.fromhex(ota_sign._sign_bytes(text, key))
     return attach(module, sig)
 
@@ -278,7 +280,7 @@ def _verifier():
     return mod.verify_sig
 
 
-def verify(data, chip, keys=None, unknown_sources=False):
+def verify(data, chip, keys=None, unknown_sources=False, scheme=None):
     """None when `data` is a module file a board of `chip` trusting `keys`
     (default: the image's OTA_PUBLIC_KEYS) lets through to its provenance
     check, otherwise the refusal the board gives -- `verify_module` in
@@ -290,7 +292,7 @@ def verify(data, chip, keys=None, unknown_sources=False):
         return None if unknown_sources else "unsigned module"
     if not sig:
         return "malformed signature"
-    if not _verifier()(signed_text(module, chip), sig.hex(), keys):
+    if not _verifier()(signed_text(module, chip, scheme), sig.hex(), keys):
         return "bad signature"
     return None
 

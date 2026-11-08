@@ -49,6 +49,10 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime.moy_store_base import is_cart_id, vendor
 
 ALL = ("python", "lua", "wasm", "elf")
+
+# A native module's one line (the overview's section 4): it runs at the
+# kernel's trust, so its prompt says so, and every native app asks for it.
+NATIVE = "Full access to the console"
 PY = ("python",)
 
 TABLE = (
@@ -68,6 +72,7 @@ TABLE = (
     ("notifications", "api:notify", ALL, "Show notifications", None, ()),
     ("autostart", "boot", ALL, "Start when the console starts", None, ()),
     ("lease", "lease", PY, "full", "lease", ()),
+    ("native", "native", ("elf",), NATIVE, None, ()),
     ("http", "api:http", PY, "Fetch pages from the internet", "wifi", ()),
     ("mic", "api:mic", PY, "Record with the microphone", "mic", ()),
     ("lora", "api:lora", PY, "Send and receive on the LoRa radio", "lora", ()),
@@ -139,6 +144,10 @@ def asked(perms):
 
 
 def tier_of(cart):
+    """The cart's tier: `elf` for a native cart (its manifest's
+    `"moybyte": {"native": [chips]}`), else its runtime, Python by default."""
+    if cart and cart.get("native"):
+        return "elf"
     return (cart.get("runtime") if cart else None) or "python"
 
 
@@ -234,6 +243,9 @@ def check(cart, rec, have):
             if p not in perms:
                 refusal = 'requires "%s" but does not ask for it' % p
                 break
+    if refusal is None and tier == "elf" and "native" not in granted:
+        refusal = (_refusal("native", _why_absent("native", tier, have, rec), tier)
+                   if "native" in perms else 'a native cart must ask for "native"')
     return granted, absent, refusal
 
 
@@ -255,7 +267,7 @@ def absent_names(absent, rec):
 
 def manifest_cart(man, folder):
     """What the checks read of a cart, from its manifest `man` (a dict) and
-    its `folder` name: id, title, runtime, permissions and required, as the
+    its `folder` name: id, title, runtime, permissions, required and native, as the
     store's cart dict carries them."""
     ven = vendor(man)
     cid = man.get("id") if isinstance(man, dict) else None
@@ -263,10 +275,12 @@ def manifest_cart(man, folder):
         cid = folder[:-4] if folder.endswith(".moy") else folder
     perms = ven.get("permissions")
     req = ven.get("required")
+    chips = ven.get("native")
     return {"id": cid, "title": man.get("title") if isinstance(man, dict) else None,
             "runtime": (man.get("runtime") if isinstance(man, dict) else None) or "python",
             "permissions": perms if isinstance(perms, list) else [],
-            "required": req if isinstance(req, list) else []}
+            "required": req if isinstance(req, list) else [],
+            "native": chips if isinstance(chips, list) else None}
 
 
 def app_id(cart):

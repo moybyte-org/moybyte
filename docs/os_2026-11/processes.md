@@ -151,8 +151,9 @@ carries Moybyte's fields (`docs/moy_cart_api.md`, `docs/app_api_v1.md`). The
 OS reads:
 
 - **the tier**: moy-spec's `"runtime"` for `python`, `lua`, `wasm`; `elf` is
-  a Moybyte-side field (`"moybyte": {"native": "esp32s3"}`), since the spec
-  does not know the tier;
+  a Moybyte-side field, the chips it carries a module for (`"moybyte":
+  {"native": ["esp32s3", "esp32p4"]}`, `native/moy_elf/README.md`), since the
+  spec does not know the tier;
 - **the kind**: `"type"` — `game` (default), `app`, `command`, `service`, or
   **several entry points** sharing one grant and one prefs namespace
   (`"entries": {"app": "...", "service": "..."}`): the LoRa node and

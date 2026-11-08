@@ -77,11 +77,11 @@ def parts(verbose=False):
     """([Part], extra cflags, link flags): what the library is made of here."""
     out = [_module("runtime." + m).PART for m in (
         "gfx_binding", "glass_binding", "lua_binding", "moy_input", "moy_lease", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "moy_usb", "moy_midi", "moy_media", "moy_loop",
-        "moy_play", "net_binding")]
+        "moy_play", "net_binding", "elf_binding")]
     spike = _module("tools.moy_index_spike")
     out += [spike.part(c) for c in (spike.SPINE, spike.FS, spike.INDEX)]
     out.append(_module("runtime.moy_play").FILES_PART)
-    cflags, link = [], ["-lm", "-lpthread"]
+    cflags, link = [], ["-lm", "-lpthread", "-ldl"]
     uf = _module("runtime.moy_ufiles_binding")
     if os.path.isdir(uf.UZLIB):
         out += [uf.part(), _module("runtime.moy_play").IMG_PART]

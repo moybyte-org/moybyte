@@ -813,7 +813,9 @@ class Player(PlayerDiag):
         err = self._gate_spec(ws, cart)
         if err is not None:
             return self._refuse(err)
-        _rt = project.cart.get("runtime", "python")
+        # A native cart (runtime/run/elf_run.py) has no main the console's
+        # tiers read: its tier is "elf" whatever its runtime field says.
+        _rt = "elf" if project.cart.get("native") else project.cart.get("runtime", "python")
         self._wasm = _rt == "wasm"
         run = 0
         self._run_handle = 0
@@ -1996,6 +1998,10 @@ class Player(PlayerDiag):
                 # opens the panel, never a hang.
                 raise RuntimeError("needs the %s runtime (not in this build)"
                                    % RUNTIME_NAMES[runtime])
+            if runtime == "elf":
+                # The native tier runs commands (sh_door.run_compiled); the
+                # Player opens no native app.
+                raise RuntimeError("a native cart runs as a command in the Terminal")
             if runtime == "wasm":
                 # A compiled cart's imports against this console's table, and
                 # its load footprint against what this console can give it,

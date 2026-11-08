@@ -1290,7 +1290,12 @@ def make_runtimes(ws):
     manifest name a cart gives it. An absent key is a runtime this build lacks,
     and the Player's runtime-missing panel is what a cart naming it gets."""
     out = {}
-    for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime)):
+    try:
+        from elf_run import make_elf_runtime
+    except ImportError:
+        from runtime.elf_run import make_elf_runtime
+    for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime),
+                       ("elf", make_elf_runtime)):
         rt = make(ws)
         if rt is not None:
             out[name] = rt

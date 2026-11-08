@@ -373,6 +373,10 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         runtimes["lua"] = lua
     if wasm_host.available():
         runtimes["wasm"] = wasm_host.WasmHostRuntime(ws)
+    from runtime import elf_binding
+    if elf_binding.available():
+        from runtime.elf_run import ElfRuntime
+        runtimes["elf"] = ElfRuntime(ws, elf_binding)
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards). WiFi (#38) is the fake host service over the
     # same moy_carts wifi.json store the device uses; the pointer ranges over the

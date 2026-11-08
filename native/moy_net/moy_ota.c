@@ -476,6 +476,49 @@ int moy_ota_verify(const void *payload, size_t n, const char *sig_hex,
     return ok;
 }
 
+const char *moy_ota_verify_module(const uint8_t *file, size_t len, const char *scheme,
+                                  const char *chip, size_t *module_len) {
+    const size_t magic = sizeof(MOY_OTA_MODULE_MAGIC) - 1;
+    *module_len = len;
+    if (len < magic + 4 || memcmp(file + len - magic, MOY_OTA_MODULE_MAGIC, magic) != 0) {
+        return MOY_OTA_MODULE_UNSIGNED;
+    }
+    const uint8_t *lp = file + len - magic - 4;
+    size_t k = lp[0] | (size_t)lp[1] << 8 | (size_t)lp[2] << 16 | (size_t)lp[3] << 24;
+    if (k < 64 || k > 1024 || k > len - magic - 4) {
+        return "malformed signature";
+    }
+    size_t n = len - magic - 4 - k;
+    *module_len = n;
+    uint8_t digest[32];
+    moy_sha256_t h;
+    moy_sha256_init(&h);
+    moy_sha256_update(&h, file, n);
+    moy_sha256_final(&h, digest);
+    static const char hex[] = "0123456789abcdef";
+    char text[160];
+    int tl = snprintf(text, sizeof text - 64, "%s\n%s\n%u\n", scheme, chip, (unsigned)n);
+    if (tl < 0 || (size_t)tl >= sizeof text - 64) {
+        return "bad signature";
+    }
+    for (int i = 0; i < 32; i++) {
+        text[tl++] = hex[digest[i] >> 4];
+        text[tl++] = hex[digest[i] & 15];
+    }
+    char *sig = moy_net_alloc(2 * k);
+    if (sig == NULL) {
+        return "the signature could not be checked";
+    }
+    const uint8_t *sp = lp - k;
+    for (size_t i = 0; i < k; i++) {
+        sig[2 * i] = hex[sp[i] >> 4];
+        sig[2 * i + 1] = hex[sp[i] & 15];
+    }
+    int ok = moy_ota_verify(text, (size_t)tl, sig, 2 * k, NULL, 0);
+    moy_net_free(sig);
+    return ok ? NULL : "bad signature";
+}
+
 // -- the manifest ---------------------------------------------------------------------------
 
 // The object's `key` as Python's `m.get(key) or ""` formats under "%s": a

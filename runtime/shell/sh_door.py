@@ -29,6 +29,11 @@ row and consent, its module's `_start` run by the wasm runtime's `command`
 folders its `files` permissions name (`wasi_roots`) as its only files and
 COMMAND_MS as its budget; a trap's exit code is TRAPPED, a module that will
 not run NOT_RUN.
+
+A NATIVE COMMAND (`"moybyte": {"native": [chips]}`) is the same door over
+the native tier's `command` (native/moy_elf/moy_os.h): its module's `main` on
+a task of its own, the same roots and budget, run only once "native" is
+granted (`app_perms.check`).
 """
 
 import gc
@@ -463,8 +468,9 @@ class ShellDoor:
             import app_perms
         except ImportError:  # host: the runtime package
             from runtime import app_perms
-        if app_perms.tier_of(cart) == "wasm":
-            return self.run_wasi(cart, name, argv, bg)
+        tier = app_perms.tier_of(cart)
+        if tier in ("wasm", "elf"):
+            return self.run_compiled(cart, name, argv, bg, tier)
         got = _sched.prepared(self.ws, cart)
         if got is None:
             self.err(name, "no source")
@@ -508,19 +514,22 @@ class ShellDoor:
         self.exits = ([(pid, code)] + self.exits)[:EXITS]
         return pid
 
-    def run_wasi(self, cart, name, argv, bg):
-        """Compiled command `cart` run as `argv`: its module's WASI `_start`
-        through the wasm runtime's `command` (native/moy_wasm/moy_wasi.h),
-        a process of its own holding what its consent grants, the folders
-        its `files` permissions name its only files. Its exit code, or in
-        the background its pid (the code kept for `status`)."""
+    def run_compiled(self, cart, name, argv, bg, tier):
+        """Compiled command `cart` run as `argv`: a WASI module's `_start`
+        through the wasm runtime's `command` (native/moy_wasm/moy_wasi.h), a
+        native module's `main` through the native runtime's
+        (native/moy_elf/moy_os.h), a process of its own holding what its
+        consent grants, the folders its `files` permissions name its only
+        files. Its exit code, or in the background its pid (the code kept for
+        `status`)."""
         try:
             import app_perms
         except ImportError:  # host: the runtime package
             from runtime import app_perms
-        rt = (getattr(self.ws, "runtimes", None) or {}).get("wasm")
+        rt = (getattr(self.ws, "runtimes", None) or {}).get(tier)
         if rt is None or not hasattr(rt, "command"):
-            self.err(name, "needs the compiled tier, which this console lacks")
+            self.err(name, "needs the %s tier, which this console lacks"
+                     % ("compiled" if tier == "wasm" else "native"))
             return NOT_RUN
         carts = getattr(self.ws, "carts", None)
         run = carts.rehydrate(cart) if carts is not None else cart
@@ -539,8 +548,12 @@ class ShellDoor:
         if _L is not None:
             _L.current(pid)
         try:
-            code, why = rt.command(run, argv, wasi_roots(granted), pid if bg else 0,
-                                   COMMAND_MS)
+            if tier == "elf":
+                code, why = rt.command(run, argv, wasi_roots(granted), pid, pid if bg else 0,
+                                       COMMAND_MS)
+            else:
+                code, why = rt.command(run, argv, wasi_roots(granted), pid if bg else 0,
+                                       COMMAND_MS)
         finally:
             if _L is not None:
                 _L.current(was)

@@ -84,6 +84,17 @@ int moy_ota_key_hex(const char *hex, size_t n, moy_ota_key_t *out);
 int moy_ota_verify(const void *payload, size_t n, const char *sig_hex,
                    size_t sig_n, const moy_ota_key_t *keys, int nkeys);
 
+// A signed module FILE (native/moy_wasm/moy_wasm_key.h's layout: the module,
+// its signature, the signature's length in 4 little-endian bytes, then
+// MOY_OTA_MODULE_MAGIC): NULL when its signature verifies under the baked keys
+// over "<scheme>\n<chip>\n<module length>\n<sha256 hex>", else the refusal:
+// MOY_OTA_MODULE_UNSIGNED (no trailer), "malformed signature", "bad
+// signature". *module_len is the module's length without any trailer.
+#define MOY_OTA_MODULE_MAGIC "moybyte-sig1"
+#define MOY_OTA_MODULE_UNSIGNED "unsigned module"
+const char *moy_ota_verify_module(const uint8_t *file, size_t len, const char *scheme,
+                                  const char *chip, size_t *module_len);
+
 // The bytes a manifest's signature covers ("moybyte-ota-v2\n<board>\n
 // <channel>\n<version>\n<size>\n<sha256 lowercased>") and the c6 block's
 // ("moybyte-c6-v1\n<board>\n<version>\n<size>\n<sha256>"), from the manifest's

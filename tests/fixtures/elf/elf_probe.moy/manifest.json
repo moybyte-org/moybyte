@@ -1,0 +1,11 @@
+{
+  "title": "Probe Native",
+  "id": "elf.probe",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "native",
+      "files"
+    ]
+  }
+}

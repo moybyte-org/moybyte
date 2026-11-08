@@ -817,6 +817,21 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     e->spec = is_str(e->format, "moy-1");
     e->runtime = field(man, mend, "runtime");
     e->compiled = is_str(e->runtime, "wasm");
+    // A native cart (docs/os_2026-11/tiers.md section 1) is compiled too, its
+    // main its first chip's module, main.<chip>.elf (tools/elf_cart.py).
+    moy_cat_json_t chips = vfield(man, mend, "native");
+    moy_cat_json_t chip0 = { NULL, NULL };
+    if (chips.v != NULL && *chips.v == '[') {
+        e->native = chips;
+        moy_json_iter_t it;
+        moy_json_iter(&it, chips.v, chips.e);
+        const char *k, *ke;
+        if (moy_json_next(&it, &k, &ke, &chip0.v, &chip0.e) && *chip0.v == '"') {
+            e->compiled = 1;
+        } else {
+            chip0.v = NULL;
+        }
+    }
     moy_cat_json_t mainf = field(man, mend, "main");
     const char *main;
     size_t main_n = 0;
@@ -828,6 +843,18 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
             }
             return 0;
         }
+    } else if (chip0.v != NULL) {
+        size_t cn = 0;
+        const char *chip = str_of(&r->a, chip0, &cn);
+        char *m = chip == NULL ? NULL : aalloc(&r->a, cn + 10u);
+        if (m == NULL) {
+            return 0;
+        }
+        memcpy(m, "main.", 5u);
+        memcpy(m + 5, chip, cn);
+        memcpy(m + 5 + cn, ".elf", 5u);
+        main = m;
+        main_n = cn + 9u;
     } else {
         main = e->compiled ? "main.wasm" : e->spec ? "main.lua" : "main.py";
         main_n = strlen(main);

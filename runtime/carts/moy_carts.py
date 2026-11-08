@@ -655,9 +655,13 @@ def _load(path, whole, folder=None):
         # A COMPILED cart (moy-spec SPEC.md §16): its main is a module,
         # not text, so it is never read here -- the runtime loads it from the
         # folder. What text it has is its optional `src/` (the Code tab).
-        compiled = runtime == "wasm"
-        mainf = man.get("main", "main.wasm" if compiled else
-                        ("main.lua" if spec else "main.py"))
+        # A NATIVE cart (docs/os_2026-11/tiers.md section 1) is compiled too:
+        # its main is its first chip's module (tools/elf_cart.py).
+        chips = vendor(man).get("native")
+        native = isinstance(chips, list) and bool(chips) and isinstance(chips[0], str)
+        compiled = runtime == "wasm" or native
+        mainf = man.get("main", "main.%s.elf" % chips[0] if native else
+                        "main.wasm" if compiled else ("main.lua" if spec else "main.py"))
         if broken and not _has(folder, path, mainf):
             # No manifest to name the program, so take whichever is there.
             for alt in ("main.py", "main.lua"):
@@ -798,6 +802,10 @@ def _load(path, whole, folder=None):
             # The permissions the cart cannot run without (runtime/shell/
             # app_perms.py): one of them absent refuses its launch by name.
             "required": ven.get("required", []),
+            # A native cart's chips (docs/os_2026-11/tiers.md section 1): a
+            # module `main.<chip>.elf` for each, beside the manifest
+            # (tools/elf_cart.py); None for every other cart.
+            "native": ven.get("native") if isinstance(ven.get("native"), list) else None,
             # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).

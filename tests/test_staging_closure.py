@@ -99,7 +99,8 @@ NATIVE = {
     # moy_net alone. moy_ui, the toolkit, stages on every console and in the
     # browser. moy_sh, the terminal's C shell, moy_tty, its face over a stream,
     # and moy_ssh, the SSH server (native/moy_ssh/README.md), are taken by
-    # every board, the Zero's too (its board.toml says why).
+    # every board, the Zero's too (its board.toml says why). moy_elf, the
+    # native tier, stages on every console and not on the Zero.
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -108,7 +109,7 @@ NATIVE = {
     # STAGED like one, so it is declared like one.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
-                       "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
+                       "moy_wasm", "moy_elf", "moy_serial", "moy_png", "moy_index", "moy_store",
                        "moy_spine", "moy_kernel", "moy_play", "moy_glass", "moy_input",
                        "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
@@ -119,7 +120,7 @@ NATIVE = {
     # API's host on the OTG port. moy_media, the media service, rides every
     # board with a speaker.
     "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
-           "moy_ppa", "moy_c6", "moy_usb", "moy_prof", "moy_wasm",
+           "moy_ppa", "moy_c6", "moy_usb", "moy_prof", "moy_wasm", "moy_elf",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
            "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_media",
            "moy_sh", "moy_ssh", "moy_tty"},
@@ -130,14 +131,14 @@ NATIVE = {
     # through a board define rather than a second panel module.
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web",
                    "moy_dsi", "moy_ppa", "moy_c6", "moy_usb", "moy_prof",
-                   "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
+                   "moy_wasm", "moy_elf", "moy_serial", "moy_png", "moy_index", "moy_store",
                    "moy_spine", "moy_kernel", "moy_play", "moy_sd", "moy_glass", "moy_input",
                    "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
     # board.toml), and with it moy_media; moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
-                   "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
+                   "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_elf", "moy_serial",
                    "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
                    "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui",
                    "moy_sh", "moy_ssh", "moy_tty"},

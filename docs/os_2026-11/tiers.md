@@ -39,20 +39,19 @@ record and the strike ledger as its floor.
   permissions; BSD sockets (lwIP's) under `network`;
   `time`/`clock_gettime`/`nanosleep`;
   `pthread_create`/`join`/mutexes as above. Each is a row of the table, so
-  the table's rules (below) hold. A **cross SDK** ships with it: a sysroot and a
-  CMake toolchain file per chip (`+sdk/`), the headers generated from the
-  ordinal source.
+  the table's rules (below) hold. A **cross SDK** ships with it, the headers
+  generated from the ordinal source (`sdk/README.md`).
 - **Runtime.** No libc, libgcc or C++ runtime code crosses the table: the
   POSIX rows are the table's own functions behind the IDF's newlib headers
   in the sysroot (owner, 2026-11-03), and a module links the rest
   statically, picolibc or newlib (memcpy, string, the soft-float helpers it
   needs), the loader runs `.init_array`, and a module asks for **no internal
   SRAM** on the S3s.
-- **The loader**: a relocatable ELF per chip, text and data in PSRAM
-  (executable PSRAM is what #158's AOT modules use, through fork patches the
-  IDF's `elf_loader` does not carry: dual-bus/XIP, the PSRAM mirror, a
-  cross-core cache sync), symbols resolved **only** against the table. The S3
-  loader is a spike before P5.4.
+- **The loader**: a relocatable ELF per chip, text and data in PSRAM,
+  Espressif's `elf_loader` vendored with our fixes
+  (`native/moy_elf/UPSTREAM.md`). A module resolves **no** symbol by name:
+  its calls into the OS are the table's slots by ordinal
+  (`native/moy_elf/README.md`, the module ABI).
 - **The table** (sketch below): rows appended, never changed or removed; a retired
   row keeps its slot and answers through a **typed** stub (one `ENOSYS` stub
   is unsound with the P4's hard-float returns). A module records the table
@@ -64,7 +63,8 @@ record and the strike ledger as its floor.
   hopped to the VM task (`native/moy_app/moy_app_wasm.c`), with the UI rows a
   second source (`native/moy_ui/moy_ui_wasm.h`) and moy-spec's verbs a third.
   The ELF table needs **a per-row ordinal and a C prototype in one source**,
-  pinned by a golden test; the wasm adapter and the UI rows are generated
+  pinned by a golden test (`native/moy_elf/os_table.json`,
+  `tests/test_os_table.py`); the wasm adapter and the UI rows are generated
   from it. Spec verbs, if exported, sit under a Moybyte-owned ordinal layer
   frozen separately from the spec, which is not append-only by index.
   WASI's imports (§3) and the POSIX rows (above) are the same C
@@ -80,8 +80,7 @@ The deferred Rust rung (owner, 2026-11-02) uses this loader and table.
 uses the **cart's** PSRAM share (its text counting in its PROCS need); a
 background C service's text is the ELF row of THE SHARES
 (`native/moy_play/moy_play.h`), 256 KiB on each S3; its code lives in PSRAM, so no ISR, no
-internal SRAM, and core 1 only; and all of it depends on the `elf_loader`
-spike.
+internal SRAM, and core 1 only.
 
 **The function table (sketch).**
 
@@ -93,9 +92,10 @@ typedef struct {
 } moy_os_table_t;
 ```
 
-A note section `moy.table` carries the version built against and the highest
-row linked; the loader refuses `highest >= rows`. The source is the ordinal
-table above; `tests/test_roles.py` pins the ordinals.
+A section `.moy.table` carries the version built against and `.moy.rows`
+every row linked; the loader refuses a row at or past its own `rows`. The
+source is `native/moy_elf/os_table.json`; `tests/test_os_table.py` pins the
+ordinals.
 
 ## 2. Lua
 

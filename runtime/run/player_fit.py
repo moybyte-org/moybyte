@@ -116,13 +116,14 @@ def _exc_cart_line(exc, fname="<cart>"):
 # The cart runtimes a manifest may name besides the console's own Python, and
 # how the runtime-missing panel says each. A build carries a runtime when
 # `ws.runtimes` maps its name to a factory; an absent key is the panel.
-RUNTIME_NAMES = {"lua": "Lua", "wasm": "wasm"}
+RUNTIME_NAMES = {"lua": "Lua", "wasm": "wasm", "elf": "native"}
 
 
 def _compiled(cart):
-    """True for a compiled ("runtime": "wasm") cart: no source to show, no
-    line to mark, no EDIT action on its error panel."""
-    return (cart or {}).get("runtime") == "wasm"
+    """True for a compiled ("runtime": "wasm") or native cart: no source to
+    show, no line to mark, no EDIT action on its error panel."""
+    cart = cart or {}
+    return cart.get("runtime") == "wasm" or bool(cart.get("native"))
 
 
 # A compiled cart bigger than this console can hold (native/moy_wasm/README.md:

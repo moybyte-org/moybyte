@@ -1,0 +1,11 @@
+{
+  "title": "Cat Native",
+  "id": "elf.cat",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "native",
+      "files"
+    ]
+  }
+}

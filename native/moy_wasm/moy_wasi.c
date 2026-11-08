@@ -15,6 +15,10 @@
 #include "moy_wasi.h"
 #include "moy_sh_board.h"
 #include "moy_log.h"
+#include "moy_sh_prog.h"
+
+_Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_INTERRUPTED == MOY_SH_PROG_INTERRUPTED
+               && MOY_WASI_KILLED == MOY_SH_PROG_KILLED, "a spawned program's ends are moy_sh_prog.h's");
 
 // A board is told by the header it has: ESP_PLATFORM is not defined for a
 // usermod's sources on the esp32 port (moy_net.h's MOY_NET_CLOCK_EPOCH).
@@ -58,7 +62,6 @@ enum { FT_UNKNOWN = 0, FT_CHAR = 2, FT_DIR = 3, FT_FILE = 4 };
 
 #define EXIT_MSG "moy_wasi: exit"
 #define PATH_CAP 512
-#define LINE_CAP 200
 #define MAGIC 0x77617369u
 
 enum { K_FREE = 0, K_STREAM, K_DIR };
@@ -81,16 +84,8 @@ struct moy_wasi {
     char *env;                  // "K=V\0" each
     size_t env_n;
     int envc;
-    char *roots;                // absolute shell paths, NUL-separated, an empty one last
     wfd_t fd[MOY_WASI_FDS];
-    uint32_t bg_pid;
-    char line[2][LINE_CAP];
-    size_t line_n[2];
-    int64_t deadline_us;        // 0: none
-    int64_t polled_us;
-    uint32_t budget_ms;
-    int exited;
-    int code;
+    moy_sh_prog_t prog;         // the roots, the background streams, the run's end
 };
 
 // -- the host's pieces ------------------------------------------------------------
@@ -238,9 +233,11 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
     w->magic = MAGIC;
     w->s = s;
     w->hop = hop;
-    w->bg_pid = bg_pid;
-    w->budget_ms = budget_ms;
-    w->deadline_us = budget_ms ? mono_us() + (int64_t)budget_ms * 1000 : 0;
+    if (moy_sh_prog_init(&w->prog, s, roots, bg_pid, budget_ms, mono_us(), w_alloc) != 0) {
+        w->prog.roots = NULL;
+        moy_wasi_free(w);
+        return NULL;
+    }
     w->argc = argc;
     for (int i = 0; i < argc; i++) {
         w->args_n += strlen(argv[i]) + 1;
@@ -267,47 +264,18 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
         moy_wasi_free(w);
         return NULL;
     }
-    const char *store = moy_sh_board_store(s);
-    size_t rn = 1;
-    for (const char *r = roots; r != NULL && *r; r += strlen(r) + 1) {
-        rn += strlen(store) + 1 + strlen(r) + 1;
-    }
-    w->roots = w_alloc(rn);
-    if (w->roots == NULL) {
-        moy_wasi_free(w);
-        return NULL;
-    }
-    char *o = w->roots;
-    for (const char *r = roots; r != NULL && *r; r += strlen(r) + 1) {
-        char path[PATH_CAP];
-        snprintf(path, sizeof path, "%s/%s", store, r);
-        if (moy_sh_abs(s, path, o, rn - (size_t)(o - w->roots)) != 0) {
-            continue;
-        }
-        if (preopen(w, o, o) != 0) {
+    for (const char *r = w->prog.roots; *r; r += strlen(r) + 1) {
+        if (preopen(w, r, r) != 0) {
             moy_wasi_free(w);
             return NULL;
         }
-        o += strlen(o) + 1;
     }
-    *o = 0;
     return w;
-}
-
-static void bg_flush(moy_wasi_t *w, int k) {
-    if (w->line_n[k] > 0) {
-        moy_log_write(k ? MOY_LOG_ERR : MOY_LOG_INFO, w->bg_pid, w->line[k], w->line_n[k]);
-        w->line_n[k] = 0;
-    }
 }
 
 void moy_wasi_free(moy_wasi_t *w) {
     if (w == NULL) {
         return;
-    }
-    if (w->bg_pid) {
-        bg_flush(w, 0);
-        bg_flush(w, 1);
     }
     for (int i = 0; i < MOY_WASI_FDS; i++) {
         if (w->fd[i].kind == K_STREAM && i >= 3 && w->fd[i].sh >= 3) {
@@ -318,7 +286,9 @@ void moy_wasi_free(moy_wasi_t *w) {
     }
     w_free(w->argv);
     w_free(w->env);
-    w_free(w->roots);
+    if (w->prog.roots != NULL) {
+        moy_sh_prog_fini(&w->prog, w_free);
+    }
     w->magic = 0;
     w_free(w);
 }
@@ -337,32 +307,15 @@ struct call {
     uint32_t r;
 };
 
-static void say(moy_wasi_t *w, const char *text) {
-    moy_sh_fd_write(w->s, 2, text, strlen(text));
-}
-
 // The run's end as proc_exit's, from inside a call.
 static void stop(moy_wasi_t *w, int code) {
-    w->exited = 1;
-    w->code = code;
+    moy_sh_prog_stop(&w->prog, code);
 }
 
 static void run_body(void *arg) {
     call_t *c = arg;
     moy_wasi_t *w = c->w;
-    int64_t now = mono_us();
-    if (!w->exited && now - w->polled_us >= MOY_WASI_POLL_US) {
-        w->polled_us = now;
-        if (moy_sh_interrupted(w->s)) {
-            stop(w, MOY_WASI_INTERRUPTED);
-        } else if (w->deadline_us && now >= w->deadline_us) {
-            char msg[64];
-            snprintf(msg, sizeof msg, "killed: ran past %u s\n", (unsigned)(w->budget_ms / 1000));
-            say(w, msg);
-            stop(w, MOY_WASI_KILLED);
-        }
-    }
-    if (w->exited) {
+    if (!moy_sh_prog_poll(&w->prog, mono_us())) {
         c->r = W_INTR;
         return;
     }
@@ -383,7 +336,7 @@ static uint32_t go(wasm_exec_env_t env, body_fn fn, call_t *c) {
     } else if (w->hop(run_body, c) != 0) {
         c->r = W_IO;                    // no task to touch the session on
     }
-    if (w->exited) {
+    if (w->prog.exited) {
         wasm_runtime_set_exception(c->inst, EXIT_MSG);
     }
     return c->r;
@@ -418,14 +371,6 @@ static wfd_t *fd_of(call_t *c, uint32_t fd) {
     return fd < MOY_WASI_FDS && c->w->fd[fd].kind != K_FREE ? &c->w->fd[fd] : NULL;
 }
 
-static bool under(const char *path, const char *dir) {
-    size_t n = strlen(dir);
-    if (n == 1 && dir[0] == '/') {
-        return true;
-    }
-    return strncmp(path, dir, n) == 0 && (path[n] == 0 || path[n] == '/');
-}
-
 // The shell path `rel` names under directory descriptor `fd`, checked against
 // the roots: W_OK with it in `out`, or a WASI errno.
 static uint32_t resolve(call_t *c, uint32_t fd, uint32_t p, uint32_t n, char *out) {
@@ -455,12 +400,7 @@ static uint32_t resolve(call_t *c, uint32_t fd, uint32_t p, uint32_t n, char *ou
     if (moy_sh_abs(c->w->s, n && rel[0] == '/' ? rel : path, out, PATH_CAP) != 0) {
         return W_NAMETOOLONG;
     }
-    for (const char *r = c->w->roots; *r; r += strlen(r) + 1) {
-        if (under(out, r)) {
-            return W_OK;
-        }
-    }
-    return W_NOTCAPABLE;
+    return moy_sh_prog_reaches(&c->w->prog, out) ? W_OK : W_NOTCAPABLE;
 }
 
 // -- args, env, clocks, random, the process ----------------------------------------
@@ -600,19 +540,6 @@ static uint32_t w_proc_raise(wasm_exec_env_t e, uint32_t sig) {
 
 // -- streams -------------------------------------------------------------------------
 
-// A background program's bytes on fd 1 or 2: the log's lines under its pid.
-static void bg_write(moy_wasi_t *w, int k, const char *p, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        if (p[i] == '\n' || w->line_n[k] == LINE_CAP) {
-            bg_flush(w, k);
-            if (p[i] == '\n') {
-                continue;
-            }
-        }
-        w->line[k][w->line_n[k]++] = p[i];
-    }
-}
-
 // fd_read, fd_write and their positioned twins: a[0] fd, a[1] iovs, a[2]
 // their count, a[3] where the count goes, a[4] 1 to write, b[0] an offset
 // (a[5] 1 when there is one).
@@ -637,7 +564,7 @@ static void b_rw(call_t *c) {
             return;
         }
     }
-    bool bg = w->bg_pid && (f->sh == 1 || f->sh == 2) && c->a[0] == (uint32_t)f->sh;
+    bool bg = moy_sh_prog_bg_stdio(&w->prog, f->sh) && f->sh > 0 && c->a[0] == (uint32_t)f->sh;
     uint32_t done = 0;
     uint16_t err = W_OK;
     for (uint32_t i = 0; i < c->a[2]; i++) {
@@ -654,9 +581,9 @@ static void b_rw(call_t *c) {
         }
         long got;
         if (writing && bg) {
-            bg_write(w, f->sh - 1, p, len);
+            moy_sh_prog_bg_write(&w->prog, f->sh, p, len);
             got = (long)len;
-        } else if (!writing && w->bg_pid && f->sh == 0) {
+        } else if (!writing && moy_sh_prog_bg_stdio(&w->prog, f->sh) && f->sh == 0) {
             got = 0;
         } else {
             if (writing && (f->flags & FDF_APPEND) && f->sh >= 3) {
@@ -1527,9 +1454,9 @@ int moy_wasi_main(moy_wasi_t *w, wasm_exec_env_t env, char *err, size_t errlen) 
     wasm_runtime_set_user_data(env, w);
     bool ok = wasm_runtime_call_wasm(env, start, 0, NULL);
     wasm_runtime_set_user_data(env, NULL);
-    if (w->exited) {
+    if (w->prog.exited) {
         wasm_runtime_clear_exception(inst);
-        return w->code;
+        return w->prog.code;
     }
     if (!ok) {
         const char *why = wasm_runtime_get_exception(inst);

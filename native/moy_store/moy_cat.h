@@ -71,12 +71,13 @@ typedef struct {
     const char *man;            // the manifest's text (a synthesised one when broken)
     size_t man_n;
     int spec;                   // "format": "moy-1"
-    int compiled;               // "runtime": "wasm"
+    int compiled;               // "runtime": "wasm", or a native cart
     const char *main;           // the main script's name, decoded
     size_t main_n;
     // The manifest's fields as they stand; the defaults are the binding's.
     moy_cat_json_t title, author, type, runtime, format, fps, palette,
-        extensions, edit, permissions, required, writable, pictures;
+        extensions, edit, permissions, required, writable, pictures,
+        native;                 // moybyte.native: a native cart's chips, when a list
     int writable_ok;            // a compiled cart's "writable" is a list of strings
     moy_cat_int_t version, memory;
     moy_cat_int_t audio_ring;   // moybyte.audio_ring: the render-ahead ring's depth

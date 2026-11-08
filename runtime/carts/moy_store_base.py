@@ -221,7 +221,7 @@ USER_NS_KEY = "author"
 VENDOR_KEY = "moybyte"
 VENDOR_FIELDS = ("type", "system", "order", "permissions", "required",
                  "config", "edit", "targets", "age_mode", "app", "assets",
-                 "graduated", "glass", "pictures", "animates")
+                 "graduated", "glass", "pictures", "animates", "native")
 
 
 def vendor(man):

@@ -1,0 +1,10 @@
+{
+  "title": "Service Native",
+  "id": "elf.svc",
+  "moybyte": {
+    "type": "service",
+    "permissions": [
+      "native"
+    ]
+  }
+}

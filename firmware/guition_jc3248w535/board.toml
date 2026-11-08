@@ -381,6 +381,15 @@ it. The run stack's size and placement are this board's MOY_WASM_* settings in
 mpconfigboard.h, with the measurement that chose them."""
 
 [[native.shared.take]]
+module = "moy_elf"
+why = """
+The native tier (native/moy_elf/README.md): the vendored elf_loader, the
+process model a module runs under and the OS table it calls by ordinal. A
+module's text and data live in PSRAM, loaded when it runs and freed when it
+ends, so what the tier costs at rest is its code in both OTA slots. The tier
+ships on every console board or on none, so this board takes it."""
+
+[[native.shared.take]]
 module = "moy_play"
 why = """
 The kernel's Player (docs/history/kernel_cartpath_2026-10.md): the tick model, the
