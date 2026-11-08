@@ -488,22 +488,39 @@ static void b_strings(call_t *c) {
     c->r = W_OK;
 }
 
-static uint32_t w_args_sizes_get(wasm_exec_env_t e, uint32_t argc, uint32_t size) {
+// A pointer argument's wasm offset. The rows carry WAMR's libc-wasi
+// signatures because wamrc compiles them in: a module's AOT code checks and
+// translates each `*` argument to a native pointer at the call site and calls
+// the native directly, and the interpreter does the same from the row, so
+// both tiers hand over the native pointer and every body works in offsets.
+static uint32_t app_off(wasm_exec_env_t e, void *p) {
+    return (uint32_t)wasm_runtime_addr_native_to_app(wasm_runtime_get_module_inst(e), p);
+}
+
+static uint32_t w_args_sizes_get(wasm_exec_env_t e, void *argc_at, void *size_at) {
+    uint32_t argc = app_off(e, argc_at);
+    uint32_t size = app_off(e, size_at);
     call_t c = { .a = { argc, size, 0 } };
     return go(e, b_sizes, &c);
 }
 
-static uint32_t w_args_get(wasm_exec_env_t e, uint32_t argv, uint32_t buf) {
+static uint32_t w_args_get(wasm_exec_env_t e, void *argv_at, void *buf_at) {
+    uint32_t argv = app_off(e, argv_at);
+    uint32_t buf = app_off(e, buf_at);
     call_t c = { .a = { argv, buf, 0 } };
     return go(e, b_strings, &c);
 }
 
-static uint32_t w_environ_sizes_get(wasm_exec_env_t e, uint32_t count, uint32_t size) {
+static uint32_t w_environ_sizes_get(wasm_exec_env_t e, void *count_at, void *size_at) {
+    uint32_t count = app_off(e, count_at);
+    uint32_t size = app_off(e, size_at);
     call_t c = { .a = { count, size, 1 } };
     return go(e, b_sizes, &c);
 }
 
-static uint32_t w_environ_get(wasm_exec_env_t e, uint32_t env, uint32_t buf) {
+static uint32_t w_environ_get(wasm_exec_env_t e, void *env_at, void *buf_at) {
+    uint32_t env = app_off(e, env_at);
+    uint32_t buf = app_off(e, buf_at);
     call_t c = { .a = { env, buf, 1 } };
     return go(e, b_strings, &c);
 }
@@ -518,12 +535,14 @@ static void b_clock(call_t *c) {
     c->r = put64(c, c->a[1], v) ? W_OK : W_FAULT;
 }
 
-static uint32_t w_clock_res_get(wasm_exec_env_t e, uint32_t id, uint32_t out) {
+static uint32_t w_clock_res_get(wasm_exec_env_t e, uint32_t id, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { id, out, 1 } };
     return go(e, b_clock, &c);
 }
 
-static uint32_t w_clock_time_get(wasm_exec_env_t e, uint32_t id, uint64_t precision, uint32_t out) {
+static uint32_t w_clock_time_get(wasm_exec_env_t e, uint32_t id, uint64_t precision, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     (void)precision;
     call_t c = { .a = { id, out, 0 } };
     return go(e, b_clock, &c);
@@ -539,7 +558,8 @@ static void b_random(call_t *c) {
     c->r = W_OK;
 }
 
-static uint32_t w_random_get(wasm_exec_env_t e, uint32_t buf, uint32_t n) {
+static uint32_t w_random_get(wasm_exec_env_t e, void *buf_at, uint32_t n) {
+    uint32_t buf = app_off(e, buf_at);
     call_t c = { .a = { buf, n } };
     return go(e, b_random, &c);
 }
@@ -659,24 +679,30 @@ static void b_rw(call_t *c) {
     c->r = put32(c, c->a[3], done) ? W_OK : W_FAULT;
 }
 
-static uint32_t w_fd_read(wasm_exec_env_t e, uint32_t fd, uint32_t iovs, uint32_t n, uint32_t out) {
+static uint32_t w_fd_read(wasm_exec_env_t e, uint32_t fd, void *iovs_at, uint32_t n, void *out_at) {
+    uint32_t iovs = app_off(e, iovs_at);
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, iovs, n, out, 0, 0 } };
     return go(e, b_rw, &c);
 }
 
-static uint32_t w_fd_write(wasm_exec_env_t e, uint32_t fd, uint32_t iovs, uint32_t n, uint32_t out) {
+static uint32_t w_fd_write(wasm_exec_env_t e, uint32_t fd, void *iovs_at, uint32_t n, void *out_at) {
+    uint32_t iovs = app_off(e, iovs_at);
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, iovs, n, out, 1, 0 } };
     return go(e, b_rw, &c);
 }
 
-static uint32_t w_fd_pread(wasm_exec_env_t e, uint32_t fd, uint32_t iovs, uint32_t n, uint64_t at,
-                         uint32_t out) {
+static uint32_t w_fd_pread(wasm_exec_env_t e, uint32_t fd, void *iovs_at, uint32_t n, uint64_t at, void *out_at) {
+    uint32_t iovs = app_off(e, iovs_at);
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, iovs, n, out, 0, 1 }, .b = { at } };
     return go(e, b_rw, &c);
 }
 
-static uint32_t w_fd_pwrite(wasm_exec_env_t e, uint32_t fd, uint32_t iovs, uint32_t n, uint64_t at,
-                          uint32_t out) {
+static uint32_t w_fd_pwrite(wasm_exec_env_t e, uint32_t fd, void *iovs_at, uint32_t n, uint64_t at, void *out_at) {
+    uint32_t iovs = app_off(e, iovs_at);
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, iovs, n, out, 1, 1 }, .b = { at } };
     return go(e, b_rw, &c);
 }
@@ -700,13 +726,14 @@ static void b_seek(call_t *c) {
     c->r = put64(c, c->a[2], (uint64_t)at) ? W_OK : W_FAULT;
 }
 
-static uint32_t w_fd_seek(wasm_exec_env_t e, uint32_t fd, uint64_t off, uint32_t whence,
-                        uint32_t out) {
+static uint32_t w_fd_seek(wasm_exec_env_t e, uint32_t fd, uint64_t off, uint32_t whence, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, whence, out }, .b = { off } };
     return go(e, b_seek, &c);
 }
 
-static uint32_t w_fd_tell(wasm_exec_env_t e, uint32_t fd, uint32_t out) {
+static uint32_t w_fd_tell(wasm_exec_env_t e, uint32_t fd, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, 1, out }, .b = { 0 } };
     return go(e, b_seek, &c);
 }
@@ -761,7 +788,8 @@ static void b_fdstat(call_t *c) {
     c->r = W_OK;
 }
 
-static uint32_t w_fd_fdstat_get(wasm_exec_env_t e, uint32_t fd, uint32_t out) {
+static uint32_t w_fd_fdstat_get(wasm_exec_env_t e, uint32_t fd, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, out } };
     return go(e, b_fdstat, &c);
 }
@@ -877,7 +905,8 @@ static void b_filestat(call_t *c) {
     c->r = W_OK;
 }
 
-static uint32_t w_fd_filestat_get(wasm_exec_env_t e, uint32_t fd, uint32_t out) {
+static uint32_t w_fd_filestat_get(wasm_exec_env_t e, uint32_t fd, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, out } };
     return go(e, b_filestat, &c);
 }
@@ -914,12 +943,14 @@ static void b_prestat(call_t *c) {
     c->r = W_OK;
 }
 
-static uint32_t w_fd_prestat_get(wasm_exec_env_t e, uint32_t fd, uint32_t out) {
+static uint32_t w_fd_prestat_get(wasm_exec_env_t e, uint32_t fd, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, out, 0 } };
     return go(e, b_prestat, &c);
 }
 
-static uint32_t w_fd_prestat_dir_name(wasm_exec_env_t e, uint32_t fd, uint32_t p, uint32_t n) {
+static uint32_t w_fd_prestat_dir_name(wasm_exec_env_t e, uint32_t fd, void *p_at, uint32_t n) {
+    uint32_t p = app_off(e, p_at);
     call_t c = { .a = { fd, p, n ? n : 1 } };
     if (n == 0) {
         return W_NAMETOOLONG;
@@ -1013,8 +1044,9 @@ static void b_readdir(call_t *c) {
     c->r = put32(c, c->a[3], r.used) ? W_OK : W_FAULT;
 }
 
-static uint32_t w_fd_readdir(wasm_exec_env_t e, uint32_t fd, uint32_t buf, uint32_t n,
-                           uint64_t cookie, uint32_t out) {
+static uint32_t w_fd_readdir(wasm_exec_env_t e, uint32_t fd, void *buf_at, uint32_t n, uint64_t cookie, void *out_at) {
+    uint32_t buf = app_off(e, buf_at);
+    uint32_t out = app_off(e, out_at);
     call_t c = { .a = { fd, buf, n, out }, .b = { cookie } };
     return go(e, b_readdir, &c);
 }
@@ -1085,9 +1117,9 @@ static void b_open(call_t *c) {
     c->r = W_OK;
 }
 
-static uint32_t w_path_open(wasm_exec_env_t e, uint32_t dirfd, uint32_t dirflags, uint32_t p,
-                          uint32_t n, uint32_t oflags, uint64_t rights, uint64_t inh,
-                          uint32_t fdflags, uint32_t out) {
+static uint32_t w_path_open(wasm_exec_env_t e, uint32_t dirfd, uint32_t dirflags, void *p_at, uint32_t n, uint32_t oflags, uint64_t rights, uint64_t inh, uint32_t fdflags, void *out_at) {
+    uint32_t p = app_off(e, p_at);
+    uint32_t out = app_off(e, out_at);
     (void)dirflags;
     (void)inh;
     call_t c = { .a = { dirfd, p, n, oflags, fdflags, out }, .b = { rights } };
@@ -1120,17 +1152,20 @@ static void b_dirop(call_t *c) {
     }
 }
 
-static uint32_t w_path_create_directory(wasm_exec_env_t e, uint32_t fd, uint32_t p, uint32_t n) {
+static uint32_t w_path_create_directory(wasm_exec_env_t e, uint32_t fd, void *p_at, uint32_t n) {
+    uint32_t p = app_off(e, p_at);
     call_t c = { .a = { fd, p, n, OP_MKDIR } };
     return go(e, b_dirop, &c);
 }
 
-static uint32_t w_path_remove_directory(wasm_exec_env_t e, uint32_t fd, uint32_t p, uint32_t n) {
+static uint32_t w_path_remove_directory(wasm_exec_env_t e, uint32_t fd, void *p_at, uint32_t n) {
+    uint32_t p = app_off(e, p_at);
     call_t c = { .a = { fd, p, n, OP_RMDIR } };
     return go(e, b_dirop, &c);
 }
 
-static uint32_t w_path_unlink_file(wasm_exec_env_t e, uint32_t fd, uint32_t p, uint32_t n) {
+static uint32_t w_path_unlink_file(wasm_exec_env_t e, uint32_t fd, void *p_at, uint32_t n) {
+    uint32_t p = app_off(e, p_at);
     call_t c = { .a = { fd, p, n, OP_UNLINK } };
     return go(e, b_dirop, &c);
 }
@@ -1144,8 +1179,9 @@ static void b_rename(call_t *c) {
     c->r = r != W_OK ? r : wasi_errno(moy_sh_rename_at(c->w->s, from, to));
 }
 
-static uint32_t w_path_rename(wasm_exec_env_t e, uint32_t fd, uint32_t p, uint32_t n, uint32_t fd2,
-                            uint32_t p2, uint32_t n2) {
+static uint32_t w_path_rename(wasm_exec_env_t e, uint32_t fd, void *p_at, uint32_t n, uint32_t fd2, void *p2_at, uint32_t n2) {
+    uint32_t p = app_off(e, p_at);
+    uint32_t p2 = app_off(e, p2_at);
     call_t c = { .a = { fd, p, n, fd2, p2, n2 } };
     return go(e, b_rename, &c);
 }
@@ -1168,8 +1204,9 @@ static void b_pathstat(call_t *c) {
     c->r = W_OK;
 }
 
-static uint32_t w_path_filestat_get(wasm_exec_env_t e, uint32_t fd, uint32_t flags, uint32_t p,
-                                  uint32_t n, uint32_t out) {
+static uint32_t w_path_filestat_get(wasm_exec_env_t e, uint32_t fd, uint32_t flags, void *p_at, uint32_t n, void *out_at) {
+    uint32_t p = app_off(e, p_at);
+    uint32_t out = app_off(e, out_at);
     (void)flags;
     call_t c = { .a = { fd, p, n, out } };
     return go(e, b_pathstat, &c);
@@ -1183,9 +1220,8 @@ static void b_path_notsup(call_t *c) {
     c->r = r != W_OK ? r : c->a[3];
 }
 
-static uint32_t w_path_filestat_set_times(wasm_exec_env_t e, uint32_t fd, uint32_t flags,
-                                        uint32_t p, uint32_t n, uint64_t a, uint64_t m,
-                                        uint32_t fst) {
+static uint32_t w_path_filestat_set_times(wasm_exec_env_t e, uint32_t fd, uint32_t flags, void *p_at, uint32_t n, uint64_t a, uint64_t m, uint32_t fst) {
+    uint32_t p = app_off(e, p_at);
     (void)flags;
     (void)a;
     (void)m;
@@ -1194,8 +1230,10 @@ static uint32_t w_path_filestat_set_times(wasm_exec_env_t e, uint32_t fd, uint32
     return go(e, b_path_notsup, &c);
 }
 
-static uint32_t w_path_readlink(wasm_exec_env_t e, uint32_t fd, uint32_t p, uint32_t n,
-                              uint32_t buf, uint32_t len, uint32_t out) {
+static uint32_t w_path_readlink(wasm_exec_env_t e, uint32_t fd, void *p_at, uint32_t n, void *buf_at, uint32_t len, void *out_at) {
+    uint32_t p = app_off(e, p_at);
+    uint32_t buf = app_off(e, buf_at);
+    uint32_t out = app_off(e, out_at);
     (void)buf;
     (void)len;
     (void)out;
@@ -1203,8 +1241,9 @@ static uint32_t w_path_readlink(wasm_exec_env_t e, uint32_t fd, uint32_t p, uint
     return go(e, b_path_notsup, &c);
 }
 
-static uint32_t w_path_link(wasm_exec_env_t e, uint32_t fd, uint32_t flags, uint32_t p, uint32_t n,
-                          uint32_t fd2, uint32_t p2, uint32_t n2) {
+static uint32_t w_path_link(wasm_exec_env_t e, uint32_t fd, uint32_t flags, void *p_at, uint32_t n, uint32_t fd2, void *p2_at, uint32_t n2) {
+    uint32_t p = app_off(e, p_at);
+    uint32_t p2 = app_off(e, p2_at);
     (void)flags;
     (void)fd2;
     (void)p2;
@@ -1213,8 +1252,9 @@ static uint32_t w_path_link(wasm_exec_env_t e, uint32_t fd, uint32_t flags, uint
     return go(e, b_path_notsup, &c);
 }
 
-static uint32_t w_path_symlink(wasm_exec_env_t e, uint32_t p, uint32_t n, uint32_t fd, uint32_t p2,
-                             uint32_t n2) {
+static uint32_t w_path_symlink(wasm_exec_env_t e, void *p_at, uint32_t n, uint32_t fd, void *p2_at, uint32_t n2) {
+    uint32_t p = app_off(e, p_at);
+    uint32_t p2 = app_off(e, p2_at);
     (void)p;
     (void)n;
     call_t c = { .a = { fd, p2, n2, W_NOTSUP } };
@@ -1293,8 +1333,10 @@ static void b_poll(call_t *c) {
     c->r = put32(c, c->a[3], events) ? W_OK : W_FAULT;
 }
 
-static uint32_t w_poll_oneoff(wasm_exec_env_t e, uint32_t in, uint32_t out, uint32_t n,
-                            uint32_t nout) {
+static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint32_t n, void *nout_at) {
+    uint32_t in = app_off(e, in_at);
+    uint32_t out = app_off(e, out_at);
+    uint32_t nout = app_off(e, nout_at);
     call_t c = { .a = { in, out, n, nout } };
     return go(e, b_poll, &c);
 }
@@ -1305,15 +1347,18 @@ static void b_notsock(call_t *c) {
     c->r = fd_of(c, c->a[0]) != NULL ? W_NOTSOCK : W_BADF;
 }
 
-static uint32_t w_sock_accept(wasm_exec_env_t e, uint32_t fd, uint32_t flags, uint32_t out) {
+static uint32_t w_sock_accept(wasm_exec_env_t e, uint32_t fd, uint32_t flags, void *out_at) {
+    uint32_t out = app_off(e, out_at);
     (void)flags;
     (void)out;
     call_t c = { .a = { fd } };
     return go(e, b_notsock, &c);
 }
 
-static uint32_t w_sock_recv(wasm_exec_env_t e, uint32_t fd, uint32_t a, uint32_t b, uint32_t f,
-                          uint32_t o1, uint32_t o2) {
+static uint32_t w_sock_recv(wasm_exec_env_t e, uint32_t fd, void *a_at, uint32_t b, uint32_t f, void *o1_at, void *o2_at) {
+    uint32_t a = app_off(e, a_at);
+    uint32_t o1 = app_off(e, o1_at);
+    uint32_t o2 = app_off(e, o2_at);
     (void)a;
     (void)b;
     (void)f;
@@ -1323,8 +1368,9 @@ static uint32_t w_sock_recv(wasm_exec_env_t e, uint32_t fd, uint32_t a, uint32_t
     return go(e, b_notsock, &c);
 }
 
-static uint32_t w_sock_send(wasm_exec_env_t e, uint32_t fd, uint32_t a, uint32_t b, uint32_t f,
-                          uint32_t o) {
+static uint32_t w_sock_send(wasm_exec_env_t e, uint32_t fd, void *a_at, uint32_t b, uint32_t f, void *o_at) {
+    uint32_t a = app_off(e, a_at);
+    uint32_t o = app_off(e, o_at);
     (void)a;
     (void)b;
     (void)f;
@@ -1360,51 +1406,51 @@ static uint32_t w_term_size(wasm_exec_env_t e, uint32_t cols, uint32_t rows) {
 #define ROW(name, sig) { #name, (void *)w_##name, sig, NULL }
 
 static const NativeSymbol WASI[] = {
-    ROW(args_get, "(ii)i"),
-    ROW(args_sizes_get, "(ii)i"),
-    ROW(environ_get, "(ii)i"),
-    ROW(environ_sizes_get, "(ii)i"),
-    ROW(clock_res_get, "(ii)i"),
-    ROW(clock_time_get, "(iIi)i"),
+    ROW(args_get, "(**)i"),
+    ROW(args_sizes_get, "(**)i"),
+    ROW(environ_get, "(**)i"),
+    ROW(environ_sizes_get, "(**)i"),
+    ROW(clock_res_get, "(i*)i"),
+    ROW(clock_time_get, "(iI*)i"),
     ROW(fd_advise, "(iIIi)i"),
     ROW(fd_allocate, "(iII)i"),
     ROW(fd_close, "(i)i"),
     ROW(fd_datasync, "(i)i"),
-    ROW(fd_fdstat_get, "(ii)i"),
+    ROW(fd_fdstat_get, "(i*)i"),
     ROW(fd_fdstat_set_flags, "(ii)i"),
     ROW(fd_fdstat_set_rights, "(iII)i"),
-    ROW(fd_filestat_get, "(ii)i"),
+    ROW(fd_filestat_get, "(i*)i"),
     ROW(fd_filestat_set_size, "(iI)i"),
     ROW(fd_filestat_set_times, "(iIIi)i"),
-    ROW(fd_pread, "(iiiIi)i"),
-    ROW(fd_prestat_dir_name, "(iii)i"),
-    ROW(fd_prestat_get, "(ii)i"),
-    ROW(fd_pwrite, "(iiiIi)i"),
-    ROW(fd_read, "(iiii)i"),
-    ROW(fd_readdir, "(iiiIi)i"),
+    ROW(fd_pread, "(i*iI*)i"),
+    ROW(fd_prestat_dir_name, "(i*~)i"),
+    ROW(fd_prestat_get, "(i*)i"),
+    ROW(fd_pwrite, "(i*iI*)i"),
+    ROW(fd_read, "(i*i*)i"),
+    ROW(fd_readdir, "(i*~I*)i"),
     ROW(fd_renumber, "(ii)i"),
-    ROW(fd_seek, "(iIii)i"),
+    ROW(fd_seek, "(iIi*)i"),
     ROW(fd_sync, "(i)i"),
-    ROW(fd_tell, "(ii)i"),
-    ROW(fd_write, "(iiii)i"),
-    ROW(path_create_directory, "(iii)i"),
-    ROW(path_filestat_get, "(iiiii)i"),
-    ROW(path_filestat_set_times, "(iiiiIIi)i"),
-    ROW(path_link, "(iiiiiii)i"),
-    ROW(path_open, "(iiiiiIIii)i"),
-    ROW(path_readlink, "(iiiiii)i"),
-    ROW(path_remove_directory, "(iii)i"),
-    ROW(path_rename, "(iiiiii)i"),
-    ROW(path_symlink, "(iiiii)i"),
-    ROW(path_unlink_file, "(iii)i"),
-    ROW(poll_oneoff, "(iiii)i"),
+    ROW(fd_tell, "(i*)i"),
+    ROW(fd_write, "(i*i*)i"),
+    ROW(path_create_directory, "(i*~)i"),
+    ROW(path_filestat_get, "(ii*~*)i"),
+    ROW(path_filestat_set_times, "(ii*~IIi)i"),
+    ROW(path_link, "(ii*~i*~)i"),
+    ROW(path_open, "(ii*~iIIi*)i"),
+    ROW(path_readlink, "(i*~*~*)i"),
+    ROW(path_remove_directory, "(i*~)i"),
+    ROW(path_rename, "(i*~i*~)i"),
+    ROW(path_symlink, "(*~i*~)i"),
+    ROW(path_unlink_file, "(i*~)i"),
+    ROW(poll_oneoff, "(**i*)i"),
     ROW(proc_exit, "(i)"),
     ROW(proc_raise, "(i)i"),
-    ROW(random_get, "(ii)i"),
+    ROW(random_get, "(*~)i"),
     ROW(sched_yield, "()i"),
-    ROW(sock_accept, "(iii)i"),
-    ROW(sock_recv, "(iiiiii)i"),
-    ROW(sock_send, "(iiiii)i"),
+    ROW(sock_accept, "(ii*)i"),
+    ROW(sock_recv, "(i*ii**)i"),
+    ROW(sock_send, "(i*ii*)i"),
     ROW(sock_shutdown, "(ii)i"),
 };
 

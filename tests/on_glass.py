@@ -3595,26 +3595,25 @@ def wasi_commands_run(board, board_dir):
                         chips=chips)
         _push_folder(board, board_dir, out, root + "/" + name + ".moy")
     board.pyval("len(ws.rescan_carts() or ())", timeout=60)
-    assert _sh(board, "cd; printf 'one\\ntwo\\n' > wasi.txt; wasi.cat/cat wasi.txt",
-               timeout=60) == (0, ["one", "two"])
-    assert _sh(board, "wasi.probe/probe args a b | wasi.cat/cat", timeout=60) == (
-        0, ["0=probe", "1=args", "2=a", "3=b"])
-    assert _sh(board, "wasi.cat/cat < wasi.txt | wasi.probe/probe stdin", timeout=60) == (
-        0, ["8 bytes 2 lines"])
-    assert _sh(board, "export WASI_ON=glass; wasi.probe/probe env WASI_ON",
-               timeout=60) == (0, ["glass"])
-    assert _sh(board, "wasi.probe/probe files", timeout=60) == (
-        0, ["size 14", "entry b.txt", "read two", "read three", "gone yes"])
-    assert _sh(board, "wasi.probe/probe clock", timeout=60) == (0, ["since 2000 yes, slept yes"])
-    assert _sh(board, "wasi.probe/probe exit 3", timeout=60) == (3, ["leaving with 3"])
+
+    def runs(line, want):
+        got = _sh(board, line, timeout=60)
+        assert got == want, "%s -> %r" % (line, got)
+
+    runs("cd; printf 'one\\ntwo\\n' > wasi.txt; wasi.cat/cat wasi.txt", (0, ["one", "two"]))
+    runs("wasi.probe/probe args a b | wasi.cat/cat", (0, ["0=probe", "1=args", "2=a", "3=b"]))
+    runs("wasi.cat/cat < wasi.txt | wasi.probe/probe stdin", (0, ["8 bytes 2 lines"]))
+    runs("export WASI_ON=glass; wasi.probe/probe env WASI_ON", (0, ["glass"]))
+    runs("wasi.probe/probe files",
+         (0, ["size 14", "entry b.txt", "read two", "read three", "gone yes"]))
+    runs("wasi.probe/probe clock", (0, ["since 2000 yes, slept yes"]))
+    runs("wasi.probe/probe exit 3", (3, ["leaving with 3"]))
     st, out = _sh(board, "wasi.probe/probe trap", timeout=60)
-    assert st == 134 and "unreachable" in " ".join(out), out
-    assert _sh(board, "rm wasi.txt")[0] == 0
+    assert st == 134 and "unreachable" in " ".join(out), (st, out)
+    runs("rm wasi.txt", (0, []))
     if not rust:
         pytest.skip("no rustc with the wasm32-wasip1 target for the Rust hello")
-    assert _sh(board, "wasi.hello/hello on glass", timeout=60) == (
-        0, ["hello from rust, 3 args", "on", "glass"])
-
+    runs("wasi.hello/hello on glass", (0, ["hello from rust, 3 args", "on", "glass"]))
 
 APP_ROLES = ("app_roles", "App Roles Wasm")
 APP_SHORT = ("app_short", "App Short Wasm")

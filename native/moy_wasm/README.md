@@ -99,7 +99,11 @@ product), with the owner's later calls dated where they land.
   past the session's pipes and the permissions, and brings a socket and
   thread layer; the table leaves the vendored runtime and the compiler as
   they are, so `MOY_WASM_FORMAT_VERSION` did not move and no installed
-  module went stale. The build keeps `WASM_ENABLE_LIBC_WASI=0`.
+  module went stale. The build keeps `WASM_ENABLE_LIBC_WASI=0`. The rows
+  carry libc-wasi's signatures exactly: wamrc knows them, so a module's
+  compiled code turns each `*` argument into a native pointer at the call
+  site and calls the native directly, whatever the row says, and the
+  interpreter must hand over the same pointer.
 - **Doom lives in moybyte-org/carts, never in the firmware** (GPL glue,
   2026-09-26; the WAD given away unmodified from that site, owner, 2026-10-03;
   `THIRD_PARTY.md`). Which boards fit it is #158's.
