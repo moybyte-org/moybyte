@@ -123,14 +123,66 @@ as today; a minimised app keeps its `update` and a minimised game is paused (abo
 tick.** It declares its wake sources and sleeps between them: timers
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`) and events
 (`moybyte.on(source, fn)`: a UART, a socket readable, a pin edge, a LoRa
-packet). Events are read from the C rings of `hardware.md` §2, so nothing is
+packet, a message). Events are read from the C rings of `hardware.md` §2, so nothing is
 lost and a record keeps its real timestamp; timers are deadlines on
 `ticks_ms` in the wake registry (`runtime/system/moybyte.py`). An idle process costs nothing, the
-idle ladder can still dim and sleep (§5), and it is one model for Python,
-Lua, wasm's `moy_timer` and ELF. A timer means "no earlier than"; jitter of up
+idle ladder can still dim and sleep (§5), and it is one model on every tier:
+the service model below. A timer means "no earlier than"; jitter of up
 to a frame is normal, and precise timing belongs to C, the wasm lanes and the
 hardware engines. Python's `asyncio` rides the same scheduler (§3);
 `every`/`after`/`on` stay as the simple form.
+
+**The service model (owner, 2026-11-08: "Real OSes don't have different ways
+depending on the app language").** A background program is one that blocks
+in ONE kernel wait on its own event queue, and each language's style is a
+library over that wait. Three kernel pieces carry it, every tier's alike:
+
+- **The event queue** (`native/moy_kernel/moy_evq.h`, the module `moy_evq`):
+  one per process, by pid, opened by the OS at its start with its app id and
+  its manifest's `receives`, closed at its end, `MOY_EVQ_DEPTH` (16) events
+  deep with the oldest dropped. An event is a message: a name, its sender's
+  pid and app id (stamped by the kernel from the sender's own queue) and its
+  arguments, a JSON array. The OS's events are messages from the system
+  (pid 0 and 1, app `"system"`): the radios' `net` and `ble`
+  (`between_apps.md` §4) are routed to every process that listens on them.
+- **The wait** (`moy_evq_wait`): a process on a task of its own blocks until
+  an event is queued, it is kicked (a stop, an answer from the VM, a resume)
+  or its own nearest deadline passes. Lua's `every`/`after`/`on` are its
+  library on a Lua service's task (`tiers.md` §2). The Python VM's processes
+  share one task, so the shell loop is their wait: a queue the VM serves is
+  flagged so, and the scheduler takes its events at the frame's start
+  (`moy_evq_ready`, `Scheduler.mail`), `asyncio` and `every`/`on` riding the
+  same scheduler (§3). A compiled service's face is decided (owner,
+  2026-11-08): a WASI program blocks in `poll_oneoff` over an event
+  descriptor that reads the queue, and an ELF module in `poll` over the
+  same descriptor (`tiers.md` §1, §3).
+- **The supervisor** (`native/moy_kernel/moy_super.h`): one ladder of budgets
+  and strikes (§3's rungs) for every tier's callbacks, charged by the tier
+  that ran the callback, logged under its pid.
+- **The VM's queue** (`native/moy_kernel/moy_vmq.h`): the one way a process
+  on its own task enters the console. A HOP runs C on the VM's task while
+  the poster waits (a role row of its app's run); a CALL is a console call
+  by name (`moybyte.notify`, `open_with`, `share`, `send`, a function the
+  console handed a system process), answered in Python as the calling
+  process at the scheduler's poll, the poster woken by the answer.
+
+**Messages are one mechanism (owner, 2026-11-08).**
+`moybyte.send(app_id, name, *args)` posts `name` to every process of app
+`app_id` that listens on it, the sender apart, and answers how many took it;
+`moybyte.on(name, fn)` listens, `fn(sender, *args)` with `sender` the app id
+the kernel stamped. The rule is the kernel's (`moy_evq.h`, THE RULE):
+
+| sender | reaches a listener |
+|---|---|
+| a process of the receiver's own app | always |
+| a process of another app | only where the receiver's manifest lists the name under `receives` |
+| the system (pid 0 and 1) | always |
+
+A message to a process that does not listen on its name is not taken. Every
+tier holds the same two names (`moybyte.send` is a row of
+`native/os_calls.json`; Lua's runs as a console call), and a message crosses
+tiers unchanged: a Python app's `send` reaches its Lua service's queue, and
+the service's reply the app's.
 
 **Where processes run.** A Lua, wasm or ELF process runs on a task the
 kernel owns; its callbacks run on that task. A Python process runs inside
@@ -138,13 +190,14 @@ the shell's one VM (§3): its callbacks run in the shell loop's slack after
 a frame is presented and before the next. Services run on core 0 on the P4s;
 what the S3s get is the overview's §5. As built for Lua
 (`native/moycore/moycore_svc.h`, P5.3): a Lua service is a state of its own
-on a task of its own, pinned to core 0 on the P4s, which waits for its next
-timer or a stop and runs what is due; the S3s refuse one, and the host and
-the desktop MicroPython, which have no task to give, step their services at
-the scheduler's poll (`runtime/system/scheduler.py`, LUA SERVICES). What a
-Lua service asks of the console (a notification, a function the console
-handed it) waits on its row for the VM's task to answer (`tiers.md` §2). A
-wasm service and an ELF one are later steps.
+on a task of its own, pinned to core 0 on the P4s, which blocks in the one
+wait until its next timer, a message or a stop and runs what is due; the S3s
+refuse one, and the host and the desktop MicroPython, which have no task to
+give, step their services at the scheduler's poll
+(`runtime/system/scheduler.py`, LUA SERVICES). What a Lua service asks of
+the console (a notification, a message, a function the console handed it)
+goes through the VM's queue (`tiers.md` §2). A wasm service and an ELF one
+are later steps.
 
 ## 2. The app manifest and the permission table
 
@@ -301,7 +354,9 @@ host and in the browser, within the frame's slack and the guaranteed slice
 measured less the collections inside it) is an overrun, and overruns go
 warning → strike → suspend (the first a warning, every later one a strike,
 `MOY_BG_STRIKES`, 3, suspend the process, whose wakes then stay unserved
-until it is resumed); the shell is never struck. A callback that never
+until it is resumed); the shell is never struck. The ladder is the one
+supervisor's (`native/moy_kernel/moy_super.h`, §1's service model), which a
+Lua service's callbacks are charged to alike. A callback that never
 returns gets a timer-driven `mp_sched_vm_abort` while the shell survives
 (P1.1 proved it on the T-Deck and a P4, 2026-11-03, #246): the guard
 (`native/moy_kernel/modmoy_guard.c`, `moy_guard.call`) is its own abort
@@ -448,10 +503,10 @@ write lands whole or not at all, by the paths a foreground run takes: a file
 through the user-files layer's crash-safe publish (`moy_fs_publish`), a Lua
 `io` file saved whole at its flush or close, and a pref as one settings row
 of `system/settings`, whose file is written atomically
-(`moy_docs.save_system`). An app talks to its own service through messages:
-`moybyte.tell(...)` queues `"app"` with its arguments on every other process
-of the caller's app that waits on it (`moybyte.on("app", fn)`), the app's run
-to its service and back, each tier's alike (the scheduler's `send`).
+(`moy_docs.save_system`). An app talks to its own service through messages
+(§1, the service model): `moybyte.send(its own app id, name, ...)`, which the
+rule always lets through within one app, the app's run to its service and
+back, each tier's alike.
 Concurrent edits of one file or pref are the app's to order, as on any OS.
 The install prompt says so: a service's lines end with "Runs in the
 background, and can do all of this with no window open"
@@ -635,9 +690,10 @@ end of it is `runtime/system/achievements.py`: `ws.ach`, the link, and
 `NotifyRole`, the `notify` role's server.
 
 - **It wakes only on events.** A cart's `achieve(kind, key)` and `award(id)`
-  are OS-routed MESSAGES, not ring records: the process holds
-  `moybyte.on("achieve", fn)` and `moybyte.on("award", fn)`, and the link
-  queues each call on them (`moybyte`'s `send`). A message wake waits apart
+  are OS-routed MESSAGES from the system, not ring records: the process
+  holds `moybyte.on("achieve", fn)` and `moybyte.on("award", fn)`, and the
+  link posts each call on its event queue (`Scheduler.send`, §1's service
+  model). A message wake waits apart
   from the timer and input wakes and costs no frame while nothing is queued:
   a tick returns at once and a board makes no service upcall, and a send
   asks for none. A queued message is served under the guard and the rungs

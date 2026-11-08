@@ -44,12 +44,15 @@ verbs): no console, no row of the runs, its timers, message wakes and
 `moybyte` names, its own counting allocator in PSRAM. On the P4s each runs on
 a task of its own on core 0; the host and the desktop MicroPython step them at
 the scheduler's poll (`runtime/system/scheduler.py`), and the S3s run none.
-Its messages (`svc_send`) queue on its row, and its console calls
-(`moybyte.notify`, the functions the console hands it) wait there for the
-VM's task to answer (`svc_call`, `svc_answer`); their JSON is the prefs
-names' (`native/moy_app/moy_app_lua.h`). Its state opens its app's role
+It is the Lua face of the one service model
+(`docs/os_2026-11/processes.md` §1): its messages are its process's event
+queue (`native/moy_kernel/moy_evq.h`), its task blocks in that queue's wait,
+its rungs are the one supervisor's (`moy_super.h`), and its console calls
+(`moybyte.notify`, `send`, the functions the console hands it) go through
+the VM's queue (`moy_vmq.h`) for the VM's task to answer; their JSON is the
+prefs names' (`native/moy_app/moy_app_lua.h`). Its state opens its app's role
 names over the run its start was handed (`moy_app_lua_open_hop`), each row
-on a P4 hopped to the VM's task, which `svc_call` runs in place.
+on a P4 a hop on the VM's queue.
 
 | piece | how |
 |---|---|

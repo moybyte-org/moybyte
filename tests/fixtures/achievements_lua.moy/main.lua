@@ -103,6 +103,6 @@ function moy_start()
             if not seen[k] then seen[k] = true; seen_keys[#seen_keys + 1] = k end
         end
     end
-    moybyte.on("achieve", note)
-    moybyte.on("award", award)
+    moybyte.on("achieve", function(who, ...) note(...) end)
+    moybyte.on("award", function(who, ...) award(...) end)
 end

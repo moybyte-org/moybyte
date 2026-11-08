@@ -248,7 +248,7 @@
     {"name": "moybyte.notify", "server": "call", "perm": "notifications", "in": ["summary:str", "body:str?"], "ret": "int", "door": true, "elf": 77, "py": ["moybyte.notify"], "lua": ["moybyte.notify"]},
     {"name": "moybyte.open_with", "server": "call", "perm": "front", "in": ["item:str", "choose:int"], "ret": "int", "door": true, "elf": 78, "py": ["moybyte.open_with"], "lua": ["moybyte.open_with"]},
     {"name": "moybyte.share", "server": "call", "perm": "front", "in": ["data:bytes", "mime:str"], "ret": "int", "door": true, "elf": 79, "py": ["moybyte.share"], "lua": ["moybyte.share"]},
-    {"name": "moybyte.tell", "server": "call", "perm": null, "py": ["moybyte.tell"], "lua": ["moybyte.tell"]},
+    {"name": "moybyte.send", "server": "call", "perm": null, "py": ["moybyte.send"], "lua": ["moybyte.send"]},
     {"name": "moybyte.pick", "server": "python", "perm": "front", "py": ["moybyte.pick"]},
     {"name": "wifi", "server": "python", "perm": "network", "py": ["wifi"]},
     {"name": "net", "server": "python", "perm": "multiplayer", "py": ["net", "on_net"], "lua": ["on_net"]},

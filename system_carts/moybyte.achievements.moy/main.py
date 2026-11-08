@@ -28,8 +28,8 @@ def _found(ach_id):
 def moy_start():
     global ACH
     ACH = Achievements(badges, on_save=badges_save, on_unlock=_found, today=clock_day)
-    moybyte.on("achieve", ACH.note)
-    moybyte.on("award", ACH.award)
+    moybyte.on("achieve", lambda who, *a: ACH.note(*a))
+    moybyte.on("award", lambda who, *a: ACH.award(*a))
 
 
 def count():

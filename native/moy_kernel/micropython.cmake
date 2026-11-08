@@ -6,7 +6,9 @@
 # the module `moy_guard`, built where the board's mpconfigboard.h turns on
 # MICROPY_ENABLE_VM_ABORT), and the lease table (moy_lease.c, the module
 # `moy_lease`, offering the board's MOY_LEASE_ROWS), and the process table
-# (moy_proc.c, the Player's rows). A board TAKES it in
+# (moy_proc.c, the Player's rows), and the service model's event queues,
+# supervisor and VM call queue (moy_evq.c, moy_super.c, moy_vmq.c, the module
+# `moy_evq`). A board TAKES it in
 # board.toml ([[native.shared.take]]), and taking it is what makes the kernel
 # own app_main.
 #
@@ -36,6 +38,10 @@ target_sources(usermod_moy_kernel INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_lease.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_lease.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_proc.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_evq.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_super.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_vmq.c
+    ${CMAKE_CURRENT_LIST_DIR}/modmoy_evq.c
 )
 
 target_include_directories(usermod_moy_kernel INTERFACE ${CMAKE_CURRENT_LIST_DIR})

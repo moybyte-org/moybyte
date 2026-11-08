@@ -39,6 +39,7 @@ def sched(monkeypatch):
     s.reset()
     _clear(wakes)
     wakes.ended = S.SCHED._ended
+    wakes.opener = S.SCHED._open
 
 
 CRASHER = '''

@@ -2,9 +2,9 @@
 BLE coming up and going down are NET and BLE records on the input table's
 ring source "radio" (native/moy_input/moy_input.h, the radios), posted by
 the drivers on a change and only on one; one router of the shell's reads
-that ring and routes each change as the message "net" or "ble", `(up, why)`,
-to every Python process waiting on it (runtime/system/moybyte.py, THE
-RADIOS) and to every Lua service's row (the scheduler's `_routed`). The
+that ring and routes each change as the message "net" or "ble" from the
+system, `(up, why)`, to every process that listens on it, whatever its tier
+(runtime/system/moybyte.py, THE RADIOS; native/moy_kernel/moy_evq.h). The
 host's stand-ins post as the boards' drivers do: FakeWifi's link, and the BLE
 central's machine (moy_hid.c) as it starts and stops."""
 
@@ -46,7 +46,7 @@ def sched(table):
     s.reset()
     _clear(wakes)
     wakes.ended = S.SCHED._ended
-    wakes.routed = S.SCHED._routed
+    wakes.opener = S.SCHED._open
 
 
 def _records(t, r):
@@ -125,8 +125,8 @@ def test_a_reader_that_fell_behind_reads_a_gap_then_the_latest():
 def test_every_process_on_net_hears_each_change_through_one_reader(table, sched):
     a, b = L.spawn("t.a"), L.spawn("t.b")
     heard = {a: [], b: []}
-    _as(a, lambda: moybyte.on("net", lambda up, why: heard[a].append((up, why))))
-    _as(b, lambda: moybyte.on("net", lambda up, why: heard[b].append((up, why))))
+    _as(a, lambda: moybyte.on("net", lambda who, up, why: heard[a].append((who, up, why))))
+    _as(b, lambda: moybyte.on("net", lambda who, up, why: heard[b].append((up, why))))
     router = moybyte.WAKES.radio
     assert router is not None and router[1] == moybyte.SHELL
     assert sum(1 for w in moybyte.WAKES.list if w is router) == 1
@@ -135,13 +135,14 @@ def test_every_process_on_net_hears_each_change_through_one_reader(table, sched)
     _frame(sched)
     table.radio(NET, False, 8)
     _frame(sched)
-    assert heard[a] == heard[b] == [(True, 0), (False, 8)]
+    assert heard[a] == [("system", True, 0), ("system", False, 8)]
+    assert heard[b] == [(True, 0), (False, 8)]
 
 
 def test_ble_is_its_own_name(table, sched):
     pid = L.spawn("t.ble")
     heard = []
-    _as(pid, lambda: moybyte.on("ble", lambda up, why: heard.append((up, why))))
+    _as(pid, lambda: moybyte.on("ble", lambda who, up, why: heard.append((up, why))))
     table.radio(NET, True)
     table.radio(BLE, True)
     _frame(sched)
@@ -150,7 +151,7 @@ def test_ble_is_its_own_name(table, sched):
 
 def test_the_router_lives_while_somebody_waits(table, sched):
     pid = L.spawn("t.net")
-    wid = _as(pid, lambda: moybyte.on("net", lambda up, why: None))
+    wid = _as(pid, lambda: moybyte.on("net", lambda who, up, why: None))
     w = moybyte.WAKES.radio
     assert w is not None
     readers = [table.reader() for _ in range(7)]    # the router holds the eighth
@@ -161,7 +162,7 @@ def test_the_router_lives_while_somebody_waits(table, sched):
     readers.append(table.reader())                  # its reader went back
     for r in readers:
         table.reader_free(r)
-    _as(pid, lambda: moybyte.on("ble", lambda up, why: None))
+    _as(pid, lambda: moybyte.on("ble", lambda who, up, why: None))
     assert moybyte.WAKES.radio is not None
     moybyte.end(pid)
     assert moybyte.WAKES.radio is None
@@ -170,7 +171,7 @@ def test_the_router_lives_while_somebody_waits(table, sched):
 def test_a_new_table_takes_the_router_along(table, sched):
     pid = L.spawn("t.net")
     heard = []
-    _as(pid, lambda: moybyte.on("net", lambda up, why: heard.append(up)))
+    _as(pid, lambda: moybyte.on("net", lambda who, up, why: heard.append(up)))
     other = mi.InputTable()
     moybyte.bind(other)
     table.radio(NET, True)                          # the old table: nobody reads it
@@ -182,7 +183,7 @@ def test_a_new_table_takes_the_router_along(table, sched):
 def test_the_host_link_posts_as_the_driver_does(table, sched):
     pid = L.spawn("t.net")
     heard = []
-    _as(pid, lambda: moybyte.on("net", lambda up, why: heard.append((up, why))))
+    _as(pid, lambda: moybyte.on("net", lambda who, up, why: heard.append((up, why))))
     wifi = FakeWifi()
     wifi.connect("Home WiFi", "pw")
     _frame(sched)
@@ -204,7 +205,7 @@ class _Stack:
 def test_the_ble_central_posts_its_start_and_stop(table, sched):
     pid = L.spawn("t.ble")
     heard = []
-    _as(pid, lambda: moybyte.on("ble", lambda up, why: heard.append(up)))
+    _as(pid, lambda: moybyte.on("ble", lambda who, up, why: heard.append(up)))
     m = mi.HidMachine(table, _Stack())
     m.started(True)
     _frame(sched)
@@ -224,8 +225,8 @@ def _lua(src, cid="t.radio"):
 def test_a_lua_service_hears_the_same_names_and_arguments(table, sched):
     since = L.next()
     pid = sched.start(_lua(
-        'moybyte.on("net", function(up, why) print("net " .. tostring(up) .. " " .. why) end)\n'
-        'moybyte.on("ble", function(up, why) print("ble " .. tostring(up) .. " " .. why) end)'))
+        'moybyte.on("net", function(who, up, why) print("net " .. tostring(up) .. " " .. why) end)\n'
+        'moybyte.on("ble", function(who, up, why) print(who .. " ble " .. tostring(up) .. " " .. why) end)'))
     assert moybyte.WAKES.radio is not None          # kept while a Lua service lives
     table.radio(NET, True)
     _frame(sched)
@@ -233,7 +234,7 @@ def test_a_lua_service_hears_the_same_names_and_arguments(table, sched):
     table.radio(NET, False, 15)
     _frame(sched)
     texts = [t for _s, _t, _l, q, t in os_log.records(since, 64) if q == pid]
-    assert texts[1:] == ["net true 0", "ble true 0", "net false 15"]
+    assert texts[1:] == ["net true 0", "system ble true 0", "net false 15"]
     sched.stop(pid)
     sched.poll()
     assert moybyte.WAKES.radio is None
@@ -247,10 +248,11 @@ import sys
 sys.path[:0] = [@TREE@]
 import moy_input as I
 import moybyte
+import scheduler
 t = I.HostInputTable()
 moybyte.bind(t)
 heard = []
-wid = moybyte.on("net", lambda up, why: heard.append((up, why)))
+wid = moybyte.on("net", lambda who, up, why: heard.append((up, why)))
 print("ROUTER", moybyte.WAKES.radio is not None)
 print("CHANGED", t.radio(I.EV_NET, True), t.radio(I.EV_NET, True), t.radio_up(I.EV_NET))
 t.radio(I.EV_NET, False, 8)
@@ -258,8 +260,10 @@ out = [0] * 4
 w = moybyte.WAKES
 for i in range(w.due(0, out)):
     w.call(out[i])
+scheduler.SCHED.mail()
 for i in range(w.due(0, out)):
     w.call(out[i])
+scheduler.SCHED.mail()
 print("HEARD", heard)
 moybyte.cancel(wid)
 print("GONE", w.radio is None)

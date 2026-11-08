@@ -31,6 +31,6 @@
     X("notify") \
     X("open_with") \
     X("share") \
-    X("tell") \
+    X("send") \
 
 #endif // MOY_APP_LUA_ROWS_H

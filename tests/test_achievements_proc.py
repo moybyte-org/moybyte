@@ -21,7 +21,8 @@ import shutil
 
 import pytest
 
-from runtime import moybyte, moy_carts, notifications, scheduler as S
+from runtime import moy_evq, moybyte, moy_carts, notifications, scheduler as S
+from runtime import moy_log as L
 from runtime import achievements as A
 
 from ws_helpers import build_ws, make_drv
@@ -147,31 +148,38 @@ def test_a_load_restarts_the_process_and_keeps_what_it_found(ws):
 
 def test_an_idle_message_wake_costs_a_frame_nothing():
     """A message wake is no wake a tick or a board's upcall serves until a
-    message is queued, and neither it nor a send asks a board for the
-    service upcall: the console serves what is queued at its frame's start
-    (a compiled run the kernel drives makes no crossing for it)."""
+    message is queued on its process's event queue, and neither it nor a
+    post asks a board for the service upcall: the console serves what is
+    queued at its frame's start (a compiled run the kernel drives makes no
+    crossing for it)."""
     w = moybyte.Wakes()
+    s = S.Scheduler(w, None)
     got = []
     upcalls = []
     w.added = lambda: upcalls.append(1)     # a board's: the service upcall wanted
-    wid = w.on("achieve", lambda kind, key=None: got.append((kind, key)))
+    pid = L.spawn("t.idle")
+    was = L.current()
+    L.current(pid)
+    try:
+        wid = w.on("ping", lambda who, kind, key=None: got.append((who, kind, key)))
+    finally:
+        L.current(was)
     out = [0] * 4
     assert w.list == [] and w.queued == 0
     assert w.due(0, out) == 0
-    s = S.Scheduler(w, None)
     assert s.tick(0) == 0                   # nothing to run: returns at once
-    pid = w.by_id[wid][1]
-    assert w.send(pid, "achieve", ("run", None)) and w.queued == 1
-    assert not w.send(pid, "award", ("konami",))    # no wake on it
-    assert not w.send(pid + 99, "achieve", ("run", None))
-    assert upcalls == []                    # neither the wake nor the send asks for one
-    assert w.due(0, out) == 1 and out[0] == wid
-    w.call(wid)
-    assert got == [("run", None)] and w.queued == 0
-    for i in range(moybyte.MAIL_MAX + 3):
-        w.send(pid, "achieve", ("open", i))
-    assert w.queued == moybyte.MAIL_MAX     # the oldest dropped
+    assert w.post(pid, "ping", ("run", None)) and w.queued == 1
+    assert not w.post(pid, "pong", ("konami",))     # it does not listen on it
+    assert not w.post(pid + 99, "ping", ("run", None))
+    assert upcalls == []                    # neither the wake nor the post asks for one
+    assert w.due(0, out) == 0               # a message is no due wake: the frame's start serves it
+    s.mail()
+    assert got == [("system", "run", None)] and w.queued == 0
+    for i in range(moy_evq.DEPTH + 3):
+        w.post(pid, "ping", ("open", i))
+    assert s.mail_of(pid) == moy_evq.DEPTH  # the oldest dropped
     w.end(pid)
-    assert w.queued == 0 and w.mail == [] and w.by_id == {}
+    assert w.mail == [] and w.by_id == {} and not moy_evq.has(pid)
+    assert wid not in w.by_id
     with pytest.raises(ValueError):
-        w.on("lora", lambda: None)
+        w.on("", lambda: None)

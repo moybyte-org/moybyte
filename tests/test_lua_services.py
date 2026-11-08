@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from runtime import moybyte, moycore, notifications, os_log, scheduler as S
+from runtime import moy_evq, moybyte, moycore, notifications, os_log, scheduler as S
 from runtime import moy_log as L
 from runtime import tasks_ui
 from test_scheduler import Guard, _clear
@@ -31,6 +31,7 @@ def sched():
     s.reset()
     _clear(wakes)
     wakes.ended = S.SCHED._ended
+    wakes.opener = S.SCHED._open
 
 
 def _cart(src, cid="t.lua"):
@@ -95,11 +96,13 @@ end)
     pid = sched.start(_cart(spin))
     _run(sched, 1500)
     p = sched.procs[pid]
-    assert p.code == S.EXIT_KILLED
+    assert p.state == S.SUSPENDED and p.strikes == 3      # the one supervisor's rungs
     texts = _texts(since, pid)
     assert [t for t in texts if "strike" in t] == [
-        "a callback ran past 300 ms: strike %d" % i for i in (1, 2, 3)]
-    assert "struck out" in texts
+        "strike %d of 3: aborted after 300 ms" % i for i in (1, 2, 3)]
+    assert "suspended" in texts
+    assert sched.resume(pid) and sched.procs[pid].state == S.BACKGROUND
+    sched.stop(pid)
 
 
 def test_a_stop_runs_moy_stop_and_a_stop_past_its_limit_is_the_kill(sched):
@@ -131,39 +134,38 @@ def test_the_c_side_refuses_what_it_does_not_run():
 def test_a_message_reaches_its_handler_with_its_arguments_in_place(sched):
     since = L.next()
     pid = sched.start(_cart(
-        'moybyte.on("achieve", function(a, b, c) print(tostring(a) .. "|" .. tostring(b)'
-        ' .. "|" .. tostring(c)) end)'))
+        'moybyte.on("ping", function(who, a, b, c) print(who .. ":" .. tostring(a) .. "|"'
+        ' .. tostring(b) .. "|" .. tostring(c)) end)'))
     assert sched.wakes_of(pid) == 1
-    assert sched.send(pid, "achieve", ("x", None, 5)) is True
-    assert sched.send(pid, "award", ("konami",)) is False       # no wake on it
+    assert sched.send(pid, "ping", ("x", None, 5)) is True
+    assert sched.send(pid, "pong", ("konami",)) is False        # no wake on it
     assert sched.mail_of(pid) == 1 and sched.svc_mail
     sched.mail()                                # the frame's start serves it
     assert sched.mail_of(pid) == 0
-    assert _texts(since, pid)[-1] == "x|nil|5"
+    assert _texts(since, pid)[-1] == "system:x|nil|5"         # the OS's own: from the system
 
 
-def test_the_message_names_are_the_os_ones(sched):
-    for name in moybyte.MESSAGES:
-        pid = sched.start(_cart('moybyte.on("%s", function() end)' % name, "t." + name))
-        assert sched.procs[pid].state == S.BACKGROUND
-        sched.stop(pid)                         # MOYCORE_SVCS rows at once
-    sched.start(_cart('moybyte.on("lora", function() end)', "t.lora"))
-    p = sched.find("t.lora") or [q for q in sched.services() if q.name == "t.lora"][0]
+def test_a_message_name_is_any_name_that_fits(sched):
+    pid = sched.start(_cart('moybyte.on("lora", function() end)', "t.lora"))
+    assert sched.procs[pid].state == S.BACKGROUND
+    sched.stop(pid)
+    sched.start(_cart('moybyte.on("%s", function() end)' % ("x" * 40), "t.long"))
+    p = [q for q in sched.services() if q.name == "t.long"][0]
     assert p.code == S.EXIT_CRASHED
 
 
-def test_a_full_mailbox_drops_the_oldest(sched):
+def test_a_full_event_queue_drops_the_oldest(sched):
     since = L.next()
-    pid = sched.start(_cart('moybyte.on("achieve", function(k, i) print(i) end)'))
-    for i in range(moybyte.MAIL_MAX + 3):
-        sched.send(pid, "achieve", ("open", i))
-    assert sched.mail_of(pid) == moybyte.MAIL_MAX
+    pid = sched.start(_cart('moybyte.on("ping", function(who, k, i) print(i) end)'))
+    for i in range(moy_evq.DEPTH + 3):
+        sched.send(pid, "ping", ("open", i))
+    assert sched.mail_of(pid) == moy_evq.DEPTH
     sched.mail()
-    assert _texts(since, pid)[1:] == [str(i) for i in range(3, moybyte.MAIL_MAX + 3)]
+    assert _texts(since, pid)[1:] == [str(i) for i in range(3, moy_evq.DEPTH + 3)]
 
 
 CALLS = """
-moybyte.on("achieve", function()
+moybyte.on("go", function()
     print(double(base))
     local v, why = boom()
     print(tostring(v) .. " " .. why)
@@ -190,7 +192,7 @@ def test_console_calls_are_answered_on_the_vms_task(sched, monkeypatch):
     env = {"base": 21, "double": lambda x: 2 * x, "boom": boom,
            "slow": lambda: time.sleep(0.4) or "slept"}
     pid = sched.start(_cart(CALLS), env=env)
-    sched.send(pid, "achieve", ())
+    sched.send(pid, "go", ())
     sched.mail()
     texts = _texts(since, pid)
     assert texts[1:5] == ["42", "boom: ValueError: no", "nil the console refused boom", "slept"]
@@ -274,19 +276,21 @@ print(moycore.svc_info(h))
 
 
 VM_MSG = """
-import moycore
-src = "moybyte.on('achieve', function(k, key) moybyte.exit(day() + #k) end)"
+import moycore, moy_evq
+src = "moybyte.on('go', function(who, k, key) moybyte.exit(day() + #k + #who) end)"
 h = moycore.svc_start(9, "t.msg", src, '[{}, ["day"]]')
 moycore.svc_step(0)
-print(moycore.svc_send(h, "achieve", '["run", null]'), moycore.svc_send(h, "award", '[]'))
+print(moy_evq.post(9, 1, "go", '["run", null]'), moy_evq.post(9, 1, "stop", '[]'))
 print(moycore.svc_info(h)[6:])
 moycore.svc_step(1)
-print(moycore.svc_call(h))
-moycore.svc_answer(h, "7")
+t = moy_evq.next_call()
+print(t[1:])
+moy_evq.answer(t[0], "7")
 moycore.svc_step(2)
 i = moycore.svc_info(h)
 print(i[0], i[1])
 moycore.svc_reap(h)
+print(moy_evq.has(9))
 """
 
 
@@ -306,4 +310,4 @@ def test_the_vm_a_board_runs_steps_its_services_alike(tmp_path):
 
 
 def test_the_vm_a_board_runs_routes_messages_and_console_calls(tmp_path):
-    assert _vm(tmp_path, VM_MSG) == ["True False", "(1, 1)", "('day', '[]')", "4 10"]
+    assert _vm(tmp_path, VM_MSG) == ["0 5", "(1, 1)", "(9, 'day', '[]')", "4 16", "False"]

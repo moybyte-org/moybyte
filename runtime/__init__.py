@@ -116,6 +116,20 @@ def _native_log():
 
 moy_log = _native_log()
 
+
+def _native_evq():
+    """The service model's queues and supervisor (native/moy_kernel/moy_evq.h,
+    moy_super.h, moy_vmq.h) over the host's one library, registered as
+    `moy_evq` like the boards' module (runtime/host/moy_evq.py)."""
+    if "moy_evq" in _sys.modules:
+        return _sys.modules["moy_evq"]
+    from . import moy_evq as mod
+    _sys.modules["moy_evq"] = mod
+    return mod
+
+
+moy_evq = _native_evq()
+
 from .editors_code import CodeEditor  # noqa: E402
 from .editors_paint_map import PaintEditor  # noqa: E402
 from .editors_sheet import SpriteSheet  # noqa: E402

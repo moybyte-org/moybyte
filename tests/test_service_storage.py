@@ -7,7 +7,9 @@ under its manifest's grants, on a run grant of its own whose owner is its pid
 names a Python app holds, a Lua service's state opens the names a Lua app's
 does (native/moy_app/moy_app_lua.h). What it writes, the app reads; what it
 is not granted has no name. The app and its service talk through messages:
-`moybyte.tell` queues "app" on the other processes of the same app.
+`moybyte.send(its own app id, name, ...)`, which the rule always lets through
+within one app, and which another app's process reaches only by a name the
+receiver's manifest lists under `receives`.
 Concurrent edits are the app's own business; the OS syncs nothing.
 
 Every test runs once per tier, the same body over the Python service and
@@ -28,28 +30,28 @@ APP = "local.pair"
 _SINCE = 0
 
 PY = '''
-def heard(*args):
+def heard(who, *args):
     prefs.set("heard", list(args))
-    moybyte.tell("pong", args[0])
+    moybyte.send(who, "pong", args[0])
 
 
 def moy_start():
     files.save_text("from_service", "hello from the service")
     prefs.set("seen", 3)
-    moybyte.on("app", heard)
+    moybyte.on("ping", heard)
 '''
 
 LUA = '''
-local function heard(...)
+local function heard(who, ...)
     local args = {...}
     prefs.set("heard", args)
-    moybyte.tell("pong", args[1])
+    moybyte.send(who, "pong", args[1])
 end
 
 function moy_start()
     files.save_text("from_service", "hello from the service")
     prefs.set("seen", 3)
-    moybyte.on("app", heard)
+    moybyte.on("ping", heard)
 end
 '''
 
@@ -67,15 +69,15 @@ function moy_start()
 end
 '''
 
-# The app: it waits on "app" and tells its service at its start.
+# The app: it waits on "pong" and sends its service "ping" at its start.
 APP_SRC = '''
 import moybyte
 got = []
 
 
 def _init():
-    moybyte.on("app", lambda *a: got.append(a))
-    moybyte.tell("ping", 7)
+    moybyte.on("pong", lambda who, *a: got.append((who,) + a))
+    moybyte.send("local.pair", "ping", 7)
 
 
 def _update(dt):
@@ -154,7 +156,7 @@ def test_the_service_holds_a_grant_of_its_own(ws, tier):
     fg = ws.app_context(APP, ("prefs",), APP, run=True)
     assert fg.grant != p.ctx.grant
     fg.end()
-    S.SCHED.send(pid, "app", ("after", 1))
+    S.SCHED.send(pid, "ping", ("after", 1))
     S.SCHED.mail()
     S.SCHED.poll()
     assert _app(ws)["prefs"].get("heard") == ["after", 1]
@@ -203,23 +205,31 @@ def test_an_app_and_its_service_round_trip_a_message(tier, tmp_path):
     for _ in range(4):
         drv.frame(1 / 30)
         S.SCHED.poll()
-    assert ws.player.ns["prefs"].get("heard") == ["ping", 7]
-    assert ws.player.ns["got"] == [("pong", "ping")]
+    assert ws.player.ns["prefs"].get("heard") == [7]
+    assert ws.player.ns["got"] == [(APP, 7)]
     assert S.SCHED.procs[pid].state == S.BACKGROUND
     S.SCHED.stop(pid)
 
 
-def test_tell_reaches_only_the_callers_own_app(ws, tier, monkeypatch):
-    pid = _start(ws, _service(tier))
+@pytest.mark.parametrize("receives", [None, ["ping"]])
+def test_another_apps_send_needs_the_name_in_receives(ws, tier, monkeypatch, receives):
+    cart = _service(tier)
+    if receives is not None:
+        cart["receives"] = receives
+    pid = _start(ws, cart)
     monkeypatch.setattr(S.SCHED, "app_of",
                         lambda q: "local.other" if q == 4242 else (APP if q == pid else None))
     was = L.current()
     L.current(4242)
     try:
-        assert moybyte.tell("x") == 0
+        took = moybyte.send(APP, "ping", "x")
+        assert took == (1 if receives else 0)
     finally:
         L.current(was)
-    assert _app(ws)["prefs"].get("heard") is None
+        moybyte.WAKES.end(4242)
+    S.SCHED.mail()
+    S.SCHED.poll()
+    assert _app(ws)["prefs"].get("heard") == (["x"] if receives else None)
 
 
 def test_the_install_prompt_says_a_service_works_in_the_background():
@@ -241,3 +251,19 @@ def test_a_start_whose_grant_cannot_be_made_is_refused(ws, tier, monkeypatch):
     p = [q for q in S.SCHED.services() if q.name == APP][-1]
     assert p.state == S.EXITED and p.code == S.EXIT_CRASHED and p.ctx is None
     assert any("its grant" in t for t in _log(p.pid))
+
+
+def test_a_manifests_receives_reaches_the_cart(tmp_path):
+    """`receives` is a Moybyte manifest field: its list, None without one."""
+    from runtime import moy_carts
+    root = tmp_path / "pair.moy"
+    root.mkdir()
+    man = {"title": "Pair", "id": APP, "canvas": "320x240",
+           "moybyte": {"type": "service", "receives": ["ping"]}}
+    (root / "manifest.json").write_text(json.dumps(man))
+    (root / "main.py").write_text("")
+    (root / "config.json").write_text("{}")
+    assert moy_carts.load(str(root))["receives"] == ["ping"]
+    man["moybyte"].pop("receives")
+    (root / "manifest.json").write_text(json.dumps(man))
+    assert moy_carts.load(str(root))["receives"] is None

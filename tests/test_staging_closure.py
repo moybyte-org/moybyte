@@ -161,13 +161,13 @@ NATIVE = {
 }
 
 # A usermod that registers more than its own name: moy_kernel is the kernel's
-# entry, its frame loop (the module `moy_loop`) and the lease table (the module
-# `moy_lease`); moy_app builds the
+# entry, its frame loop (the module `moy_loop`), the lease table (the module
+# `moy_lease`) and the service model's queues (the module `moy_evq`); moy_app builds the
 # user-files layer it serves the files role over, the module `moy_ufiles`; the
 # device APIs' drivers register beside the module of the directory they live
 # in (`moy_http` and `moy_lora` in moy_net, `moy_mic` in moy_audio, `moy_gatt`
 # and `moy_midi` in moy_input).
-USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop", "moy_lease"},
+USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop", "moy_lease", "moy_evq"},
                    "moy_app": {"moy_app", "moy_ufiles"},
                    "moy_net": {"moy_net", "moy_http", "moy_lora"},
                    "moy_audio": {"moy_audio", "moy_mic"},
@@ -200,18 +200,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # them.
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "moycore",
-                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
                        "native_build", "host_native", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play", "native_build", "host_native",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play", "native_build", "host_native",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "moycore", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
                    "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
                    "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
@@ -220,7 +220,7 @@ HOST_ONLY = {
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "moycore", "input",
-             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
              "native_build", "host_native", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
@@ -228,7 +228,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "moycore", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play", "native_build", "host_native", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play", "native_build", "host_native", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 

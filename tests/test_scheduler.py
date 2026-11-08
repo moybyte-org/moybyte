@@ -59,6 +59,7 @@ def sched():
     s.reset()
     _clear(wakes)
     wakes.ended = S.SCHED._ended
+    wakes.opener = S.SCHED._open
 
 
 def _since():
@@ -89,6 +90,33 @@ def _as(pid, fn):
 
 def test_a_tick_with_no_wakes_spends_nothing(sched):
     assert sched.tick(0) == 0 and sched.spent_us == 0
+
+
+def test_a_message_left_by_an_ended_process_costs_no_frame(sched):
+    """A message queued on a process that ends before it is served goes
+    with its queue, and leaves no frame a look at the queues."""
+    pid = _app("t.gone")
+    _as(pid, lambda: sched.wakes.on("ping", lambda who: None))
+    assert sched.send(pid, "ping", ()) and sched.wakes.queued
+    sched.wakes.end(pid)
+    assert not sched.wakes.queued
+    assert sched.tick(0) == 0 and sched.spent_us == 0
+
+
+def test_a_suspended_processs_messages_wait_and_cost_no_frame(sched):
+    pid = _app("t.held")
+    got = []
+    _as(pid, lambda: sched.wakes.on("ping", lambda who, n: got.append(n)))
+    for _ in range(S.MOY_BG_STRIKES):
+        sched._charge(pid, 0, True)
+    assert sched.held(pid)
+    sched.send(pid, "ping", (1,))
+    sched.mail()
+    assert got == [] and not sched.wakes.queued and sched.mail_of(pid) == 1
+    assert sched.resume(pid)
+    sched.mail()
+    assert got == [1]
+    sched.wakes.end(pid)
 
 
 def test_a_wake_runs_as_the_process_that_made_it(sched):

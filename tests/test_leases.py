@@ -64,6 +64,7 @@ def sched():
     yield s
     s.reset()
     moybyte.WAKES.ended = S.SCHED._ended
+    moybyte.WAKES.opener = S.SCHED._open
 
 
 def _as(pid, fn):

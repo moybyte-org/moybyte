@@ -115,7 +115,7 @@ enum {
     MOY_T_UI_TEXT_VIEW, MOY_T_UI_TABLE_PART, MOY_T_UI_PART_AT, MOY_T_UI_SPLIT,
     MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
     MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
-    MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_TELL,
+    MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND,
 };
 #define MOY_APP_TABLE_N 169u
 // Each row's "role.verb", its role and its C row (-1: the Python console
@@ -289,7 +289,7 @@ enum {
     { "moybyte.notify", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.open_with", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.share", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.tell", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.send", MOY_ROLE_MOYBYTE, -1 }, \
 }
 
 // The permission each role is granted by: a role absent here is never

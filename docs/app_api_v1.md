@@ -139,7 +139,7 @@ there (`docs/os_2026-11/tiers.md` §1; the toolkit's `ui` rows are
 | `moybyte.notify` | `notifications` | `moybyte.notify` | `moybyte.notify` |  | `moy_notify` |
 | `moybyte.open_with` | `front` | `moybyte.open_with` | `moybyte.open_with` |  | `moy_open_with` |
 | `moybyte.share` | `front` | `moybyte.share` | `moybyte.share` |  | `moy_share` |
-| `moybyte.tell` | none | `moybyte.tell` | `moybyte.tell` |  |  |
+| `moybyte.send` | none | `moybyte.send` | `moybyte.send` |  |  |
 | `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |

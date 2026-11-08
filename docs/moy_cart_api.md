@@ -1157,6 +1157,29 @@ it back), and `None` reaches it when they cancel. It answers `False` where
 they have no file of that type. `docs/os_2026-11/between_apps.md` §1 and §2
 have the rules.
 
+### Messages between processes (Moybyte-side verbs)
+
+`moybyte.send` and `moybyte.on` are Moybyte's own, the same two names in
+Python and in a Lua service. A message has a name and arguments (any values
+JSON carries), and every process has its own queue of them:
+
+```python
+import moybyte
+
+def pong(sender, score):        # sender: the app id that sent it
+    print(sender, "says", score)
+
+moybyte.on("pong", pong)                             # listen
+moybyte.send("local.pinger", "ping", 42)             # every process of that app that listens
+```
+
+`send` answers how many took it. Your own app's processes (an app and its
+service) always hear each other. Another app hears you only on a name its
+manifest lists (`"moybyte": {"receives": ["ping"]}`), so an app chooses
+what the world may tell it. Messages from the console itself come from
+`"system"`: `moybyte.on("net", fn)` hears WiFi come and go as
+`fn("system", up, why)`. `docs/os_2026-11/processes.md` §1 has the rule.
+
 ---
 
 ## Palette

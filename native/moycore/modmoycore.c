@@ -1110,8 +1110,6 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 // -- the Lua tier's services (moycore_svc.h) ---------------------------------
 //   svc_start(pid, name, src[, env[, app]]) -> h   svc_stop(h)   svc_reap(h)
 //                                 (app: its app's run, moy_app's `run()`)
-//   svc_send(h, name, args) -> bool   svc_call(h) -> (name, args) or None
-//   svc_answer(h, ans or None)
 //   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why, wakes, mail), None when stale
 //   svc_tasks() -> bool   svc_step(now_ms) -> ms to the next deadline   svc_reset()
 
@@ -1146,40 +1144,6 @@ static mp_obj_t mod_svc_stop(mp_obj_t h)
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_stop_obj, mod_svc_stop);
-
-static mp_obj_t mod_svc_send(mp_obj_t h, mp_obj_t name, mp_obj_t args)
-{
-    size_t n;
-    const char *text = mp_obj_str_get_data(args, &n);
-    int rc = moycore_svc_send((uint32_t)mp_obj_get_int(h), mp_obj_str_get_str(name), text, n);
-    if (rc == MOYCORE_SVC_BAD) {
-        return mp_const_false;
-    }
-    svc_check(rc);
-    return mp_const_true;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(mod_svc_send_obj, mod_svc_send);
-
-static mp_obj_t mod_svc_call(mp_obj_t h)
-{
-    const char *name, *args;
-    size_t n;
-    if (moycore_svc_call((uint32_t)mp_obj_get_int(h), &name, &args, &n) != MOYCORE_SVC_OK) {
-        return mp_const_none;
-    }
-    mp_obj_t t[2] = { mp_obj_new_str(name, strlen(name)), mp_obj_new_str(args, n) };
-    return mp_obj_new_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_call_obj, mod_svc_call);
-
-static mp_obj_t mod_svc_answer(mp_obj_t h, mp_obj_t ans)
-{
-    size_t n = 0;
-    const char *text = ans != mp_const_none ? mp_obj_str_get_data(ans, &n) : NULL;
-    svc_check(moycore_svc_answer((uint32_t)mp_obj_get_int(h), text, n));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_svc_answer_obj, mod_svc_answer);
 
 static mp_obj_t mod_svc_info(mp_obj_t h)
 {
@@ -1273,9 +1237,6 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_heap),        MP_ROM_PTR(&mod_heap_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_start),   MP_ROM_PTR(&mod_svc_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_stop),    MP_ROM_PTR(&mod_svc_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_svc_send),    MP_ROM_PTR(&mod_svc_send_obj) },
-    { MP_ROM_QSTR(MP_QSTR_svc_call),    MP_ROM_PTR(&mod_svc_call_obj) },
-    { MP_ROM_QSTR(MP_QSTR_svc_answer),  MP_ROM_PTR(&mod_svc_answer_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_info),    MP_ROM_PTR(&mod_svc_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_reap),    MP_ROM_PTR(&mod_svc_reap_obj) },
     { MP_ROM_QSTR(MP_QSTR_svc_tasks),   MP_ROM_PTR(&mod_svc_tasks_obj) },

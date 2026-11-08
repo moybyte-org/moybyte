@@ -17,8 +17,11 @@
 #include "lauxlib.h"
 #include "lua.h"
 #include "lualib.h"
+#include "moy_evq.h"
 #include "moy_json.h"
 #include "moy_proc_exit.h"
+#include "moy_super.h"
+#include "moy_vmq.h"
 
 // The console calls a service's `moybyte` table holds, generated from
 // native/os_calls.json (none in an image without the app ABI).
@@ -86,29 +89,6 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
     return MOYCORE_SVC_BAD;
 }
 
-int moycore_svc_send(uint32_t h, const char *name, const char *args, size_t n) {
-    (void)h;
-    (void)name;
-    (void)args;
-    (void)n;
-    return MOYCORE_SVC_STALE;
-}
-
-int moycore_svc_call(uint32_t h, const char **name, const char **args, size_t *n) {
-    (void)h;
-    (void)name;
-    (void)args;
-    (void)n;
-    return MOYCORE_SVC_STALE;
-}
-
-int moycore_svc_answer(uint32_t h, const char *ans, size_t n) {
-    (void)h;
-    (void)ans;
-    (void)n;
-    return MOYCORE_SVC_STALE;
-}
-
 int moycore_svc_stop(uint32_t h) {
     (void)h;
     return MOYCORE_SVC_STALE;
@@ -149,12 +129,8 @@ void moycore_svc_reset(void) {
 enum { CALL_OK, CALL_ERR, CALL_ABORT, CALL_EXIT, CALL_WAIT };
 // What follows a call's end.
 enum { THEN_CHUNK, THEN_START, THEN_STOP, THEN_CB };
-// A console call's passage: posted by the service, answered by the VM.
+// A console call's passage: posted on the VM's queue, answered by the console.
 enum { REQ_NONE, REQ_POSTED, REQ_ANSWERED };
-// A hop's: posted by the service's task, run by the VM's.
-enum { HOP_NONE, HOP_POSTED, HOP_DONE };
-
-static const char *const MESSAGES[] = { MOYCORE_SVC_MESSAGES };
 
 typedef struct {
     uint32_t id;                // 0: a free timer
@@ -164,16 +140,10 @@ typedef struct {
 } svc_timer_t;
 
 typedef struct {
-    uint32_t id;                // 0: a free wake; written last, read by the VM's send
+    uint32_t id;                // 0: a free wake
     int ref;                    // the handler, in the registry
-    char name[MOYCORE_SVC_NAME];
+    char name[MOY_EVQ_NAME];
 } svc_on_t;
-
-typedef struct {
-    char *args;                 // a JSON array
-    uint32_t n;
-    uint32_t wid;               // the wake it was queued on
-} svc_msg_t;
 
 typedef struct {
     lua_State *L;
@@ -184,7 +154,6 @@ typedef struct {
     uint32_t pid;
     uint16_t gen;
     volatile uint8_t state;
-    volatile uint8_t strikes;
     volatile uint8_t stop_req;
     volatile uint8_t done;      // its task is gone (or it never had one)
     volatile int32_t exit;
@@ -194,11 +163,7 @@ typedef struct {
     uint32_t next_id;
     svc_timer_t tm[MOYCORE_SVC_TIMERS];
     svc_on_t on[MOYCORE_SVC_ONS];
-    // the mail: a ring, its oldest at mail_at; taken under the lock
-    svc_msg_t mail[MOYCORE_SVC_MAIL];
-    uint8_t mail_at;
-    uint8_t mail_n;
-    uint8_t sealed;             // ended: it takes no more
+    uint8_t own_q;              // its event queue is its own, opened at its start
     // the call under way: its coroutine (anchored at co_ref), NULL for none
     lua_State *co;
     int co_ref;
@@ -210,13 +175,16 @@ typedef struct {
     uint8_t aborted;
     uint8_t exiting;
     int32_t exit_req;
-    char *msg;                  // the message it delivers, until its handler has its arguments
+    // the message it delivers: taken from its event queue, handed to each of
+    // its wakes on the name in turn (msg_next the next to look at)
+    char *msg;                  // its arguments, a JSON array; NULL: none
     size_t msg_n;
-    // its console call
-    uint8_t req;                // REQ_*, atomically
-    char req_name[MOYCORE_SVC_NAME];
-    char *req_args;
-    size_t req_n;
+    uint8_t msg_next;
+    moy_evq_ev_t ev;            // its sender and its name
+    // its console call, on the VM's queue (moy_vmq.h)
+    uint8_t req;                // REQ_*
+    uint32_t ticket;
+    char req_name[MOY_VMQ_NAME];
     char *ans;                  // the answer, NULL: refused
     size_t ans_n;
     char id[32];
@@ -226,24 +194,11 @@ typedef struct {
 #endif
 #ifdef SVC_TASKS
     TaskHandle_t task;
-    // the hop under way: posted by its task, run by the VM's (moycore_svc_call)
-    uint8_t hop;                // HOP_*, atomically
-    void (*hop_fn)(void *);
-    void *hop_arg;
 #endif
 } svc_t;
 
 static svc_t *s_row[MOYCORE_SVCS];
 static uint16_t s_gen;
-
-#ifdef SVC_TASKS
-static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-#define MAIL_LOCK() taskENTER_CRITICAL(&s_mux)
-#define MAIL_UNLOCK() taskEXIT_CRITICAL(&s_mux)
-#else
-#define MAIL_LOCK() ((void)0)
-#define MAIL_UNLOCK() ((void)0)
-#endif
 
 // -- the clock, the memory -------------------------------------------------------
 
@@ -305,12 +260,6 @@ static void *svc_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
     return p;
 }
 
-static void say(svc_t *s, int level, const char *text) {
-    if (moy_log_write != NULL) {
-        moy_log_write(level, s->pid, text, strlen(text));
-    }
-}
-
 static svc_t *of_state(lua_State *L) {
     return *(svc_t **)lua_getextraspace(L);
 }
@@ -347,7 +296,7 @@ static int resume(svc_t *s, int nargs) {
         out = CALL_EXIT;
     } else if (s->aborted) {
         out = CALL_ABORT;
-    } else if (rc == LUA_YIELD && __atomic_load_n(&s->req, __ATOMIC_ACQUIRE) == REQ_POSTED) {
+    } else if (rc == LUA_YIELD && s->req == REQ_POSTED) {
         return CALL_WAIT;
     } else if (rc == LUA_OK) {
         out = CALL_OK;
@@ -413,7 +362,10 @@ static void on_end(svc_t *s, svc_on_t *o) {
     if (s->L != NULL) {
         luaL_unref(s->L, LUA_REGISTRYINDEX, o->ref);
     }
-    __atomic_store_n(&o->id, 0u, __ATOMIC_RELEASE);
+    if (o->id != 0) {
+        moy_evq_listen(s->pid, o->name, false);
+    }
+    o->id = 0;
 }
 
 static uint32_t new_id(svc_t *s) {
@@ -461,11 +413,7 @@ static int l_on(lua_State *L) {
     size_t n;
     const char *name = luaL_checklstring(L, 1, &n);
     luaL_checktype(L, 2, LUA_TFUNCTION);
-    int known = 0;
-    for (size_t i = 0; i < sizeof MESSAGES / sizeof MESSAGES[0]; i++) {
-        known = known || strcmp(MESSAGES[i], name) == 0;
-    }
-    if (!known || n >= MOYCORE_SVC_NAME) {
+    if (n == 0 || n >= MOY_EVQ_NAME) {
         return luaL_error(L, "no message %s", name);
     }
     svc_on_t *o = NULL;
@@ -477,12 +425,14 @@ static int l_on(lua_State *L) {
     if (o == NULL) {
         return luaL_error(L, "every message wake of the service is taken");
     }
+    if (moy_evq_listen(s->pid, name, true) != MOY_EVQ_OK) {
+        return luaL_error(L, "the service listens on too many names");
+    }
     lua_pushvalue(L, 2);
     o->ref = luaL_ref(L, LUA_REGISTRYINDEX);
     memcpy(o->name, name, n + 1u);
-    uint32_t id = new_id(s);
-    __atomic_store_n(&o->id, id, __ATOMIC_RELEASE);
-    lua_pushinteger(L, (lua_Integer)id);
+    o->id = new_id(s);
+    lua_pushinteger(L, (lua_Integer)o->id);
     return 1;
 }
 
@@ -570,6 +520,11 @@ static int console_k(lua_State *L, int status, lua_KContext ctx) {
     return 2;
 }
 
+// A message's sender: the app id the OS stamped on it.
+static void push_sender(lua_State *L, const svc_t *s) {
+    lua_pushstring(L, s->ev.app);
+}
+
 // A console call (its name the upvalue): its arguments posted as a JSON array
 // and the call's coroutine yielded until the VM's task answers.
 static int l_console(lua_State *L) {
@@ -593,15 +548,14 @@ static int l_console(lua_State *L) {
     lua_concat(L, n > 0 ? 2 * n + 1 : 2);
     size_t len;
     const char *text = lua_tolstring(L, -1, &len);
-    char *args = mem_copy(text, len);
-    if (args == NULL) {
-        return luaL_error(L, "no memory for a console call");
-    }
     snprintf(s->req_name, sizeof s->req_name, "%s", lua_tostring(L, lua_upvalueindex(1)));
-    s->req_args = args;
-    s->req_n = len;
+    int rc = moy_vmq_post(s->pid, s->req_name, text, len, &s->ticket);
+    if (rc != MOY_VMQ_OK) {
+        return luaL_error(L, rc == MOY_VMQ_FULL ? "the console's queue is full"
+                                                : "no memory for a console call");
+    }
     lua_settop(L, 0);
-    __atomic_store_n(&s->req, (uint8_t)REQ_POSTED, __ATOMIC_RELEASE);
+    s->req = REQ_POSTED;
     return lua_yieldk(L, 0, 0, console_k);
 }
 
@@ -612,11 +566,13 @@ static int deliver_k(lua_State *L, int status, lua_KContext ctx) {
     return 0;
 }
 
-// A message delivered: its handler (at 1) called with the arguments its JSON
-// array holds, each in its place, a null as nil.
+// A message delivered: its handler (at 1) called with its sender's app id and
+// the arguments its JSON array holds, each in its place, a null as nil.
 static int l_deliver(lua_State *L) {
     svc_t *s = of_state(L);
-    int n = 0;
+    luaL_checkstack(L, 1, NULL);
+    push_sender(L, s);
+    int n = 1;
     if (s->msg != NULL && moy_app_lua_json_push != NULL) {
         const char *end = s->msg + s->msg_n;
         const char *v = moy_json_ws(s->msg, end);
@@ -632,8 +588,6 @@ static int l_deliver(lua_State *L) {
             }
         }
     }
-    free(s->msg);
-    s->msg = NULL;
     lua_callk(L, n, 0, 0, deliver_k);
     return 0;
 }
@@ -681,26 +635,20 @@ static void open_names(lua_State *L) {
 
 #ifdef SVC_APP
 // fn(arg) on the VM's task, for a row of the app's run (moy_app_lua.h's hop).
-// From the service's own task the hop is posted on its row and the task waits
-// until the VM's task has run it (moycore_svc_call), the wait not counted
-// against the call's budget nor its time; anywhere else (a stepped tier, the
-// VM's task) fn runs in place.
+// From the service's own task it is a hop on the VM's queue (moy_vmq.h), the
+// task waiting until the VM's task has run it, the wait not counted against
+// the call's budget nor its time; anywhere else (a stepped tier, the VM's
+// task) fn runs in place.
 static int vm_hop(lua_State *L, void (*fn)(void *), void *arg) {
     #ifdef SVC_TASKS
     svc_t *s = of_state(L);
     if (xTaskGetCurrentTaskHandle() == s->task) {
-        s->hop_fn = fn;
-        s->hop_arg = arg;
-        int64_t t = now_us();
-        __atomic_store_n(&s->hop, (uint8_t)HOP_POSTED, __ATOMIC_RELEASE);
-        while (__atomic_load_n(&s->hop, __ATOMIC_ACQUIRE) != HOP_DONE) {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+        uint32_t waited = 0;
+        if (moy_vmq_hop(s->pid, fn, arg, &waited) != MOY_VMQ_OK) {
+            return luaL_error(L, "the console's queue is full");
         }
-        __atomic_store_n(&s->hop, (uint8_t)HOP_NONE, __ATOMIC_RELEASE);
-        int64_t waited = now_us() - t;
         s->t0 += waited;
         s->seg += waited;
-        xTaskNotifyGive(s->task);      // a wake the wait took is the loop's again
         return 0;
     }
     #else
@@ -768,18 +716,15 @@ static int l_open_env(lua_State *L) {
 // -- the life ------------------------------------------------------------------------
 
 static void end(svc_t *s, int32_t code) {
-    svc_msg_t left[MOYCORE_SVC_MAIL];
-    uint32_t n = 0;
-    MAIL_LOCK();
-    s->sealed = 1;
-    while (s->mail_n) {
-        left[n++] = s->mail[s->mail_at];
-        s->mail_at = (uint8_t)((s->mail_at + 1u) % MOYCORE_SVC_MAIL);
-        s->mail_n--;
+    for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
+        if (s->on[i].id != 0) {
+            moy_evq_listen(s->pid, s->on[i].name, false);
+        }
     }
-    MAIL_UNLOCK();
-    for (uint32_t i = 0; i < n; i++) {
-        free(left[i].args);
+    moy_vmq_drop(s->pid);
+    if (s->own_q) {
+        moy_evq_close(s->pid);
+        s->own_q = 0;
     }
     if (s->L != NULL) {
         lua_close(s->L);
@@ -790,7 +735,7 @@ static void end(svc_t *s, int32_t code) {
         s->tm[i].id = 0;
     }
     for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        __atomic_store_n(&s->on[i].id, 0u, __ATOMIC_RELEASE);
+        s->on[i].id = 0;
     }
     free(s->src);
     s->src = NULL;
@@ -798,8 +743,6 @@ static void end(svc_t *s, int32_t code) {
     s->env = NULL;
     free(s->msg);
     s->msg = NULL;
-    free(s->req_args);
-    s->req_args = NULL;
     free(s->ans);
     s->ans = NULL;
     s->req = REQ_NONE;
@@ -885,16 +828,10 @@ static void after(svc_t *s, int rc) {
         end(s, s->exit_req);
     } else if (rc == CALL_ERR) {
         end(s, MOYCORE_SVC_EXIT_CRASHED);
-    } else if (rc == CALL_ABORT) {
-        s->strikes++;
-        char line[64];
-        snprintf(line, sizeof line, "a callback ran past %u ms: strike %u",
-                 MOYCORE_SVC_ABORT_US / 1000u, (unsigned)s->strikes);
-        say(s, LOG_WARNING, line);
-        if (s->strikes >= MOYCORE_SVC_STRIKES) {
-            snprintf(s->why, sizeof s->why, "struck out");
-            end(s, MOY_PROC_KILLED);
-        }
+    } else if (rc == CALL_ABORT || s->spent > (int64_t)MOY_SUPER_SLICE_US) {
+        // the one supervisor's rungs (moy_super.h): a suspension holds its
+        // wakes unserved until it is resumed
+        moy_super_charge(s->pid, (uint32_t)s->spent, rc == CALL_ABORT);
     }
 }
 
@@ -943,29 +880,43 @@ static void stop(svc_t *s) {
     end(s, 0);
 }
 
-// The oldest message whose wake stands, its delivery and its handler pushed
-// on the main state and its arguments held for it: 1, or 0 for none.
+// The next delivery of the message under way to a wake on its name, or of
+// the oldest one on its event queue: its delivery and its handler pushed on
+// the main state, the message held for it: 1, or 0 for none.
 static int take_mail(svc_t *s) {
     for (;;) {
-        MAIL_LOCK();
-        if (s->mail_n == 0) {
-            MAIL_UNLOCK();
+        while (s->msg != NULL && s->msg_next < MOYCORE_SVC_ONS) {
+            svc_on_t *o = &s->on[s->msg_next++];
+            if (o->id != 0 && strcmp(o->name, s->ev.name) == 0) {
+                lua_pushcfunction(s->L, l_deliver);
+                lua_rawgeti(s->L, LUA_REGISTRYINDEX, o->ref);
+                return 1;
+            }
+        }
+        free(s->msg);
+        s->msg = NULL;
+        char small[256];
+        int rc = moy_evq_take(s->pid, &s->ev, small, sizeof small);
+        if (rc == MOY_EVQ_RANGE) {
+            char *big = mem_realloc(NULL, s->ev.n + 1u);
+            if (big == NULL) {
+                return 0;
+            }
+            if (moy_evq_take(s->pid, &s->ev, big, s->ev.n + 1u) != MOY_EVQ_OK) {
+                free(big);
+                return 0;
+            }
+            s->msg = big;
+        } else if (rc == MOY_EVQ_OK) {
+            s->msg = mem_copy(small, s->ev.n);
+            if (s->msg == NULL) {
+                return 0;
+            }
+        } else {
             return 0;
         }
-        svc_msg_t m = s->mail[s->mail_at];
-        s->mail_at = (uint8_t)((s->mail_at + 1u) % MOYCORE_SVC_MAIL);
-        s->mail_n--;
-        MAIL_UNLOCK();
-        svc_on_t *o = on_of(s, m.wid);
-        if (o == NULL) {
-            free(m.args);
-            continue;
-        }
-        s->msg = m.args;
-        s->msg_n = m.n;
-        lua_pushcfunction(s->L, l_deliver);
-        lua_rawgeti(s->L, LUA_REGISTRYINDEX, o->ref);
-        return 1;
+        s->msg_n = s->ev.n;
+        s->msg_next = 0;
     }
 }
 
@@ -974,11 +925,16 @@ static int take_mail(svc_t *s) {
 static uint32_t run(svc_t *s, uint32_t now) {
     s->now = now;
     if (s->co != NULL) {
-        if (__atomic_load_n(&s->req, __ATOMIC_ACQUIRE) != REQ_ANSWERED) {
-            return UINT32_MAX;
+        if (s->req == REQ_POSTED) {
+            char *ans = NULL;
+            size_t n = 0;
+            int got = moy_vmq_result(s->ticket, &ans, &n);
+            if (got == MOY_VMQ_WAITING) {
+                return UINT32_MAX;
+            }
+            s->ans = got == MOY_VMQ_OK ? ans : NULL;
+            s->ans_n = n;
         }
-        free(s->req_args);
-        s->req_args = NULL;
         s->req = REQ_NONE;
         int rc = resume(s, 0);
         if (rc != CALL_WAIT) {
@@ -1000,7 +956,7 @@ static uint32_t run(svc_t *s, uint32_t now) {
             return UINT32_MAX;
         }
     }
-    if (s->state != MOYCORE_SVC_RUNNING) {
+    if (s->state != MOYCORE_SVC_RUNNING || moy_super_held(s->pid)) {
         return UINT32_MAX;
     }
     for (uint32_t i = 0; i < MOYCORE_SVC_TIMERS && s->state == MOYCORE_SVC_RUNNING; i++) {
@@ -1017,13 +973,14 @@ static uint32_t run(svc_t *s, uint32_t now) {
         } else {
             timer_end(s, t);
         }
-        begin(s, MOYCORE_SVC_ABORT_US, 0, THEN_CB);
+        begin(s, MOY_SUPER_ABORT_US, 0, THEN_CB);
         if (s->co != NULL) {
             return UINT32_MAX;
         }
     }
-    while (s->state == MOYCORE_SVC_RUNNING && !s->stop_req && take_mail(s)) {
-        begin(s, MOYCORE_SVC_ABORT_US, 1, THEN_CB);
+    while (s->state == MOYCORE_SVC_RUNNING && !s->stop_req && !moy_super_held(s->pid)
+           && take_mail(s)) {
+        begin(s, MOY_SUPER_ABORT_US, 1, THEN_CB);
         if (s->co != NULL) {
             return UINT32_MAX;
         }
@@ -1060,8 +1017,7 @@ static void svc_task(void *arg) {
         if (wait > 1000u) {
             wait = 1000u;
         }
-        TickType_t ticks = pdMS_TO_TICKS(wait);
-        ulTaskNotifyTake(pdTRUE, ticks > 0 ? ticks : 1);
+        moy_evq_wait(s->pid, wait > 0 ? wait : 1u);     // the one kernel wait
     }
     s->done = 1;
     vTaskDelete(NULL);
@@ -1069,13 +1025,7 @@ static void svc_task(void *arg) {
 #endif
 
 static void wake(svc_t *s) {
-    #ifdef SVC_TASKS
-    if (!s->done) {
-        xTaskNotifyGive(s->task);
-    }
-    #else
-    (void)s;
-    #endif
+    moy_evq_kick(s->pid);
 }
 
 // -- the table -----------------------------------------------------------------------
@@ -1130,11 +1080,23 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
     }
     s->gen = s_gen;
     s->state = MOYCORE_SVC_STARTING;
+    if (!moy_evq_has(pid)) {
+        if (moy_evq_open(pid, id != NULL ? id : "service", NULL, 0u) != MOY_EVQ_OK) {
+            free(copy);
+            free(envc);
+            free(s);
+            return MOYCORE_SVC_NOMEM;
+        }
+        s->own_q = 1;
+    }
     s_row[slot] = s;
     #ifdef SVC_TASKS
     if (xTaskCreatePinnedToCore(svc_task, "moy_svc", MOYCORE_SVC_STACK, s, MOYCORE_SVC_PRIO,
                                 &s->task, MOYCORE_SVC_CORE) != pdPASS) {
         s_row[slot] = NULL;
+        if (s->own_q) {
+            moy_evq_close(pid);
+        }
         free(copy);
         free(envc);
         free(s);
@@ -1157,92 +1119,15 @@ int moycore_svc_stop(uint32_t h) {
     return MOYCORE_SVC_OK;
 }
 
-int moycore_svc_send(uint32_t h, const char *name, const char *args, size_t n) {
-    svc_t *s = row_of(h);
-    if (s == NULL) {
-        return MOYCORE_SVC_STALE;
-    }
-    int took = 0;
-    for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        uint32_t wid = __atomic_load_n(&s->on[i].id, __ATOMIC_ACQUIRE);
-        if (wid == 0 || strcmp(s->on[i].name, name) != 0) {
-            continue;
-        }
-        char *copy = mem_copy(args, n);
-        if (copy == NULL) {
-            return MOYCORE_SVC_NOMEM;
-        }
-        svc_msg_t old = { NULL, 0, 0 };
-        MAIL_LOCK();
-        if (s->sealed) {
-            MAIL_UNLOCK();
-            free(copy);
-            return MOYCORE_SVC_BAD;
-        }
-        if (s->mail_n == MOYCORE_SVC_MAIL) {
-            old = s->mail[s->mail_at];
-            s->mail_at = (uint8_t)((s->mail_at + 1u) % MOYCORE_SVC_MAIL);
-            s->mail_n--;
-        }
-        svc_msg_t *m = &s->mail[(s->mail_at + s->mail_n) % MOYCORE_SVC_MAIL];
-        m->args = copy;
-        m->n = (uint32_t)n;
-        m->wid = wid;
-        s->mail_n++;
-        MAIL_UNLOCK();
-        free(old.args);
-        took = 1;
-    }
-    if (!took) {
-        return MOYCORE_SVC_BAD;
-    }
-    wake(s);
-    return MOYCORE_SVC_OK;
-}
-
-int moycore_svc_call(uint32_t h, const char **name, const char **args, size_t *n) {
-    svc_t *s = row_of(h);
-    if (s == NULL) {
-        return MOYCORE_SVC_STALE;
-    }
-    #ifdef SVC_TASKS
-    if (__atomic_load_n(&s->hop, __ATOMIC_ACQUIRE) == HOP_POSTED) {
-        s->hop_fn(s->hop_arg);
-        __atomic_store_n(&s->hop, (uint8_t)HOP_DONE, __ATOMIC_RELEASE);
-        wake(s);
-    }
-    #endif
-    if (__atomic_load_n(&s->req, __ATOMIC_ACQUIRE) != REQ_POSTED) {
-        return MOYCORE_SVC_BAD;
-    }
-    *name = s->req_name;
-    *args = s->req_args;
-    *n = s->req_n;
-    return MOYCORE_SVC_OK;
-}
-
-int moycore_svc_answer(uint32_t h, const char *ans, size_t n) {
-    svc_t *s = row_of(h);
-    if (s == NULL) {
-        return MOYCORE_SVC_STALE;
-    }
-    if (__atomic_load_n(&s->req, __ATOMIC_ACQUIRE) != REQ_POSTED) {
-        return MOYCORE_SVC_BAD;
-    }
-    s->ans = ans != NULL ? mem_copy(ans, n) : NULL;
-    s->ans_n = n;
-    __atomic_store_n(&s->req, (uint8_t)REQ_ANSWERED, __ATOMIC_RELEASE);
-    wake(s);
-    return MOYCORE_SVC_OK;
-}
-
 int moycore_svc_info(uint32_t h, moycore_svc_info_t *out) {
     svc_t *s = row_of(h);
     if (s == NULL) {
         return MOYCORE_SVC_STALE;
     }
+    uint32_t overruns, strikes;
+    moy_super_info(s->pid, &overruns, &strikes);
     out->state = s->state;
-    out->strikes = s->strikes;
+    out->strikes = (uint8_t)strikes;
     out->exit = s->state == MOYCORE_SVC_EXITED ? s->exit : 0;
     out->heap = s->heap;
     out->cpu_us = s->cpu_us;
@@ -1257,10 +1142,10 @@ int moycore_svc_info(uint32_t h, moycore_svc_info_t *out) {
         w = (uint8_t)(w + (s->tm[i].id != 0));
     }
     for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        w = (uint8_t)(w + (__atomic_load_n(&s->on[i].id, __ATOMIC_ACQUIRE) != 0));
+        w = (uint8_t)(w + (s->on[i].id != 0));
     }
     out->wakes = w;
-    out->mail = s->mail_n;
+    out->mail = (uint8_t)moy_evq_queued(s->pid);
     return MOYCORE_SVC_OK;
 }
 

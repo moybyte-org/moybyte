@@ -24,9 +24,11 @@ and on a board the service upcall is not made at all; a message wake with
 no message queued (moybyte's `mail`) counts as none. The tick allocates
 nothing (tests/test_frame_alloc.py).
 
-THE RUNGS. Each callback runs with its process current in the OS log (its
-prints, its new wakes and its events() are its own) and under
-`moy_guard.call` (native/moy_kernel/modmoy_guard.c): a one-shot timer of
+THE RUNGS are the one supervisor's (native/moy_kernel/moy_super.h), every
+tier's: this module charges it a Python callback's cost, moycore a Lua
+service's, and it logs each rung. Each callback runs with its process current
+in the OS log (its prints, its new wakes and its events() are its own) and
+under `moy_guard.call` (native/moy_kernel/modmoy_guard.c): a one-shot timer of
 MOY_BG_ABORT_US aborts it if it never returns. Its cost is measured less the
 collections inside it. A callback over MOY_BG_CALLBACK_US is an OVERRUN:
 
@@ -46,10 +48,16 @@ the shell's that the tick runs plainly (`plain_every`), each task step under
 loop's. A process's live tasks count as its wakes. The first start of a
 service whose source names asyncio installs the loop.
 
-MESSAGES (moybyte's `mail`) are served by `mail()`, which the console calls
-at the start of its frame while one is queued, so a message sent by the
-frame's input is served before the frame draws, and by a tick that runs
-first, as any wake is. A send asks a board for no upcall of its own.
+MESSAGES are the kernel's per-process event queues (native/moy_kernel/
+moy_evq.h, the module `moy_evq`). `mail()` serves the queues of the VM's
+processes (moy_evq.ready), each message handed to every wake of its process
+on its name as `fn(sender, *args)` under the guard and the rungs, at most
+MAIL_SERVE a call. The console calls it at the start of its frame while
+`queued` is set, so a message sent by the frame's input is served before the
+frame draws, and a tick that runs first serves it too. A send asks a board
+for no upcall of its own. `_open` opens a process's queue at its first
+`on` or `send` (moybyte's `opener`) and at a Lua service's start: its app id
+(`app_of`, else its cart's) and its manifest's `receives`.
 
 A callback's exception is a crash: its traceback goes to the OS log at crit
 and a service exits with EXIT_CRASHED; a wake of any other process is
@@ -71,9 +79,9 @@ A service started on a console holds the roles a foreground run of its app
 is granted, under its granted permissions, on a run grant of its own whose
 owner is its pid (system_api.service_api), held on its row and ended at its
 end: a Python service's namespace holds the names a Python app's does, a Lua
-service's state opens the names a Lua app's does. `tell` routes
-`moybyte.tell`: message "app" to the other processes of the caller's app
-(`app_of`, the console's, bound at `attach`).
+service's state opens the names a Lua app's does. An app talks to its
+service with `moybyte.send(its own app id, name, ...)`, which the rule always
+lets through within one app.
 
 LUA SERVICES (`"runtime": "lua"`). The start hands the cart's source to
 moycore's services (native/moycore/moycore_svc.h): a state of its own, on a
@@ -83,15 +91,16 @@ logged and exited 1), with what the console hands a system process (its
 run, whose role names its state opens. `poll()`, a
 wake of the shell's every POLL_MS while one lives, steps them where they
 have no task (the host, the desktop MicroPython), answers the console calls
-they wait on (`moybyte.notify`, `tell` and the `env` functions, run here on
-the VM's task as the service's process, at most CALLS_MAX a service a poll,
-and, on a P4, the role row its task posted), reads
+they wait on the VM's queue (native/moy_kernel/moy_vmq.h: `moybyte.notify`,
+`send` and the `env` functions, run here on the VM's task as the service's
+process, and, on a P4, the role rows its task hopped), reads
 each one's heap (exact) and its calls' time onto its row, and hands an end
 to the same exit, log line and restart policy; a stop is its TERM there, the
-C side's KILL past MOY_SERVICE_STOP_MS. `send` routes a message to a Lua
-service's row (a radio's change reaches every row through `_routed`, the
-radios' router's hook, kept while a Lua service lives), and the console's frame start (`mail`) and a tick that runs
-first serve it with a poll, as they serve a Python service's.
+C side's KILL past MOY_SERVICE_STOP_MS. A message reaches a Lua service's
+event queue as any process's (a radio's change too: the radios' router is
+kept while a Lua service lives), and wakes its task; a stepped one is
+stepped at the next poll, or at once by the frame start (`mail`) where the
+OS's own `send` posted it.
 
 AUTOSTART. `boot(ws)`, at the console's first drawn frame, starts every
 service cart whose manifest asks for `autostart` and whose consent holds it
@@ -139,7 +148,7 @@ _CALLS = {
     "moybyte.notify": _moybyte.notify,
     "moybyte.open_with": _moybyte.open_with,
     "moybyte.share": _moybyte.share,
-    "moybyte.tell": _moybyte.tell,
+    "moybyte.send": _moybyte.send,
 }
 # END GENERATED
 
@@ -147,6 +156,11 @@ try:
     import json as _json
 except ImportError:  # pragma: no cover - every VM has it
     _json = None
+
+try:
+    import moy_evq as _E
+except ImportError:  # host: the runtime package
+    from runtime import moy_evq as _E
 
 try:
     import moy_log as _L
@@ -160,9 +174,10 @@ except ImportError:  # CPython and the browser: no VM abort
 
 MOY_BG_SLICE_US = 1000          # the background slice a frame always gets
 MOY_BG_SLICE_EVERY = 1          # ... every this many frames
-MOY_BG_CALLBACK_US = 20000      # a callback over this is an overrun
-MOY_BG_ABORT_US = 300000        # the guard's timer: past a collection's pause
-MOY_BG_STRIKES = 3              # strikes to suspension
+MOY_BG_CALLBACK_US = _E.SLICE_US   # a callback over this is an overrun (the supervisor's)
+MOY_BG_ABORT_US = _E.ABORT_US      # the guard's timer: past a collection's pause
+MOY_BG_STRIKES = _E.STRIKES        # strikes to suspension
+MAIL_SERVE = 32                 # messages served a mail() at most
 MOY_SERVICE_STOP_MS = 2000      # TERM to KILL: a start or stop hook's limit
 MOY_RESTART_BACKOFF_MS = 1000  # the first restart's wait, doubled for each end in a row
 MOY_RESTART_HEAL_MS = 10000     # a run this long before its end starts the count afresh
@@ -303,10 +318,12 @@ class Scheduler:
         self._t0 = 0                # this tick's start and budget (left_us)
         self._budget = 0
         self._poll = 0              # the Lua services' poll, a wake of the shell's
-        self.svc_mail = False       # a message sent to a Lua service, not yet polled
+        self.svc_mail = False       # a message sent to a stepped Lua service, not yet polled
         self.app_of = None          # fn(pid) -> the app id it runs, the console's (`attach`)
+        self.cart_of = None         # fn(pid) -> the cart a run runs, the console's (`attach`)
+        self._fns = []              # the handlers of the message being served
         self.wakes.ended = self._ended
-        self.wakes.routed = self._routed
+        self.wakes.opener = self._open
 
     # -- the tick ---------------------------------------------------------
 
@@ -319,9 +336,12 @@ class Scheduler:
             self._n = self._i = 0
             self.spent_us = 0
             return 0
-        if self.svc_mail:
-            self.svc_mail = False
-            self.poll()
+        if w.queued or self.svc_mail:
+            self.mail()                 # the frame start's work, not the wakes' budget
+        if not w.list:
+            self._n = self._i = 0
+            self.spent_us = 0
+            return 0
         budget = slack_us
         if f == 0 and budget < MOY_BG_SLICE_US:
             budget = MOY_BG_SLICE_US
@@ -357,51 +377,67 @@ class Scheduler:
         if not w.queued and not self.svc_mail:
             return 0
         t0 = _ticks_us()
-        if self.svc_mail:
-            self.svc_mail = False
+        if self.svc_mail or (w.queued and self._poll):
+            self.svc_mail = False       # a Lua service may have taken one too
             self.poll()
-        for wake in list(w.mail):
-            if wake[_AT]:
-                self._run(wake[0])
+        w.queued = 0
+        fns = self._fns
+        for _ in range(MAIL_SERVE):
+            pid = _E.ready()            # a suspended process's queue is never ready
+            if not pid:
+                break
+            p = self.procs.get(pid)
+            ev = _E.take(pid)
+            if ev is None:
+                continue
+            app, name = ev[1], ev[2]
+            try:
+                args = _json.loads(ev[3])
+            except ValueError:
+                continue
+            w.handlers(pid, name, fns)
+            for fn in fns:
+                self._guarded(pid, lambda: fn(app, *args))
+            del fns[:]
+            if p is None:
+                p = self.procs.get(pid)
+            if p is not None and p.kind == SERVICE and p.state != EXITED \
+                    and p.state != STOPPING and not self.wakes.count(pid):
+                self._exit(p, EXIT_OK)
+        else:
+            w.queued = 1                # more than one serve's worth: the next frame's
         return _ticks_diff(_ticks_us(), t0)
 
     def send(self, pid, name, args):
-        """The OS routes message `name` with `args` to process `pid`
-        (moybyte's `send`, or a Lua service's row): False where it holds no
-        wake on `name`."""
+        """The OS's own message `name` with `args` to process `pid`, from
+        the system, whatever its tier: False where it does not listen on
+        `name`."""
+        took = self.wakes.post(pid, name, args)
         p = self.procs.get(pid)
-        if p is None or not p.native:
-            return self.wakes.send(pid, name, args)
-        svc = _svc()
-        try:
-            took = svc.svc_send(p.native, name, _json.dumps(list(args)))
-        except (OSError, TypeError, ValueError):
-            return False
-        if took:
+        if took and p is not None and p.native:
             self.svc_mail = True
         return took
 
-    def tell(self, pid, args):
-        """`moybyte.tell` from process `pid`: message "app" with `args` to
-        every other live process of its app (`app_of`: the app id a run or
-        a service runs under, the grant's key) that waits on it, a Lua
-        service's row alike. Answers how many took it."""
-        of = self.app_of
-        aid = of(pid) if of is not None else None
-        if aid is None:
-            return 0
-        to = []
-        for w in self.wakes.mail:
-            if w[_MS] == "app" and w[_OWNER] not in to:
-                to.append(w[_OWNER])
-        for p in self.procs.values():
-            if p.native and p.state != EXITED and p.pid not in to:
-                to.append(p.pid)
-        n = 0
-        for q in to:
-            if q != pid and of(q) == aid and self.send(q, "app", tuple(args)):
-                n += 1
-        return n
+    def _open(self, pid, vm=True):
+        """Process `pid`'s event queue opened: its app id (`app_of`, else
+        its cart's) and its manifest's `receives`; `vm` where the VM's task
+        serves it (a Python process)."""
+        p = self.procs.get(pid)
+        cart = p.cart if p is not None else None
+        if cart is None and self.cart_of is not None:
+            cart = self.cart_of(pid)
+        app = self.app_of(pid) if self.app_of is not None else None
+        if app is None and cart is not None:
+            try:
+                import app_perms
+            except ImportError:  # host: the runtime package
+                from runtime import app_perms
+            app = app_perms.app_id(cart)
+        if app is None:
+            app = (_L.name(pid) if _L is not None else "") or "pid%d" % pid
+        recv = cart.get("receives") if cart is not None else None
+        recv = "\n".join(r for r in recv if isinstance(r, str)) if isinstance(recv, list) else ""
+        _E.open(pid, app, recv, vm)
 
     def wakes_of(self, pid):
         """How many wakes process `pid` holds: its timers, readers and
@@ -413,12 +449,8 @@ class Scheduler:
         return self.wakes.count(pid)
 
     def mail_of(self, pid):
-        """How many messages wait for process `pid`."""
-        p = self.procs.get(pid)
-        if p is not None and p.native:
-            got = _svc().svc_info(p.native)
-            return got[7] if got is not None else 0
-        return self.wakes.mail_of(pid)
+        """How many messages wait on process `pid`'s event queue."""
+        return _E.queued(pid)
 
     def left_us(self):
         """What is left of this tick's budget, microseconds."""
@@ -545,9 +577,9 @@ class Scheduler:
             if w is not None and w[_HOW] == _AFTER:
                 wakes.cancel(w[0])
             if ladder:
-                self._strike(pid, "aborted after %d ms" % (budget // 1000))
+                self._charge(pid, cost, True)
         elif ladder and cost > MOY_BG_CALLBACK_US:
-            self._overrun(pid, cost)
+            self._charge(pid, cost, False)
         if err is not None:
             raise err
         return r
@@ -561,35 +593,27 @@ class Scheduler:
             p = self.procs[pid] = Proc(pid, APP, name)
         return p
 
-    def _overrun(self, pid, cost):
+    def _charge(self, pid, cost, aborted):
+        """A callback of process `pid` over its slice, or aborted: charged
+        to the one supervisor (moy_super.h), which logs the rung; its
+        suspension holds the process's wakes unserved."""
         if pid == SHELL:
             return
+        rung = _E.charge(pid, cost, aborted)
         p = self._row(pid)
-        p.overruns += 1
-        if p.overruns == 1:
-            _log(WARNING, pid, "callback ran %d ms, over its %d ms slice"
-                 % (cost // 1000, MOY_BG_CALLBACK_US // 1000))
-        else:
-            self._strike(pid, "callback ran %d ms" % (cost // 1000))
-
-    def _strike(self, pid, why):
-        if pid == SHELL:
-            return
-        p = self._row(pid)
-        p.overruns += 1
-        p.strikes += 1
-        _log(ERR, pid, "strike %d of %d: %s" % (p.strikes, MOY_BG_STRIKES, why))
-        if p.strikes >= MOY_BG_STRIKES and p.state != EXITED:
+        p.overruns, p.strikes = _E.rungs(pid)
+        if rung == _E.SUSPENDED and p.state != EXITED:
             p.state = SUSPENDED
-            _log(ERR, pid, "suspended")
 
     def resume(self, pid):
         """A suspended process served again, its rungs from the start."""
         p = self.procs.get(pid)
         if p is None or p.state != SUSPENDED:
             return False
+        _E.resume(pid)
         p.state = BACKGROUND if p.kind == SERVICE else RUNNING
         p.overruns = p.strikes = 0
+        self.wakes.queued = 1           # what waited on its queue meanwhile
         _log(INFO, pid, "resumed")
         return True
 
@@ -713,6 +737,7 @@ class Scheduler:
         try:
             if svc is None:
                 raise OSError(EINVAL, "no Lua runtime")
+            self._open(p.pid, False)
             p.native = svc.svc_start(p.pid, p.name, src, _env_text(env), run)
         except (TypeError, ValueError) as e:
             _log(ERR, p.pid, "what the console hands it is not JSON: %s" % e)
@@ -742,12 +767,12 @@ class Scheduler:
         stepped = not svc.svc_tasks()
         if stepped:
             svc.svc_step(_ticks_ms())
+        self._answer(svc, stepped)
         live = False
         for pid in list(self.procs):
             p = self.procs[pid]
             if not p.native:
                 continue
-            self._answer(p, svc, stepped)
             got = svc.svc_info(p.native)
             if got is None:
                 p.native = 0
@@ -758,6 +783,9 @@ class Scheduler:
             p.cost_us = cpu_us & ALLOC_WRAP
             if state != SVC_EXITED:
                 live = True
+                if p.state == BACKGROUND and _E.held(pid):
+                    p.state = SUSPENDED
+                p.overruns, p.strikes = _E.rungs(pid)
                 continue
             h, p.native = p.native, 0
             svc.svc_reap(h)
@@ -777,45 +805,37 @@ class Scheduler:
         self.wakes.radio_keep = on
         self.wakes.radio_sync()
 
-    def _routed(self, name, args):
-        """A radio's change, which the router queued on the Python wakes,
-        sent on to each Lua service; a row with no wake on it takes none."""
-        if not self._poll:
-            return
-        for p in list(self.procs.values()):
-            if p.native:
-                self.send(p.pid, name, args)
-
-    def _answer(self, p, svc, stepped):
-        """The console calls Lua service `p` waits on, answered on this
-        task as its process: `moybyte.notify`, `open_with`, `share` or
-        `tell` (`_CALLS`), or a function of the `env` its start was handed;
-        a role row its own task posted runs first, in the call that asks
-        (moycore_svc_call). A stepped service runs on to its next call at
-        once."""
-        env = p.args[2] if len(p.args) > 2 else None
-        for _ in range(CALLS_MAX):
+    def _answer(self, svc, stepped):
+        """The VM's queue (moy_vmq.h): the role rows the services' tasks
+        hopped with run, then the console calls they wait on answered on
+        this task as their processes: `moybyte.notify`, `open_with`,
+        `share` or `send` (`_CALLS`), or a function of the `env` a start
+        was handed. A stepped service runs on to its next call at once."""
+        for _ in range(CALLS_MAX * 4):
+            if not _E.serve():
+                return
+            req = _E.next_call()
+            if req is None:
+                return
+            ticket, pid, name, args = req
+            p = self.procs.get(pid)
+            env = p.args[2] if p is not None and len(p.args) > 2 else None
             was = _L.current() if _L is not None else SHELL
             if _L is not None:
-                _L.current(p.pid)
+                _L.current(pid)
+            ans = None
             try:
-                req = svc.svc_call(p.native)
-                if req is None:
-                    return
-                name, args = req
                 fn = _CALLS.get(name)
                 if fn is None and env:
                     fn = env.get(name)
-                ans = None
-                try:
-                    if fn is not None:
-                        ans = _json.dumps(fn(*_json.loads(args)))
-                except Exception as exc:  # noqa: BLE001 -- refused, the service told
-                    _log(ERR, p.pid, "%s: %s: %s" % (name, type(exc).__name__, exc))
+                if fn is not None:
+                    ans = _json.dumps(fn(*_json.loads(args)))
+            except Exception as exc:  # noqa: BLE001 -- refused, the service told
+                _log(ERR, pid, "%s: %s: %s" % (name, type(exc).__name__, exc))
             finally:
                 if _L is not None:
                     _L.current(was)
-            svc.svc_answer(p.native, ans)
+            _E.answer(ticket, ans)
             if stepped:
                 svc.svc_step(_ticks_ms())
 
@@ -1053,7 +1073,6 @@ def _aio():
 
 
 SCHED = Scheduler()
-_moybyte.WAKES.teller = SCHED.tell      # `moybyte.tell`: the console's scheduler
 
 
 def tick(slack_us=0):
@@ -1088,11 +1107,13 @@ def prepared(ws, cart):
 
 def attach(ws, sched=None):
     """The console whose settings hold the restart policies and whose
-    processes `tell` reads the app ids of."""
+    processes' app ids and carts stamp their event queues (`_open`)."""
     sched = sched or SCHED
     sched.store = getattr(ws, "system", None)
     procs = getattr(ws, "procs", None)
     sched.app_of = getattr(procs, "app_id", None)
+    who = getattr(procs, "who", None)
+    sched.cart_of = (lambda pid: who(pid)[1]) if who is not None else None
 
 
 def start_cart(ws, cart, sched=None):

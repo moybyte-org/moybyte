@@ -31,6 +31,7 @@ def sched():
         s.tick(10000)
     _clear(wakes)
     wakes.ended = S.SCHED._ended
+    wakes.opener = S.SCHED._open
 
 
 def _cart(src, cid="t.aio"):

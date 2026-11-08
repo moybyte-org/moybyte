@@ -315,6 +315,8 @@ def build_carts(system_carts_dir):
             cart["permissions"] = vendor(man)["permissions"]
         if "handles" in vendor(man):             # the MIME types its app opens
             cart["handles"] = vendor(man)["handles"]
+        if "receives" in vendor(man):            # the message names other apps may send it
+            cart["receives"] = vendor(man)["receives"]
         if vendor(man).get("glass") is True:   # a per-glass wallpaper
             cart["glass"] = True
         if "pictures" in vendor(man):           # a picture wallpaper

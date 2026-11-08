@@ -809,6 +809,11 @@ def _load(path, whole, folder=None):
             # The MIME types the cart's app opens (docs/os_2026-11/
             # between_apps.md section 1): what `open_with` and `share` route by.
             "handles": ven.get("handles", []),
+            # The message names another app's process may send it
+            # (docs/os_2026-11/processes.md section 1, the rule), as the
+            # manifest has them; None without the field. Its queue's open
+            # takes the strings (scheduler._open).
+            "receives": ven.get("receives"),
             # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).

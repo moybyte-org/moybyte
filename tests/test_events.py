@@ -510,8 +510,16 @@ def test_an_on_wake_is_due_while_its_source_has_records_and_reads_them(wakes):
     wakes.call(wid)
     assert got == [mi.EV_KEY_DOWN, mi.EV_TEXT, mi.EV_KEY_UP]
     assert wakes.due(_ticks_ms(), out) == 0
+    # A name that is no input source is a message name (the service model,
+    # docs/os_2026-11/processes.md section 1): a message wake on its
+    # process's event queue, never a due input wake; only no name at all is
+    # refused.
+    mid = wakes.on("lora", on_key)
+    assert wakes.by_id[mid] in wakes.mail and wakes.by_id[mid] not in wakes.list
+    assert wakes.due(_ticks_ms(), out) == 0
+    wakes.cancel(mid)
     with pytest.raises(ValueError):
-        wakes.on("lora", on_key)
+        wakes.on("", on_key)
 
 
 def test_a_process_ending_takes_its_wakes_and_readers(wakes):

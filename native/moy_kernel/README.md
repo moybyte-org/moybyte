@@ -9,7 +9,11 @@ ladder (`moy_idle.h`), the PERF line (`moy_perf.h`), the dev channel
 the dev channel's `log` word reads), the scheduler's callback guard
 (`modmoy_guard.c`, the VM abort), the lease table (`moy_lease.h`, the
 resources a process holds raw), the process table (`moy_proc.h`, a row per
-Lua or compiled run the Player launches) and the kernel's I2C bus (`moy_bus.h`). Each header states how
+Lua or compiled run the Player launches), the service model's three pieces
+(`moy_evq.h`, every process's event queue and the one wait; `moy_super.h`,
+the one supervisor of background callbacks; `moy_vmq.h`, the one queue of
+calls into the VM's task; the module `moy_evq`, `modmoy_evq.c`) and the
+kernel's I2C bus (`moy_bus.h`). Each header states how
 its piece works; `moy_kernel.h` holds the rules every kernel module keeps
 (handles, PSRAM, stopping the VM), and `native/moy_play/moy_play.h` the
 memory shares. The design record is `docs/history/native_kernel_2026-09.md`

@@ -4,10 +4,16 @@
 // and lives until it is stopped, exits or strikes out, whatever app is on
 // screen.
 //
+// It is the Lua face of the one service model (docs/os_2026-11/processes.md
+// section 1): its timers are this library's, its messages its process's
+// event queue (native/moy_kernel/moy_evq.h), its rungs the one supervisor's
+// (moy_super.h) and its calls into the console the VM's queue (moy_vmq.h).
+//
 // WHERE IT RUNS. On the P4s each service runs on a task of its own, pinned to
 // core 0 (MOYCORE_SVC_CORE) at MOYCORE_SVC_PRIO: the task makes the state,
-// runs the chunk and `moy_start`, then waits for its next deadline or a stop
-// and runs what is due, so a callback never runs on the VM's task. The S3s get
+// runs the chunk and `moy_start`, then blocks in the one kernel wait
+// (moy_evq_wait) until its next deadline, a message, an answer or a stop, and
+// runs what is due, so a callback never runs on the VM's task. The S3s get
 // no user service in Lua (the overview's section 5): a start there is BAD.
 // The host and the desktop MicroPython have no task to give: their services
 // run when moycore_svc_step is called (the scheduler's poll, once a frame), on
@@ -21,12 +27,13 @@
 //   moybyte.cancel(id)
 //   moybyte.log(severity, text)    the OS log under the service's pid
 //   moybyte.exit(code)             the service ends with `code`
-//   moybyte.on(name, fn) -> id     fn(...) for each message `name` the OS
-//                                  routes to it (MOYCORE_SVC_MESSAGES:
-//                                  "net" and "ble" are fn(up, why) as WiFi or
-//                                  BLE comes up or goes down, "app" what its
-//                                  own app tells it); a message
-//                                  wake, which `cancel` ends too
+//   moybyte.on(name, fn) -> id     fn(sender, ...) for each message `name`
+//                                  on its event queue, `sender` the app id
+//                                  the OS stamped on it ("system" for the
+//                                  OS's own: "net" and "ble" are
+//                                  fn("system", up, why) as WiFi or BLE comes
+//                                  up or goes down); a message wake, which
+//                                  `cancel` ends too
 //   moybyte.notify(summary[, body[, icon]]) -> id
 //                                  a notification, the console's
 //                                  moybyte.notify under the service's pid
@@ -35,30 +42,33 @@
 //                                  an item (a URL or a user file's path, "Documents/todo.md") or
 //                                  text routed to the app that opens it, the
 //                                  console's own (runtime/system/intents.py)
-//   moybyte.tell(...) -> n         message "app" with these arguments to the
-//                                  other processes of its own app that wait
-//                                  on it (runtime/system/moybyte.py's tell)
+//   moybyte.send(app, name, ...) -> n
+//                                  message `name` to the processes of app
+//                                  `app` that listen on it, under the rule
+//                                  (moy_evq.h): how many took it
 // and `print`, which logs at info. Its allocator counts every byte it holds,
 // in PSRAM on a board, so the task manager's figure is exact
 // (moycore_svc_info's `heap`), and refuses past MOYCORE_SVC_HEAP_MAX.
 //
-// MESSAGES. moycore_svc_send queues a message on the service's row (its
-// arguments a JSON array, decoded into the handler's arguments), at most
-// MOYCORE_SVC_MAIL, the oldest dropped; a service with no wake on its name
-// takes none. The service runs each at its next step, after its due timers:
-// on its task, at once (a send wakes it).
+// MESSAGES are its process's event queue's (moy_evq.h), opened by the OS at
+// its start with its app id and its manifest's `receives` (the start opens
+// one with its id alone where none is open, and closes that one at its end).
+// Each `on` listens on its name; a message taken from the queue is handed to
+// each of its wakes on the name, its JSON array decoded into the handler's
+// arguments after the sender. The service runs them at its next step, after
+// its due timers: on its task, at once (a post wakes it).
 //
 // CONSOLE CALLS. What the console hands a service at its start (`env`, the
 // JSON array [values, calls]): each of `values`' members a global, and each
 // name in `calls` a global function whose call the console answers, as
 // `moybyte.notify` is (its name "moybyte.notify"). Such a call enters the
-// console, so it runs on the VM's task (`moybyte.open_with` and
-// `moybyte.share` are such calls too): the service's call yields its
-// coroutine with the call posted on its row (its name and its arguments as a
-// JSON array), the VM's task takes it (moycore_svc_call), runs it and
-// answers (moycore_svc_answer: a JSON value, or none where the console
-// refused, which the call answers as nil and why), and the service's next
-// step resumes it with the answer. A call waits its answer apart from its
+// console, so it runs on the VM's task (`moybyte.open_with`, `moybyte.share`
+// and `moybyte.send` are such calls too): the service's call yields its
+// coroutine with the call posted on the VM's queue (moy_vmq_post: its name
+// and its arguments as a JSON array), the VM's task takes it (moy_vmq_next),
+// runs it and answers (moy_vmq_answer: a JSON value, or none where the
+// console refused, which the call answers as nil and why), which wakes the
+// service, and its next step resumes it with the answer. A call waits its answer apart from its
 // budget: the abort counts the time it runs, not the time the VM takes to
 // answer. A call from a coroutine the service made itself, or from where it
 // cannot yield, is an error.
@@ -69,17 +79,19 @@
 // state opens (native/moy_app/moy_app_lua.h): `files`, `io` and
 // `os.remove`/`os.rename` with files, `prefs`, `set_theme`, `open_app`, and
 // none it is not granted. Each row runs on the VM's task: on the service's
-// own task the binding's hop posts it on the row and the task waits until the
-// VM's task runs it in place at its next moycore_svc_call (the scheduler's
-// poll), its wait not counted against the call's budget; a stepped service is
-// on the VM's task already and calls the row in place.
+// own task the binding's hop is a hop on the VM's queue (moy_vmq_hop) and the
+// task waits until the VM's task runs it at its next moy_vmq_serve (the
+// scheduler's poll), its wait not counted against the call's budget; a
+// stepped service is on the VM's task already and calls the row in place.
 //
 // THE LIFE. The chunk, then `moy_start()` where it is defined, each under
 // MOYCORE_SVC_STOP_MS: an error ends the service with exit 1, and one that
-// leaves no wake (a timer or a message wake) ends it with 0. Each due timer's callback runs under
-// MOYCORE_SVC_ABORT_US; a callback over it is aborted and struck, and the
-// MOYCORE_SVC_STRIKES'th strike ends the service with 137; an error ends it
-// with 1. A message's handler is a callback alike. A stop (TERM) runs
+// leaves no wake (a timer or a message wake) ends it with 0. Each due
+// timer's callback runs under MOY_SUPER_ABORT_US and is charged to the one
+// supervisor (moy_super.h): an overrun of MOY_SUPER_SLICE_US or an abort is a
+// rung, and a suspended service serves none of its timers or messages until
+// it is resumed; an error ends it with 1. A message's handler is a callback
+// alike. A stop (TERM) runs
 // `moy_stop()` under MOYCORE_SVC_STOP_MS: 0 when it returns, 137 (KILL) when
 // it is aborted. A service whose last wake is gone has exited, 0. The state
 // is closed on the service's task as it ends.
@@ -90,14 +102,11 @@
 // abort. Inside a C function that cannot yield (a sort's comparator) the hook
 // raises instead, and yields at the first Lua instruction after it.
 //
-// Calls from the VM's task: start, stop, send, call, answer, info, reap,
-// reset; step is the stepping caller's. A row's state, exit, heap and cpu are
-// written by the service's task and read by the VM's, its mail is taken
-// under a lock, and a console call passes between the two with the row's
-// `req` (posted by the service, answered by the VM) and a role row with the
-// row's `hop` (posted by the service's task, run by the VM's in
-// moycore_svc_call); a row is reaped (its slot freed) only after it has
-// exited and its task is done.
+// Calls from the VM's task: start, stop, info, reap, reset; step is the
+// stepping caller's. A row's state, exit, heap and cpu are written by the
+// service's task and read by the VM's; messages, console calls and hops pass
+// through the kernel's queues, each under its own lock; a row is reaped (its
+// slot freed) only after it has exited and its task is done.
 
 #ifndef MOYCORE_SVC_H
 #define MOYCORE_SVC_H
@@ -125,16 +134,7 @@ enum {
 #define MOYCORE_SVCS 4u                 // services at once
 #define MOYCORE_SVC_TIMERS 16u          // timers a service holds
 #define MOYCORE_SVC_ONS 4u              // message wakes a service holds
-#define MOYCORE_SVC_MAIL 16u            // messages queued on a service (moybyte.py's MAIL_MAX)
-#define MOYCORE_SVC_NAME 24u            // a message's or a console call's name, its NUL counted
-// The messages the OS routes to a process (runtime/system/moybyte.py's
-// MESSAGES): the notify role's events, the radios' changes ("net" and
-// "ble", each `(up, why)`; docs/os_2026-11/between_apps.md section 4), and
-// "app", what a process of its own app tells it (moybyte.tell).
-#define MOYCORE_SVC_MESSAGES "achieve", "award", "net", "ble", "app"
 #define MOYCORE_SVC_STOP_MS 2000u       // a start's or a stop's limit (TERM to KILL)
-#define MOYCORE_SVC_ABORT_US 300000u    // a callback's limit
-#define MOYCORE_SVC_STRIKES 3u          // aborted callbacks to the end
 #define MOYCORE_SVC_HEAP_MAX (1024u * 1024u)
 #define MOYCORE_SVC_WHY 96u
 #define MOYCORE_SVC_CORE 0
@@ -147,14 +147,14 @@ enum {
 
 typedef struct {
     uint8_t state;
-    uint8_t strikes;
+    uint8_t strikes;            // the supervisor's (moy_super.h)
     int32_t exit;               // once EXITED
     uint32_t heap;              // bytes its state holds now
     uint32_t cpu_us;            // its calls' time, summed (wrapping)
     uint32_t pid;
     char why[MOYCORE_SVC_WHY];  // the error that ended it, "" for none
     uint8_t wakes;              // its timers and message wakes
-    uint8_t mail;               // the messages queued on it
+    uint8_t mail;               // the messages queued on its event queue
 } moycore_svc_info_t;
 
 // Start service `pid` (the OS log's) running Lua source `src` of `n` bytes,
@@ -166,17 +166,6 @@ struct moy_app_run;
 int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
                       const char *env, size_t envn, const struct moy_app_run *app,
                       uint32_t *h);
-// Message `name` with `args` (a JSON array, n bytes) to the service: OK
-// queued, STALE, BAD where it holds no wake on `name`.
-int moycore_svc_send(uint32_t h, const char *name, const char *args, size_t n);
-// The console call the service waits on, unanswered: OK with its name and
-// its arguments (a JSON array, *n bytes), which stay the row's until it is
-// answered; STALE; BAD where it waits on none. A role row its task posted is
-// run here first, in place.
-int moycore_svc_call(uint32_t h, const char **name, const char **args, size_t *n);
-// The console's answer to that call: a JSON value of `n` bytes, or NULL
-// where the console refused it. OK, STALE, BAD where it waits on none.
-int moycore_svc_answer(uint32_t h, const char *ans, size_t n);
 // The TERM: its `moy_stop` runs next on its task. OK, STALE.
 int moycore_svc_stop(uint32_t h);
 int moycore_svc_info(uint32_t h, moycore_svc_info_t *out);

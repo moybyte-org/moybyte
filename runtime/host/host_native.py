@@ -76,7 +76,7 @@ def _module(name):
 def parts(verbose=False):
     """([Part], extra cflags, link flags): what the library is made of here."""
     out = [_module("runtime." + m).PART for m in (
-        "gfx_binding", "glass_binding", "lua_binding", "moy_input", "moy_lease", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "moy_usb", "moy_midi", "moy_media", "moy_loop",
+        "gfx_binding", "glass_binding", "lua_binding", "moy_input", "moy_lease", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "moy_usb", "moy_midi", "moy_media", "moy_loop", "moy_evq",
         "moy_play", "net_binding", "elf_binding")]
     spike = _module("tools.moy_index_spike")
     out += [spike.part(c) for c in (spike.SPINE, spike.FS, spike.INDEX)]

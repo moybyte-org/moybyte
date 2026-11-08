@@ -15,12 +15,18 @@ one, `time.ticks_us()`.
                      PROV_POLL)
   on(source, fn)     wake `fn()` when `source` has records: "keys", "touch",
                      "pad" or "input" (all three); inside `fn`, events() reads
-                     that source's records. Or wake `fn(*args)` for each
-                     MESSAGE the OS routes to this process by that name
-                     ("achieve", "award": the notify role's events, which the
-                     shell sends the achievements process, section 8; "net",
-                     "ble": the radios, below; "app": what a process of its
-                     own app tells it, `tell`)
+                     that source's records. Any other name is a MESSAGE: wake
+                     `fn(sender, *args)` for each message of that name on
+                     this process's event queue, `sender` the app id the OS
+                     stamped on it ("system" for the OS's own: "net" and
+                     "ble", the radios, below)
+  send(app, name, *args)
+                     message `name` with `args` (JSON values) to every
+                     process of app `app` that listens on it, the caller
+                     apart: always within the caller's own app, from another
+                     app only where the receiver's manifest lists `name`
+                     under `receives`, always from the system. How many took
+                     it (native/moy_kernel/moy_evq.h, THE RULE)
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
@@ -58,11 +64,6 @@ one, `time.ticks_us()`.
                      the room. From the loop or a `_thread`; allocates nothing
   snd_close()        the ring given back; snd_counts() its (queued, played,
                      starved, room, open, depth) counters, None before any open
-  tell(*args)        message "app" with `args` to every other process of
-                     the caller's own app (its id, the grant's key) that
-                     waits on it: an app's to its service, a service's to its
-                     app's run. How many took it; the OS routes it as it
-                     routes any message (`send`), each tier's alike
   notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0)
                      post a notification (processes.md section 7) under the
                      `notifications` permission: its id, or None where the
@@ -119,24 +120,30 @@ THE RADIOS (docs/os_2026-11/between_apps.md section 4). WiFi having an
 address and the BLE host running, each coming up or going down, are NET and
 BLE records on the input table's ring source "radio" (moy_input.h, the
 radios), which the drivers post in C on every change and only on one.
-`on("net", fn)` and `on("ble", fn)` are message wakes: `fn(up, why)` for each
-change, `up` a bool and `why` what took it down (the station's disconnect
-reason, NimBLE's reset reason; 0 when it was put down or came up). One ROUTER
-reads that ring for everybody, a wake of the shell's that lives while any
-process waits on "net" or "ble" or anything else asks for it (`radio_keep`,
-the scheduler's Lua services), and queues each change on every such wake
-(`route`), then tells `routed` (the scheduler, which sends it on to the Lua
-services' rows), so one reader serves every process and every tier.
+`on("net", fn)` and `on("ble", fn)` are message wakes: `fn("system", up,
+why)` for each change, `up` a bool and `why` what took it down (the
+station's disconnect reason, NimBLE's reset reason; 0 when it was put down or
+came up). One ROUTER reads that ring for everybody, a wake of the shell's
+that lives while any process waits on "net" or "ble" or anything else asks
+for it (`radio_keep`, the scheduler's Lua services), and routes each change
+from the system to every process that listens on it, whatever its tier
+(`route`, moy_evq_route), so one reader serves every process.
 
-MESSAGES are not ring records: `send(pid, name, args)`, the OS's, queues
-`args` (a tuple) on process `pid`'s wakes on `name` (MAIL_MAX a wake, the
-oldest dropped). A message wake waits in `mail`, apart from `list`: while
-none has a message queued (`queued` is 0) it costs a frame nothing, so the
-scheduler's tick and a board's upcall look at `list` and `queued` alone. A
-send does not ask a board for the service upcall: the console serves what is
-queued at the start of its next frame (scheduler.Scheduler.mail), and a tick
-that runs first serves it too, so a run the kernel drives makes no crossing
-for a message its launch sent.
+MESSAGES are not ring records: they are the kernel's per-process event
+queues (native/moy_kernel/moy_evq.h, the module `moy_evq`), every tier's
+alike. A message wake waits in `mail`, apart from `list`; its process
+LISTENS on its name. The queue is opened at a process's first `on` or
+`send` (`opener`, the scheduler's: its app id and its manifest's
+`receives`) and closed at its end. `post(pid, name, args)` is the OS's own
+message to one process (from the system), `route` an OS event to every
+listener. While `queued` is 0 a message costs a frame nothing, so the
+scheduler's tick and a board's upcall look at `list` and `queued` alone; a
+send from Python sets it, and the scheduler's poll sets it when a message
+reached the VM's processes from another task. A send does not ask a board
+for the service upcall: the console serves what is queued at the start of
+its next frame (scheduler.Scheduler.mail), and a tick that runs first serves
+it too, so a run the kernel drives makes no crossing for a message its
+launch sent.
 """
 
 try:
@@ -154,6 +161,16 @@ try:
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
+try:
+    import moy_evq as _E
+except ImportError:  # host: the runtime package
+    from runtime import moy_evq as _E
+
+try:
+    import json as _json
+except ImportError:  # pragma: no cover - every VM has it
+    _json = None
+
 EV_FIELDS = _I.EV_FIELDS
 EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B = (
     _I.EV_T, _I.EV_SRC, _I.EV_KIND, _I.EV_PROV, _I.EV_A, _I.EV_ID, _I.EV_B)
@@ -168,11 +185,7 @@ EVENT_VERSION = _I.EV_VERSION
 SOURCES = {"keys": _I.EV_KEYS, "touch": _I.EV_TOUCH, "pad": _I.EV_PAD,
            "input": _I.EV_KEYS | _I.EV_TOUCH | _I.EV_PAD}
 
-# A Lua service's row takes the same names and the same depth
-# (native/moycore/moycore_svc.h: MOYCORE_SVC_MESSAGES, MOYCORE_SVC_MAIL),
-# pinned by tests/test_lua_services.py.
-MESSAGES = ("achieve", "award", "net", "ble", "app")
-MAIL_MAX = 16
+SYSTEM = "system"           # the sender of the OS's own messages
 
 # The radios' messages, by the kind of their records.
 RADIO = {NET: "net", BLE: "ble"}
@@ -183,7 +196,7 @@ ALARMS = "alarms"           # the permission `at` needs
 EPERM = 1
 _ON, _EVERY, _AFTER, _MAIL, _RING, _ALARM = 0, 1, 2, 3, 4, 5
 # A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
-# `ms` is its name and its `deadline` the queue of its messages, a ring
+# `ms` is its name (its messages wait on its process's event queue), a ring
 # wake's `ms` the ring source it reads alone and its `deadline` the kinds,
 # an alarm's `ms` whether it wakes the screen and its `deadline` its Unix
 # seconds.
@@ -202,7 +215,7 @@ class Wakes:
         self.table = None
         self.list = []              # the wakes, in the order they were made
         self.mail = []              # the message wakes, likewise
-        self.queued = 0             # messages queued on them
+        self.queued = 0             # 1: a message may wait on a VM process's queue
         self.by_id = {}
         self.readers = {}           # pid -> its events() reader
         self.cur = [-1]             # the reader events() reads; -1: the current process's
@@ -216,8 +229,8 @@ class Wakes:
                                     # wakes goes off: the console lights the screen
         self.radio = None           # the radios' router, a wake of the shell's
         self.radio_keep = False     # something beside a wake wants the router
-        self.routed = None          # fn(name, args) told each radio change routed
-        self.teller = None          # fn(pid, args) -> n: `tell` from process pid (the scheduler's)
+        self.opener = None          # fn(pid): process pid's event queue opened
+                                    # (the scheduler's: its app and `receives`)
         self._rbuf = None
 
     def bind(self, table):
@@ -251,15 +264,27 @@ class Wakes:
             self.added()
         return wid
 
+    def queue(self, pid):
+        """Process `pid`'s event queue, opened where it has none."""
+        if not _E.has(pid):
+            if self.opener is not None:
+                self.opener(pid)
+            else:
+                _E.open(pid, SYSTEM if pid <= SHELL else "pid%d" % pid, "", True)
+
     def on(self, source, fn):
-        if source in MESSAGES:
-            wid = self._add(_MAIL, source, [], fn, -1)
+        kinds = SOURCES.get(source)
+        if kinds is None:
+            if not isinstance(source, str) or not source:
+                raise ValueError("no wake source %r" % (source,))
+            pid = _pid()
+            self.queue(pid)
+            if _E.listen(pid, source, True) != _E.OK:
+                raise OSError("process %d listens on too many names" % pid)
+            wid = self._add(_MAIL, source, None, fn, -1)
             if source == "net" or source == "ble":
                 self.radio_sync()
             return wid
-        kinds = SOURCES.get(source)
-        if kinds is None:
-            raise ValueError("no wake source %r" % (source,))
         if self.table is None:
             raise OSError("no input table bound")
         return self._add(_ON, source, 0, fn, self.table.reader(kinds))
@@ -287,38 +312,45 @@ class Wakes:
         t = int(-(-t // 1))
         return self._add(_ALARM, bool(wake), t, fn, -1)
 
-    def send(self, pid, name, args):
-        """The OS routes message `name` with `args` to process `pid`: queued
-        on each of its wakes on `name`. False where it holds none. It makes
-        no upcall wanted (`added` is not told)."""
-        took = False
-        for w in self.mail:
-            if w[_OWNER] == pid and w[_MS] == name:
-                q = w[_AT]
-                if len(q) >= MAIL_MAX:
-                    q.pop(0)
-                else:
-                    self.queued += 1
-                q.append(args)
-                took = True
-        return took
+    def post(self, pid, name, args, frm=SHELL):
+        """Message `name` with `args` (a tuple of JSON values) from process
+        `frm` (the system by default) to process `pid`, under the rule: True
+        where its queue took it. It makes no upcall wanted (`added` is not
+        told)."""
+        if frm > SHELL:
+            self.queue(frm)
+        ok = _E.post(pid, frm, name, _json.dumps(list(args))) == _E.OK
+        if ok:
+            self.queued = 1
+        return ok
+
+    def send(self, frm, app, name, args):
+        """`moybyte.send` from process `frm`: message `name` to every
+        process of app `app` that listens on it, under the rule. How many
+        took it."""
+        if frm > SHELL:
+            self.queue(frm)
+        took = _E.send(frm, app, name, _json.dumps(list(args)))[0]
+        if took > 0:
+            self.queued = 1
+        return max(0, took)
 
     def route(self, name, args):
-        """Message `name` with `args` queued on every process's wakes on
-        it, then `routed` told: a radio's change. Answers how many took it."""
-        took = 0
-        for w in self.mail:
-            if w[_MS] == name:
-                q = w[_AT]
-                if len(q) >= MAIL_MAX:
-                    q.pop(0)
-                else:
-                    self.queued += 1
-                q.append(args)
-                took += 1
-        if self.routed is not None:
-            self.routed(name, args)
+        """An OS event: message `name` with `args` from the system to every
+        process that listens on it, whatever its tier. How many took it."""
+        took = _E.route(name, _json.dumps(list(args)))
+        if took:
+            self.queued = 1
         return took
+
+    def handlers(self, pid, name, out):
+        """The functions of process `pid`'s wakes on message `name`, into
+        list `out` (cleared first)."""
+        del out[:]
+        for w in self.mail:
+            if w[_OWNER] == pid and w[_MS] == name:
+                out.append(w[_FN])
+        return out
 
     def radio_sync(self):
         """The router made while a process waits on "net" or "ble" or
@@ -373,8 +405,8 @@ class Wakes:
             n = t.events(buf, r) if n == cap else 0
 
     def mail_of(self, pid):
-        """How many messages wait on process `pid`'s wakes."""
-        return sum(len(w[_AT]) for w in self.mail if w[_OWNER] == pid)
+        """How many messages wait on process `pid`'s event queue."""
+        return _E.queued(pid)
 
     def cancel(self, wid):
         w = self.by_id.pop(wid, None)
@@ -382,7 +414,7 @@ class Wakes:
             return False
         if w[_HOW] == _MAIL:
             self.mail.remove(w)
-            self.queued -= len(w[_AT])
+            _E.listen(w[_OWNER], w[_MS], False)
             if w[_MS] == "net" or w[_MS] == "ble":
                 self.radio_sync()
             return True
@@ -406,6 +438,12 @@ class Wakes:
         r = self.readers.pop(pid, None)
         if r is not None and self.table is not None:
             self.table.reader_free(r)
+        if pid > SHELL:
+            _E.close(pid)
+            _E.drop(pid)
+            _E.forget(pid)
+            if self.queued and not _E.ready():
+                self.queued = 0         # what was queued was the ended process's
         if self.ended is not None:
             self.ended(pid)
 
@@ -461,13 +499,6 @@ class Wakes:
                     w[_AT] = None
             out[n] = w[_WID]
             n += 1
-        if self.queued:
-            for w in self.mail:
-                if n == cap:
-                    break
-                if w[_AT]:
-                    out[n] = w[_WID]
-                    n += 1
         return n
 
     def call(self, wid):
@@ -475,14 +506,7 @@ class Wakes:
         or its process's. Its exception is the caller's. An `after` is spent
         by the call, and so is an alarm."""
         w = self.by_id.get(wid)
-        if w is None:
-            return
-        if w[_HOW] == _MAIL:
-            q = w[_AT]
-            fn = w[_FN]
-            while q and self.by_id.get(wid) is w:
-                self.queued -= 1
-                fn(*q.pop(0))
+        if w is None or w[_HOW] == _MAIL:
             return
         cur = self.cur
         was = cur[0]
@@ -698,9 +722,8 @@ def open_with(item, choose=False):
     return _intents().open_with(_pid(), item, bool(choose))
 
 
-def tell(*args):
-    t = WAKES.teller
-    return t(_pid(), args) if t is not None else 0
+def send(app, name, *args):
+    return WAKES.send(_pid(), app, name, args)
 
 
 def share(data, mime):

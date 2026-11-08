@@ -218,7 +218,7 @@ def test_the_achievements_process_serves_the_notify_role():
 
 def test_the_proc_rows_are_the_processs_and_the_links():
     """Each `proc:<name>` row is the process's: a message it wakes on
-    (`moybyte.on(verb, fn)`, moybyte.MESSAGES) or a function of its main;
+    (`moybyte.on(verb, fn)`) or a function of its main;
     and a method of the role's link, taking the grant first (the link is
     what the console registers, runtime/system/achievements.py)."""
     import ast
@@ -233,7 +233,6 @@ def test_the_proc_rows_are_the_processs_and_the_links():
                if isinstance(c, ast.Call) and getattr(c.func, "attr", None) == "on"
                and isinstance(c.args[0], ast.Constant)}
         verbs = {r["verb"] for r in rows}
-        assert ons <= set(moybyte.MESSAGES)
         assert verbs == ons | (fns & verbs), sorted(verbs - ons - fns)
         assert not ons & fns
         cls = links[name]
