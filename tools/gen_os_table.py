@@ -89,7 +89,7 @@ TIERS = ("python", "lua", "wasm", "elf")
 # served on these (the cart verbs, which this source does not hold).
 SPEC_TIERS = ("python", "lua", "wasm")
 
-ROW_FIELDS = {"name", "kind", "server", "perm", "in", "ret", "how", "door", "wasm", "elf",
+ROW_FIELDS = {"name", "kind", "server", "perm", "in", "ret", "how", "door", "wasm", "wasi", "elf",
               "lua", "py", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 PERM_FIELDS = {"perm", "grants", "prompt", "needs", "py", "tiers", "spec"}
@@ -143,9 +143,11 @@ def dump(src):
 # -- the source's views ---------------------------------------------------------
 
 def is_door(r):
-    """A row of the role table, which the ROLE door names by its index."""
+    """A row of the role table, which the ROLE door names by its index: a row
+    a role's server serves, or any row whose fields the door's Python half
+    decodes (a kernel or Python row a compiled app imports)."""
     s = r.get("server")
-    return s in DOOR_SERVERS or (s or "").startswith("proc:")
+    return s in DOOR_SERVERS or (s or "").startswith("proc:") or bool(r.get("door"))
 
 
 def role_of(r):
@@ -204,14 +206,22 @@ def wasm_sig(r):
 
 def wasi_rows(src):
     """The rows a WASI program imports from moybyte.os."""
-    return [r for r in src["rows"] if r.get("wasm") == "wasi"]
+    return [r for r in src["rows"] if r.get("wasi")]
+
+
+def wasi_c(r):
+    """A "wasi" row's C prototype: the kernel's own, or a console call's as
+    the OS table names it (moy_<verb>)."""
+    if "c" in r:
+        return r["c"]
+    return "int32_t %s(%s)" % (c_name(r), ", ".join(c_params(r)) or "void")
 
 
 def wasi_params(r):
     """[(name, kind)] of a "wasi" row's C prototype: "s" a text (a pointer and
     a length in the import), "i" a number."""
     out = []
-    for p in parse(r["c"])[2]:
+    for p in parse(wasi_c(r))[2]:
         name = _param_name(p)
         out.append((name, "s" if p.startswith("const char *") else "i"))
     return out
@@ -224,9 +234,10 @@ def wasi_sig(r):
 
 def door_kinds(r):
     """The row's fields as the door decodes them in Python: `s` text, `o`
-    text where empty is None, `i` a number, `c` a cart, `b` bytes."""
-    m = {"str": "s", "str?": "o", "int": "i", "cart": "c", "bytes": "b"}
-    return "".join(m[t] for _n, t in params(r) if t != "out")
+    text where empty is None, `i` a number, `c` a cart, `b` bytes; an answer's
+    buffer (out) is handed over as its capacity, a number."""
+    m = {"str": "s", "str?": "o", "int": "i", "cart": "c", "bytes": "b", "out": "i"}
+    return "".join(m[t] for _n, t in params(r))
 
 
 def perms_of(r, src):
@@ -247,7 +258,7 @@ def row_tiers(r, src):
     out = set()
     if isinstance(r.get("elf"), int):
         out.add("elf")
-    if r.get("wasm"):
+    if r.get("wasm") or r.get("wasi"):
         out.add("wasm")
     if r.get("lua"):
         out.add("lua")
@@ -471,26 +482,27 @@ def check(src):
         outs = [n for n, t in params(r) if t == "out"]
         if (r.get("ret") == "len") != bool(outs) and r.get("how") != "direct":
             raise TableError("%s: a len answer is what an out parameter holds" % name)
-        if r.get("wasm") not in (None, True, "wasi"):
-            raise TableError("%s's wasm: %r" % (name, r["wasm"]))
-        if r.get("wasm") == "wasi":
-            if "c" not in r or not isinstance(r.get("elf"), int) or kind != "moybyte":
-                raise TableError("%s: a WASI import is a moybyte row the kernel serves" % name)
-            ps = parse(r["c"])[2]
-            if parse(r["c"])[0] != "int" or not all(
-                    p.startswith("const char *") or p.startswith("int ") for p in ps):
+        if r.get("wasm") not in (None, True) or r.get("wasi") not in (None, True):
+            raise TableError("%s's wasm or wasi: %r, %r" % (name, r.get("wasm"), r.get("wasi")))
+        if r.get("wasi"):
+            kernel = "c" in r and isinstance(r.get("elf"), int) and kind == "moybyte"
+            call = "c" not in r and r.get("server") == "call" and "in" in r
+            if not (kernel or call):
+                raise TableError("%s: a WASI import is a moybyte row the kernel serves, or "
+                                 "a console call" % name)
+            ps = parse(wasi_c(r))[2]
+            if parse(wasi_c(r))[0] not in ("int", "int32_t") or not all(
+                    p.startswith("const char *") or p.startswith(("int ", "int32_t "))
+                    for p in ps):
                 raise TableError("%s: a WASI import takes texts and numbers, and answers a "
                                  "number" % name)
-        elif r.get("wasm"):
+        if r.get("wasm"):
             if not ("in" in r and "ret" in r and "how" in r):
                 raise TableError("%s: an import needs in, ret and how" % name)
             if (r["how"] == "direct") != (role_of(r) == "ui"):
                 raise TableError("%s: a direct import is the toolkit's" % name)
-            if r["how"] != "direct":
-                ints = [k for k, (_n, t) in enumerate(params(r)) if t == "int"]
-                if ints not in ([], [0]) or len(outs) > 1 or (outs and params(r)[-1][1] != "out"):
-                    raise TableError("%s: the adapter packs one number first and one "
-                                     "answer last" % name)
+            if r["how"] != "direct" and (len(outs) > 1 or (outs and params(r)[-1][1] != "out")):
+                raise TableError("%s: the adapter writes one answer, last" % name)
         e = r.get("elf")
         if e is not None and not (isinstance(e, int) or e == "deferred"):
             raise TableError("%s's elf: %r" % (name, e))
@@ -502,10 +514,12 @@ def check(src):
             if [n for n, t in params(r) if t == "cart"]:
                 raise TableError("%s: a cart has no C form" % name)
         if r.get("door"):
-            if r.get("server") not in ("shell", "call") and not r["server"].startswith("proc:"):
-                raise TableError("%s: the door's Python half serves shell rows" % name)
-            if "in" not in r or outs:
-                raise TableError("%s: a door row's fields are its in, no out" % name)
+            if r.get("server") == "c":
+                raise TableError("%s: the door's Python half serves no C row" % name)
+            if "in" not in r or len(outs) > 1 or (outs and params(r)[-1][1] != "out"):
+                raise TableError("%s: a door row's fields are its in, one answer last" % name)
+            if outs and "c" not in r and isinstance(r.get("elf"), int):
+                raise TableError("%s: the OS table's door hands no answer's capacity" % name)
         lua, py = r.get("lua") or [], list(r.get("py") or [])
         if role_of(r) in ctx_roles(src):
             py.append(r["name"])
@@ -742,7 +756,7 @@ def _evq_block(path=EVQ_H):
 def _wasi_import(r):
     """A WASI program's side of a "wasi" row: its moybyte.os import, and the
     function by the row's C name over it (each text a pointer and a length)."""
-    ret, name, ps, _v = parse(r["c"])
+    ret, name, ps, _v = parse(wasi_c(r))
     verb = verb_of(r)
     args, call = [], []
     for p, (n, k) in zip(ps, wasi_params(r)):
@@ -755,7 +769,7 @@ def _wasi_import(r):
     imp = "__moy_os_%s" % verb
     return ["int32_t %s(%s)" % (imp, ", ".join(args)),
             '    __attribute__((import_module("%s"), import_name("%s")));' % (WASI_OS, verb),
-            "static inline %s {" % r["c"],
+            "static inline %s {" % wasi_c(r),
             "    int32_t r = %s(%s);" % (imp, ", ".join(call)),
             "    if (r < 0) {",
             "        errno = (int)-r;",
@@ -793,6 +807,9 @@ def gen_sdk_h(table):
          "// the process only on a name it listens on (moy_on); moy_send answers",
          "// how many processes took one.",
          _evq_block(), "",
+         "// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).",
+         "#define MOY_LOG_ERR 3", "#define MOY_LOG_WARNING 4", "#define MOY_LOG_INFO 6",
+         "#define MOY_LOG_DEBUG 7", "",
          "#ifdef __wasm__", "",
          "#include <errno.h>", ""]
     for r in wasi_rows(src):
@@ -800,10 +817,7 @@ def gen_sdk_h(table):
         o.append("")
     o += ["#else", "",
           "// The table the OS hands a module at its load (sdk/src/moyos_crt.c).",
-          TABLE_T, "",
-          "// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).",
-          "#define MOY_LOG_ERR 3", "#define MOY_LOG_WARNING 4", "#define MOY_LOG_INFO 6",
-          "#define MOY_LOG_DEBUG 7", ""]
+          TABLE_T, ""]
     for r in rows:
         if r["kind"] == "moybyte" and r["door"] is None and not r.get("retired"):
             o.append("%s;" % r["c"])
@@ -1043,25 +1057,30 @@ def gen_wasm_h(src):
         if r["how"] == "direct":
             continue
         cps = ["void *e"]
-        num = "NULL"
-        spans = []
+        nums, fields = [], []
         for n, t in params(r):
             if t == "int":
                 cps.append("int32_t %s" % n)
-                num = "&" + n
+                nums.append("q_" + n)
+                fields.append("NUM(q_%s, %s)" % (n, n))
             elif t == "out":
                 cps += ["uint8_t *%s" % n, "uint32_t %s_cap" % n]
+                if r["server"] != "c":
+                    # the door's Python half is handed the answer's capacity
+                    nums.append("q_" + n)
+                    fields.append("NUM(q_%s, %s_cap)" % (n, n))
             else:
                 cps += ["const uint8_t *%s" % n, "uint32_t %s_n" % n]
-                spans.append(n)
+                fields.append("{ %s, %s_n }" % (n, n))
         outs = [n for n, t in params(r) if t == "out"]
         fn = "w_" + ident(r["name"])
         o += _c_decl("static int32_t %s" % fn, cps, " {")
-        if spans:
-            o.append("    span_t s[%d] = { %s };" % (
-                len(spans), ", ".join("{ %s, %s_n }" % (n, n) for n in spans)))
-        o.append("    return run(e, %s, MOY_T_%s, %s, %s, %d, %s, %s);" % (
-            r["how"].upper(), upper(r["name"]), num, "s" if spans else "NULL", len(spans),
+        if nums:
+            o.append("    uint8_t %s;" % ", ".join("%s[4]" % q for q in nums))
+        if fields:
+            o.append("    span_t f[%d] = { %s };" % (len(fields), ", ".join(fields)))
+        o.append("    return run(e, %s, MOY_T_%s, %s, %d, %s, %s);" % (
+            r["how"].upper(), upper(r["name"]), "f" if fields else "NULL", len(fields),
             outs[0] if outs else "NULL", (outs[0] + "_cap") if outs else "0"))
         o.append("}")
     o += ["", "// The natives, in the role table's order, and the table row each serves.",
@@ -1112,7 +1131,7 @@ def lua_names(src):
 def lua_calls(src):
     """The console calls a Lua service holds as moybyte.<verb>."""
     return [verb_of(r) for r in door_rows(src)
-            if role_of(r) == "moybyte" and r.get("lua")]
+            if role_of(r) == "moybyte" and r.get("server") == "call" and r.get("lua")]
 
 
 def lua_run_calls(src):
@@ -1272,8 +1291,8 @@ def gen_doc(src):
         if r.get("retired"):
             continue
         cname = cnames.get(r["name"]) or (parse(r["c"])[1] if "c" in r else None)
-        imported = (ident(r["name"]) if r.get("wasm") is True
-                    else "%s.%s" % (WASI_OS, verb_of(r)) if r.get("wasm") else None)
+        imported = ([ident(r["name"])] if r.get("wasm") else []) + (
+            ["%s.%s" % (WASI_OS, verb_of(r))] if r.get("wasi") else [])
         if not (cname or imported or r.get("lua")):
             continue
         perms = perms_of(r, src)
@@ -1282,7 +1301,7 @@ def gen_doc(src):
             py = ["ctx.%s" % r["name"]] + py
         o.append("| `%s` | %s | %s | %s | %s | %s |" % (
             r["name"], _cell(perms) or "none", _cell(py), _cell(r.get("lua")),
-            _cell([imported] if imported else []), _cell([cname] if cname else [])))
+            _cell(imported), _cell([cname] if cname else [])))
     text = _splice(APP_DOC, "\n".join(o) + "\n", MD_BEGIN, MD_END)
     return _splice(APP_DOC, "\n".join(roles) + "\n", MD_ROLES_BEGIN, MD_END, text)
 

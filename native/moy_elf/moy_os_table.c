@@ -130,6 +130,21 @@ int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime) {
     return moy_os_call(163u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.share
 }
 
+int32_t moy_os_moy_award(const char *id) {
+    const moy_os_arg_t a[1] = {
+        { id, 0u, 0, MOY_OS_ARG_STR },
+    };
+    return moy_os_call(165u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.award
+}
+
+int32_t moy_os_moy_progress(const char *id, int32_t value) {
+    const moy_os_arg_t a[2] = {
+        { id, 0u, 0, MOY_OS_ARG_STR },
+        { NULL, 0u, value, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(166u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.progress
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -235,6 +250,8 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_share,
         (void *)moy_os_moy_send,
         (void *)moy_os_moy_on,
+        (void *)moy_os_moy_award,
+        (void *)moy_os_moy_progress,
     },
 };
 
@@ -321,4 +338,6 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_share",
     "moy_send",
     "moy_on",
+    "moy_award",
+    "moy_progress",
 };

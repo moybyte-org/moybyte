@@ -9,6 +9,21 @@
       "clipboard",
       "files:documents",
       "notifications"
+    ],
+    "achievements": [
+      {
+        "id": "first",
+        "title": "First Call",
+        "icon": "star",
+        "hint": "Run it"
+      },
+      {
+        "id": "far",
+        "title": "Far Call",
+        "icon": "run",
+        "hint": "Call five times",
+        "goal": 5
+      }
     ]
   }
 }

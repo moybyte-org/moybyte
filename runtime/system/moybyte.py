@@ -783,6 +783,44 @@ def _intents_end(pid):
 ENDS.append(_intents_end)
 
 
+# A compiled app's window events (runtime/run/player.py, for a wasm app that
+# declares the moybyte.app extension): each a message from the system its
+# process hears where it listens on its name, as it hears any other, and a
+# granted item a handle its item_read and item_write take
+# (runtime/shell/shell_servers.py, ConsoleCalls).
+_ITEMS = {}                 # pid -> {handle: grant}
+_ITEM_NEXT = [1]
+
+
+def _compiled_events(ns, pid):
+    """`_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`
+    of the run of process `pid` into its namespace `ns`, each posted to it:
+    `moy_open` as (handle, mime, mode, name), a cancelled pick's as
+    (0, None, None, None)."""
+    def post(name, *args):
+        WAKES.post(pid, name, args)
+
+    def give(g):
+        if g is None:
+            return post("moy_open", 0, None, None, None)
+        h = _ITEM_NEXT[0]
+        _ITEM_NEXT[0] = h + 1
+        _ITEMS.setdefault(pid, {})[h] = g
+        post("moy_open", h, g.mime, g.mode, g.name)
+
+    ns["_minimise"] = lambda: post("_minimise")
+    ns["_restore"] = lambda: post("_restore")
+    ns["moy_action"] = lambda nid, key: post("moy_action", nid, key)
+    ns["moy_open"] = give
+
+
+def _items_end(pid):
+    _ITEMS.pop(pid, None)
+
+
+ENDS.append(_items_end)
+
+
 def log(level, text):
     if _L is not None:
         _L.write(max(0, min(7, int(level))), _pid(), str(text))

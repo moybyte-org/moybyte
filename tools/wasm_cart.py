@@ -80,7 +80,11 @@ def assemble(src):
     clang (`tools/jet_cart.py` finds or fetches it) or `src/main.rs` by
     rustc for `wasm32-wasip1`, each as the toolchain builds any program,
     with no flag of ours but the SDK's headers on a C program's include path
-    (`moybyte/os.h`: the event descriptor and the moybyte.os imports), and
+    (`moybyte/os.h`: the event descriptor and the moybyte.os imports) and,
+    for a C cart that is no WASI program (an app or a game: no command or
+    service), clang's reactor model, so the exports it names (`_init`,
+    `_update`, `_draw`) are its loop and no `_start` or `main` is linked,
+    and its memory fixed at the manifest's `memory` pages, as a cart's is;
     its DWARF stripped (`strip_debug`)."""
     wat_src = os.path.join(src, SOURCE)
     if os.path.isfile(wat_src):
@@ -100,6 +104,11 @@ def assemble(src):
             cmd = [os.path.join(sdk, "bin", "clang"), "--target=wasm32-wasip1",
                    "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"), "-O2",
                    "-I", os.path.join(ROOT, "sdk", "include"), "-o", out, c_src]
+            man = manifest(src)
+            if (man.get("moybyte") or {}).get("type") not in ("command", "service"):
+                mem = "%d" % (int(man.get("memory") or 1) * 65536)
+                cmd[-3:-3] = ["-mexec-model=reactor", "-Wl,--initial-memory=" + mem,
+                              "-Wl,--max-memory=" + mem]
         elif os.path.isfile(rs_src):
             rustc = shutil.which("rustc")
             if rustc is None or not rust_wasip1():

@@ -37,6 +37,8 @@ import moy_app
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVERS = ("shell", "c", "call")
+# A kernel or Python row a compiled app imports is the door's too.
+DOOR_ONLY = ("kernel", "python")
 PROC = "proc:"
 
 
@@ -63,7 +65,8 @@ def test_the_table_is_well_formed():
         key = (r["role"], r["verb"])
         assert key not in seen, "row twice: %s.%s" % key
         seen.add(key)
-        assert r["server"] in SERVERS or r["server"].startswith(PROC), r
+        assert r["server"] in SERVERS or r["server"].startswith(PROC) or (
+            r["server"] in DOOR_ONLY and r["wasm"] is not None), r
         assert r["wasm"] is None or isinstance(r["wasm"], str), r
 
 
@@ -149,7 +152,7 @@ def test_the_doors_shell_rows_take_their_servers_arguments():
                "moybyte": ss.ConsoleCalls}
     for name, kinds in ss.DOOR_ARGS.items():
         r = rows[name]
-        assert r["server"] in ("shell", "call") or r["server"].startswith(PROC), name
+        assert r["server"] in ("shell", "call") + DOOR_ONLY or r["server"].startswith(PROC), name
         role, verb = name.split(".")
         params = list(inspect.signature(getattr(servers[role], verb)).parameters.values())[2:]
         assert len(params) >= len(kinds), (name, kinds)
@@ -159,9 +162,11 @@ def test_the_doors_shell_rows_take_their_servers_arguments():
 
 
 def test_the_console_calls_are_the_door_rows_of_the_moybyte_role():
-    """Each `call` row the door decodes is a method of the door's console-call
-    server, which runs the `moybyte` module's function of the same name; a
-    method no row names is a call nothing can reach."""
+    """Each `moybyte` row the door decodes is a method of the door's
+    console-call server, which runs the `moybyte` module's function of the
+    same name where a Python program holds one (the rest are a compiled
+    app's own: its queue's read and its granted items'); a method no row
+    names is a call nothing can reach."""
     from runtime import shell_servers as ss
     from runtime import moybyte
     rows = [r for r in _rows() if r["server"] == "call"]
@@ -169,7 +174,10 @@ def test_the_console_calls_are_the_door_rows_of_the_moybyte_role():
     door = {n.split(".")[1] for n in ss.DOOR_ARGS if n.startswith("moybyte.")}
     have = {n for n in dir(ss.ConsoleCalls) if not n.startswith("_")}
     assert have == door
-    assert all(callable(getattr(moybyte, v)) for v in door)
+    py = {r["name"][8:] for r in gen_os_table.load()["rows"]
+          if r["name"] in ss.DOOR_ARGS and r["name"] in (r.get("py") or ())}
+    assert py == door - {"recv", "item_read", "item_write"}
+    assert all(callable(getattr(moybyte, v)) for v in py)
 
 
 def test_the_shell_rows_are_the_servers_methods():

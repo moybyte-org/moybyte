@@ -846,3 +846,23 @@ int moy_on(const char *name, int on)
     return ((moy_os_fn_moy_on *)__moy_os->fn[81])(name, on);
 }
 #endif
+
+#if MOY_OS_ROW(82)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_award(const char *id);
+MOY_OS_USED(82);
+int32_t moy_award(const char *id)
+{
+    return ((moy_os_fn_moy_award *)__moy_os->fn[82])(id);
+}
+#endif
+
+#if MOY_OS_ROW(83)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_progress(const char *id, int32_t value);
+MOY_OS_USED(83);
+int32_t moy_progress(const char *id, int32_t value)
+{
+    return ((moy_os_fn_moy_progress *)__moy_os->fn[83])(id, value);
+}
+#endif

@@ -623,6 +623,7 @@ class ShellDoor:
         try:
             while code == rt.RUNNING:
                 code, why = self._as_pid(pid, rt.step, pid, STEP_MS)
+                _sched.SCHED.calls()
                 _noticed()
                 if code == rt.RUNNING:
                     yield False

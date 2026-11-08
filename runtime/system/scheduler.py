@@ -1068,6 +1068,12 @@ class Scheduler:
             if stepped:
                 svc.svc_step(_ticks_ms())
 
+    def calls(self):
+        """The VM's queue served now (`_answer`): what a foreground compiled
+        command posted, between its job's steps, whether or not a service's
+        poll runs."""
+        self._answer(None, False)
+
     def hook(self, pid, name, *args):
         """Run live service `pid`'s hook `name(*args)` (`moy_action`, a
         notification acted on) as a callback: under the guard and the rungs.

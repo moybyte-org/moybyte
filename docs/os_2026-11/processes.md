@@ -166,7 +166,9 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   one kernel wait with the program's nearest deadline as its timeout, so a
   timer is a deadline and no hook is dispatched. Both listen and send with
   the same two rows, `moy_on` and `moy_send` (a WASI program's `moybyte.os`
-  imports), the kernel's own on the program's thread. A compiled command's
+  imports), the kernel's own on the program's thread. A compiled app reads
+  the same record from its own queue with `moybyte_recv`
+  (`docs/app_api_v1.md` §8). A compiled command's
   process gets a queue from the shell's door (`runtime/shell/sh_door.py`),
   and a compiled service's from the scheduler, its app id and `receives`;
   its stop hangs the descriptor up (`POLLHUP`, WASI's hangup flag, a read's

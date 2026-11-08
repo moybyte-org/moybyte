@@ -66,7 +66,8 @@ permissions grant, the OS log for a background run's streams, Ctrl-C and the
 budget). No row is a second implementation of a shell or WASI call.
 
 **An app call** (`moy_files_*`, `moy_prefs_*`, `moy_clipboard_*`,
-`moy_nav_open_app`, `moy_notify`, `moy_open_with`, `moy_share`; the table is
+`moy_nav_open_app`, `moy_notify`, `moy_open_with`, `moy_share`, `moy_award`,
+`moy_progress`; the table is
 `docs/app_api_v1.md`'s call table) is a row of the app ABI's role table,
 reached through the same door a compiled app's import is
 (`native/moy_app/moy_app.h`'s `moy_app_role`): its generated body packs its

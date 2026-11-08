@@ -2027,6 +2027,9 @@ class Player(PlayerDiag):
             # imports serve it. A game has none, and the console's state is
             # the one its `ui` reads the theme from (moy_app_wasm.h).
             ns["_moy_app"] = self._app_run(ws.cart)
+            if runtime == "wasm" and APP_EXT in ((ws.cart or {}).get("extensions") or ()):
+                # A compiled app hears its window events as messages.
+                _moybyte._compiled_events(ns, self.pid)
             # The cart's code loads and inits inside the app-cart boundary, as
             # a Python cart's exec and _init do (docs/theme_and_shell_2026-11.md §3.7).
             _was = _cart_text(True)

@@ -1,10 +1,11 @@
 // moy_wasi: WASI preview1 for a compiled command (docs/os_2026-11/tiers.md
 // section 3): the imports a module built by wasi-sdk, Rust's
 // `wasm32-wasip1` or Zig makes from `wasi_snapshot_preview1`, plus what WASI
-// lacks: `moybyte.term`'s `term_size`, and `moybyte.os`'s `send` and `on`,
-// the rows of native/os_calls.json a WASI program shares with an ELF module
-// (moy_wasi_os_rows.h, generated; sdk/include/moybyte/os.h declares them
-// under the C names moy_send and moy_on). A command is its module's
+// lacks: `moybyte.term`'s `term_size`, and `moybyte.os`'s `send`, `on`,
+// `log`, `notify`, `award` and `progress`, the rows of native/os_calls.json
+// a WASI program shares with an ELF module (moy_wasi_os_rows.h, generated;
+// sdk/include/moybyte/os.h declares them under their C names, moy_send and
+// the rest; the console calls are moy_wasi.c's THE CONSOLE CALLS). A command is its module's
 // `_start`, run in a shell session's process (moy_sh.h's spawn).
 //
 // THE EVENT DESCRIPTOR. The run's process is its background pid, else the
@@ -18,8 +19,9 @@
 // clock. Each wake, from a poll of the descriptor's return to the next
 // poll of it, is charged to the one supervisor (moy_super.h), less what its
 // calls waited for the session's task; while the supervisor holds the
-// process suspended, its poll waits unserved. send and on are the kernel's
-// calls on the module's thread, answering a number or a WASI errno below 0.
+// process suspended, its poll waits unserved. send, on and log are the
+// kernel's calls on the module's thread, answering a number or a WASI errno
+// below 0.
 //
 // ADAPTERS, NOT A SECOND OS. Each import keeps WASI's name and calls the C a
 // shell built-in calls: stdio is the session's descriptors 0, 1 and 2 (the

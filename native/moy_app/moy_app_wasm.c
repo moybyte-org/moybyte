@@ -131,10 +131,13 @@ static void le32(uint8_t *q, uint32_t v) {
     q[3] = (uint8_t)(v >> 24);
 }
 
-// Row `row` with its text fields `s` and, where `num` is not NULL, one number
-// field first: packed as moy_app_role's fields, then run as `how` says.
-static int32_t run(void *e, int how, int row, const int32_t *num, const span_t *s, int ns,
-                   uint8_t *ans, uint32_t cap) {
+// A number as a field: its four bytes, little-endian, in `q`.
+#define NUM(q, v) { (le32((q), (uint32_t)(v)), (q)), 4u }
+
+// Row `row` with its fields `f` (a text, a blob or a NUM each, in the row's
+// order) packed as moy_app_role's, then run as `how` says.
+static int32_t run(void *e, int how, int row, const span_t *f, int nf, uint8_t *ans,
+                   uint32_t cap) {
     const moy_app_run_t *rn = run_of(e);
     if (rn == NULL || row < 0) {
         return -MOY_APP_STALE;
@@ -142,26 +145,21 @@ static int32_t run(void *e, int how, int row, const int32_t *num, const span_t *
     moy_appabi_t *a = rn->a;
     uint32_t g = rn->g;
     uint8_t stack[320];
-    size_t n = num != NULL ? 8u : 0u;
-    for (int i = 0; i < ns; i++) {
-        n += 4u + s[i].n;
+    size_t n = 0;
+    for (int i = 0; i < nf; i++) {
+        n += 4u + f[i].n;
     }
     uint8_t *buf = n <= sizeof stack ? stack : malloc(n);
     if (buf == NULL) {
         return -MOY_APP_NOMEM;
     }
     size_t at = 0;
-    if (num != NULL) {
-        le32(buf, 4u);
-        le32(buf + 4, (uint32_t)*num);
-        at = 8;
-    }
-    for (int i = 0; i < ns; i++) {
-        le32(buf + at, s[i].n);
-        if (s[i].n) {
-            memcpy(buf + at + 4, s[i].p, s[i].n);
+    for (int i = 0; i < nf; i++) {
+        le32(buf + at, f[i].n);
+        if (f[i].n) {
+            memcpy(buf + at + 4, f[i].p, f[i].n);
         }
-        at += 4u + s[i].n;
+        at += 4u + f[i].n;
     }
     int32_t r;
     if (how == SEQ) {
@@ -350,7 +348,11 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
     if (role == MOY_ROLE_UI) {
         return 0;                   // the toolkit's rows: every compiled app's, no grant
     }
-    int ungated = role == MOY_ROLE_THEME && moy_app_table_c_row((uint32_t)row) != MOY_APP_SHELL;
+    // The console calls are every grant's (MOY_ROLE_FLOOR), each answered under
+    // the permission it names; the theme's reads need none.
+    int ungated = ((MOY_ROLE_FLOOR >> role) & 1u)
+                  || (role == MOY_ROLE_THEME
+                      && moy_app_table_c_row((uint32_t)row) != MOY_APP_SHELL);
     if ((!ungated && !(r->roles & (1u << role)))
         || moy_app_holds(r->a, r->g, role) != MOY_APP_OK) {
         const char *perm = moy_app_perm_of(role);

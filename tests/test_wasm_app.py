@@ -8,7 +8,13 @@ the host's WAMR, the load's grant check and the VM-free verdict's clauses.
   * the same module one permission short is refused at load, the import named;
   * tests/fixtures/wasm/app_shell.moy imports a shell-served row, and the
     verdict keeps the VM for it with the import as its `why` (moy_play's
-    census, over native/moy_app's table as on a board).
+    census, over native/moy_app's table as on a board);
+  * tests/fixtures/wasm/app_talk.moy, a C app, makes the console calls a
+    Python and a Lua app make (docs/app_api_v1.md sections 8 and 9): it pings
+    the Echo service and reads the answer as its event record, notifies,
+    awards the badge it declares, hears its alarm as the system's message and
+    writes the OS log, each under the permission it is under on every tier,
+    and reads an item handed to it by its window event.
 """
 
 import json
@@ -16,7 +22,8 @@ import os
 
 import pytest
 
-from runtime import host_app, moy_loop
+from runtime import host_app, moy_evq, moy_loop, notifications, os_log, scheduler as S
+from runtime import moy_log as L
 from tools import wasm_cart
 from ws_helpers import open_cart
 
@@ -26,6 +33,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures", "wasm")
 ROLES = os.path.join(FIXTURES, "app_roles.moy")
 SHELL = os.path.join(FIXTURES, "app_shell.moy")
+TALK = os.path.join(FIXTURES, "app_talk.moy")
+ECHO = os.path.join(ROOT, "tests", "fixtures", "apps", "echo_lua.moy")
 _DT = 1.0 / 30.0
 
 
@@ -142,3 +151,90 @@ def test_the_verdict_keeps_the_vm_for_a_shell_import(tmp_path):
     with open(p, "w") as f:
         json.dump(man, f)
     assert moy_play.census(roles) == ("wasm", False, "permission")
+
+
+
+def _talk(tmp_path, off=()):
+    """App Talk opened beside the running Echo service, its permissions `off`
+    turned off in Settings first: its process's OS log lines after its frames
+    and the scheduler's serves, and its pid."""
+    import shutil
+    _binding_or_skip()
+    if S._svc() is None:
+        pytest.skip("no Lua runtime on this host")
+    try:
+        built = str(tmp_path / "built" / "app_talk.moy")
+        wasm_cart.build(TALK, built)
+    except wasm_cart.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root)
+    shutil.copytree(built, os.path.join(root, "app_talk.moy"))
+    shutil.copytree(ECHO, os.path.join(root, "echo_lua.moy"))
+    ws.carts.rescan()
+    echo = S.start_cart(ws, next(c for c in ws.carts.all if c["title"] == "Echo"))
+    assert echo is not None
+    for perm in off:
+        ws.consent.turn("local.talk", perm, False)
+    since = L.next()
+    try:
+        open_cart(ws, "Talk")
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
+        pid = ws.run.player.pid
+        for _ in range(4):
+            S.SCHED.mail()
+            S.SCHED.poll()
+            S.SCHED.tick(0)
+            _frames(ws, 1)
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    finally:
+        S.SCHED.stop(echo)
+    return ws, pid, [t for _s, _t, _l, q, t in os_log.records(since, 256) if q == pid]
+
+
+@pytest.fixture
+def talk(tmp_path):
+    """_talk, its run closed after, so its queue goes with it."""
+    held = []
+
+    def run(off=()):
+        got = _talk(tmp_path, off)
+        held.append(got[:2])
+        return got
+    yield run
+    for ws, pid in held:
+        ws.exit()
+        assert not moy_evq.has(pid), "the run's queue closes with it"
+
+
+def test_a_compiled_app_talks_to_a_service_notifies_awards_and_hears_its_alarm(talk):
+    ws, pid, lines = talk()
+    assert "send 1" in lines, lines
+    assert "heard pong from local.echo [42]" in lines, lines
+    note = [ln for ln in lines if ln.startswith("notify ")]
+    assert note and int(note[0].split()[1]) > 0, lines
+    assert [(n.summary, n.body, n.pid) for n in notifications.NOTES.list
+            if n.pid == pid] == [("Talk", "Sent a ping", pid)]
+    assert "award 1" in lines, lines
+    assert ws.ach.has("local.talk", "hello"), "the badge it declares is found"
+    at = [ln for ln in lines if ln.startswith("at ")]
+    assert at and int(at[0].split()[1]) > 0, lines
+    assert "heard moybyte.at from system [%s]" % at[0].split()[1] in lines, lines
+
+
+def test_a_compiled_app_hears_an_item_handed_to_it_and_reads_it(talk):
+    from runtime import intents
+    ws, pid, _lines = talk()
+    since = L.next()
+    assert ws.run.player.window_event("moy_open", intents.Grant("text/plain", "r", data=b"a gift"))
+    _frames(ws, 2)
+    lines = [t for _s, _t, _l, q, t in os_log.records(since, 64) if q == pid]
+    heard = [ln for ln in lines if ln.startswith("heard moy_open from system [")]
+    assert heard and heard[0].endswith(', "text/plain", "r", null]'), lines
+    assert "item a gift" in lines, lines
+
+
+def test_a_compiled_app_is_refused_what_its_permissions_do_not_grant(talk):
+    _ws, _pid, lines = talk(off=("notifications", "alarms"))
+    assert "notify -4" in lines and "at -4" in lines, lines      # MOY_APP_DENIED
+    assert "heard pong from local.echo [42]" in lines, lines     # messages need none

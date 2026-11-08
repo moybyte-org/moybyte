@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 66
+#define MOY_APP_WASM_N 79
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -79,93 +79,160 @@ int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t) UI_WEA
 int32_t moy_ui_wasm_held_all(void *) UI_WEAK;
 
 static int32_t w_theme_token(void *e, int32_t role) {
-    return run(e, SEQ, MOY_T_THEME_TOKEN, &role, NULL, 0, NULL, 0);
+    uint8_t q_role[4];
+    span_t f[1] = { NUM(q_role, role) };
+    return run(e, SEQ, MOY_T_THEME_TOKEN, f, 1, NULL, 0);
 }
 static int32_t w_theme_gen(void *e) {
-    return run(e, SEQ, MOY_T_THEME_GEN, NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, MOY_T_THEME_GEN, NULL, 0, NULL, 0);
 }
 static int32_t w_theme_light(void *e) {
-    return run(e, SEQ, MOY_T_THEME_LIGHT, NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, MOY_T_THEME_LIGHT, NULL, 0, NULL, 0);
 }
 static int32_t w_theme_name(void *e, uint8_t *name, uint32_t name_cap) {
-    return run(e, SEQ, MOY_T_THEME_NAME, NULL, NULL, 0, name, name_cap);
+    return run(e, SEQ, MOY_T_THEME_NAME, NULL, 0, name, name_cap);
 }
 static int32_t w_theme_variant(void *e, uint8_t *variant, uint32_t variant_cap) {
-    return run(e, SEQ, MOY_T_THEME_VARIANT, NULL, NULL, 0, variant, variant_cap);
+    return run(e, SEQ, MOY_T_THEME_VARIANT, NULL, 0, variant, variant_cap);
 }
 static int32_t w_theme_set(void *e, const uint8_t *name, uint32_t name_n, const uint8_t *variant,
                            uint32_t variant_n) {
-    span_t s[2] = { { name, name_n }, { variant, variant_n } };
-    return run(e, HOP, MOY_T_THEME_SET, NULL, s, 2, NULL, 0);
+    span_t f[2] = { { name, name_n }, { variant, variant_n } };
+    return run(e, HOP, MOY_T_THEME_SET, f, 2, NULL, 0);
 }
 static int32_t w_theme_set_variant(void *e, const uint8_t *variant, uint32_t variant_n) {
-    span_t s[1] = { { variant, variant_n } };
-    return run(e, HOP, MOY_T_THEME_SET_VARIANT, NULL, s, 1, NULL, 0);
+    span_t f[1] = { { variant, variant_n } };
+    return run(e, HOP, MOY_T_THEME_SET_VARIANT, f, 1, NULL, 0);
 }
 static int32_t w_theme_edit_file(void *e) {
-    return run(e, HOP, MOY_T_THEME_EDIT_FILE, NULL, NULL, 0, NULL, 0);
+    return run(e, HOP, MOY_T_THEME_EDIT_FILE, NULL, 0, NULL, 0);
 }
 static int32_t w_files_readable(void *e) {
-    return run(e, HOP, MOY_T_FILES_READABLE, NULL, NULL, 0, NULL, 0);
+    return run(e, HOP, MOY_T_FILES_READABLE, NULL, 0, NULL, 0);
 }
 static int32_t w_files_ready(void *e) {
-    return run(e, HOP, MOY_T_FILES_READY, NULL, NULL, 0, NULL, 0);
+    return run(e, HOP, MOY_T_FILES_READY, NULL, 0, NULL, 0);
 }
 static int32_t w_files_list(void *e, const uint8_t *kind, uint32_t kind_n, uint8_t *names,
                             uint32_t names_cap) {
-    span_t s[1] = { { kind, kind_n } };
-    return run(e, HOP, MOY_T_FILES_LIST, NULL, s, 1, names, names_cap);
+    span_t f[1] = { { kind, kind_n } };
+    return run(e, HOP, MOY_T_FILES_LIST, f, 1, names, names_cap);
 }
 static int32_t w_files_count(void *e, const uint8_t *kind, uint32_t kind_n) {
-    span_t s[1] = { { kind, kind_n } };
-    return run(e, HOP, MOY_T_FILES_COUNT, NULL, s, 1, NULL, 0);
+    span_t f[1] = { { kind, kind_n } };
+    return run(e, HOP, MOY_T_FILES_COUNT, f, 1, NULL, 0);
 }
 static int32_t w_files_load(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
                             uint32_t name_n, uint8_t *data, uint32_t data_cap) {
-    span_t s[2] = { { kind, kind_n }, { name, name_n } };
-    return run(e, HOP, MOY_T_FILES_LOAD, NULL, s, 2, data, data_cap);
+    span_t f[2] = { { kind, kind_n }, { name, name_n } };
+    return run(e, HOP, MOY_T_FILES_LOAD, f, 2, data, data_cap);
 }
 static int32_t w_files_save(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
                             uint32_t name_n, const uint8_t *data, uint32_t data_n, uint8_t *saved,
                             uint32_t saved_cap) {
-    span_t s[3] = { { kind, kind_n }, { name, name_n }, { data, data_n } };
-    return run(e, HOP, MOY_T_FILES_SAVE, NULL, s, 3, saved, saved_cap);
+    span_t f[3] = { { kind, kind_n }, { name, name_n }, { data, data_n } };
+    return run(e, HOP, MOY_T_FILES_SAVE, f, 3, saved, saved_cap);
 }
 static int32_t w_files_delete(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
                               uint32_t name_n, uint8_t *trashed, uint32_t trashed_cap) {
-    span_t s[2] = { { kind, kind_n }, { name, name_n } };
-    return run(e, HOP, MOY_T_FILES_DELETE, NULL, s, 2, trashed, trashed_cap);
+    span_t f[2] = { { kind, kind_n }, { name, name_n } };
+    return run(e, HOP, MOY_T_FILES_DELETE, f, 2, trashed, trashed_cap);
 }
 static int32_t w_nav_open_app(void *e, const uint8_t *id, uint32_t id_n) {
-    span_t s[1] = { { id, id_n } };
-    return run(e, HOP, MOY_T_NAV_OPEN_APP, NULL, s, 1, NULL, 0);
+    span_t f[1] = { { id, id_n } };
+    return run(e, HOP, MOY_T_NAV_OPEN_APP, f, 1, NULL, 0);
 }
 static int32_t w_prefs_get(void *e, const uint8_t *key, uint32_t key_n, uint8_t *json,
                            uint32_t json_cap) {
-    span_t s[1] = { { key, key_n } };
-    return run(e, HOP, MOY_T_PREFS_GET, NULL, s, 1, json, json_cap);
+    span_t f[1] = { { key, key_n } };
+    return run(e, HOP, MOY_T_PREFS_GET, f, 1, json, json_cap);
 }
 static int32_t w_prefs_set(void *e, const uint8_t *key, uint32_t key_n, const uint8_t *json,
                            uint32_t json_n) {
-    span_t s[2] = { { key, key_n }, { json, json_n } };
-    return run(e, HOP, MOY_T_PREFS_SET, NULL, s, 2, NULL, 0);
+    span_t f[2] = { { key, key_n }, { json, json_n } };
+    return run(e, HOP, MOY_T_PREFS_SET, f, 2, NULL, 0);
 }
 static int32_t w_prefs_clear(void *e, const uint8_t *key, uint32_t key_n) {
-    span_t s[1] = { { key, key_n } };
-    return run(e, HOP, MOY_T_PREFS_CLEAR, NULL, s, 1, NULL, 0);
+    span_t f[1] = { { key, key_n } };
+    return run(e, HOP, MOY_T_PREFS_CLEAR, f, 1, NULL, 0);
 }
 static int32_t w_clipboard_put_text(void *e, const uint8_t *text, uint32_t text_n) {
-    span_t s[1] = { { text, text_n } };
-    return run(e, HOP, MOY_T_CLIPBOARD_PUT_TEXT, NULL, s, 1, NULL, 0);
+    span_t f[1] = { { text, text_n } };
+    return run(e, HOP, MOY_T_CLIPBOARD_PUT_TEXT, f, 1, NULL, 0);
 }
 static int32_t w_clipboard_text(void *e, uint8_t *text, uint32_t text_cap) {
-    return run(e, SEQ, MOY_T_CLIPBOARD_TEXT, NULL, NULL, 0, text, text_cap);
+    return run(e, SEQ, MOY_T_CLIPBOARD_TEXT, NULL, 0, text, text_cap);
 }
 static int32_t w_clipboard_kind(void *e) {
-    return run(e, SEQ, MOY_T_CLIPBOARD_KIND, NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, MOY_T_CLIPBOARD_KIND, NULL, 0, NULL, 0);
 }
 static int32_t w_clipboard_seq(void *e) {
-    return run(e, SEQ, MOY_T_CLIPBOARD_SEQ, NULL, NULL, 0, NULL, 0);
+    return run(e, SEQ, MOY_T_CLIPBOARD_SEQ, NULL, 0, NULL, 0);
+}
+static int32_t w_moybyte_notify(void *e, const uint8_t *summary, uint32_t summary_n,
+                                const uint8_t *body, uint32_t body_n) {
+    span_t f[2] = { { summary, summary_n }, { body, body_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_NOTIFY, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_open_with(void *e, const uint8_t *item, uint32_t item_n,
+                                   int32_t choose) {
+    uint8_t q_choose[4];
+    span_t f[2] = { { item, item_n }, NUM(q_choose, choose) };
+    return run(e, HOP, MOY_T_MOYBYTE_OPEN_WITH, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_share(void *e, const uint8_t *data, uint32_t data_n, const uint8_t *mime,
+                               uint32_t mime_n) {
+    span_t f[2] = { { data, data_n }, { mime, mime_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_SHARE, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_send(void *e, const uint8_t *app, uint32_t app_n, const uint8_t *name,
+                              uint32_t name_n, const uint8_t *args, uint32_t args_n) {
+    span_t f[3] = { { app, app_n }, { name, name_n }, { args, args_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_SEND, f, 3, NULL, 0);
+}
+static int32_t w_moybyte_award(void *e, const uint8_t *id, uint32_t id_n) {
+    span_t f[1] = { { id, id_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_AWARD, f, 1, NULL, 0);
+}
+static int32_t w_moybyte_progress(void *e, const uint8_t *id, uint32_t id_n, int32_t value) {
+    uint8_t q_value[4];
+    span_t f[2] = { { id, id_n }, NUM(q_value, value) };
+    return run(e, HOP, MOY_T_MOYBYTE_PROGRESS, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_on(void *e, const uint8_t *name, uint32_t name_n, int32_t on) {
+    uint8_t q_on[4];
+    span_t f[2] = { { name, name_n }, NUM(q_on, on) };
+    return run(e, HOP, MOY_T_MOYBYTE_ON, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_pick(void *e, const uint8_t *mime, uint32_t mime_n, const uint8_t *mode,
+                              uint32_t mode_n) {
+    span_t f[2] = { { mime, mime_n }, { mode, mode_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_PICK, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_log(void *e, int32_t level, const uint8_t *text, uint32_t text_n) {
+    uint8_t q_level[4];
+    span_t f[2] = { NUM(q_level, level), { text, text_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_LOG, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_recv(void *e, uint8_t *record, uint32_t record_cap) {
+    uint8_t q_record[4];
+    span_t f[1] = { NUM(q_record, record_cap) };
+    return run(e, HOP, MOY_T_MOYBYTE_RECV, f, 1, record, record_cap);
+}
+static int32_t w_moybyte_item_read(void *e, int32_t item, uint8_t *data, uint32_t data_cap) {
+    uint8_t q_item[4], q_data[4];
+    span_t f[2] = { NUM(q_item, item), NUM(q_data, data_cap) };
+    return run(e, HOP, MOY_T_MOYBYTE_ITEM_READ, f, 2, data, data_cap);
+}
+static int32_t w_moybyte_item_write(void *e, int32_t item, const uint8_t *data, uint32_t data_n) {
+    uint8_t q_item[4];
+    span_t f[2] = { NUM(q_item, item), { data, data_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_ITEM_WRITE, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_at(void *e, int32_t t) {
+    uint8_t q_t[4];
+    span_t f[1] = { NUM(q_t, t) };
+    return run(e, HOP, MOY_T_MOYBYTE_AT, f, 1, NULL, 0);
 }
 
 // The natives, in the role table's order, and the table row each serves.
@@ -236,6 +303,19 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "ui_slot_next", FN(moy_ui_wasm_slot_next), "()i", NULL },
     { "ui_held_last", FN(moy_ui_wasm_held_last), "(*~i)i", NULL },
     { "ui_held_all", FN(moy_ui_wasm_held_all), "()i", NULL },
+    { "moybyte_notify", FN(w_moybyte_notify), "(*~*~)i", NULL },
+    { "moybyte_open_with", FN(w_moybyte_open_with), "(*~i)i", NULL },
+    { "moybyte_share", FN(w_moybyte_share), "(*~*~)i", NULL },
+    { "moybyte_send", FN(w_moybyte_send), "(*~*~*~)i", NULL },
+    { "moybyte_award", FN(w_moybyte_award), "(*~)i", NULL },
+    { "moybyte_progress", FN(w_moybyte_progress), "(*~i)i", NULL },
+    { "moybyte_on", FN(w_moybyte_on), "(*~i)i", NULL },
+    { "moybyte_pick", FN(w_moybyte_pick), "(*~*~)i", NULL },
+    { "moybyte_log", FN(w_moybyte_log), "(i*~)i", NULL },
+    { "moybyte_recv", FN(w_moybyte_recv), "(*~)i", NULL },
+    { "moybyte_item_read", FN(w_moybyte_item_read), "(i*~)i", NULL },
+    { "moybyte_item_write", FN(w_moybyte_item_write), "(i*~)i", NULL },
+    { "moybyte_at", FN(w_moybyte_at), "(i)i", NULL },
 };
 static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_THEME_TOKEN, MOY_T_THEME_GEN, MOY_T_THEME_LIGHT, MOY_T_THEME_NAME,
@@ -252,5 +332,8 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_UI_POPOVER, MOY_T_UI_MENU, MOY_T_UI_TOOL, MOY_T_UI_BAR, MOY_T_UI_RULE,
     MOY_T_UI_TEXT_VIEW, MOY_T_UI_TABLE_PART, MOY_T_UI_PART_AT, MOY_T_UI_SPLIT,
     MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
-    MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL,
+    MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
+    MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
+    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG,
+    MOY_T_MOYBYTE_RECV, MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
 };

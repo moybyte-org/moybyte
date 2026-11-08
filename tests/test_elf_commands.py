@@ -105,16 +105,22 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     rows native/os_calls.json gives the ELF tier) reach the console's role
     table for its own grant: prefs, the clipboard, its files folder and a
     notification under the permissions it was granted, a buffer too small
-    ERANGE, a folder it was not granted and a role it lacks EACCES."""
+    ERANGE, a folder it was not granted and a role it lacks EACCES; award and
+    progress reach the achievements process, which finds the badge it
+    declares."""
     from runtime.notifications import NOTES
     _ws, app = term
     assert out(app, "elf.app/app; echo status $?") == [
         "prefs.set 0", "prefs.get 42", "clipboard.put_text 0", "clipboard.text from C",
         "clipboard.short -1 ERANGE", "files.save note", "files.load # hi", "",
         "files.list note,", "files.load.other -1 EACCES", "notify 1",
-        "nav.open_app -1 EACCES", "status 0"]
+        "nav.open_app -1 EACCES", "award 1", "progress 1", "status 0"]
     assert [(n.app, n.summary, n.body) for n in NOTES.list if n.summary == "Hello"] == [
         ("App Calls", "Hello", "from C")]
+    ws = _ws
+    ws.frame(1 / 30)
+    assert ws.ach.has("elf.app", "first"), "a badge it declares, awarded from C"
+    assert not ws.ach.has("elf.app", "far")
 
 
 def test_hello_runs_and_takes_its_args(term):

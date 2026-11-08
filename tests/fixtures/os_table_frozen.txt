@@ -85,3 +85,5 @@
 79 moy_share | int32_t moy_share(const void *data, size_t data_len, const char *mime)
 80 moy_send | int moy_send(const char *app, const char *name, const char *args)
 81 moy_on | int moy_on(const char *name, int on)
+82 moy_award | int32_t moy_award(const char *id)
+83 moy_progress | int32_t moy_progress(const char *id, int32_t value)

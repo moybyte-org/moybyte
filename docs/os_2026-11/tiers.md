@@ -81,8 +81,9 @@ costs are #227's.
   `cart`, `out`, and what the answer is), where it is served, the permission
   it answers under, and each tier's name for it: its ELF ordinal, whether a
   compiled app imports it from `moybyte.app` (its WAMR signature from the
-  types), its Lua and Python names (Lua's are Python's, verbatim), and
-  whether the door's Python half decodes it. `tools/gen_os_table.py` writes
+  types) and whether a WASI program imports it from `moybyte.os`, its Lua and
+  Python names (Lua's are Python's, verbatim), and whether the door's Python
+  half decodes it. `tools/gen_os_table.py` writes
   every tier's table from it: this table and the SDK's header and stubs; the
   app ABI's roles, C rows, role table and allowlist
   (`native/moy_app/moy_app_rows.h`); the `moybyte.app` natives
@@ -95,13 +96,16 @@ costs are #227's.
   under a Moybyte-owned ordinal layer frozen separately from the spec, which
   is not append-only by index. WASI's imports (§3) keep WASI's names and are
   not rows; they and the POSIX rows (above) are the same C functions under
-  two standard names, neither a second implementation.
+  two standard names, neither a second implementation. A row a compiled app
+  imports whose server is the kernel's or Python's (`moybyte.on`, `log`,
+  `at`) is a row of the role table too, so its import has a door to cross.
 - **A native module's app calls.** The app verbs a compiled app imports are
-  rows of this table too (ordinals 62 to 79): the files role
+  rows of this table too (ordinals 62 to 79, 82 and 83): the files role
   (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
   `delete`), prefs (`moy_prefs_get`, `set`, `clear`), the clipboard
   (`moy_clipboard_put_text`, `text`, `kind`, `seq`), `moy_nav_open_app`, and
-  the console calls `moy_notify`, `moy_open_with` and `moy_share`. Each is
+  the console calls `moy_notify`, `moy_open_with`, `moy_share`, `moy_award`
+  and `moy_progress`. Each is
   its role table row run through the ROLE door for the process's app run: a
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and
@@ -116,8 +120,8 @@ costs are #227's.
   are the spec's); only what no call serves states its own (a native module's
   run, a service's start). So `clipboard` is Python's, wasm's and ELF's,
   `network` Python's and ELF's (its sockets), `notifications` and `front`
-  Python's, Lua's and ELF's, and an install prompt asks a cart only for what
-  its tier can do (`tests/test_app_perms.py`).
+  every tier's, `alarms` Python's, Lua's and wasm's, and an install prompt
+  asks a cart only for what its tier can do (`tests/test_app_perms.py`).
 - **Trust** is the overview's §4 C row: an ELF that has loaded runs at the
   kernel's trust, and no permission binds it past its consent. The strike ledger and crash record are the floor, keyed for
   an unsigned module by **content hash**, since an id is the author's to
@@ -210,9 +214,11 @@ achievements process ported to it: the Lua tier's is
 in the store, with the same events in, the same store and the same
 notifications out. Its wasm parameter is an xfail: the scheduler starts a
 WASI service (§3), whose ABI is the event descriptor (owner, 2026-11-08:
-WASI's `poll_oneoff`, built in `native/moy_wasm/moy_wasi.h`), but the
-achievements process is not ported to it, and a WASI program imports no
-console call to post its notifications with.
+WASI's `poll_oneoff`, built in `native/moy_wasm/moy_wasi.h`), and a WASI
+program notifies and hears its messages, but the process also keeps its
+prefs, which a WASI program imports no row for, and asks the console for
+`game(app)` and `clock_day()`, the calls only a Lua or Python service is
+handed.
 
 ## 3. wasm and WASI
 
@@ -260,12 +266,28 @@ builds with libc-wasi off (`native/moy_wasm/micropython.cmake`,
 A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`
 for the rest; a WASI program's `moybyte.os` (`send`, `on`: the service
-model's, below); and an app's `moybyte.app`, its roles' rows. Those are rows of
+model's, below; `notify`, `award`, `progress`, the console calls a native
+service posts on the VM's queue; `log`); and an app's `moybyte.app`, its
+roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
 row's types give, and the adapter's natives and the toolkit's are generated
 from it (`native/moy_app/moy_app_wasm_rows.h`,
 `native/moy_ui/moy_ui_wasm_rows.h`), each packing its fields for the ROLE
 door and hopping to the VM's task, or, for a read of what the look and the
 clipboard write, reading in place under the seqlock, as its row's `how`
-says. No console call is imported yet: a compiled app has no
-`notifications` or `front` call, so neither permission is a wasm cart's.
+says. The console calls are imported too (`moybyte_notify`, `open_with`,
+`share`, `pick`, `send`, `award`, `progress`, `at`, `log`), each the
+`moybyte` module's verb run as the app's process through the door
+(`runtime/shell/shell_servers.py`, ConsoleCalls), under the permission it
+names there. **A compiled app polls its messages (2026-11-08)**: `moybyte_on`
+is the kernel's listen and `moybyte_recv` takes the oldest event of its
+process's queue as the record the event descriptor reads (`moy_evq_ev_t`, the
+arguments, a NUL), 0 when none waits. A callback export the host called at
+the frame's start would need room in the module's memory for three strings
+and a new call in each engine's glue (a board's, the host's, the browser's);
+the poll is one more generated import, cart-shaped as `btn` is (an app reads
+it in `_update`), and the same record a WASI or ELF service reads, so a
+compiled program parses messages one way. Its window events and an alarm are
+the system's messages (`_minimise`, `_restore`, `moy_action`, `moy_open`,
+`moybyte.at`), an item handed to it a handle its `moybyte_item_read` and
+`item_write` take (`runtime/system/moybyte.py`, `_compiled_events`).

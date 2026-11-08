@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 82
+#define MOY_OS_VERSION 84
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -44,14 +44,53 @@ typedef struct {
     char name[MOY_EVQ_NAME];
 } moy_evq_ev_t;
 
+// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).
+#define MOY_LOG_ERR 3
+#define MOY_LOG_WARNING 4
+#define MOY_LOG_INFO 6
+#define MOY_LOG_DEBUG 7
+
 #ifdef __wasm__
 
 #include <errno.h>
+
+int32_t __moy_os_notify(const char *summary, size_t summary_len, const char *body, size_t body_len)
+    __attribute__((import_module("moybyte.os"), import_name("notify")));
+static inline int32_t moy_notify(const char *summary, const char *body) {
+    int32_t r = __moy_os_notify(summary, summary ? __builtin_strlen(summary) : 0, body, body ? __builtin_strlen(body) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
 
 int32_t __moy_os_send(const char *app, size_t app_len, const char *name, size_t name_len, const char *args, size_t args_len)
     __attribute__((import_module("moybyte.os"), import_name("send")));
 static inline int moy_send(const char *app, const char *name, const char *args) {
     int32_t r = __moy_os_send(app, app ? __builtin_strlen(app) : 0, name, name ? __builtin_strlen(name) : 0, args, args ? __builtin_strlen(args) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_award(const char *id, size_t id_len)
+    __attribute__((import_module("moybyte.os"), import_name("award")));
+static inline int32_t moy_award(const char *id) {
+    int32_t r = __moy_os_award(id, id ? __builtin_strlen(id) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_progress(const char *id, size_t id_len, int32_t value)
+    __attribute__((import_module("moybyte.os"), import_name("progress")));
+static inline int32_t moy_progress(const char *id, int32_t value) {
+    int32_t r = __moy_os_progress(id, id ? __builtin_strlen(id) : 0, value);
     if (r < 0) {
         errno = (int)-r;
         return -1;
@@ -70,6 +109,17 @@ static inline int moy_on(const char *name, int on) {
     return (int)r;
 }
 
+int32_t __moy_os_log(int level, const char *text, size_t text_len)
+    __attribute__((import_module("moybyte.os"), import_name("log")));
+static inline int moy_log(int level, const char *text) {
+    int32_t r = __moy_os_log(level, text, text ? __builtin_strlen(text) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 #else
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
@@ -78,12 +128,6 @@ typedef struct {
     uint32_t rows;
     void *fn[];           // row i is the same prototype forever; retired -> a typed stub
 } moy_os_table_t;
-
-// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).
-#define MOY_LOG_ERR 3
-#define MOY_LOG_WARNING 4
-#define MOY_LOG_INFO 6
-#define MOY_LOG_DEBUG 7
 
 int moy_log(int level, const char *text);
 int moy_term_size(int *cols, int *rows);
@@ -115,6 +159,8 @@ int32_t moy_clipboard_seq(void);   // clipboard.seq
 int32_t moy_notify(const char *summary, const char *body);   // moybyte.notify
 int32_t moy_open_with(const char *item, int32_t choose);   // moybyte.open_with
 int32_t moy_share(const void *data, size_t data_len, const char *mime);   // moybyte.share
+int32_t moy_award(const char *id);   // moybyte.award
+int32_t moy_progress(const char *id, int32_t value);   // moybyte.progress
 
 #endif // __wasm__
 

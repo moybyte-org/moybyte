@@ -39,5 +39,7 @@ int main(void) {
     said("files.load.other", moy_files_load("drawings", "x", buf, sizeof buf), NULL);
     said("notify", moy_notify("Hello", "from C") >= 0 ? 1 : -1, NULL);
     said("nav.open_app", moy_nav_open_app("calc"), NULL);
+    said("award", moy_award("first"), NULL);
+    said("progress", moy_progress("far", 3), NULL);
     return 0;
 }

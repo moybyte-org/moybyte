@@ -54,14 +54,15 @@ ID_MAX = 63
 _ENOSPC = 28
 
 
-# The role table (native/os_calls.json's rows the ROLE door names, in order),
-# each as {"role", "verb", "server"}: the served roles' rows are its own, and
+# The role table (native/os_calls.json's rows the ROLE door names, in order:
+# tools/gen_os_table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
 # its roles and C rows size the C's.
 with open(os.path.join(HERE, "..", "..", "native", "os_calls.json")) as _f:
     _SRC = json.load(_f)
 _TABLE = [{"role": r["name"].split(".", 1)[0], "verb": r["name"].split(".", 1)[1],
            "server": r["server"]} for r in _SRC["rows"]
-          if r.get("server") in ("c", "shell", "call") or r.get("server", "").startswith("proc:")]
+          if r.get("server") in ("c", "shell", "call") or r.get("server", "").startswith("proc:")
+          or r.get("door")]
 ROLE_N = len(_SRC["roles"])
 ROW_N = sum(1 for r in _TABLE if r["server"] == "c")
 

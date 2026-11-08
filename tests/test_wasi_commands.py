@@ -253,7 +253,8 @@ def test_a_program_blocks_in_poll_on_its_event_descriptor(term):
     run's process has an event queue under its app id; its poll_oneoff on
     MOY_EVQ_FD blocks in the one kernel wait between its clock's deadlines,
     a ping from its own app is read as one record and answered with its
-    moybyte.os send, and its end closes the queue."""
+    moybyte.os send, its notify is answered between the job's steps, and its
+    end closes the queue."""
     from runtime import moy_evq, moy_log, scheduler
     _ws, app = term
     peer = moy_log.spawn("peer")
@@ -271,6 +272,11 @@ def test_a_program_blocks_in_poll_on_its_event_descriptor(term):
         assert moy_evq.take(peer) == (pid, "wasi.svc", "pong", "[7]")
         t0 = time.monotonic()
         _steps(lambda: time.monotonic() - t0 > 0.1)           # its clock ticks meanwhile
+        # a console call, answered between the job's steps: refused, as the
+        # command asks for no notifications
+        assert moy_evq.send(peer, "wasi.svc", "note", '["x"]')[0] == 1
+        assert _steps(lambda: (app.face.take(), "note -1 errno 2" in app.face.lines())[1]), \
+            app.face.lines()
         assert moy_evq.send(peer, "wasi.svc", "bye", "[]")[0] == 1
         assert _steps(lambda: not app.face.busy())
         assert app.face.status() == 0

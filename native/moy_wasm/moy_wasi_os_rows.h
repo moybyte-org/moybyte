@@ -9,7 +9,11 @@
 #define MOY_WASI_OS_ROWS_H
 
 #define MOY_WASI_OS_ROWS(X) \
+    X(notify, "(*~*~)i") \
     X(send, "(*~*~*~)i") \
+    X(award, "(*~)i") \
+    X(progress, "(*~i)i") \
     X(on, "(*~i)i") \
+    X(log, "(i*~)i") \
 
 #endif // MOY_WASI_OS_ROWS_H

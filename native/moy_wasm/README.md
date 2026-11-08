@@ -93,14 +93,19 @@ product), with the owner's later calls dated where they land.
   `apps/<id>/` (`runtime/cart_files.py`) on every tier, untouched by an
   install, an update or a push. A user's own files are a separate
   capability (#231): the console's picker (`docs/os_2026-11/between_apps.md`
-  §2), which a compiled cart holds no import of.
+  §2), which a compiled app reaches by its `moybyte.app` imports
+  (`moybyte_pick`, the item a handle its `moybyte_item_read` and
+  `item_write` take; `docs/app_api_v1.md` §10) and a game holds none of.
 - **WASI preview1 is an adapter of ours, not WAMR's libc-wasi
   (2026-11-08).** A command's imports are a table of natives registered
   under WASI's module name (`moy_wasi.h`), each over the C a shell built-in
   calls: the session's descriptors, its files tree under the command's
-  permissions, its variables; and `moybyte.os`, the service model's calls a
-  WASI program shares with an ELF module (`moy_send`, `moy_on`), beside its
-  event descriptor (`moy_wasi.h`, THE EVENT DESCRIPTOR). libc-wasi would reach the IDF's POSIX and VFS
+  permissions, its variables; and `moybyte.os`, the calls a WASI program
+  shares with an ELF module: the service model's (`moy_send`, `moy_on`),
+  beside its event descriptor (`moy_wasi.h`, THE EVENT DESCRIPTOR), the OS
+  log (`moy_log`), and the console calls `moy_notify`, `moy_award` and
+  `moy_progress`, posted on the VM's queue as a native service's are
+  (`moy_wasi.c`, THE CONSOLE CALLS). libc-wasi would reach the IDF's POSIX and VFS
   past the session's pipes and the permissions, and brings a socket and
   thread layer; the table leaves the vendored runtime and the compiler as
   they are, so `MOY_WASM_FORMAT_VERSION` did not move and no installed

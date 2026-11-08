@@ -221,6 +221,41 @@ def test_the_pinger_wakes_a_wasi_service_that_receives_its_ping(tmp_path, built)
         _clear(wakes)
 
 
+def _granted(ws, cart, perms):
+    """The service's cart with its manifest asking for `perms`, rescanned."""
+    path = os.path.join(cart["path"], "manifest.json")
+    with open(path) as f:
+        man = json.load(f)
+    man["moybyte"]["permissions"] = list(perms)
+    with open(path, "w") as f:
+        json.dump(man, f)
+    ws.carts.rescan()
+    return [c for c in ws.carts.all if c.get("id") == "wasi.svc"][0]
+
+
+@pytest.mark.parametrize("perms", [("notifications",), ()])
+def test_a_wasi_service_notifies_under_its_permission_and_writes_the_log(svc, perms):
+    """moybyte.os `notify` is the console call a Python service's
+    moybyte.notify is, posted on the VM's queue and answered at the poll as
+    the service's process; `log` writes the OS log under its pid."""
+    from runtime import notifications
+    ws, s, cart, peer = svc
+    notifications.NOTES.reset()
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "note", '["hi"]')[0] == 1)
+    assert _polled(s, lambda: "noted" in _texts(since, pid))
+    texts = _texts(since, pid)
+    mine = [n for n in notifications.NOTES.list if n.pid == pid]
+    if perms:
+        assert [(n.summary, n.body) for n in mine] == [("Service Wasi", '["hi"]')]
+        assert "note %d errno 0" % mine[0].id in texts, texts
+    else:
+        assert mine == [] and "note -1 errno 2" in texts, texts     # WASI's ACCES
+    assert s.stop(pid)
+
+
 def test_the_fixture_is_a_service():
     with open(os.path.join(FIXTURE, "manifest.json")) as f:
         man = json.load(f)

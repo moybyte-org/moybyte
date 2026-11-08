@@ -9,7 +9,8 @@ What a C program needs to become a native module for a console
   the Moybyte rows: the kernel's (`moy_log`, `moy_term_size`, `moy_send`,
   `moy_on`) and the app calls (`moy_files_*`,
   `moy_prefs_*`, `moy_clipboard_*`, `moy_nav_open_app`, `moy_notify`,
-  `moy_open_with`, `moy_share`: `docs/app_api_v1.md`'s call table), all from
+  `moy_open_with`, `moy_share`, `moy_award`, `moy_progress`:
+  `docs/app_api_v1.md`'s call table), all from
   `native/os_calls.json`. The POSIX rows are declared by the toolchain's own
   headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
 - `src/moyos_crt.c`: the module's entry, `_moy_entry`, and its
@@ -33,8 +34,9 @@ A service blocks in `poll` on `MOY_EVQ_FD` with its nearest deadline as the
 timeout, reads each message it is woken for, and returns when the
 descriptor reads end of file (its stop); `tests/fixtures/elf/elf_svc.moy`
 is the example. A WASI program built by wasi-sdk includes the same header:
-under `__wasm__` it declares `moy_send` and `moy_on` as its `moybyte.os`
-imports (`tests/fixtures/wasm/wasi_svc.moy`, built by
+under `__wasm__` it declares `moy_send`, `moy_on`, `moy_notify`,
+`moy_award`, `moy_progress` and `moy_log` (and its levels) as its
+`moybyte.os` imports (`tests/fixtures/wasm/wasi_svc.moy`, built by
 `tools/wasm_cart.py`, which puts `include/` on its include path).
 
 The chips: `esp32s3` (Xtensa, `-mlongcalls`), `esp32p4` (RISC-V,

@@ -159,5 +159,7 @@ int32_t moy_os_moy_open_with(const char *item, int32_t choose);
 int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime);
 int moy_os_moy_send(const char *app, const char *name, const char *args);
 int moy_os_moy_on(const char *name, int on);
+int32_t moy_os_moy_award(const char *id);
+int32_t moy_os_moy_progress(const char *id, int32_t value);
 
 #endif // MOY_OS_ROWS_H

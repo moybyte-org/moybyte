@@ -1,0 +1,19 @@
+{
+  "format": "moy-1",
+  "title": "Talk",
+  "id": "local.talk",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 2,
+  "extensions": [
+    "moybyte.app"
+  ],
+  "moybyte": {
+    "type": "app",
+    "permissions": ["notifications", "alarms"],
+    "receives": ["pong"],
+    "achievements": [
+      {"id": "hello", "title": "Hello", "icon": "star", "hint": "Say hello"}
+    ]
+  }
+}

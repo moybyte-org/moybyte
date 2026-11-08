@@ -33,9 +33,10 @@ from runtime import achievements as A
 from ws_helpers import build_ws, make_drv, open_cart, settle_badges
 
 LUA_TWIN = os.path.join(os.path.dirname(__file__), "fixtures", "achievements_lua.moy")
-WASM_WHY = ("the scheduler starts a WASI service (native/moy_wasm/moy_wasi.h, A SERVICE), "
-            "but the achievements process is not ported to it, and a WASI program "
-            "imports no console call to post its notifications with")
+WASM_WHY = ("a WASI program notifies, awards and hears its messages (moybyte.os), but the "
+            "process also reads and writes its prefs, which a WASI program imports no row "
+            "for, and asks the console for game(app) and clock_day(), the env calls only a "
+            "Lua or Python service is handed")
 GAME = "moybyte.harpoon_pop"            # a seed game that declares four badges
 _SINCE = [0]
 

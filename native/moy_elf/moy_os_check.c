@@ -389,6 +389,18 @@ static int u_check_81(const moy_u_space_t *u, const char *name, int on) {
     return U_STR0(name);
 }
 
+// 82 moy_award
+_Static_assert(U_REGS(const char *) <= 7, "moy_award's registers");
+static int u_check_82(const moy_u_space_t *u, const char *id) {
+    return U_STR(id);
+}
+
+// 83 moy_progress
+_Static_assert(U_REGS(const char *) + U_REGS(int32_t) <= 7, "moy_progress's registers");
+static int u_check_83(const moy_u_space_t *u, const char *id, int32_t value) {
+    return U_STR(id);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -447,6 +459,8 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 79: fn = (u_check_fn *)(void *)u_check_79; break;
     case 80: fn = (u_check_fn *)(void *)u_check_80; break;
     case 81: fn = (u_check_fn *)(void *)u_check_81; break;
+    case 82: fn = (u_check_fn *)(void *)u_check_82; break;
+    case 83: fn = (u_check_fn *)(void *)u_check_83; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

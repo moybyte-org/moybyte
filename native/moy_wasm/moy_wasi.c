@@ -18,6 +18,7 @@
 #include "moy_log.h"
 #include "moy_sh_prog.h"
 #include "moy_super.h"
+#include "moy_vmq.h"
 #include "moy_wasi_os_rows.h"
 
 _Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_RUNNING == MOY_SH_PROG_RUNNING,
@@ -714,6 +715,153 @@ static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int
     }
     int rc = moy_evq_listen(w->pid, nm, on != 0);
     return rc == MOY_EVQ_OK ? 0 : os_errno(rc);
+}
+
+static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint32_t text_n) {
+    moy_wasi_t *w = os_run(e);
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    if (text_n && text == NULL) {
+        return -(int32_t)W_INVAL;
+    }
+    moy_log_write(level < 0 || level >= MOY_LOG_LEVELS ? MOY_LOG_INFO : level, w->pid, text,
+                  text_n);
+    return 0;
+}
+
+// THE CONSOLE CALLS (notify, award, progress): each the console's verb of the
+// row's name run as the run's process, its arguments a JSON array posted on
+// the VM's queue (moy_vmq.h) as a native service's are, and answered at the
+// console's next serve of it: a service's at the scheduler's poll, a
+// foreground command's at its job's step. The module's thread waits for the
+// answer in slices of CALL_SLICE_MS, CALL_MS at most (AGAIN past it: a
+// background command's door serves nothing while it waits). The answer is
+// the verb's number (true 1, false 0); a refusal (the verb's null, or its
+// raise) is ACCES.
+static bool h_sleeps(moy_wasi_t *w);
+static void nap(moy_wasi_t *w, int ms);
+
+#define CALL_SLICE_MS 2
+#define CALL_MS 5000
+#define CALL_ARGS 512
+
+// `n` bytes of text at `p` as a JSON string, appended to out (cap bytes) at
+// *at: false where it does not fit.
+static bool json_str(char *out, size_t cap, size_t *at, const char *p, uint32_t n) {
+    size_t k = *at;
+    if (n && p == NULL) {
+        return false;
+    }
+    if (k + 1 >= cap) {
+        return false;
+    }
+    out[k++] = '"';
+    for (uint32_t i = 0; i < n; i++) {
+        unsigned char ch = (unsigned char)p[i];
+        size_t need = ch == '"' || ch == '\\' ? 2u : ch < 0x20u ? 6u : 1u;
+        if (k + need + 1 >= cap) {
+            return false;
+        }
+        if (need == 6u) {
+            snprintf(out + k, 7, "\\u%04x", ch);
+        } else {
+            if (need == 2u) {
+                out[k++] = '\\';
+            }
+            out[k] = (char)ch;
+        }
+        k += need == 2u ? 1u : need;
+    }
+    out[k++] = '"';
+    *at = k;
+    return true;
+}
+
+static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args, size_t n) {
+    moy_wasi_t *w = os_run(e);
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    uint32_t ticket;
+    int rc = moy_vmq_post(w->pid, name, args, n, &ticket);
+    if (rc != MOY_VMQ_OK) {
+        return -(int32_t)(rc == MOY_VMQ_FULL ? W_AGAIN : W_NOMEM);
+    }
+    int64_t t0 = mono_us();
+    for (;;) {
+        char *ans = NULL;
+        size_t an = 0;
+        rc = moy_vmq_result(ticket, &ans, &an);
+        if (rc == MOY_VMQ_OK) {
+            int32_t v = -(int32_t)W_ACCES;
+            if (ans != NULL && an > 0) {
+                char t[16];
+                size_t k = an < sizeof t - 1 ? an : sizeof t - 1;
+                memcpy(t, ans, k);
+                t[k] = 0;
+                if (strcmp(t, "true") == 0) {
+                    v = 1;
+                } else if (strcmp(t, "false") == 0) {
+                    v = 0;
+                } else if ((t[0] >= '0' && t[0] <= '9') || t[0] == '-') {
+                    v = (int32_t)strtol(t, NULL, 10);
+                }
+            }
+            free(ans);
+            return v;
+        }
+        if (rc != MOY_VMQ_WAITING) {
+            return -(int32_t)W_BADF;
+        }
+        if (w->prog.exited) {
+            return -(int32_t)W_INTR;
+        }
+        if (mono_us() - t0 >= (int64_t)CALL_MS * 1000) {
+            return -(int32_t)W_AGAIN;
+        }
+        if (moy_evq_wait(w->pid, CALL_SLICE_MS) != 0 && h_sleeps(w)) {
+            nap(w, CALL_SLICE_MS);          // a message waits: the wait does not block
+        }
+    }
+}
+
+static int32_t w_os_notify(wasm_exec_env_t e, const char *summary, uint32_t summary_n,
+                           const char *body, uint32_t body_n) {
+    char a[CALL_ARGS];
+    size_t k = 0;
+    a[k++] = '[';
+    if (!json_str(a, sizeof a, &k, summary, summary_n) || k + 2 >= sizeof a) {
+        return -(int32_t)W_INVAL;
+    }
+    a[k++] = ',';
+    if (!json_str(a, sizeof a, &k, body, body_n) || k + 1 >= sizeof a) {
+        return -(int32_t)W_INVAL;
+    }
+    a[k++] = ']';
+    return os_console(e, "moybyte.notify", a, k);
+}
+
+static int32_t w_os_award(wasm_exec_env_t e, const char *id, uint32_t id_n) {
+    char a[CALL_ARGS];
+    size_t k = 0;
+    a[k++] = '[';
+    if (id_n == 0 || !json_str(a, sizeof a, &k, id, id_n) || k + 1 >= sizeof a) {
+        return -(int32_t)W_INVAL;
+    }
+    a[k++] = ']';
+    return os_console(e, "moybyte.award", a, k);
+}
+
+static int32_t w_os_progress(wasm_exec_env_t e, const char *id, uint32_t id_n, int32_t value) {
+    char a[CALL_ARGS];
+    size_t k = 0;
+    a[k++] = '[';
+    if (id_n == 0 || !json_str(a, sizeof a, &k, id, id_n) || k + 16 >= sizeof a) {
+        return -(int32_t)W_INVAL;
+    }
+    k += (size_t)snprintf(a + k, sizeof a - k, ",%ld]", (long)value);
+    return os_console(e, "moybyte.progress", a, k);
 }
 
 // -- streams -------------------------------------------------------------------------

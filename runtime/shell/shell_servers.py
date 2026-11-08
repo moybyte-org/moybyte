@@ -62,6 +62,18 @@ try:
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
+try:
+    import moy_evq as _E
+except ImportError:  # host: the runtime package
+    from runtime import moy_evq as _E
+
+try:
+    import json as _json
+except ImportError:  # pragma: no cover - every VM has it
+    _json = None
+
+_SHELL = 1
+
 _COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
 
 
@@ -639,15 +651,24 @@ class InstallServer:
 # -- the console calls --------------------------------------------------------
 
 class ConsoleCalls:
-    """The `moybyte` role's rows (native/os_calls.json's "call" server): the
-    console calls a program makes on any tier, each the `moybyte` module's
-    function run as the process whose grant `g` is (`Procs.pid_of`), so the
-    permission each names (`notifications`, the front's gate) is that
-    process's. Every grant holds the role; a grant no process claims calls
-    as nobody's, which every gate refuses."""
+    """The `moybyte` role's rows (native/os_calls.json's "call" server, and
+    the kernel's and Python's rows a compiled app imports): the console
+    calls a program makes on any tier, each the `moybyte` module's function
+    run as the process whose grant `g` is (`Procs.pid_of`), so the
+    permission each names (`notifications`, `alarms`, the front's gate) is
+    that process's. Every grant holds the role; a grant no process claims
+    is answered STALE.
+
+    A compiled app's messages are its process's own event queue
+    (native/moy_kernel/moy_evq.h), opened for it at its first `send`, `on`
+    or `at` as a native service's is (no Python wake serves it): `on` is the
+    kernel's listen, `recv` takes the oldest event as the event descriptor's
+    record (`moy_evq_ev_t`, its arguments, a NUL), and an alarm is the
+    system's message `moybyte.at` carrying its id."""
 
     def __init__(self, ws):
         self.__ws = ws
+        self.__held = {}            # pid -> a record recv could not hand over
 
     def _as(self, g, fn, *args):
         pid = self.__ws.procs.pid_of(g)
@@ -660,9 +681,22 @@ class ConsoleCalls:
             if _L is not None:
                 _L.current(was)
 
+    def _own(self, g):
+        """The process of grant `g` with its event queue open, or None."""
+        pid = self.__ws.procs.pid_of(g)
+        if pid is None or pid <= _SHELL:
+            return None
+        if not _E.has(pid):
+            opener = _moybyte.WAKES.opener
+            if opener is not None:
+                opener(pid, False)
+            else:
+                _E.open(pid, "pid%d" % pid, "", False)
+        return pid
+
     def notify(self, g, summary, body=None):
         n = self._as(g, _moybyte.notify, summary, body or "")
-        return -1 if n is None else n
+        return _DOOR_DENIED if n is None else n
 
     def open_with(self, g, item, choose):
         return self._as(g, _moybyte.open_with, item, bool(choose))
@@ -670,11 +704,111 @@ class ConsoleCalls:
     def share(self, g, data, mime):
         return self._as(g, _moybyte.share, bytes(data), mime)
 
+    def pick(self, g, mime, mode=None):
+        return self._as(g, _moybyte.pick, mime, mode or "r")
+
+    def send(self, g, app, name, args=None):
+        try:
+            a = _json.loads(args) if args else []
+        except ValueError:
+            return _DOOR_BAD
+        if not isinstance(a, list):
+            return _DOOR_BAD
+        if self._own(g) is None:
+            return _DOOR_STALE
+        return self._as(g, _moybyte.send, app, name, *a)
+
+    def award(self, g, ach_id):
+        if self._own(g) is None:
+            return _DOOR_STALE
+        return self._as(g, _moybyte.award, ach_id)
+
+    def progress(self, g, ach_id, value):
+        if self._own(g) is None:
+            return _DOOR_STALE
+        return self._as(g, _moybyte.progress, ach_id, value)
+
+    def on(self, g, name, on):
+        pid = self._own(g)
+        if pid is None:
+            return _DOOR_STALE
+        rc = _E.listen(pid, name, bool(on))
+        return 0 if rc == _E.OK else _DOOR_FULL if rc == _E.FULL else _DOOR_STALE
+
+    def at(self, g, t):
+        pid = self._own(g)
+        if pid is None:
+            return _DOOR_STALE
+        try:
+            wid = self._as(g, _moybyte.at_message, t)
+        except OSError:
+            return _DOOR_DENIED
+        _E.listen(pid, _moybyte.AT, True)
+        return wid
+
+    def log(self, g, level, text):
+        if self.__ws.procs.pid_of(g) is None:
+            return _DOOR_STALE
+        self._as(g, _moybyte.log, level, text)
+        return 0
+
+    def recv(self, g, cap):
+        """The oldest event of the process's queue as its record: its
+        length, 0 with none queued, FULL where `cap` does not hold it (the
+        event kept for the next call)."""
+        pid = self.__ws.procs.pid_of(g)
+        if pid is None:
+            return _DOOR_STALE
+        rec = self.__held.pop(pid, None)
+        if rec is None:
+            ev = _E.take(pid) if _E.has(pid) else None
+            if ev is None:
+                return 0
+            rec = _record(*ev)
+        if len(rec) > cap:
+            self.__held[pid] = rec
+            return _DOOR_FULL
+        return rec
+
+    def item_read(self, g, h, cap):
+        it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
+        if it is None:
+            return _DOOR_ABSENT
+        d = it.read()
+        if d is None:
+            return _DOOR_ABSENT
+        d = d.encode("utf-8") if isinstance(d, str) else bytes(d)
+        return _DOOR_FULL if len(d) > cap else d
+
+    def item_write(self, g, h, data):
+        it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
+        if it is None:
+            return _DOOR_ABSENT
+        return bool(it.write(bytes(data)))
+
+
+# The event descriptor's record (moy_evq_ev_t, native/moy_kernel/moy_evq.h):
+# the sender's pid, the arguments' bytes, the app id and the name, each
+# NUL-padded to its field, then the arguments and a NUL.
+EV_APP, EV_NAME = 48, 24
+
+
+def _le32(v):
+    return bytes((v & 255, v >> 8 & 255, v >> 16 & 255, v >> 24 & 255))
+
+
+def _record(frm, app, name, args):
+    a = args.encode("utf-8")
+    ap = app.encode("utf-8")[:EV_APP - 1]
+    nm = name.encode("utf-8")[:EV_NAME - 1]
+    return (_le32(frm) + _le32(len(a)) + ap + bytes(EV_APP - len(ap))
+            + nm + bytes(EV_NAME - len(nm)) + a + b"\0")
+
 
 # -- the ROLE door ----------------------------------------------------------------
 
 # moy_app.h's codes the door answers with, negated.
-_DOOR_ABSENT, _DOOR_BAD = -8, -7
+_DOOR_STALE, _DOOR_FULL, _DOOR_DENIED, _DOOR_BAD, _DOOR_ABSENT = -1, -2, -4, -7, -8
 # The row the C shell's crossings take (native/moy_sh/moy_sh_board.h's
 # MOY_SH_DOOR, runtime/shell/sh_door.py).
 SH_DOOR = 0x7368
@@ -707,6 +841,16 @@ DOOR_ARGS = {
     "moybyte.notify": "so",
     "moybyte.open_with": "si",
     "moybyte.share": "bs",
+    "moybyte.send": "sso",
+    "moybyte.award": "s",
+    "moybyte.progress": "si",
+    "moybyte.on": "si",
+    "moybyte.pick": "so",
+    "moybyte.log": "is",
+    "moybyte.recv": "i",
+    "moybyte.item_read": "ii",
+    "moybyte.item_write": "ib",
+    "moybyte.at": "i",
 }
 # END GENERATED
 
