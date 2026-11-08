@@ -365,3 +365,30 @@ def test_a_lua_game_awards_its_own_badges(tmp_path):
     finally:
         S.SCHED.stop(ws.ach.pid)
         notifications.NOTES.reset()
+
+
+def _live_procs():
+    return [p.pid for p in S.SCHED.procs.values()
+            if p.name == A.PROC and p.state != S.EXITED]
+
+
+def test_one_process_a_vm_owned_by_the_newest_console(tmp_path):
+    """A VM runs one achievements process, the newest console's: each
+    console that loads ends the last one's, and a console that never loads
+    (a bare Workstation) still ends it, so a badge the old console sent is
+    never served into the new console's frame as a banner over its page."""
+    consoles = []
+    for i in range(4):
+        ws = build_ws(tmp_path / ("c%d" % i))
+        consoles.append(ws)
+        assert _live_procs() == [ws.ach.pid]
+    consoles[-1].ach.award("first_open")         # queued, not yet served
+    from runtime import console, host_app
+    from runtime.host_canvas import make_system_canvas
+    from runtime.input import InputState
+    bare = console.Workstation(host_app._NullComp(),
+                               make_system_canvas(host_app.WIDTH, host_app.HEIGHT),
+                               InputState(), [])
+    assert _live_procs() == [] and bare.ach.pid is None
+    bare.ach.award("first_open")                 # no process: goes nowhere
+    assert not notifications.NOTES.list

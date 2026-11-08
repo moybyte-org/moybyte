@@ -745,7 +745,10 @@ manifest lists `award` and `progress` under `receives` and grants it
 `notifications` and `prefs`. The console's end of it is
 `runtime/system/achievements.py`: `ws.ach`, the link, `NotifyRole`, the
 `notify` role's server, the console's own declaration (`SHELL`) and the
-strict readers both ends share.
+strict readers both ends share. A VM runs one achievements process, the
+newest console's: a console's link ends the one running (`achievements.end`),
+whose `game` and `clock_day` read the console that started it, and its own
+start runs it again.
 
 - **It wakes only on two messages**, `award(id)` and `progress(id,
   value)`, sent by a game (`moybyte.award`, `moybyte.progress`: rows of

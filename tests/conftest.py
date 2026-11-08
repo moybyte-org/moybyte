@@ -341,6 +341,9 @@ def _processes_reset():
     SL = sys.modules.get("runtime.shell_layout")
     if SL is not None:
         SL.ITEMS[0] = 0
+    A = sys.modules.get("runtime.achievements")
+    if A is not None:
+        A.end()
 
 
 @pytest.fixture(autouse=True)
@@ -351,9 +354,10 @@ def _processes_fresh():
     and device gates (`leases.LEASES.grants`, `devices.grants`), which a
     Workstation binds to its running set as it boots; the notifications
     (`notifications.NOTES`), whose banner stays up BANNER_MS of wall time;
-    and the apps' status items (`status_items.ITEMS`) with the count the bar
+    the apps' status items (`status_items.ITEMS`) with the count the bar
     packs for them (`shell_layout.ITEMS`), which a console brings level only
-    at its next frame. A test that left a game running handed every later
+    at its next frame; and the achievements process (`achievements.end`),
+    which serves its queue on whichever console frames next. A test that left a game running handed every later
     test on the worker that game's pid, one that built a Workstation handed
     it that console's grants, so the shell's own reads (a /dev file) and a
     bare process's lease were refused as another's; a badge an earlier
@@ -361,9 +365,10 @@ def _processes_fresh():
     up as a banner, which keeps a console animating and draws over the bar;
     and an item freed after its console's last frame left the count at 1, so
     the next console's first layout placed the bar's cells around a status
-    item it did not have. Each test starts, and leaves, the shell current,
+    item it did not have; a badge the shell sent as a test ended was served
+    in the next test's console, whose banner took a tap meant for the page. Each test starts, and leaves, the shell current,
     the gates unbound (the front's among them, `front.FRONT`), no
-    notification and no status item, as a fresh VM has them before its
+    notification, no status item and no achievements process, as a fresh VM has them before its
     console boots."""
     _processes_reset()
     yield

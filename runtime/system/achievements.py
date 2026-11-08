@@ -174,10 +174,26 @@ def is_proc(cart):
     return cart.get("type") == "service" and cart.get("title") == TITLE
 
 
+def end():
+    """Stop the running achievements process, whichever console started it.
+    A VM has one, as a board has one console: a new console's Link ends the
+    last one's (its `game` and `clock_day` read that console), and its own
+    `start` runs it again."""
+    sched = _sched.SCHED
+    for name in (PROC, TITLE):
+        while True:
+            old = sched.find(name)
+            if old is None or old.cart is None or not is_proc(old.cart):
+                break
+            if not sched.stop(old.pid):
+                break
+
+
 class Link:
     """`ws.ach`: the achievements process as the console reaches it."""
 
     def __init__(self, ws):
+        end()
         self.ws = ws
         self.pid = None
         self.key = PROC + "_" + PREFS_KEY   # the process's row of system/settings
@@ -205,14 +221,9 @@ class Link:
         return None
 
     def start(self):
-        """(Re)start the process: a running one is stopped first (an earlier
-        load's, or another console's where a host runs two: one process a
-        host, as a board has one console). Answers its pid, or None."""
-        sched = _sched.SCHED
-        for name in (PROC, TITLE):
-            old = sched.find(name)
-            if old is not None and old.cart is not None and is_proc(old.cart):
-                sched.stop(old.pid)
+        """(Re)start the process: a running one is stopped first (`end`).
+        Answers its pid, or None."""
+        end()
         cart = self._cart()
         if cart is not None:
             self.key = _perms.app_id(cart) + "_" + PREFS_KEY
