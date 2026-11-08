@@ -16,7 +16,13 @@
 #include "moy_sh_board.h"
 #include "moy_log.h"
 
-#ifdef ESP_PLATFORM
+// A board is told by the header it has: ESP_PLATFORM is not defined for a
+// usermod's sources on the esp32 port (moy_net.h's MOY_NET_CLOCK_EPOCH).
+#if __has_include("esp_heap_caps.h")
+#define MOY_WASI_BOARD 1
+#endif
+
+#ifdef MOY_WASI_BOARD
 #include <sys/time.h>
 #include "esp_heap_caps.h"
 #include "esp_random.h"
@@ -90,7 +96,7 @@ struct moy_wasi {
 // -- the host's pieces ------------------------------------------------------------
 
 static void *w_alloc(size_t n) {
-#ifdef ESP_PLATFORM
+#ifdef MOY_WASI_BOARD
     void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     return p != NULL ? p : calloc(1, n);
 #else
@@ -112,7 +118,7 @@ static char *w_strdup(const char *p) {
 }
 
 static int64_t mono_us(void) {
-#ifdef ESP_PLATFORM
+#ifdef MOY_WASI_BOARD
     return esp_timer_get_time();
 #else
     struct timespec t;
@@ -124,7 +130,7 @@ static int64_t mono_us(void) {
 // Nanoseconds since 1970. A board's clock counts from 2000 (moy_wifi.c), as
 // `date` reads it.
 static uint64_t real_ns(void) {
-#ifdef ESP_PLATFORM
+#ifdef MOY_WASI_BOARD
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return ((uint64_t)tv.tv_sec + 946684800u) * 1000000000ull + (uint64_t)tv.tv_usec * 1000u;
@@ -136,7 +142,7 @@ static uint64_t real_ns(void) {
 }
 
 static void fill_random(uint8_t *p, size_t n) {
-#ifdef ESP_PLATFORM
+#ifdef MOY_WASI_BOARD
     esp_fill_random(p, n);
 #else
     while (n > 0) {
