@@ -85,9 +85,12 @@ table, `intents.TYPES`), routed to default apps by the `handles` table of §1.
 your pictures"; bare `files` is `files:documents`). The grant reaches every
 kind in its folder (`files:pictures`: drawings and sprite sheets) and no
 other; a Python app's `files` and a Lua run's io work in the folder's own
-kind (documents' notes, pictures' drawings). Downloads has no kind of the
-layer's: a compiled command reaches it, as it reaches any folder its
-`files` permissions name, by path (`sh_door.wasi_roots`).
+kind (documents' notes, pictures' drawings). A compiled command (WASI or
+native) is given the same folder by path, its only preopened root
+(`sh_door.wasi_roots`, from the same policy). One folder a grant on every
+tier: a manifest naming two is refused, at launch and at a command's run.
+Downloads, `.Trash` and `.history` are no grant's: the user moves a download
+into a folder with Files, or hands one file over through the picker.
 
 **The picker** is OS chrome: an app with no `files:*` permission calls
 `moybyte.pick(mime, mode)` and the console's one question

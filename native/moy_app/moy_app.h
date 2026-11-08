@@ -211,10 +211,12 @@ int moy_app_kind_folder(const char *kind, size_t n);
 #define MOY_APP_DEFAULT_KIND 0  // "files" with no folder: documents
 
 // A manifest's permissions, read one by one (moy_app_policy_add) into what
-// they grant. `files` with no folder is the default folder, `files:<folder>`
-// a known folder; an unknown folder grants nothing (Downloads has no kind of
-// the layer's: a compiled command reaches it by path). Two folders or more
-// are a manifest error, and then no files grant is made.
+// they grant: the one policy of every tier, an app's grant and a compiled
+// command's preopened folder alike (runtime/shell/sh_door.py's wasi_roots).
+// `files` with no folder is the default folder, `files:<folder>` a known
+// folder; an unknown folder grants nothing, Downloads included (it has no
+// kind of the layer's). Two folders or more are a manifest error, and then no
+// files grant is made.
 typedef struct {
     uint32_t roles;
     uint8_t nkinds;

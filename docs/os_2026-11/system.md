@@ -62,7 +62,7 @@ reads its code. A compiled (`"runtime": "wasm"`) command is its module's
 WASI `_start` (`native/moy_wasm/moy_wasi.h`), crossing the same door and
 holding the same process row and guard: its stdio the session's own
 descriptors, its args and exported variables the shell's, its files the
-folders its `files` permissions grant, its exit code `proc_exit`'s (134 for
+one folder its `files` permission grants (`between_apps.md` §2), its exit code `proc_exit`'s (134 for
 a trap, as SIGABRT's), and Ctrl-C reaching it at its next import.
 `python` with the terminal for its stdin is the
 interactive REPL in front of the face (below); with a pipe or a

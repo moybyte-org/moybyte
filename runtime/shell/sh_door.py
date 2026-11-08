@@ -26,7 +26,7 @@ pid answers, and `wait` reads its exit code (`status`).
 A COMPILED COMMAND (`"runtime": "wasm"`) is a WASI program: the same process
 row and consent, its module's `_start` run by the wasm runtime's `command`
 (native/moy_wasm/moy_wasi.h) over the session's own descriptors, with the
-folders its `files` permissions name (`wasi_roots`) as its only files and
+folder its `files` permission names (`wasi_roots`) as its only files and
 COMMAND_MS as its budget; a trap's exit code is TRAPPED, a module that will
 not run NOT_RUN.
 
@@ -61,6 +61,11 @@ try:
     import scheduler as _sched
 except ImportError:  # host: the runtime package
     from runtime import scheduler as _sched
+
+try:
+    import moy_app as _moy_app
+except ImportError:  # host: the runtime package
+    from runtime import moy_app as _moy_app
 
 try:
     import moybyte as _moybyte
@@ -330,22 +335,18 @@ def commands(ws):
 
 
 def wasi_roots(granted):
-    """The folders a compiled command's granted permissions name, relative
-    to the store: `files` the user's files folder, `files:<folder>` that
-    shared folder (moy_store_base.SHARED_FOLDERS, named in lower case)."""
+    """The folder a compiled command's granted permissions reach, relative to
+    the store: the one the C policy (`moy_app.policy`) makes an app's files
+    grant for, by its kind's place on disk (moy_store_base.FILE_KIND_DIRS).
+    No folder is none: a manifest naming two is refused before it runs
+    (`moy_app.manifest_error`), and Downloads, `.Trash` and `.history` are
+    no grant's."""
     try:
-        from moy_store_base import SHARED_FOLDERS
+        from moy_store_base import FILE_KIND_DIRS
     except ImportError:  # host: the runtime package
-        from runtime.moy_store_base import SHARED_FOLDERS
-    out = []
-    for perm in granted:
-        if perm == "files":
-            out.append("files")
-        elif perm.startswith("files:"):
-            for f in SHARED_FOLDERS:
-                if f.lower() == perm[6:]:
-                    out.append("files/" + f)
-    return out
+        from runtime.moy_store_base import FILE_KIND_DIRS
+    kind = _moy_app.policy(granted)[1]
+    return [] if kind is None else ["files/" + FILE_KIND_DIRS[kind]]
 
 
 def find_command(ws, name):
@@ -547,7 +548,7 @@ class ShellDoor:
         through the wasm runtime's `command` (native/moy_wasm/moy_wasi.h), a
         native module's `main` through the native runtime's
         (native/moy_elf/moy_os.h), a process of its own holding what its
-        consent grants, the folders its `files` permissions name its only
+        consent grants, the folder its `files` permission names its only
         files. Its exit code, or in the background its pid (the code kept for
         `status`). In the foreground with a `job` it is a job the door steps
         (`_compiled_steps`): RUNNING."""
@@ -566,6 +567,8 @@ class ShellDoor:
         rec = consent.get(app_perms.app_id(run)) if consent is not None else None
         have = app_perms.services(self.ws) if consent is not None else ()
         granted, _absent, refusal = app_perms.check(run, rec, have)
+        if refusal is None:
+            refusal = _moy_app.manifest_error(run.get("permissions"))
         if refusal is not None:
             self.err(name, refusal)
             return NOT_RUN

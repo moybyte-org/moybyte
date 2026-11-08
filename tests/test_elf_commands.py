@@ -42,7 +42,7 @@ def term(tmp_path, built):
     from runtime.host_app import build_workstation
     carts = tmp_path / "carts"
     carts.mkdir()
-    (tmp_path / "files").mkdir()
+    (tmp_path / "files" / "Documents").mkdir(parents=True)
     for name, path in built.items():
         shutil.copytree(path, str(carts / (name + ".moy")))
     bare = carts / "elf_bare.moy"
@@ -109,37 +109,41 @@ def test_the_environment_folder_terminal_and_clocks(term):
     _ws, app = term
     assert out(app, "export GREETING=hi; elf.probe/probe env GREETING") == ["hi"]
     assert out(app, "elf.probe/probe env NOPE") == ["(unset)"]
-    assert out(app, "cd /files; elf.probe/probe cwd") == ["/files"]
+    assert out(app, "cd /files/Documents; elf.probe/probe cwd") == ["/files/Documents"]
     assert out(app, "elf.probe/probe term") == ["term 1"]
     assert out(app, "elf.probe/probe time") == ["mono 1", "wall 1"]
 
 
 def test_cat_through_pipes_redirections_and_files(term, tmp_path):
     _ws, app = term
-    assert out(app, "cd /files; printf 'one\\ntwo\\n' > a.txt; elf.cat/cat a.txt") == ["one", "two"]
+    assert out(app, "cd /files/Documents; printf 'one\\ntwo\\n' > a.txt; elf.cat/cat a.txt") == ["one", "two"]
     assert out(app, "printf 'x\\ny\\n' | elf.cat/cat") == ["x", "y"]
     assert out(app, "elf.cat/cat < a.txt") == ["one", "two"]
     run(app, "elf.cat/cat a.txt - a.txt < a.txt > b.txt")
-    assert (tmp_path / "files" / "b.txt").read_text() == "one\ntwo\n" * 3
+    assert (tmp_path / "files" / "Documents" / "b.txt").read_text() == "one\ntwo\n" * 3
     assert out(app, "elf.cat/cat missing.txt; echo status $?") == [
         "cat: missing.txt: No such file or directory", "status 1"]
 
 
 def test_files_are_made_written_listed_moved_and_removed(term, tmp_path):
     _ws, app = term
-    assert out(app, "elf.probe/probe files /files") == [
+    assert out(app, "elf.probe/probe files /files/Documents") == [
         "mkdir 0", "open 0", "write 7", "stat 7", "isdir 1", "rename 0", "entry b",
         "read 7", "native", "unlink 0", "rmdir 0"]
-    assert not (tmp_path / "files" / "x").exists()
+    assert not (tmp_path / "files" / "Documents" / "x").exists()
 
 
 def test_a_path_outside_its_folders_is_refused(term, tmp_path):
     _ws, app = term
     (tmp_path / "secret.txt").write_text("no")
     assert out(app, "elf.probe/probe deny /secret.txt") == ["open -1"]
-    assert out(app, "cd /files; elf.probe/probe deny ../secret.txt") == ["open -1"]
-    run(app, "printf 'x\\n' > /files/a.txt")
-    assert out(app, "elf.bare/bare deny /files/a.txt") == ["open -1"]
+    assert out(app, "cd /files/Documents; elf.probe/probe deny ../secret.txt") == ["open -1"]
+    (tmp_path / "files" / ".Trash").mkdir()
+    (tmp_path / "files" / ".Trash" / "t.txt").write_text("gone")
+    assert out(app, "elf.probe/probe deny /files/.Trash/t.txt") == ["open -1"]
+    assert out(app, "cd /files/Documents; elf.probe/probe deny ../.Trash/t.txt") == ["open -1"]
+    run(app, "printf 'x\\n' > /files/Documents/a.txt")
+    assert out(app, "elf.bare/bare deny /files/Documents/a.txt") == ["open -1"]
 
 
 def test_exit_codes_from_main_and_from_a_thread(term):
@@ -159,7 +163,7 @@ def test_what_a_command_left_held_is_swept(term):
     from runtime import elf_binding
     _ws, app = term
     before = elf_binding.stats()
-    assert out(app, "cd /files; elf.probe/probe leak l.txt; echo status $?") == [
+    assert out(app, "cd /files/Documents; elf.probe/probe leak l.txt; echo status $?") == [
         "held 1", "status 3"]
     after = elf_binding.stats()
     # the file, the folder, the mutex

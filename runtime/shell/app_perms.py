@@ -134,6 +134,8 @@ def line(perm):
     if r[PROMPT] == "full":
         return FULL % perm[6:]
     if "%s" in r[PROMPT]:
+        if _moy_app.policy((perm,))[1] is None:
+            return None             # a folder no grant is made for: nothing to ask
         kind = perm[6:] if perm.startswith("files:") else "documents"
         return r[PROMPT] % kind
     return r[PROMPT]

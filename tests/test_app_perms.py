@@ -81,6 +81,8 @@ def test_files_kinds_share_the_files_row_and_name_their_kind():
     assert P.line("files:music") == "Read and save your music"
     assert P.line("files") == "Read and save your documents"
     assert P.line("files:pictures") == "Read and save your pictures"
+    assert P.line("files") == "Read and save your documents"
+    assert P.line("files:downloads") is None and P.line("files:docs") is None
     assert P.line("graphics") is None and P.line("editor") is None
 
 
@@ -493,11 +495,35 @@ def test_settings_lists_each_carts_permissions_and_a_switch_turns_one_off(tmp_pa
     assert sl.page is None
 
 
-def test_a_compiled_commands_files_permissions_name_the_shared_folders():
-    """The WASI and ELF tiers' preopen roots come from the one folder list
-    (moy_store_base.SHARED_FOLDERS): `files:<folder>` is that folder, and a
-    name that is no folder reaches nothing."""
+FILES_CASES = (
+    ["files"], ["files:documents"], ["files:pictures"], ["files:music"],
+    ["files:recordings"], ["files:downloads"], ["files:docs"], ["files:nonsense"],
+    ["files", "files:documents"], ["files", "files:pictures"],
+    ["files:pictures", "files:downloads", "prefs"], ["prefs"], [],
+)
+
+
+@pytest.mark.parametrize("perms", FILES_CASES)
+def test_an_app_and_a_compiled_command_reach_the_same_folder(perms):
+    """One policy for both tiers: the folder an app's files grant is made for
+    (`moy_app.policy`'s kind, its place on disk) is the one root a WASI or
+    native command is preopened, and a manifest the app tier refuses for two
+    folders the command tier refuses too."""
+    from runtime import moy_store_base, sh_door
+    kind = moy_app.policy(perms)[1]
+    app = [] if kind is None else ["files/" + moy_store_base.FILE_KIND_DIRS[kind]]
+    assert sh_door.wasi_roots(perms) == app
+    for root in app:
+        assert root.split("/")[1] in moy_store_base.SHARED_FOLDERS
+
+
+def test_a_compiled_command_reaches_one_shared_folder_and_never_the_whole_tree():
+    """Bare `files` is Documents on every tier; Downloads, `.Trash` and
+    `.history` are no grant's, and no permission preopens `files/` itself."""
     from runtime import sh_door
-    assert sh_door.wasi_roots(["files", "files:pictures", "files:downloads",
-                               "files:docs", "prefs"]) == [
-        "files", "files/Pictures", "files/Downloads"]
+    assert sh_door.wasi_roots(["files"]) == ["files/Documents"]
+    assert sh_door.wasi_roots(["files:pictures", "prefs"]) == ["files/Pictures"]
+    assert sh_door.wasi_roots(["files:downloads"]) == []
+    for perms in FILES_CASES:
+        assert "files" not in sh_door.wasi_roots(perms)
+    assert moy_app.manifest_error(["files", "files:pictures"]) is not None

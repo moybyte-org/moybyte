@@ -64,7 +64,7 @@ def term(tmp_path, built):
     from runtime.host_app import build_workstation
     carts = tmp_path / "carts"
     carts.mkdir()
-    (tmp_path / "files").mkdir()
+    (tmp_path / "files" / "Documents").mkdir(parents=True)
     for name, path in built.items():
         shutil.copytree(path, str(carts / (name + ".moy")))
     bare = carts / "wasi_bare.moy"
@@ -78,6 +78,7 @@ def term(tmp_path, built):
     app.open()
     app.draw(0)
     app.draw(0)                         # the grid takes the view's width
+    run(app, "cd /files/Documents")     # `files` is Documents: the command's one root
     yield ws, app
     app.close_session()
 
@@ -140,7 +141,7 @@ def test_stdio_runs_through_the_session_s_pipes_and_redirections(term, tmp_path)
     assert out(app, "wasi.probe/probe args x | wasi.cat/cat") == ["0=probe", "1=args", "2=x"]
     assert out(app, "printf 'hello\\nworld\\n' > n.txt; wasi.cat/cat n.txt > m.txt; cat m.txt") \
         == ["hello", "world"]
-    assert (tmp_path / "files" / "m.txt").read_text() == "hello\nworld\n"
+    assert (tmp_path / "files" / "Documents" / "m.txt").read_text() == "hello\nworld\n"
     assert out(app, "wasi.cat/cat < n.txt") == ["hello", "world"]
 
 
@@ -156,14 +157,14 @@ def test_files_are_made_written_listed_moved_and_removed(term, tmp_path):
     _ws, app = term
     assert out(app, "wasi.probe/probe files") == [
         "size 14", "entry b.txt", "read two", "read three", "gone yes"]
-    assert not (tmp_path / "files" / "probe.d").exists()
+    assert not (tmp_path / "files" / "Documents" / "probe.d").exists()
 
 
 def test_a_path_outside_its_folders_is_not_capable(term, tmp_path):
     _ws, app = term
     (tmp_path / "secret.txt").write_text("no")
     run(app, "printf 'x\\n' > a.txt")
-    assert out(app, "wasi.probe/probe open /files/a.txt") == ["opened"]
+    assert out(app, "wasi.probe/probe open /files/Documents/a.txt") == ["opened"]
     assert out(app, "wasi.probe/probe open /secret.txt; echo $?") == [
         "open: No such file or directory", "2"]
     assert out(app, "wasi.probe/probe open ../secret.txt") == ["open: Capabilities insufficient"]
