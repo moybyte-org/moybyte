@@ -69,9 +69,30 @@ typedef struct {
     uint32_t slo, shi;
     volatile uint8_t *ending;   // its process is ending: it stops at its next way into U-mode
     void *thr;                  // NULL: a call on the loading task (BIND)
-    uint32_t fwd_pc;            // the last instruction handed to the lazy FPU enable
     uint32_t fault;             // a call no thread owns: its fault's cause + 1
 } moy_u_space_t;
+
+// THE LAZY FPU. ESP-IDF turns the FPU off (mstatus.FS = Off) on every
+// interrupt and every context switch, and turns it back on in _panic_handler
+// when the next FPU instruction traps (vectors.S's coprocessor path, which
+// also takes fflags/frm/fcsr CSR accesses). An interrupt can land between that
+// enable and the instruction's retry, so the same instruction traps again with
+// the FPU off; only a trap taken with the FPU ON is an illegal instruction.
+#define MOY_U_MSTATUS_FS (3u << 13)
+
+// Whether a U-mode illegal-instruction trap of `insn` (mtval), with `ill` the
+// EXT_ILL reason and `mstatus` read at the trap, goes to IDF's lazy enable:
+// an FPU instruction (never PIE or a hardware loop, which IDF aborts on from a
+// task) taken while the FPU was off.
+static inline int moy_u_fpu_lazy(uint32_t insn, uint32_t ill, uint32_t mstatus) {
+    if ((mstatus & MOY_U_MSTATUS_FS) != 0u || (ill & 4u) || (insn & 0x7fu) == 0x2bu) {
+        return 0;
+    }
+    if ((ill & 1u) || (insn & 0x5fu) == 0x07u || (insn & 0x6001u) == 0x6000u) {
+        return 1;
+    }
+    return (insn & 0x7fu) == 0x73u && (insn >> 20) >= 1u && (insn >> 20) <= 3u;
+}
 
 // 0 once the vectors are this module's on both cores; -1 when ESP-IDF's
 // table is not the one the stubs were written for (no module runs).

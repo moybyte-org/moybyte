@@ -379,34 +379,17 @@ void moy_u_ecall(uint32_t *f) {
     moy_os_u_row(uctx_of(f)->space, f);
 }
 
-// What ESP-IDF's _panic_handler takes as a coprocessor trap and enables the FPU
-// for (vectors.S): never PIE or a hardware loop, which it aborts on from a
-// task, so those end the thread here.
-static IRAM_ATTR bool fpu_trap(uint32_t insn, uint32_t ill) {
-    if ((ill & 4u) || (insn & 0x7fu) == 0x2bu) {
-        return false;
-    }
-    if (ill & 1u) {
-        return true;
-    }
-    if ((insn & 0x5fu) == 0x07u || (insn & 0x6001u) == 0x6000u) {
-        return true;
-    }
-    return (insn & 0x7fu) == 0x73u && (insn >> 20) >= 1u && (insn >> 20) <= 3u;
-}
-
 // An exception in U-mode other than an ecall, interrupts off: 0 to retry (a
-// window loaded), 1 to hand it to IDF's lazy FPU enable. Anything else ends
-// the thread's process.
+// window loaded), 1 to hand it to IDF's lazy FPU enable (moy_u_fpu_lazy, over
+// mstatus as the trap left it: nothing on the way here touches FS). Anything
+// else ends the thread's process.
 IRAM_ATTR int moy_u_fault(uint32_t *f, uint32_t mcause, uint32_t mtval, uint32_t ill) {
     moy_u_space_t *s = uctx_of(f)->space;
     uint32_t code = mcause & 0xfffu;
     int core = esp_cpu_get_core_id();
-    if (code == 2 && fpu_trap(mtval, ill) && s->fwd_pc != f[0]) {
-        s->fwd_pc = f[0];
+    if (code == 2 && moy_u_fpu_lazy(mtval, ill, RV_READ_CSR(mstatus))) {
         return 1;
     }
-    s->fwd_pc = 0;
     if (code == 1 && window_fault(s, core, f[0], MOY_U_X)) {
         return 0;
     }
