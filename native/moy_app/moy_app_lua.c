@@ -21,6 +21,7 @@
 
 #include "moy_app.h"
 #include "moy_app_lua.h"
+#include "moy_app_lua_rows.h"
 #include "moy_json.h"
 
 // The run this state's names serve, its files kind's name, the hop its calls
@@ -56,31 +57,6 @@ static int on_vm(lua_State *L, moy_app_lua_hop_fn hop, void (*fn)(void *), void 
         return 0;
     }
     return hop(L, fn, arg);
-}
-
-// The table rows the names call, found by name once.
-enum {
-    R_FILES_READY, R_FILES_LIST, R_FILES_LOAD, R_FILES_SAVE, R_FILES_DELETE,
-    R_FILES_DUPLICATE, R_FILES_RENAME, R_FILES_NEW_NAME,
-    R_PREFS_GET, R_PREFS_SET, R_PREFS_CLEAR,
-    R_THEME_SET, R_NAV_OPEN_APP,
-    R_N
-};
-static const char *const ROW_NAME[R_N] = {
-    "files.ready", "files.list", "files.load", "files.save", "files.delete",
-    "files.duplicate", "files.rename", "files.new_name",
-    "prefs.get", "prefs.set", "prefs.clear",
-    "theme.set", "nav.open_app",
-};
-// Row `k`'s index in the table, or -1: looked up per call, so the binding keeps
-// no internal RAM of its own (an S3's idle desk is counted to the byte).
-static int row_of(int k) {
-    for (uint32_t r = 0; r < MOY_APP_TABLE_N; r++) {
-        if (strcmp(moy_app_table_name(r), ROW_NAME[k]) == 0) {
-            return (int)r;
-        }
-    }
-    return -1;
 }
 
 // -- a growing byte buffer held in a userdata at a fixed stack slot ------------------
@@ -186,7 +162,7 @@ static void role_run(void *p) {
 
 static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
     lrun_t *u = lrun(L);
-    int row = row_of(k);
+    int row = k;
     if (u == NULL || row < 0) {
         lua_pushnil(L);
         *ans = NULL;
@@ -269,7 +245,7 @@ static int ret_text(lua_State *L, int32_t r, const uint8_t *ans, int absent_nil)
 
 static int l_files_ready(lua_State *L) {
     const uint8_t *ans;
-    int32_t r = row_call(L, R_FILES_READY, NULL, &ans);
+    int32_t r = row_call(L, MOY_T_FILES_READY, NULL, &ans);
     if (r < 0) {
         return raise_rc(L, -r);
     }
@@ -282,7 +258,7 @@ static int l_files_list(lua_State *L) {
     buf_init(L, &b, 64u);
     field_kind(L, &b);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_FILES_LIST, &b, &ans);
+    int32_t r = row_call(L, MOY_T_FILES_LIST, &b, &ans);
     if (r < 0) {
         return ret_text(L, r, ans, 0);
     }
@@ -313,23 +289,23 @@ static int named(lua_State *L, int k, int nargs, int absent_nil) {
 }
 
 static int l_files_load(lua_State *L) {
-    return named(L, R_FILES_LOAD, 1, 1);
+    return named(L, MOY_T_FILES_LOAD, 1, 1);
 }
 
 static int l_files_save(lua_State *L) {
-    return named(L, R_FILES_SAVE, 2, 0);
+    return named(L, MOY_T_FILES_SAVE, 2, 0);
 }
 
 static int l_files_delete(lua_State *L) {
-    return named(L, R_FILES_DELETE, 1, 0);
+    return named(L, MOY_T_FILES_DELETE, 1, 0);
 }
 
 static int l_files_duplicate(lua_State *L) {
-    return named(L, R_FILES_DUPLICATE, 1, 0);
+    return named(L, MOY_T_FILES_DUPLICATE, 1, 0);
 }
 
 static int l_files_rename(lua_State *L) {
-    return named(L, R_FILES_RENAME, 2, 0);
+    return named(L, MOY_T_FILES_RENAME, 2, 0);
 }
 
 static int l_files_new_name(lua_State *L) {
@@ -339,13 +315,13 @@ static int l_files_new_name(lua_State *L) {
     field_kind(L, &b);
     field_opt(L, &b, 1);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_FILES_NEW_NAME, &b, &ans);
+    int32_t r = row_call(L, MOY_T_FILES_NEW_NAME, &b, &ans);
     return ret_text(L, r, ans, 0);
 }
 
 // A document is its own text: ("", err) where it cannot be read, "" for none.
 static int l_files_load_text(lua_State *L) {
-    named(L, R_FILES_LOAD, 1, 1);
+    named(L, MOY_T_FILES_LOAD, 1, 1);
     if (lua_isnil(L, -2)) {
         lua_pushliteral(L, "");
         lua_replace(L, -3);
@@ -577,7 +553,7 @@ static int l_prefs_get(lua_State *L) {
     buf_init(L, &b, 128u);
     field_arg(L, &b, 1);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_PREFS_GET, &b, &ans);
+    int32_t r = row_call(L, MOY_T_PREFS_GET, &b, &ans);
     if (r == -MOY_APP_ABSENT) {
         lua_pushvalue(L, 2);
         return 1;
@@ -606,7 +582,7 @@ static int l_prefs_set(lua_State *L) {
     field_arg(L, &b, 1);
     buf_field(&b, j.p, j.n);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_PREFS_SET, &b, &ans);
+    int32_t r = row_call(L, MOY_T_PREFS_SET, &b, &ans);
     if (r < 0 && r != -MOY_APP_ABSENT) {
         return raise_rc(L, -r);
     }
@@ -620,7 +596,7 @@ static int l_prefs_clear(lua_State *L) {
     buf_init(L, &b, 128u);
     field_arg(L, &b, 1);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_PREFS_CLEAR, &b, &ans);
+    int32_t r = row_call(L, MOY_T_PREFS_CLEAR, &b, &ans);
     if (r < 0 && r != -MOY_APP_ABSENT) {
         return raise_rc(L, -r);
     }
@@ -637,7 +613,7 @@ static int l_set_theme(lua_State *L) {
     field_arg(L, &b, 1);
     field_opt(L, &b, 2);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_THEME_SET, &b, &ans);
+    int32_t r = row_call(L, MOY_T_THEME_SET, &b, &ans);
     if (r < 0) {
         return raise_rc(L, -r);
     }
@@ -651,7 +627,7 @@ static int l_open_app(lua_State *L) {
     buf_init(L, &b, 64u);
     field_arg(L, &b, 1);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_NAV_OPEN_APP, &b, &ans);
+    int32_t r = row_call(L, MOY_T_NAV_OPEN_APP, &b, &ans);
     if (r < 0) {
         return raise_rc(L, -r);
     }
@@ -736,7 +712,7 @@ static int file_save(lua_State *L, file_t *f) {
     buf_field(&b, f->name, strlen(f->name));
     buf_field(&b, f->p, f->n);
     const uint8_t *ans;
-    int32_t r = row_call(L, R_FILES_SAVE, &b, &ans);
+    int32_t r = row_call(L, MOY_T_FILES_SAVE, &b, &ans);
     lua_pop(L, 2);
     if (r < 0) {
         return -r;
@@ -781,7 +757,7 @@ static int l_io_open(lua_State *L) {
         buf_init(L, &b, 128u);
         field_kind(L, &b);
         buf_field(&b, name, strlen(name));
-        r = row_call(L, R_FILES_LOAD, &b, &ans);
+        r = row_call(L, MOY_T_FILES_LOAD, &b, &ans);
         if (r >= 0) {
             has = 1;
         } else if (!(mode[0] == 'a' && -r == MOY_APP_ABSENT)) {
@@ -1075,7 +1051,7 @@ static int l_os_remove(lua_State *L) {
     field_kind(L, &b);
     buf_field(&b, name, strlen(name));
     const uint8_t *ans;
-    int32_t r = row_call(L, R_FILES_DELETE, &b, &ans);
+    int32_t r = row_call(L, MOY_T_FILES_DELETE, &b, &ans);
     if (r < 0) {
         return fail_rc(L, path, -r);
     }
@@ -1096,7 +1072,7 @@ static int l_os_rename(lua_State *L) {
     buf_field(&b, a, strlen(a));
     buf_field(&b, z, strlen(z));
     const uint8_t *ans;
-    int32_t r = row_call(L, R_FILES_RENAME, &b, &ans);
+    int32_t r = row_call(L, MOY_T_FILES_RENAME, &b, &ans);
     if (r < 0) {
         return fail_rc(L, from, -r);
     }
@@ -1180,6 +1156,25 @@ int moy_app_lua_open(lua_State *L, const struct moy_app_run *run) {
     return moy_app_lua_open_hop(L, run, NULL);
 }
 
+static int l_files_save_text(lua_State *L) {
+    return l_files_save(L);
+}
+
+// The names a run's role binding holds, each opened for the role it serves
+// (moy_app_lua_rows.h, generated from native/os_calls.json): a global, or a
+// function of a global table.
+typedef struct {
+    int8_t role;
+    const char *tbl, *name;
+    lua_CFunction fn;
+} lname_t;
+
+static const lname_t NAMES[] = {
+#define NAME(role, tbl, name, fn, row) { role, tbl, name, fn },
+    MOY_APP_LUA_NAMES(NAME)
+#undef NAME
+};
+
 int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
                          moy_app_lua_hop_fn hop) {
     open_t o = { run, 0, { 0 } };
@@ -1210,18 +1205,6 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
     lua_setglobal(L, "os");
 
     if (files) {
-        static const luaL_Reg files_fns[] = {
-            { "ready", l_files_ready }, { "list", l_files_list },
-            { "load", l_files_load }, { "save", l_files_save },
-            { "delete", l_files_delete }, { "rename", l_files_rename },
-            { "duplicate", l_files_duplicate }, { "new_name", l_files_new_name },
-            { "save_text", l_files_save }, { "load_text", l_files_load_text },
-            { NULL, NULL },
-        };
-        lua_newtable(L);
-        luaL_setfuncs(L, files_fns, 0);
-        lua_setglobal(L, "files");
-
         static const luaL_Reg file_methods[] = {
             { "read", file_read }, { "write", file_write }, { "lines", file_lines },
             { "close", file_close }, { "flush", file_flush }, { "seek", file_seek },
@@ -1246,22 +1229,25 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
         luaL_setfuncs(L, io_fns, 0);
         lua_setglobal(L, "io");
     }
-    if ((roles >> MOY_ROLE_PREFS) & 1u) {
-        static const luaL_Reg prefs_fns[] = {
-            { "get", l_prefs_get }, { "set", l_prefs_set }, { "clear", l_prefs_clear },
-            { NULL, NULL },
-        };
-        lua_newtable(L);
-        luaL_setfuncs(L, prefs_fns, 0);
-        lua_setglobal(L, "prefs");
-    }
-    if ((roles >> MOY_ROLE_THEME) & 1u) {
-        lua_pushcfunction(L, l_set_theme);
-        lua_setglobal(L, "set_theme");
-    }
-    if ((roles >> MOY_ROLE_NAV) & 1u) {
-        lua_pushcfunction(L, l_open_app);
-        lua_setglobal(L, "open_app");
+    for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++) {
+        const lname_t *nm = &NAMES[i];
+        if (!((roles >> nm->role) & 1u) || (nm->role == MOY_ROLE_FILES && !files)) {
+            continue;
+        }
+        if (nm->tbl == NULL) {
+            lua_pushcfunction(L, nm->fn);
+            lua_setglobal(L, nm->name);
+            continue;
+        }
+        if (lua_getglobal(L, nm->tbl) != LUA_TTABLE) {
+            lua_pop(L, 1);
+            lua_newtable(L);
+            lua_pushvalue(L, -1);
+            lua_setglobal(L, nm->tbl);
+        }
+        lua_pushcfunction(L, nm->fn);
+        lua_setfield(L, -2, nm->name);
+        lua_pop(L, 1);
     }
     return 1;
 }

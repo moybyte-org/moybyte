@@ -1,6 +1,6 @@
 // The app ABI's kernel half (docs/history/kernel_appabi_2026-10.md): the grants, the
-// grant policy, and the roles served in C. roles.json beside this file is the
-// role table; a C row there is a function here, and tests/test_moy_app.py holds
+// grant policy, and the roles served in C. native/os_calls.json is the role
+// table; a C row there is a function here, and tests/test_moy_app.py holds
 // the two equal.
 //
 // A moy_appabi_t is the state the C rows read: the grant table (kind GRANT, rows
@@ -54,51 +54,10 @@ enum {
     MOY_APP_NEEDS_VM = 9,   // a shell-served verb while no VM runs
 };
 
-// The roles, in roles.json's order: a grant's mask is 1 << role.
-enum {
-    MOY_ROLE_DAMAGE = 0, MOY_ROLE_SURFACE, MOY_ROLE_THEME, MOY_ROLE_FILES,
-    MOY_ROLE_CARTS, MOY_ROLE_NAV, MOY_ROLE_PREFS, MOY_ROLE_NOTIFY,
-    MOY_ROLE_WALLPAPER, MOY_ROLE_ARTWORK, MOY_ROLE_CLIPBOARD, MOY_ROLE_INSTALL,
-    MOY_ROLE_UI,
-    MOY_ROLE_N
-};
-
-// The C rows, in roles.json's order: what moy_app_count counts.
-enum {
-    MOY_ROW_DAMAGE_ALL = 0, MOY_ROW_DAMAGE_AGAIN,
-    MOY_ROW_SURFACE_CANVAS, MOY_ROW_SURFACE_SIZE, MOY_ROW_SURFACE_FONT_SCALE,
-    MOY_ROW_SURFACE_CHROME_SCALE, MOY_ROW_SURFACE_WINDOWED, MOY_ROW_SURFACE_BAR_H,
-    MOY_ROW_SURFACE_CONTENT_RECT, MOY_ROW_SURFACE_POINTER,
-    MOY_ROW_THEME_COLORS, MOY_ROW_THEME_TOKEN, MOY_ROW_THEME_GEN,
-    MOY_ROW_THEME_LIGHT, MOY_ROW_THEME_NAME, MOY_ROW_THEME_VARIANT,
-    MOY_ROW_FILES_READABLE, MOY_ROW_FILES_READY, MOY_ROW_FILES_BEGIN,
-    MOY_ROW_FILES_END, MOY_ROW_FILES_LIST, MOY_ROW_FILES_COUNT, MOY_ROW_FILES_LOAD,
-    MOY_ROW_FILES_SAVE, MOY_ROW_FILES_DELETE, MOY_ROW_FILES_DUPLICATE,
-    MOY_ROW_FILES_RENAME, MOY_ROW_FILES_NEW_NAME, MOY_ROW_FILES_TRASH_LIST,
-    MOY_ROW_FILES_RESTORE, MOY_ROW_FILES_EMPTY_TRASH, MOY_ROW_FILES_HISTORY,
-    MOY_ROW_FILES_HISTORY_OPS, MOY_ROW_FILES_HISTORY_COMMIT,
-    MOY_ROW_FILES_ENCODE_IMAGE, MOY_ROW_FILES_DECODE_IMAGE,
-    MOY_ROW_FILES_DECODE_COVER, MOY_ROW_FILES_ENCODE_COVER, MOY_ROW_FILES_SIG,
-    MOY_ROW_FILES_STAMP, MOY_ROW_FILES_ENCODE_TEXT, MOY_ROW_FILES_DECODE_TEXT,
-    MOY_ROW_FILES_PROVENANCE,
-    MOY_ROW_PREFS_GET, MOY_ROW_PREFS_SET, MOY_ROW_PREFS_CLEAR,
-    MOY_ROW_WALLPAPER_LOAD_COPY, MOY_ROW_WALLPAPER_SAVE_COPY,
-    MOY_ROW_ARTWORK_CURRENT, MOY_ROW_ARTWORK_FOLLOW,
-    MOY_ROW_CLIPBOARD_PUT_TEXT, MOY_ROW_CLIPBOARD_TEXT, MOY_ROW_CLIPBOARD_KIND,
-    MOY_ROW_CLIPBOARD_SEQ,
-    MOY_ROW_UI_PAGE, MOY_ROW_UI_LABEL, MOY_ROW_UI_BUTTON, MOY_ROW_UI_TOGGLE,
-    MOY_ROW_UI_SLIDER, MOY_ROW_UI_LIST, MOY_ROW_UI_PART, MOY_ROW_UI_FOCUS,
-    MOY_ROW_UI_KEYS_TAKEN, MOY_ROW_UI_AT, MOY_ROW_UI_GROUP, MOY_ROW_UI_INFO, MOY_ROW_UI_LINK,
-    MOY_ROW_UI_CYCLE, MOY_ROW_UI_SEG, MOY_ROW_UI_SWATCHES, MOY_ROW_UI_HINTS,
-    MOY_ROW_UI_ICON, MOY_ROW_UI_PROGRESS, MOY_ROW_UI_TABLE, MOY_ROW_UI_SCROLL, MOY_ROW_UI_FIELD,
-    MOY_ROW_UI_DIALOG, MOY_ROW_UI_TABS, MOY_ROW_UI_GRID, MOY_ROW_UI_CARD, MOY_ROW_UI_POPOVER,
-    MOY_ROW_UI_MENU, MOY_ROW_UI_TOOL, MOY_ROW_UI_BAR,
-    MOY_ROW_UI_RULE, MOY_ROW_UI_TEXT_VIEW, MOY_ROW_UI_TABLE_PART, MOY_ROW_UI_PART_AT,
-    MOY_ROW_UI_SPLIT, MOY_ROW_UI_TABLE_DIST, MOY_ROW_UI_TABLE_FLOOR, MOY_ROW_UI_HELD,
-    MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
-    MOY_ROW_UI_HELD_ALL,
-    MOY_ROW_N
-};
+// The roles (MOY_ROLE_*, a grant's mask 1 << role), the rows served in C
+// (MOY_ROW_*), the role table (MOY_T_*, MOY_APP_TABLE_N) and the permission
+// each role is granted by, generated from native/os_calls.json.
+#include "moy_app_rows.h"
 
 #define MOY_GRANT_SLOTS 32u       // grants a table holds
 #define MOY_APP_ID_MAX 63u      // an id's, and a prefs namespace's, bytes
@@ -468,8 +427,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 
 // -- the ROLE door -----------------------------------------------------------------
 
-// The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 165u
+// The role table's rows, C and shell alike (MOY_T_*): what the door names.
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.

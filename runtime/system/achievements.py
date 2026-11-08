@@ -5,7 +5,7 @@ The badges are the process's (system_carts/moybyte.achievements.moy, PROC):
 a service the console starts when it loads its store (`Link.start`),
 handing it the document the store holds, the write and the day
 (`Link.env`). The notify role's rows name it (`"server":
-"proc:achievements"`, native/moy_app/roles.json):
+"proc:achievements"`, native/os_calls.json):
 
   achieve, award    MESSAGES to the process (the scheduler's `send`): it
                     wakes on them in the scheduler's slice, records, and
@@ -200,7 +200,7 @@ class Link:
 
 
 class NotifyRole:
-    """The notify role's server (roles.json's `proc:achievements` rows):
+    """The notify role's server (native/os_calls.json's `proc:achievements` rows):
     each verb takes the grant and goes to the process through `ws.ach`."""
 
     def __init__(self, ws):

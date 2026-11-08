@@ -20,6 +20,14 @@
 #include "moy_json.h"
 #include "moy_proc_exit.h"
 
+// The console calls a service's `moybyte` table holds, generated from
+// native/os_calls.json (none in an image without the app ABI).
+#if defined(__has_include) && __has_include("moy_app_lua_rows.h")
+#include "moy_app_lua_rows.h"
+#else
+#define MOY_APP_LUA_CALLS(X)
+#endif
+
 #if defined(__has_include)
 #if __has_include("esp_heap_caps.h")
 #define SVC_BOARD 1
@@ -662,18 +670,12 @@ static void open_names(lua_State *L) {
     lua_setfield(L, -2, "WARNING");
     lua_pushinteger(L, LOG_INFO);
     lua_setfield(L, -2, "INFO");
-    lua_pushliteral(L, "moybyte.notify");
-    lua_pushcclosure(L, l_console, 1);
-    lua_setfield(L, -2, "notify");
-    lua_pushliteral(L, "moybyte.open_with");
-    lua_pushcclosure(L, l_console, 1);
-    lua_setfield(L, -2, "open_with");
-    lua_pushliteral(L, "moybyte.share");
-    lua_pushcclosure(L, l_console, 1);
-    lua_setfield(L, -2, "share");
-    lua_pushliteral(L, "moybyte.tell");
-    lua_pushcclosure(L, l_console, 1);
-    lua_setfield(L, -2, "tell");
+#define CALL(name)                          \
+    lua_pushliteral(L, "moybyte." name);    \
+    lua_pushcclosure(L, l_console, 1);      \
+    lua_setfield(L, -2, name);
+    MOY_APP_LUA_CALLS(CALL)
+#undef CALL
     lua_setglobal(L, "moybyte");
 }
 

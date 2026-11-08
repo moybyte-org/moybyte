@@ -28,7 +28,7 @@ audio sessions, leases); the row itself, like a grant, outlives a stop.
 
 **The shell is process 1**: the Python console (`runtime/shell/console.py`,
 the window managers), where every shipped app runs. It is privileged by
-holding the grants the policy marks `never` (`native/moy_app/roles.json`:
+holding the grants the policy marks `never` (`native/os_calls.json`'s roles:
 `carts`, `install`, `wallpaper`, `artwork`, `damage`, `surface` and `ui`; `notify`,
 also `never`, is the achievements process's API, §8).
 
@@ -230,14 +230,17 @@ checked and before anything moves onto the shelf, since a carts index
 carries no manifest (`cart_index.Install`'s `ask`); a denied install
 removes the build, and Remove forgets the record.
 
-**The permission table.** One JSON source, `native/moy_app/roles.json`'s
-`"permissions"` beside the role rows, restated as `app_perms.TABLE` (held
-equal to it, and its `role:` rows to the C policy's allowlist, by
-`tests/test_app_perms.py`), which the prompt, the install check, the launch
+**The permission table.** One JSON source, `native/os_calls.json`'s
+`"permissions"` beside the rows of every call (`tiers.md` §1), generated
+into `app_perms.TABLE` and the C policy's allowlist (`MOY_APP_PERMS`) by
+`tools/gen_os_table.py`, which the prompt, the install check, the launch
 check and Settings all read. Each row: the name (`files` also matches
 `files:<folder>`), what it grants (`floor`, `role:<role>`, `api:<service>`,
 `boot`, or `marker`: a shipped app's claim on its cart, granting nothing),
-the tiers that may hold it, its line of the install prompt (None for the
+the tiers that may hold it (derived: the tiers that serve the calls it hands
+an app, so a prompt names nothing the cart's tier cannot do and a cart of
+another tier is not asked for it, `tests/test_app_perms.py`), its line of
+the install prompt (None for the
 floor and the markers: nothing to consent to and nothing to turn off), the
 console service it needs (`wifi`, `net`, `gpio`), and the names a Python
 cart's namespace holds while it is granted, each `None` while it is turned
@@ -550,7 +553,7 @@ it reload the cart's bank?) on a T-Deck resume.
 is `moybyte.notify(summary, body, icon, actions, urgency, replaces_id)`,
 the freedesktop notification fields (owner, 2026-11-03), behind a **`notifications`**
 permission granted at install (§2). The name is deliberately not
-`notify`: the `notify` ROLE (`native/moy_app/roles.json`) is the
+`notify`: the `notify` ROLE (`native/os_calls.json`) is the
 achievements process's API (§8) and stays ungrantable, so the two never
 collide.
 
@@ -643,7 +646,7 @@ end of it is `runtime/system/achievements.py`: `ws.ach`, the link, and
   the input that earned it, or by a tick that runs first. A run the kernel
   drives (a compiled cart) makes no crossing for the `open` its launch
   sent: the process takes it when the console frames again.
-- **The `notify` role is its API.** In `roles.json` its rows' `server` is
+- **The `notify` role is its API.** In `native/os_calls.json` its rows' `server` is
   `"proc:achievements"` and the grant stays `never`. The console registers
   the link for the role (to `native/moy_app` the row is served as a shell
   row): `achieve` and `award` are the messages (the scheduler's `send`,
@@ -724,5 +727,5 @@ keeps its tracebacks (§9).
 |---|---|---|
 | process identity | the cart `id`; OWNER rows (`native/moy_spine/moy_htab.h`); one run (`native/moy_play`) | a PROC kind that outlives a VM stop and holds an OWNER for its loans |
 | the grant | `native/moy_app/moy_app.c`'s table, keyed by id, not an OWNER row | unchanged in shape; carries device-API and lease bits |
-| the permission table | `roles.json` + `PERMS` in C; `network`/`multiplayer`/`pins` gated in `runtime/run/cart_api.py` | **one table** (§2), C-owned, read by the Player, the wasm adapter, the Lua binding, the ELF loader, the installer and the simulator |
+| the permission table | `native/os_calls.json`'s permissions, generated into `app_perms.TABLE` and `MOY_APP_PERMS` in C; `network`/`multiplayer`/`pins` gated in `runtime/run/cart_api.py` | **one table** (§2), C-owned, read by the Player, the wasm adapter, the Lua binding, the ELF loader, the installer and the simulator |
 | the update screen | the updater's; firmware update is never a role (`runtime/shell/system_api.py`) | **kernel chrome** (owner, 2026-11-01, option b): the precedent for a service's indicator |

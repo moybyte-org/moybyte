@@ -87,6 +87,9 @@ target_include_directories(usermod_moy_elf INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/../moy_input
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine
     ${CMAKE_CURRENT_LIST_DIR}/../moy_net
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_app
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_store
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_png
 )
 # The loader's struct layout follows its switches, so the binding that reads
 # it is compiled with them too. They reach every usermod source, which is

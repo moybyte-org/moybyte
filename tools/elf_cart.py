@@ -46,7 +46,7 @@ SDK_SRC = os.path.join(SDK, "src")
 SDK_LIBC = os.path.join(SDK, "libc")
 SDK_SYSROOT = os.path.join(SDK, "sysroot", "include")
 CACHE = os.path.join(ROOT, ".build", "sdk")
-TABLE = os.path.join(ROOT, "native", "moy_elf", "os_table.json")
+TABLE = os.path.join(ROOT, "native", "os_calls.json")
 ELF_H = os.path.join(ROOT, "native", "moy_elf", "moy_elf.h")
 
 # Per chip: the toolchain's folder and prefix, the code flags, the link
@@ -124,8 +124,9 @@ def _run(cmd):
 
 
 def _rows():
+    """The OS function table's length: its version, the ordinals ever appended."""
     with open(TABLE) as f:
-        return len(json.load(f)["rows"])
+        return json.load(f)["version"]
 
 
 def includes(chip):

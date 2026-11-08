@@ -1,5 +1,5 @@
-"""The app ABI's role table (`native/moy_app/roles.json`, #224 sprint 5) and
-the nets held to it.
+"""The app ABI's role table (the role rows of `native/os_calls.json`, #224
+sprint 5) and the nets held to it.
 
 The table is one row per verb an app reaches through its `AppContext`: the
 role, the verb, where it is served, the permission that grants it to a user
@@ -24,7 +24,6 @@ over a real store on CPython and on the T-Deck's own desktop; its "uncalled"
 line is the coverage ratchet.
 """
 
-import json
 import re
 from pathlib import Path
 
@@ -33,24 +32,25 @@ import pytest
 from ws_helpers import build_ws
 
 from runtime import app_context as _ac
+from tools import gen_os_table
 import moy_app
 
 ROOT = Path(__file__).resolve().parent.parent
-TABLE = ROOT / "native" / "moy_app" / "roles.json"
-SERVERS = ("shell", "c")
+SERVERS = ("shell", "c", "call")
 PROC = "proc:"
 
 
 def _rows():
-    return json.loads(TABLE.read_text())["rows"]
+    return gen_os_table.role_table()
 
 
 def _verbs():
-    """Each role's verbs but the toolkit's, which no AppContext object serves
-    (app_context.TOOLKIT; tests/test_ui_wasm.py drives its rows)."""
+    """Each role's verbs but those of the roles no AppContext object serves:
+    the toolkit's (app_context.TOOLKIT; tests/test_ui_wasm.py drives its
+    rows) and the console calls' (shell_servers.ConsoleCalls)."""
     out = {}
     for r in _rows():
-        if r["role"] == _ac.TOOLKIT:
+        if r["role"] not in _ac.ROLES:
             continue
         out.setdefault(r["role"], []).append(r["verb"])
     return out
@@ -100,7 +100,8 @@ def test_each_role_object_answers_exactly_its_rows(role):
 def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
     c_rows = [r["role"] + "." + r["verb"] for r in _rows() if r["server"] == "c"]
     assert c_rows == list(moy_app.rows())
-    assert tuple(_verbs()) + (_ac.TOOLKIT,) == tuple(moy_app.roles())
+    assert tuple(moy_app.roles()) == tuple(gen_os_table.roles(gen_os_table.load()))
+    assert _ac.TOOLKIT in moy_app.roles()
 
 
 def test_the_import_adapter_is_the_tables_wasm_column():
@@ -131,7 +132,7 @@ def test_the_ui_fixture_imports_every_ui_row():
 
 def test_the_role_doors_table_is_the_tables_rows():
     """The ROLE door names a row by its index here (moy_app_role), so the C's
-    table is roles.json row for row."""
+    table is the source's row for row."""
     assert list(moy_app.table()) == [r["role"] + "." + r["verb"] for r in _rows()]
 
 
@@ -144,16 +145,31 @@ def test_the_doors_shell_rows_take_their_servers_arguments():
     rows = {r["role"] + "." + r["verb"]: r for r in _rows()}
     from runtime import achievements
     servers = {"theme": ss.ThemeServer, "nav": ss.NavServer,
-               "notify": achievements.NotifyRole, "wallpaper": ss.WallpaperServer}
+               "notify": achievements.NotifyRole, "wallpaper": ss.WallpaperServer,
+               "moybyte": ss.ConsoleCalls}
     for name, kinds in ss.DOOR_ARGS.items():
         r = rows[name]
-        assert r["server"] == "shell" or r["server"].startswith(PROC), name
+        assert r["server"] in ("shell", "call") or r["server"].startswith(PROC), name
         role, verb = name.split(".")
         params = list(inspect.signature(getattr(servers[role], verb)).parameters.values())[2:]
         assert len(params) >= len(kinds), (name, kinds)
         for p, k in zip(params, kinds):
             assert (p.default is not inspect.Parameter.empty) == (k == "o"), (name, p.name, k)
         assert all(p.default is not inspect.Parameter.empty for p in params[len(kinds):]), name
+
+
+def test_the_console_calls_are_the_door_rows_of_the_moybyte_role():
+    """Each `call` row the door decodes is a method of the door's console-call
+    server, which runs the `moybyte` module's function of the same name; a
+    method no row names is a call nothing can reach."""
+    from runtime import shell_servers as ss
+    from runtime import moybyte
+    rows = [r for r in _rows() if r["server"] == "call"]
+    assert all(r["role"] == "moybyte" for r in rows)
+    door = {n.split(".")[1] for n in ss.DOOR_ARGS if n.startswith("moybyte.")}
+    have = {n for n in dir(ss.ConsoleCalls) if not n.startswith("_")}
+    assert have == door
+    assert all(callable(getattr(moybyte, v)) for v in door)
 
 
 def test_the_shell_rows_are_the_servers_methods():
@@ -227,12 +243,17 @@ def test_the_proc_rows_are_the_processs_and_the_links():
             assert list(inspect.signature(getattr(cls, v)).parameters)[:2] == ["self", "g"]
 
 
+# The roles every grant holds (moy_app.h's MOY_ROLE_FLOOR): no permission
+# grants them, and the C's holding check passes them for every grant.
+_FLOOR = {x["role"]: "floor" for x in gen_os_table.load()["roles"] if x["grant"] == "floor"}
+
+
 def test_the_grant_column_is_the_permission_map():
     perm_for = {}
     for perm, role in moy_app.perms():
         perm_for[role] = perm
     for r in _rows():
-        want = perm_for.get(r["role"], "never")
+        want = perm_for.get(r["role"], _FLOOR.get(r["role"], "never"))
         assert r["grant"] == want, "%s.%s grant %r, the map says %r" % (
             r["role"], r["verb"], r["grant"], want)
 
@@ -242,11 +263,12 @@ def test_the_grant_column_is_the_permission_tables():
     `role:<role>` row (runtime/shell/app_perms.py): the install prompt names
     exactly the grants the policy can make."""
     by_role = {}
-    for r in json.loads(TABLE.read_text())["permissions"]:
+    for r in gen_os_table.load()["permissions"]:
         if r["grants"].startswith("role:"):
             by_role[r["grants"][5:]] = r["perm"]
     for r in _rows():
-        assert r["grant"] == by_role.get(r["role"], "never"), (r["role"], r["verb"])
+        assert r["grant"] == by_role.get(r["role"], _FLOOR.get(r["role"], "never")), (
+            r["role"], r["verb"])
 
 
 def _doc_table():

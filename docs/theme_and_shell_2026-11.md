@@ -1738,8 +1738,8 @@ The calc/appearance/artwork heads take
 `moy_app_surface_t` holds `cx, cy, cw, ch` where it held `bar_h`, written by
 the same two writers (`console._surface_write`, `_LayoutCtx.install`) with
 `Workstation.app_content_rect()`, the rect the exitable strip leaves the
-RUNNING app's screen; the C answers `bar_h` as its `cy`. `roles.json` carries
-`surface.content_rect` (`server: c`, `grant: never`, `wasm: null`, as `bar_h`
+RUNNING app's screen; the C answers `bar_h` as its `cy`. `native/os_calls.json` carries
+`surface.content_rect` (`server: c`, a row of a `never` role, no import, as `bar_h`
 is) and the role table's drift tests (`tests/test_roles.py`) move with it.
 `runtime/shell/system_api.py` publishes `content_rect()` ungated beside `bar_h()` —
 an app-API global, not a cart verb (the verb table and moy-spec are

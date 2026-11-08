@@ -42,7 +42,7 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 97, 4, 38
+KINDS_N, TOKENS_N = 4, 38
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
@@ -54,9 +54,16 @@ ID_MAX = 63
 _ENOSPC = 28
 
 
-# The role table: the served roles' rows are its own.
-with open(os.path.join(HERE, "..", "..", "native", "moy_app", "roles.json")) as _f:
-    _TABLE = json.load(_f)["rows"]
+# The role table (native/os_calls.json's rows the ROLE door names, in order),
+# each as {"role", "verb", "server"}: the served roles' rows are its own, and
+# its roles and C rows size the C's.
+with open(os.path.join(HERE, "..", "..", "native", "os_calls.json")) as _f:
+    _SRC = json.load(_f)
+_TABLE = [{"role": r["name"].split(".", 1)[0], "verb": r["name"].split(".", 1)[1],
+           "server": r["server"]} for r in _SRC["rows"]
+          if r.get("server") in ("c", "shell", "call") or r.get("server", "").startswith("proc:")]
+ROLE_N = len(_SRC["roles"])
+ROW_N = sum(1 for r in _TABLE if r["server"] == "c")
 
 
 class _Buf(c.Structure):

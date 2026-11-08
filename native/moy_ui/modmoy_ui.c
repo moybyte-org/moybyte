@@ -3929,7 +3929,7 @@ static mp_obj_t ui_api_lost(mp_obj_t ctx) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_lost_obj, ui_api_lost);
 
 // wasm_rows() -> the public UI API's rows a compiled app imports ("ui_page", ...),
-// in roles.json's order: what this image serves (moy_ui_wasm.h).
+// in the role table's order: what this image serves (moy_ui_wasm.h).
 static mp_obj_t ui_wasm_rows(void) {
     mp_obj_t items[MOY_UI_WASM_ROWS];
     for (int i = 0; i < MOY_UI_WASM_ROWS; i++) {

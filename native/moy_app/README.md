@@ -3,13 +3,17 @@
 The app ABI's kernel half (#224 sprint 5; the design record is
 `docs/history/kernel_appabi_2026-10.md`): the grants every app's context holds,
 the grant policy, the roles served in C, and the binding of the rows the
-console serves in Python. `roles.json` is the
-role table (one row per verb, its `server` saying where it is served), and
+console serves in Python. The role table is the role rows of
+`native/os_calls.json`, the one source of Moybyte's app and OS calls (one row
+per verb, its `server` saying where it is served, each tier's name for it),
+from which `tools/gen_os_table.py` writes this module's tables;
 `tests/test_roles.py` holds the C rows to it.
 
 | file | what it is |
 |---|---|
-| `roles.json` | the role table: role, verb, server (`c`, `shell`: the Python console's, or `proc:<name>`: a process's), the permission that grants it, its wasm import type; and the permission table (`"permissions"`: name, what it grants, tiers, install prompt line, the service it needs, its Python names), whose `role:` rows are this module's allowlist (`runtime/shell/app_perms.py`, `docs/os_2026-11/processes.md` §2) |
+| `moy_app_rows.h` | generated: the roles (`MOY_ROLE_*`, and `MOY_ROLE_FLOOR`, the roles every grant holds), the C rows (`MOY_ROW_*`), the role table (`MOY_T_*`, `MOY_APP_TABLE_ROWS`) and the permission each role is granted by (`MOY_APP_PERMS`, the allowlist) |
+| `moy_app_wasm_rows.h` | generated: the `moybyte.app` natives, one per row a compiled app imports, each packing its fields for the ROLE door, and the table row each serves |
+| `moy_app_lua_rows.h` | generated: the names a Lua run's role binding opens (`MOY_APP_LUA_NAMES`) and the console calls a Lua service's `moybyte` table holds (`MOY_APP_LUA_CALLS`) |
 | `moy_app.h`, `moy_app.c` | the state (`moy_appabi_t`): the grant table (kind GRANT, rows keyed by the app's id, SHIPPED idempotent by id, RUN ended with its run, each with the surface row the shell writes), the damage flags, the live token table under its generation (the theme's vocabulary, `moy_app_token_name`), the pointer the surface rows read (a `moy_input_ptr_t` the console binds, let go when the VM ends), Paint's open picture (its `paint_doc` and `paint_doc_kind` settings rows, JSON strings, read and followed by the artwork rows), the clipboard's 4 KiB of text, the user-files store the files and wallpaper-copy rows reach (the layer's verb table `moy_uf_ops`, the carts root, readable and writable, the session count, the copy's generation), the per-row counters, prefs written into a settings store; the ROLE door (`moy_app_role`: any table row by its index, its arguments packed as length-prefixed fields, a C row run here with a blob the layer allocated copied out and freed, a shell row handed to the door `moy_app_door_bind` binds, the kernel's counted `moy_loop_role`); the policy (permission to role, the files kinds, the two-kinds refusal, the key a cart's grant is made under); the C rows, each store row taking the bus gate around its own op (`moy_vol_gate_enter`) and a grant made with a files kind reaching that kind alone |
 | `moy_app_wasm.h`, `moy_app_wasm.c` | the wasm import adapter: one native per row with a wasm type, imported from module `moybyte.app` as `<role>_<verb>`, each packing its arguments for the ROLE door; writes, prefs, the files rows and shell rows hop to the VM's task (`moy_wasm_on_vm`, weak: a call where there is none), the look's and the clipboard's reads run in place under the seqlock (`moy_app_seq_begin`/`end`); each native's run found by the engine's handle on its call (`moy_app_wasm_run_of`, which the engine's glue defines: `native/moycore/moycore_wasm.c`, `runtime/host/moyhost_wasm.c`), the console's state the theme is read from (`moy_app_wasm_live`), the load's grant check against the run (`moy_app_wasm_admit`), a module's import walk (`moy_app_wasm_imports`, which the VM-free verdict reads too) and the hops' count and microseconds |
 | `moy_app_run.h` | a run's grant, `moy_app_run_t`: the state, its serial, the grant and the role mask the permissions name, a value the run's owner holds (a Lua state's registry, a wasm run's per-run state in its engine's glue, a process row with the table); `moy_app.h` makes one (`moy_app_run_make`), checks its state is still made (`moy_app_run_live`) and holds the one a VM stop carries (`moy_app_stop_hold`, `moy_app_stopped`, `moy_app_stop_end`). It includes nothing else, so an engine's glue holds one without this module's headers |
@@ -19,7 +23,7 @@ role table (one row per verb, its `server` saying where it is served), and
 
 ## One table, a server per verb
 
-The role table is data, and every verb has one of three servers:
+The role table is data, and every verb has one of four servers:
 
 - **`c`**: the state is the kernel's and resident (the settings rows, the
   glass, the lease table, the engine's sizing, the user-files layer). Each verb
@@ -39,8 +43,14 @@ The role table is data, and every verb has one of three servers:
   process for the role (`runtime/system/achievements.py`), so this module serves
   the row as a shell row; the link sends the process its events as messages and
   reads its answers off its functions.
-- **Python-only**: a row with no wasm type, whose only consumer is Python on
-  paths and objects (`install.net`, `install.keep`, `install.op`).
+- **`call`**: a console call (the `moybyte` role, which every grant holds):
+  the `moybyte` module's function (`notify`, `open_with`, `share`) run as the
+  process whose grant it is (`runtime/shell/shell_servers.py`'s
+  `ConsoleCalls`), so the permission it names is that process's. A native
+  command reaches them through the door; a Lua service through its console
+  calls.
+- **Python-only**: a row no other tier imports, whose only consumer is Python
+  on paths and objects (`install.net`, `install.keep`, `install.op`).
 
 A role read on the frame path is a C call with no Python shim, or a cached
 object checked by one integer (`theme.colors()` against the token generation,

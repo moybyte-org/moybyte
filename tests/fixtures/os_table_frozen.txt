@@ -1,4 +1,4 @@
-# The OS table's rows as shipped (native/moy_elf/os_table.json), one line each:
+# The OS table's rows as shipped (native/os_calls.json's rows with an ELF ordinal), one line each:
 # ordinal, name, prototype. A module built against any of them calls them by
 # ordinal forever, so a line here is never changed, moved or removed: a new
 # row is a new last line, written with the row it freezes. tests/test_os_table.py
@@ -65,3 +65,21 @@
 59 poll | int poll(struct pollfd *fds, nfds_t n, int timeout)
 60 select | int select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv)
 61 fcntl | int fcntl(int fd, int cmd, ...)
+62 moy_files_readable | int32_t moy_files_readable(void)
+63 moy_files_ready | int32_t moy_files_ready(void)
+64 moy_files_list | int32_t moy_files_list(const char *kind, void *names, size_t names_cap)
+65 moy_files_count | int32_t moy_files_count(const char *kind)
+66 moy_files_load | int32_t moy_files_load(const char *kind, const char *name, void *data, size_t data_cap)
+67 moy_files_save | int32_t moy_files_save(const char *kind, const char *name, const void *data, size_t data_len, void *saved, size_t saved_cap)
+68 moy_files_delete | int32_t moy_files_delete(const char *kind, const char *name, void *trashed, size_t trashed_cap)
+69 moy_nav_open_app | int32_t moy_nav_open_app(const char *id)
+70 moy_prefs_get | int32_t moy_prefs_get(const char *key, void *json, size_t json_cap)
+71 moy_prefs_set | int32_t moy_prefs_set(const char *key, const char *json)
+72 moy_prefs_clear | int32_t moy_prefs_clear(const char *key)
+73 moy_clipboard_put_text | int32_t moy_clipboard_put_text(const char *text)
+74 moy_clipboard_text | int32_t moy_clipboard_text(void *text, size_t text_cap)
+75 moy_clipboard_kind | int32_t moy_clipboard_kind(void)
+76 moy_clipboard_seq | int32_t moy_clipboard_seq(void)
+77 moy_notify | int32_t moy_notify(const char *summary, const char *body)
+78 moy_open_with | int32_t moy_open_with(const char *item, int32_t choose)
+79 moy_share | int32_t moy_share(const void *data, size_t data_len, const char *mime)

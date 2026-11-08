@@ -179,7 +179,7 @@ typedef int (*moy_loop_up_fn)(int which, uint32_t arg, const char *line);
 
 // THE ROLE DOOR (native/moy_app/README.md): the upcall that
 // carries arguments. A compiled app's call of a role row the Python console
-// serves: the calling grant, the row (native/moy_app/roles.json's index), the
+// serves: the calling grant, the row (the role table's index, native/os_calls.json), the
 // row's arguments packed in `arg` (n bytes, native/moy_app/moy_app.h's field
 // encoding) and a buffer for its answer (cap bytes). The binding's dispatcher
 // answers >= 0 (the row's number, or the length of the text or blob it wrote

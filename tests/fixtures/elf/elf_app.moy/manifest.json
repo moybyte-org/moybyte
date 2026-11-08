@@ -1,0 +1,14 @@
+{
+  "title": "App Calls",
+  "id": "elf.app",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "native",
+      "prefs",
+      "clipboard",
+      "files:documents",
+      "notifications"
+    ]
+  }
+}

@@ -24,7 +24,9 @@ SLOTS = 32
 ID_MAX = 63
 KEY_MAX = 127
 _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
-          "notify", "wallpaper", "artwork", "clipboard", "install", "ui")
+          "notify", "wallpaper", "artwork", "clipboard", "install", "ui", "moybyte")
+# The roles every grant holds (moy_app.h's MOY_ROLE_FLOOR).
+_FLOOR = ("moybyte",)
 _ROWS = ("damage.all", "damage.again",
          "surface.canvas", "surface.size", "surface.font_scale",
          "surface.chrome_scale", "surface.windowed", "surface.bar_h",
@@ -243,7 +245,7 @@ class App:
         g = self._grants.get(h)
         if g is None:
             raise ValueError("a grant that ended")
-        if role not in g[2]:
+        if role not in g[2] and role not in _FLOOR:
             raise ValueError("a role the grant does not hold")
         return g
 
@@ -662,7 +664,7 @@ class Files(_Role):
         return _layer().read_provenance(blob)
 
 
-# The roles every row of which the console serves (roles.json's "shell" rows).
+# The roles every row of which the console serves (native/os_calls.json's "shell" rows).
 _SERVED = {
     "carts": ("readable ready begin end all can_journal slug create journal rescan "
               "hydrate images save_image encode_image"),

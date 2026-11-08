@@ -8,8 +8,8 @@ decisions the code rests on.
 
 | file | what it is |
 |---|---|
-| `os_table.json` | the ORDINAL SOURCE: one row a function, appended, never changed or removed |
-| `moy_os_table.h`, `moy_os_rows.h`, `moy_os_table.c` | generated from it (`tools/gen_os_table.py`): the row enum, the kernel's prototypes, the table and its retired rows' typed stubs |
+| `../os_calls.json` | the ONE SOURCE of Moybyte's calls: a row with an `elf` ordinal is a row of this table, appended, never changed or removed |
+| `moy_os_table.h`, `moy_os_rows.h`, `moy_os_table.c` | generated from it (`tools/gen_os_table.py`): the row enum, the kernel's prototypes, the table, its retired rows' typed stubs, and the body of each app call (below) |
 | `moy_os.h`, `moy_os.c` | the process model and every row's body |
 | `moy_elf.h`, `moy_elf_check.c` | the verdict a module passes before it is relocated |
 | `modmoy_elf.c` | the boards' binding (`moy_elf`): store file to PSRAM, signature, verdict, relocation |
@@ -39,7 +39,11 @@ decisions the code rests on.
 
 ## The table's rules
 
-`tools/gen_os_table.py` checks the source: a row keeps its slot and its
+The table is the rows of `native/os_calls.json` that carry an ordinal: the
+POSIX rows and the kernel's own (`moy_log`, the timers, the events) with
+their C prototypes as written there, and the app calls, whose prototypes
+the generator writes from the row's neutral types. `tools/gen_os_table.py`
+checks the source: a row keeps its slot and its
 prototype forever, a retired row answers through a stub typed like it (its
 `fail` value, `ENOSYS`), and the version is the row count, so it moves on an
 append and on nothing else. `tests/test_os_table.py` pins the generated files
@@ -51,6 +55,22 @@ streams through the spawned program's session calls (`native/moy_sh/moy_sh.h`)
 under the policy WASI uses (`native/moy_sh/moy_sh_prog.h`: the folders the
 permissions grant, the OS log for a background run's streams, Ctrl-C and the
 budget). No row is a second implementation of a shell or WASI call.
+
+**An app call** (`moy_files_*`, `moy_prefs_*`, `moy_clipboard_*`,
+`moy_nav_open_app`, `moy_notify`, `moy_open_with`, `moy_share`; the table is
+`docs/app_api_v1.md`'s call table) is a row of the app ABI's role table,
+reached through the same door a compiled app's import is
+(`native/moy_app/moy_app.h`'s `moy_app_role`): its generated body packs its
+fields and calls `moy_os_call`, which runs it for the process's app run on the
+task that serves its session (the VM's), or reads what the look and the
+clipboard write where it is called, under the app ABI's seqlock. The run is a
+grant of the command's own, owned by its pid, over the roles its granted
+permissions name (`runtime/shell/sh_door.py`, as a service's is), handed to
+`moy_os_command`; the console calls answer as that pid, under its
+`notifications` and the front's gate. An answer is a number or a length, or
+-1 with errno (EACCES a role or a folder the grant lacks, ERANGE a buffer too
+small, EAGAIN a process with no session to run it on: a service). The
+toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
 
 ## The process model
 

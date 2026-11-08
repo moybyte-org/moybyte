@@ -83,23 +83,72 @@ answer.
 An app now takes an **`AppContext`** (`runtime/shell/app_context.py`) carrying only the
 roles it declared:
 
-| role | what it is | verbs |
-|---|---|---|
-| `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
-| `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the content rect the host's exitable strip leaves a running app (`content_rect()`, `(x, y, w, h)`, and `bar_h()`, its `y` -- what a user app's ungated `content_rect()` and `bar_h()` read), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `content_rect()`, `pointer()` |
-| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; the verbs that change the look; and the Appearance page's (`docs/history/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
-| `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/Documents/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made for a shared folder (a user app's) reaches the kinds in that folder alone | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
-| `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
-| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
-| `ctx.prefs` | per-app settings on `system/settings`' rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
-| `ctx.notify` | achievement events, and the badges themselves: one awarded by its id, how many are found, whether one is, the day it was and its progress, and today's date on the bar's clock as the badges record it | `achieve()`, `award()`, `count()`, `has()`, `found_on()`, `progress()`, `today()` |
-| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
-| `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | `current()`, `follow()` |
-| `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `put_text()`, `text()`, `kind()`, `seq()` |
-| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves; the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open; the console's consent records, which the install prompt reads and writes (`runtime/shell/app_perms.py`) | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()`, `consent()` |
+<!-- GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit. -->
+| role | what it is | granted by | verbs |
+|---|---|---|---|
+| `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | the shell | `all()`, `again()` |
+| `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the content rect the host's exitable strip leaves a running app (`content_rect()`, `(x, y, w, h)`, and `bar_h()`, its `y` -- what a user app's ungated `content_rect()` and `bar_h()` read), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | the shell | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `content_rect()`, `pointer()` |
+| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; the verbs that change the look; and the Appearance page's (`docs/history/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `appearance` | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
+| `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/Documents/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made for a shared folder (a user app's) reaches the kinds in that folder alone | `files` | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
+| `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | the shell | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
+| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `launch` | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
+| `ctx.prefs` | per-app settings on `system/settings`' rows, namespaced per app (the grant's namespace), a write saved as it is made | `prefs` | `get()`, `set()`, `clear()` |
+| `ctx.notify` | achievement events, and the badges themselves: one awarded by its id, how many are found, whether one is, the day it was and its progress, and today's date on the bar's clock as the badges record it | the shell | `achieve()`, `award()`, `count()`, `has()`, `found_on()`, `progress()`, `today()` |
+| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | the shell | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
+| `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | the shell | `current()`, `follow()` |
+| `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `clipboard` | `put_text()`, `text()`, `kind()`, `seq()` |
+| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves; the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open; the console's consent records, which the install prompt reads and writes (`runtime/shell/app_perms.py`) | the shell | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()`, `consent()` |
 
-Read that module for the signatures. The verbs column is the role table's
-(`native/moy_app/roles.json`), and `tests/test_roles.py` holds the two equal.
+The calls a program reaches on more than one tier, each by its name
+there (`docs/os_2026-11/tiers.md` §1; the toolkit's `ui` rows are
+`docs/ui_api_2026-10.md`'s):
+
+| call | permission | Python | Lua | wasm (`moybyte.app`) | C (ELF) |
+|---|---|---|---|---|---|
+| `moy_log` | none |  |  |  | `moy_log` |
+| `moy_term_size` | none |  |  |  | `moy_term_size` |
+| `moy_timer_every` | none |  |  |  | `moy_timer_every` |
+| `moy_timer_cancel` | none |  |  |  | `moy_timer_cancel` |
+| `moy_events` | none |  |  |  | `moy_events` |
+| `theme.token` | `appearance` | `ctx.theme.token` |  | `theme_token` |  |
+| `theme.gen` | `appearance` | `ctx.theme.gen` |  | `theme_gen` |  |
+| `theme.light` | `appearance` | `ctx.theme.light` |  | `theme_light` |  |
+| `theme.name` | `appearance` | `ctx.theme.name` |  | `theme_name` |  |
+| `theme.variant` | `appearance` | `ctx.theme.variant` |  | `theme_variant` |  |
+| `theme.set` | `appearance` | `ctx.theme.set`, `set_theme` | `set_theme` | `theme_set` |  |
+| `theme.set_variant` | `appearance` | `ctx.theme.set_variant` |  | `theme_set_variant` |  |
+| `theme.edit_file` | `appearance` | `ctx.theme.edit_file` |  | `theme_edit_file` |  |
+| `files.readable` | `files` | `ctx.files.readable` |  | `files_readable` | `moy_files_readable` |
+| `files.ready` | `files` | `ctx.files.ready`, `files.ready` | `files.ready` | `files_ready` | `moy_files_ready` |
+| `files.list` | `files` | `ctx.files.list`, `files.list` | `files.list` | `files_list` | `moy_files_list` |
+| `files.count` | `files` | `ctx.files.count` |  | `files_count` | `moy_files_count` |
+| `files.load` | `files` | `ctx.files.load`, `files.load`, `files.load_text` | `files.load`, `files.load_text` | `files_load` | `moy_files_load` |
+| `files.save` | `files` | `ctx.files.save`, `files.save`, `files.save_text` | `files.save`, `files.save_text` | `files_save` | `moy_files_save` |
+| `files.delete` | `files` | `ctx.files.delete`, `files.delete` | `files.delete` | `files_delete` | `moy_files_delete` |
+| `files.duplicate` | `files` | `ctx.files.duplicate`, `files.duplicate` | `files.duplicate` |  |  |
+| `files.rename` | `files` | `ctx.files.rename`, `files.rename` | `files.rename` |  |  |
+| `files.new_name` | `files` | `ctx.files.new_name`, `files.new_name` | `files.new_name` |  |  |
+| `nav.open_app` | `launch`, `front` | `ctx.nav.open_app`, `open_app` | `open_app` | `nav_open_app` | `moy_nav_open_app` |
+| `prefs.get` | `prefs` | `ctx.prefs.get`, `prefs.get` | `prefs.get` | `prefs_get` | `moy_prefs_get` |
+| `prefs.set` | `prefs` | `ctx.prefs.set`, `prefs.set` | `prefs.set` | `prefs_set` | `moy_prefs_set` |
+| `prefs.clear` | `prefs` | `ctx.prefs.clear`, `prefs.clear` | `prefs.clear` | `prefs_clear` | `moy_prefs_clear` |
+| `clipboard.put_text` | `clipboard` | `ctx.clipboard.put_text` |  | `clipboard_put_text` | `moy_clipboard_put_text` |
+| `clipboard.text` | `clipboard` | `ctx.clipboard.text` |  | `clipboard_text` | `moy_clipboard_text` |
+| `clipboard.kind` | `clipboard` | `ctx.clipboard.kind` |  | `clipboard_kind` | `moy_clipboard_kind` |
+| `clipboard.seq` | `clipboard` | `ctx.clipboard.seq` |  | `clipboard_seq` | `moy_clipboard_seq` |
+| `moybyte.notify` | `notifications` | `moybyte.notify` | `moybyte.notify` |  | `moy_notify` |
+| `moybyte.open_with` | `front` | `moybyte.open_with` | `moybyte.open_with` |  | `moy_open_with` |
+| `moybyte.share` | `front` | `moybyte.share` | `moybyte.share` |  | `moy_share` |
+| `moybyte.tell` | none | `moybyte.tell` | `moybyte.tell` |  |  |
+| `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
+| `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
+<!-- END GENERATED -->
+
+Read that module for the signatures. Both tables are written from
+`native/os_calls.json`, the one source of Moybyte's app and OS calls, by
+`tools/gen_os_table.py` (`tests/test_os_table.py` fails on a stale copy); the
+second names each call on every tier that serves it, and a permission's
+tiers (the install prompt's) are the tiers that serve what it hands an app.
 Every context holds a **grant**, a row of native/moy_app's grant table keyed by
 the app's id, and every role is native/moy_app's role object over it: a C row
 reads the kernel's state, and a shell row checks the grant and calls the server
@@ -323,8 +372,8 @@ draws every frame.
 A user app may be compiled: `"runtime": "wasm"` with `"extensions":
 ["moybyte.app"]` in its manifest. It reaches its roles through IMPORTS from
 module `"moybyte.app"` (moy-spec SPEC.md §16.2's vendor-extension rule), each
-named `<role>_<verb>` at the type the role table's `wasm` column gives
-(`native/moy_app/roles.json`); `native/moy_app/moy_app_wasm.h` is the
+named `<role>_<verb>` at the type its row's parameters give (the call table
+above; `native/os_calls.json`); `native/moy_app/moy_app_wasm.h` is the
 adapter's contract. A number answers as an `i32`, text or a blob is written
 into the caller's buffer and answers its length, and a negative answer is
 moy_app.h's code negated. The theme's reads are every app's, as `theme()` is;

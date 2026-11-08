@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_app.h"
 #include "moy_os.h"
 #include "moy_os_rows.h"
 #include "moy_proc.h"
@@ -323,6 +324,7 @@ struct moy_os_proc {
     map_t *maps;                // mmap's, newest first
     size_t mapped;
     uint32_t flags;             // MOY_OS_NET
+    moy_app_run_t run;          // its app run: what its app calls are answered for
     volatile uint8_t net_held;
     uint32_t calls, timers, events;
 };
@@ -638,6 +640,115 @@ static int on_session(thr_t *t, void (*fn)(void *arg), void *arg) {
     }
     sem_give(&p->hop_lock);
     return 0;
+}
+
+// -- the rows the role door serves -------------------------------------------------
+//
+// An app call (docs/app_api_v1.md's call table) is the role table's row for the
+// process's app run, its fields packed as the door takes them
+// (native/moy_app/moy_app.h's moy_app_role): run on the task that serves the
+// process's session, which is the VM's, or a read of what the look and the
+// clipboard write where it is called, under the state's seqlock. A process
+// with no session (a service) has no task to run it on: EAGAIN.
+
+typedef struct {
+    const moy_app_run_t *run;
+    uint32_t row;
+    const uint8_t *arg;
+    size_t n;
+    void *out;
+    size_t cap;
+    int32_t r;
+} role_call_t;
+
+static void role_body(void *arg) {
+    role_call_t *c = arg;
+    c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->out, c->cap);
+}
+
+static void put32(uint8_t *q, uint32_t v) {
+    q[0] = (uint8_t)v;
+    q[1] = (uint8_t)(v >> 8);
+    q[2] = (uint8_t)(v >> 16);
+    q[3] = (uint8_t)(v >> 24);
+}
+
+static int role_errno(int32_t r) {
+    switch (-r) {
+        case MOY_APP_DENIED: case MOY_APP_STALE: return EACCES;
+        case MOY_APP_FULL: return ERANGE;
+        case MOY_APP_NOMEM: return ENOMEM;
+        case MOY_APP_ABSENT: return ENOENT;
+        case MOY_APP_NOSTORE: return ENODEV;
+        case MOY_APP_IO: return EIO;
+        case MOY_APP_NEEDS_VM: return EAGAIN;
+        default: return EINVAL;
+    }
+}
+
+int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *out, size_t cap) {
+    thr_t *t = enter();
+    moy_os_proc_t *p = t != NULL ? t->p : NULL;
+    int32_t r = -MOY_APP_STALE;
+    uint8_t stack[256];
+    uint8_t *buf = stack;
+    size_t len = 0;
+    if (p != NULL && moy_app_run_live(&p->run)) {
+        for (int i = 0; i < n; i++) {
+            size_t k = a[i].kind == MOY_OS_ARG_INT ? 4u
+                       : a[i].kind == MOY_OS_ARG_BYTES ? a[i].n
+                       : a[i].p != NULL ? strlen(a[i].p) : 0u;
+            len += 4u + k;
+        }
+        if (len > sizeof stack) {
+            buf = os_alloc(len);
+        }
+        if (buf == NULL) {
+            r = -MOY_APP_NOMEM;
+        } else {
+            size_t at = 0;
+            for (int i = 0; i < n; i++) {
+                if (a[i].kind == MOY_OS_ARG_INT) {
+                    put32(buf + at, 4u);
+                    put32(buf + at + 4, (uint32_t)a[i].v);
+                    at += 8u;
+                    continue;
+                }
+                size_t k = a[i].kind == MOY_OS_ARG_BYTES ? a[i].n
+                           : a[i].p != NULL ? strlen(a[i].p) : 0u;
+                put32(buf + at, (uint32_t)k);
+                if (k) {
+                    memcpy(buf + at + 4, a[i].p, k);
+                }
+                at += 4u + k;
+            }
+            role_call_t c = { &p->run, row, buf, len, out, out != NULL ? cap : 0u,
+                              -MOY_APP_NEEDS_VM };
+            if (how == MOY_OS_SEQ) {
+                for (;;) {
+                    uint32_t q = moy_app_seq_begin(p->run.a);
+                    if (!(q & 1u)) {
+                        role_body(&c);
+                        if (moy_app_seq_end(p->run.a, q)) {
+                            break;
+                        }
+                    }
+                }
+            } else if (on_session(t, role_body, &c) != 0) {
+                c.r = -MOY_APP_NEEDS_VM;
+            }
+            r = c.r;
+            if (buf != stack) {
+                os_free(buf);
+            }
+        }
+    }
+    leave(t);
+    if (r < 0) {
+        moy_os_errno_set(role_errno(r));
+        return -1;
+    }
+    return r;
 }
 
 // -- the rows: files and streams ----------------------------------------------------
@@ -2482,7 +2593,7 @@ static moy_os_proc_t *proc_of(uint32_t pid);
 int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                          int argc, const char *const *argv, const char *roots, uint32_t pid,
                          const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
-                         char *err, size_t errlen) {
+                         const moy_app_run_t *run, char *err, size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, false, err, errlen);
     if (p == NULL) {
         if (m->unload != NULL) {
@@ -2492,6 +2603,9 @@ int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_cap
     }
     p->s = s;
     p->flags = flags;
+    if (run != NULL) {
+        p->run = *run;
+    }
     size_t args_n = 0;
     for (int i = 0; i < argc; i++) {
         args_n += strlen(argv[i]) + 1;
@@ -2582,9 +2696,9 @@ int moy_os_command_stop(uint32_t pid) {
 int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                    int argc, const char *const *argv, const char *roots, uint32_t pid,
                    const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
-                   char *err, size_t errlen) {
+                   const moy_app_run_t *run, char *err, size_t errlen) {
     int r = moy_os_command_start(s, m, caps, argc, argv, roots, pid, id, bg_pid, budget_ms,
-                                 flags, err, errlen);
+                                 flags, run, err, errlen);
     if (r != 0) {
         return r;
     }

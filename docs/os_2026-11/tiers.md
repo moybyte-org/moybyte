@@ -59,17 +59,48 @@ record and the strike ledger as its floor.
   version and its highest row; a module built for a newer table is refused as
   "console needs an update". Every struct that crosses the table carries a
   version (`moy_event_t`, a lease's cfg).
-- **One source, three consumers.** Today the wasm imports are WAMR signature
-  strings in `roles.json` (many rows `null`), packed for the ROLE door and
-  hopped to the VM task (`native/moy_app/moy_app_wasm.c`), with the UI rows a
-  second source (`native/moy_ui/moy_ui_wasm.h`) and moy-spec's verbs a third.
-  The ELF table needs **a per-row ordinal and a C prototype in one source**,
-  pinned by a golden test (`native/moy_elf/os_table.json`,
-  `tests/test_os_table.py`); the wasm adapter and the UI rows are generated
-  from it. Spec verbs, if exported, sit under a Moybyte-owned ordinal layer
-  frozen separately from the spec, which is not append-only by index.
-  WASI's imports (§3) and the POSIX rows (above) are the same C
-  functions under two standard names; neither is a second implementation.
+- **One source for every tier's calls (owner, 2026-11-08, #246).**
+  `native/os_calls.json` holds Moybyte's app and OS calls, one row each: its
+  name, its types in a neutral notation (`int`, `str`, `str?`, `bytes`,
+  `cart`, `out`, and what the answer is), where it is served, the permission
+  it answers under, and each tier's name for it: its ELF ordinal, whether a
+  compiled app imports it from `moybyte.app` (its WAMR signature from the
+  types), its Lua and Python names (Lua's are Python's, verbatim), and
+  whether the door's Python half decodes it. `tools/gen_os_table.py` writes
+  every tier's table from it: this table and the SDK's header and stubs; the
+  app ABI's roles, C rows, role table and allowlist
+  (`native/moy_app/moy_app_rows.h`); the `moybyte.app` natives
+  (`moy_app_wasm_rows.h`) and the toolkit's (`native/moy_ui/moy_ui_wasm_rows.h`);
+  the names a Lua run and a Lua service hold (`moy_app_lua_rows.h`); the
+  Python console's `ROLES`, `TABLE`, `DOOR_ARGS` and console calls; and
+  `docs/app_api_v1.md`'s role and call tables. `tests/test_os_table.py`
+  fails on a stale copy. moy-spec's game verbs are not in it (they are the
+  `moy` module's and libmoy's); spec verbs, if ever exported here, would sit
+  under a Moybyte-owned ordinal layer frozen separately from the spec, which
+  is not append-only by index. WASI's imports (§3) keep WASI's names and are
+  not rows; they and the POSIX rows (above) are the same C functions under
+  two standard names, neither a second implementation.
+- **A native module's app calls.** The app verbs a compiled app imports are
+  rows of this table too (ordinals 62 to 79): the files role
+  (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
+  `delete`), prefs (`moy_prefs_get`, `set`, `clear`), the clipboard
+  (`moy_clipboard_put_text`, `text`, `kind`, `seq`), `moy_nav_open_app`, and
+  the console calls `moy_notify`, `moy_open_with` and `moy_share`. Each is
+  its role table row run through the ROLE door for the process's app run: a
+  grant the shell makes for the command, owned by its pid, over the roles
+  its granted permissions name (`native/moy_elf/README.md`). The nav row and
+  the console calls pass the front's gate and `notifications` as the
+  process; a service, which has no session for the call to run on, answers
+  EAGAIN until the service model gives it one queue into the VM's task. The
+  toolkit's `ui` rows are deferred for this tier.
+- **A permission's tiers are derived.** The permission table's tiers column
+  is the set of tiers that serve the calls the permission hands an app (the
+  rows of its role, the rows naming it, and moy-spec's tiers where its verbs
+  are the spec's); only what no call serves states its own (a native module's
+  run, a service's start). So `clipboard` is Python's, wasm's and ELF's,
+  `network` Python's and ELF's (its sockets), `notifications` and `front`
+  Python's, Lua's and ELF's, and an install prompt asks a cart only for what
+  its tier can do (`tests/test_app_perms.py`).
 - **Trust** is the overview's §4 C row: an ELF that has loaded runs at the
   kernel's trust, and no permission binds it past its consent. The strike ledger and crash record are the floor, keyed for
   an unsigned module by **content hash**, since an id is the author's to
@@ -95,8 +126,8 @@ typedef struct {
 
 A section `.moy.table` carries the version built against and `.moy.rows`
 every row linked; the loader refuses a row at or past its own `rows`. The
-source is `native/moy_elf/os_table.json`; `tests/test_os_table.py` pins the
-ordinals.
+source is `native/os_calls.json`'s rows with an `elf` ordinal;
+`tests/test_os_table.py` pins the ordinals to `tests/fixtures/os_table_frozen.txt`.
 
 ## 2. Lua
 
@@ -111,7 +142,8 @@ role binding** is `native/moy_app/moy_app_lua.c` (P5.1, 2026-11-07), over the ro
 table and the ROLE door (`moy_app_role`) the wasm adapter reaches, for the
 state's own run (§3): the Player makes a Lua app's run, its state's open
 copies it into the state, and the state opens with the names its
-permissions grant (`files`, `prefs`, `set_theme`, `open_app`), each
+permissions grant (`files`, `prefs`, `set_theme`, `open_app`: the source's
+Lua names, §1, generated into `native/moy_app/moy_app_lua_rows.h`), each
 answering as the Python face does (the roles trace for a Lua app,
 `tests/test_semantic_traces.py`), and no others. With it Lua's **`io` and
 `os` libraries** are mapped onto the files tree under the app's permissions
@@ -130,8 +162,10 @@ callback. `moybyte.on` takes the OS's messages (`processes.md` §8's
 `achieve` and `award`, `between_apps.md` §4's `net` and `ble`, and `app`,
 what its own app tells it, `processes.md` §5), queued on
 the service's row. What enters the console
-is the VM task's: `moybyte.notify` and the functions the console hands a
-system process (its `env`, whose values become globals) are CONSOLE CALLS,
+is the VM task's: `moybyte.notify`, `open_with`, `share` and `tell` (the
+source's console calls, §1, generated into the state's `moybyte` table and
+the scheduler's `_CALLS`) and the functions the console hands a system
+process (its `env`, whose values become globals) are CONSOLE CALLS,
 which yield the call's coroutine with the call posted on the row until the
 VM's task answers it at the scheduler's poll, so a service on its own task
 never enters Python and its wait is not counted against its budget. The
@@ -196,4 +230,12 @@ builds with libc-wasi off (`native/moy_wasm/micropython.cmake`,
 
 A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`
-for the rest.
+for the rest; and an app's `moybyte.app`, its roles' rows. Those are rows of
+the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
+row's types give, and the adapter's natives and the toolkit's are generated
+from it (`native/moy_app/moy_app_wasm_rows.h`,
+`native/moy_ui/moy_ui_wasm_rows.h`), each packing its fields for the ROLE
+door and hopping to the VM's task, or, for a read of what the look and the
+clipboard write, reading in place under the seqlock, as its row's `how`
+says. No console call is imported yet: a compiled app has no
+`notifications` or `front` call, so neither permission is a wasm cart's.

@@ -4,7 +4,7 @@
 // A MODULE is a loaded ELF (moy_elf.h's loader on a board, the host's dlopen):
 // one entry the OS calls with the table and what to run (sdk/src/moyos_crt.c).
 // The module imports nothing by name; its calls into the OS are the table's
-// rows, by ordinal (moy_os_table.h, generated from os_table.json).
+// rows, by ordinal (moy_os_table.h, generated from native/os_calls.json).
 //
 // A PROCESS is a module run: its pid, its row of the process table
 // (moy_proc.h, tier ELF), its threads and its registrations. The OS creates
@@ -59,6 +59,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "moy_app_run.h"
 #include "moy_event.h"
 #include "moy_os_table.h"
 #include "moy_sh.h"
@@ -114,8 +115,10 @@ void moy_os_default_caps(moy_os_caps_t *caps);
 // in the background when `bg_pid` is non-zero, ending at `budget_ms` (0: no
 // limit), with what `flags` grants (MOY_OS_NET: the socket rows). `id` is
 // the cart's id for its process row. Its exit status, or
-// MOY_OS_REFUSED with the reason in `err`. The module is unloaded (m->unload)
-// before it answers, whatever it answers.
+// MOY_OS_REFUSED with the reason in `err`. `run` is the process's app run
+// (moy_app_run.h), the grant its app calls are answered for (NULL: none,
+// each answering EACCES). The module is unloaded (m->unload) before it
+// answers, whatever it answers.
 #define MOY_OS_NET 1u
 // A loader's flag, read before the module is handed here: the cart's consent
 // admits a module with no signature (moy_ota_admit_module's `consented`,
@@ -124,7 +127,7 @@ void moy_os_default_caps(moy_os_caps_t *caps);
 int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                    int argc, const char *const *argv, const char *roots, uint32_t pid,
                    const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
-                   char *err, size_t errlen);
+                   const moy_app_run_t *run, char *err, size_t errlen);
 
 // The same run in steps, so the task that serves it can go on between them
 // (the shell door's step, runtime/shell/sh_door.py): start answers 0 with
@@ -136,7 +139,7 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
 int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                          int argc, const char *const *argv, const char *roots, uint32_t pid,
                          const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
-                         char *err, size_t errlen);
+                         const moy_app_run_t *run, char *err, size_t errlen);
 int moy_os_command_step(uint32_t pid, uint32_t max_us);
 int moy_os_command_stop(uint32_t pid);
 

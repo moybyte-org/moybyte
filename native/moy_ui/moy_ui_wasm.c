@@ -902,53 +902,10 @@ int32_t moy_ui_wasm_rule(void *e) {
 
 #define FN(f) ((void *)(f))
 
-// In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
-// row's import type (tests/test_roles.py holds the two to roles.json).
-static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = {
-    { "ui_page", FN(moy_ui_wasm_page) },
-    { "ui_label", FN(moy_ui_wasm_label) },
-    { "ui_button", FN(moy_ui_wasm_button) },
-    { "ui_toggle", FN(moy_ui_wasm_toggle) },
-    { "ui_slider", FN(moy_ui_wasm_slider) },
-    { "ui_list", FN(moy_ui_wasm_list) },
-    { "ui_part", FN(moy_ui_wasm_part) },
-    { "ui_focus", FN(moy_ui_wasm_focus) },
-    { "ui_keys_taken", FN(moy_ui_wasm_keys_taken) },
-    { "ui_at", FN(moy_ui_wasm_at) },
-    { "ui_group", FN(moy_ui_wasm_group) },
-    { "ui_info", FN(moy_ui_wasm_info) },
-    { "ui_link", FN(moy_ui_wasm_link) },
-    { "ui_cycle", FN(moy_ui_wasm_cycle) },
-    { "ui_seg", FN(moy_ui_wasm_seg) },
-    { "ui_swatches", FN(moy_ui_wasm_swatches) },
-    { "ui_hints", FN(moy_ui_wasm_hints) },
-    { "ui_icon", FN(moy_ui_wasm_icon) },
-    { "ui_progress", FN(moy_ui_wasm_progress) },
-    { "ui_table", FN(moy_ui_wasm_table) },
-    { "ui_scroll", FN(moy_ui_wasm_scroll) },
-    { "ui_field", FN(moy_ui_wasm_field) },
-    { "ui_dialog", FN(moy_ui_wasm_dialog) },
-    { "ui_tabs", FN(moy_ui_wasm_tabs) },
-    { "ui_grid", FN(moy_ui_wasm_grid) },
-    { "ui_card", FN(moy_ui_wasm_card) },
-    { "ui_popover", FN(moy_ui_wasm_popover) },
-    { "ui_menu", FN(moy_ui_wasm_menu) },
-    { "ui_tool", FN(moy_ui_wasm_tool) },
-    { "ui_bar", FN(moy_ui_wasm_bar) },
-    { "ui_rule", FN(moy_ui_wasm_rule) },
-    { "ui_text_view", FN(moy_ui_wasm_text_view) },
-    { "ui_table_part", FN(moy_ui_wasm_table_part) },
-    { "ui_table_dist", FN(moy_ui_wasm_table_dist) },
-    { "ui_table_floor", FN(moy_ui_wasm_table_floor) },
-    { "ui_held", FN(moy_ui_wasm_held) },
-    { "ui_held_last", FN(moy_ui_wasm_held_last) },
-    { "ui_held_all", FN(moy_ui_wasm_held_all) },
-    { "ui_slots", FN(moy_ui_wasm_slots) },
-    { "ui_slot", FN(moy_ui_wasm_slot) },
-    { "ui_slot_next", FN(moy_ui_wasm_slot_next) },
-    { "ui_part_at", FN(moy_ui_wasm_part_at) },
-    { "ui_split", FN(moy_ui_wasm_split) },
-};
+// By import name, in the role table's order (moy_ui_wasm_rows.h, generated
+// from native/os_calls.json with each row's import type).
+static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] =
+    MOY_UI_WASM_NATIVES;
 
 void *moy_ui_wasm_native(const char *name) {
     for (int i = 0; i < MOY_UI_WASM_ROWS; i++) {

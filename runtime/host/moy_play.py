@@ -62,7 +62,7 @@ _SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_shares.c", "moy_rt.h", "moy_rt
             "moy_store_host.c",
             # native/moy_app's table, which a compiled app's verdict reads its
             # imports through, as on a board
-            "moy_app.h", "moy_app.c", "moy_app_wasm.h", "moy_app_wasm.c",
+            "moy_app.h", "moy_app_rows.h", "moy_app_wasm_rows.h", "moy_app_lua_rows.h", "moy_app.c", "moy_app_wasm.h", "moy_app_wasm.c",
             "moy_htab.h", "moy_htab.c", "moy_settings.h", "moy_settings.c",
             "moy_route.h", "moy_route.c", "moy_ledger.h", "moy_ledger.c",
             "moy_input.h", "moy_ufiles.h")

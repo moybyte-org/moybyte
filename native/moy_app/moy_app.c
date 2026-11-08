@@ -54,36 +54,9 @@ int moy_app_seq_end(const moy_appabi_t *a, uint32_t s) {
     return __atomic_load_n(&a->seq, __ATOMIC_RELAXED) == s;
 }
 
-static const char *const ROLE_NAMES[MOY_ROLE_N] = {
-    "damage", "surface", "theme", "files", "carts", "nav", "prefs", "notify",
-    "wallpaper", "artwork", "clipboard", "install", "ui",
-};
+static const char *const ROLE_NAMES[MOY_ROLE_N] = MOY_ROLE_NAMES;
 
-static const char *const ROW_NAMES[MOY_ROW_N] = {
-    "damage.all", "damage.again",
-    "surface.canvas", "surface.size", "surface.font_scale", "surface.chrome_scale",
-    "surface.windowed", "surface.bar_h", "surface.content_rect", "surface.pointer",
-    "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
-    "theme.variant",
-    "files.readable", "files.ready", "files.begin", "files.end", "files.list",
-    "files.count", "files.load", "files.save", "files.delete", "files.duplicate",
-    "files.rename", "files.new_name", "files.trash_list", "files.restore",
-    "files.empty_trash", "files.history", "files.history_ops",
-    "files.history_commit", "files.encode_image", "files.decode_image",
-    "files.decode_cover", "files.encode_cover", "files.sig", "files.stamp",
-    "files.encode_text", "files.decode_text", "files.provenance",
-    "prefs.get", "prefs.set", "prefs.clear",
-    "wallpaper.load_copy", "wallpaper.save_copy",
-    "artwork.current", "artwork.follow",
-    "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
-    "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
-    "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
-    "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress", "ui.table", "ui.scroll",
-    "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover", "ui.menu",
-    "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part", "ui.part_at",
-    "ui.split", "ui.table_dist", "ui.table_floor", "ui.held", "ui.slots", "ui.slot",
-    "ui.slot_next", "ui.held_last", "ui.held_all",
-};
+static const char *const ROW_NAMES[MOY_ROW_N] = MOY_ROW_NAMES;
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
 // chrome's (docs/theme_and_shell_2026-11.md §3.1), in role-id order.
@@ -115,13 +88,7 @@ static const struct { const char *kind; int8_t folder; } KIND_FOLDERS[] = {
 };
 
 // The allowlist: a role absent here is never granted.
-static const struct { const char *perm; int role; } PERMS[] = {
-    { "files", MOY_ROLE_FILES },
-    { "prefs", MOY_ROLE_PREFS },
-    { "appearance", MOY_ROLE_THEME },
-    { "launch", MOY_ROLE_NAV },
-    { "clipboard", MOY_ROLE_CLIPBOARD },
-};
+static const struct { const char *perm; int role; } PERMS[] = MOY_APP_PERMS;
 #define NPERMS (sizeof(PERMS) / sizeof(PERMS[0]))
 
 // -- the state ---------------------------------------------------------------------
@@ -326,7 +293,7 @@ static const moy_grant_t *holding(const moy_appabi_t *a, uint32_t h, int role, i
         *rc = MOY_APP_STALE;
         return NULL;
     }
-    if ((g->roles & (1u << role)) == 0u) {
+    if (((g->roles | MOY_ROLE_FLOOR) & (1u << role)) == 0u) {
         *rc = MOY_APP_DENIED;
         return NULL;
     }
@@ -1525,175 +1492,10 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g) {
 // -- the ROLE door -------------------------------------------------------------------
 
 // The role table, row for row: each row's "role.verb", its role and its C row
-// (MOY_APP_SHELL for a row the Python console serves). tests/test_roles.py
-// holds it to roles.json.
-static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABLE_N] = {
-    {"damage.all", MOY_ROLE_DAMAGE, MOY_ROW_DAMAGE_ALL},
-    {"damage.again", MOY_ROLE_DAMAGE, MOY_ROW_DAMAGE_AGAIN},
-    {"surface.canvas", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CANVAS},
-    {"surface.size", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_SIZE},
-    {"surface.font_scale", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_FONT_SCALE},
-    {"surface.chrome_scale", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CHROME_SCALE},
-    {"surface.windowed", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_WINDOWED},
-    {"surface.bar_h", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_BAR_H},
-    {"surface.content_rect", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CONTENT_RECT},
-    {"surface.pointer", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_POINTER},
-    {"theme.colors", MOY_ROLE_THEME, MOY_ROW_THEME_COLORS},
-    {"theme.token", MOY_ROLE_THEME, MOY_ROW_THEME_TOKEN},
-    {"theme.gen", MOY_ROLE_THEME, MOY_ROW_THEME_GEN},
-    {"theme.light", MOY_ROLE_THEME, MOY_ROW_THEME_LIGHT},
-    {"theme.name", MOY_ROLE_THEME, MOY_ROW_THEME_NAME},
-    {"theme.variant", MOY_ROLE_THEME, MOY_ROW_THEME_VARIANT},
-    {"theme.set", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.set_variant", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.change", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.choices", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.set_chrome_scale", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.edit_file", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.name_custom", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.name_check", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"files.readable", MOY_ROLE_FILES, MOY_ROW_FILES_READABLE},
-    {"files.ready", MOY_ROLE_FILES, MOY_ROW_FILES_READY},
-    {"files.begin", MOY_ROLE_FILES, MOY_ROW_FILES_BEGIN},
-    {"files.end", MOY_ROLE_FILES, MOY_ROW_FILES_END},
-    {"files.list", MOY_ROLE_FILES, MOY_ROW_FILES_LIST},
-    {"files.count", MOY_ROLE_FILES, MOY_ROW_FILES_COUNT},
-    {"files.load", MOY_ROLE_FILES, MOY_ROW_FILES_LOAD},
-    {"files.save", MOY_ROLE_FILES, MOY_ROW_FILES_SAVE},
-    {"files.delete", MOY_ROLE_FILES, MOY_ROW_FILES_DELETE},
-    {"files.duplicate", MOY_ROLE_FILES, MOY_ROW_FILES_DUPLICATE},
-    {"files.rename", MOY_ROLE_FILES, MOY_ROW_FILES_RENAME},
-    {"files.new_name", MOY_ROLE_FILES, MOY_ROW_FILES_NEW_NAME},
-    {"files.trash_list", MOY_ROLE_FILES, MOY_ROW_FILES_TRASH_LIST},
-    {"files.restore", MOY_ROLE_FILES, MOY_ROW_FILES_RESTORE},
-    {"files.empty_trash", MOY_ROLE_FILES, MOY_ROW_FILES_EMPTY_TRASH},
-    {"files.history", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY},
-    {"files.history_ops", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY_OPS},
-    {"files.history_commit", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY_COMMIT},
-    {"files.encode_image", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_IMAGE},
-    {"files.decode_image", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_IMAGE},
-    {"files.decode_cover", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_COVER},
-    {"files.encode_cover", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_COVER},
-    {"files.sig", MOY_ROLE_FILES, MOY_ROW_FILES_SIG},
-    {"files.stamp", MOY_ROLE_FILES, MOY_ROW_FILES_STAMP},
-    {"files.encode_text", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_TEXT},
-    {"files.decode_text", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_TEXT},
-    {"files.provenance", MOY_ROLE_FILES, MOY_ROW_FILES_PROVENANCE},
-    {"carts.readable", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.ready", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.begin", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.end", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.all", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.can_journal", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.slug", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.create", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.journal", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.rescan", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.hydrate", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.images", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.save_image", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.encode_image", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"nav.open_app", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.is_system_app", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.projects", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.edit", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.open_image", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.open_text", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.edit_file", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.play", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.run_script", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.text_mode", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.cover", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.cover_gen", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"prefs.get", MOY_ROLE_PREFS, MOY_ROW_PREFS_GET},
-    {"prefs.set", MOY_ROLE_PREFS, MOY_ROW_PREFS_SET},
-    {"prefs.clear", MOY_ROLE_PREFS, MOY_ROW_PREFS_CLEAR},
-    {"notify.achieve", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.award", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.count", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.has", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.found_on", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.progress", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.today", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"wallpaper.current", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.carts", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.id_for", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.title", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.select", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.preview", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.thumbnail", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.load_copy", MOY_ROLE_WALLPAPER, MOY_ROW_WALLPAPER_LOAD_COPY},
-    {"wallpaper.save_copy", MOY_ROLE_WALLPAPER, MOY_ROW_WALLPAPER_SAVE_COPY},
-    {"artwork.current", MOY_ROLE_ARTWORK, MOY_ROW_ARTWORK_CURRENT},
-    {"artwork.follow", MOY_ROLE_ARTWORK, MOY_ROW_ARTWORK_FOLLOW},
-    {"clipboard.put_text", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_PUT_TEXT},
-    {"clipboard.text", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_TEXT},
-    {"clipboard.kind", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_KIND},
-    {"clipboard.seq", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_SEQ},
-    {"install.hold", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.release", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.fit", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.memory", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.chip", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.runtimes", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.home", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.can_pick", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.pick", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.root", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.writable", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.op", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.rescan", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.free", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.find", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.net", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.keep", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.wifi", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.wifi_open", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.consent", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"ui.page", MOY_ROLE_UI, MOY_ROW_UI_PAGE},
-    {"ui.label", MOY_ROLE_UI, MOY_ROW_UI_LABEL},
-    {"ui.button", MOY_ROLE_UI, MOY_ROW_UI_BUTTON},
-    {"ui.toggle", MOY_ROLE_UI, MOY_ROW_UI_TOGGLE},
-    {"ui.slider", MOY_ROLE_UI, MOY_ROW_UI_SLIDER},
-    {"ui.list", MOY_ROLE_UI, MOY_ROW_UI_LIST},
-    {"ui.part", MOY_ROLE_UI, MOY_ROW_UI_PART},
-    {"ui.focus", MOY_ROLE_UI, MOY_ROW_UI_FOCUS},
-    {"ui.keys_taken", MOY_ROLE_UI, MOY_ROW_UI_KEYS_TAKEN},
-    {"ui.at", MOY_ROLE_UI, MOY_ROW_UI_AT},
-    {"ui.group", MOY_ROLE_UI, MOY_ROW_UI_GROUP},
-    {"ui.info", MOY_ROLE_UI, MOY_ROW_UI_INFO},
-    {"ui.link", MOY_ROLE_UI, MOY_ROW_UI_LINK},
-    {"ui.cycle", MOY_ROLE_UI, MOY_ROW_UI_CYCLE},
-    {"ui.seg", MOY_ROLE_UI, MOY_ROW_UI_SEG},
-    {"ui.swatches", MOY_ROLE_UI, MOY_ROW_UI_SWATCHES},
-    {"ui.hints", MOY_ROLE_UI, MOY_ROW_UI_HINTS},
-    {"ui.icon", MOY_ROLE_UI, MOY_ROW_UI_ICON},
-    {"ui.progress", MOY_ROLE_UI, MOY_ROW_UI_PROGRESS},
-    {"ui.table", MOY_ROLE_UI, MOY_ROW_UI_TABLE},
-    {"ui.scroll", MOY_ROLE_UI, MOY_ROW_UI_SCROLL},
-    {"ui.field", MOY_ROLE_UI, MOY_ROW_UI_FIELD},
-    {"ui.dialog", MOY_ROLE_UI, MOY_ROW_UI_DIALOG},
-    {"ui.tabs", MOY_ROLE_UI, MOY_ROW_UI_TABS},
-    {"ui.grid", MOY_ROLE_UI, MOY_ROW_UI_GRID},
-    {"ui.card", MOY_ROLE_UI, MOY_ROW_UI_CARD},
-    {"ui.popover", MOY_ROLE_UI, MOY_ROW_UI_POPOVER},
-    {"ui.menu", MOY_ROLE_UI, MOY_ROW_UI_MENU},
-    {"ui.tool", MOY_ROLE_UI, MOY_ROW_UI_TOOL},
-    {"ui.bar", MOY_ROLE_UI, MOY_ROW_UI_BAR},
-    {"ui.rule", MOY_ROLE_UI, MOY_ROW_UI_RULE},
-    {"ui.text_view", MOY_ROLE_UI, MOY_ROW_UI_TEXT_VIEW},
-    {"ui.table_part", MOY_ROLE_UI, MOY_ROW_UI_TABLE_PART},
-    {"ui.part_at", MOY_ROLE_UI, MOY_ROW_UI_PART_AT},
-    {"ui.split", MOY_ROLE_UI, MOY_ROW_UI_SPLIT},
-    {"ui.table_dist", MOY_ROLE_UI, MOY_ROW_UI_TABLE_DIST},
-    {"ui.table_floor", MOY_ROLE_UI, MOY_ROW_UI_TABLE_FLOOR},
-    {"ui.held", MOY_ROLE_UI, MOY_ROW_UI_HELD},
-    {"ui.slots", MOY_ROLE_UI, MOY_ROW_UI_SLOTS},
-    {"ui.slot", MOY_ROLE_UI, MOY_ROW_UI_SLOT},
-    {"ui.slot_next", MOY_ROLE_UI, MOY_ROW_UI_SLOT_NEXT},
-    {"ui.held_last", MOY_ROLE_UI, MOY_ROW_UI_HELD_LAST},
-    {"ui.held_all", MOY_ROLE_UI, MOY_ROW_UI_HELD_ALL},
-};
+// (MOY_APP_SHELL for a row the Python console serves), generated from
+// native/os_calls.json.
+static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABLE_N] =
+    MOY_APP_TABLE_ROWS;
 
 int moy_app_table_role(uint32_t row) {
     return row < MOY_APP_TABLE_N ? TABLE[row].role : -1;

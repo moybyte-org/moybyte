@@ -1,5 +1,5 @@
 """The permission table and the install prompt (docs/os_2026-11/processes.md
-§2, runtime/shell/app_perms.py): one table, `native/moy_app/roles.json`'s
+§2, runtime/shell/app_perms.py): one table, `native/os_calls.json`'s
 "permissions", that the prompt, the install check and the launch check read;
 consent recorded at install, all or nothing; a permission turned off in
 Settings absent (`None`) from the next launch, and a `required` one refusing
@@ -15,30 +15,63 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import app_perms as P
+from tools import gen_os_table
 from runtime import cart_index as ci
 from runtime import host_app
 from ws_helpers import build_ws
 import moy_app
 
 ROOT = Path(__file__).resolve().parent.parent
-TABLE = ROOT / "native" / "moy_app" / "roles.json"
 DT = 1.0 / 30
-FIELDS = ("perm", "grants", "tiers", "prompt", "needs", "py")
 
 
-def _json_rows():
-    return json.loads(TABLE.read_text())["permissions"]
+def _src():
+    return gen_os_table.load()
 
 
 # -- the one table ---------------------------------------------------------------
 
-def test_the_python_table_is_the_json_row_for_row():
-    rows = _json_rows()
+def test_the_python_table_is_the_source_row_for_row():
+    src = _src()
+    rows = src["permissions"]
     assert len(rows) == len(P.TABLE)
     for j, r in zip(rows, P.TABLE):
-        assert tuple(j) == FIELDS, j
-        assert (j["perm"], j["grants"], tuple(j["tiers"]), j["prompt"], j["needs"],
-                tuple(j["py"])) == r
+        assert (j["perm"], j["grants"], gen_os_table.perm_tiers(j, src), j["prompt"],
+                j["needs"], tuple(j["py"])) == r
+
+
+def test_a_permission_s_tiers_are_the_tiers_that_serve_what_it_grants():
+    """No install prompt lists what the cart's tier cannot do: a permission
+    with a line is held on a tier only where a call it hands an app is served
+    there (the source's rows, by their tiers' names for them), or moy-spec's
+    verbs serve it; what no call serves (a native module's run, a service's
+    start) states its tiers, and nothing else may."""
+    src = _src()
+    served = {}
+    for r in src["rows"]:
+        for perm in gen_os_table.perms_of(r, src):
+            served.setdefault(perm, set()).update(gen_os_table.row_tiers(r, src))
+    for p in src["permissions"]:
+        tiers = set(next(r for r in P.TABLE if r[P.PERM] == p["perm"])[P.TIERS])
+        kind = p["grants"].split(":")[0]
+        if kind in ("floor", "marker"):
+            continue
+        if kind in ("native", "boot"):
+            assert tiers == set(p["tiers"]), p["perm"]
+            continue
+        want = served.get(p["perm"], set()) | (set(gen_os_table.SPEC_TIERS)
+                                               if p.get("spec") else set())
+        assert tiers == want, (p["perm"], sorted(tiers), sorted(want))
+        assert "tiers" not in p, p["perm"]
+
+
+def test_a_tier_that_serves_no_row_of_a_permission_is_not_asked_for_it():
+    """A Lua cart asking for the clipboard (no Lua name serves it) is not
+    prompted for it, and holds it absent; a Python cart is."""
+    lua = {"runtime": "lua", "permissions": ["clipboard", "prefs"]}
+    assert P.prompt(lua) == ["Keep its own settings"]
+    assert "clipboard" not in P.check(lua, None, ())[0]
+    assert P.prompt({"runtime": "python", "permissions": ["clipboard"]})[0] == "Use the clipboard"
 
 
 def test_the_table_is_well_formed():
@@ -89,8 +122,8 @@ def test_files_kinds_share_the_files_row_and_name_their_kind():
 # -- the prompt ------------------------------------------------------------------
 
 def test_the_prompt_is_the_tables_lines_in_the_manifests_order():
-    cart = {"runtime": "lua", "permissions": ["graphics", "network", "prefs", "network"]}
-    assert P.prompt(cart) == ["Use Wi-Fi and the internet", "Keep its own settings"]
+    cart = {"runtime": "lua", "permissions": ["graphics", "pins", "prefs", "pins"]}
+    assert P.prompt(cart) == ["Switch the console's pins", "Keep its own settings"]
 
 
 def test_a_cart_that_asks_for_no_more_than_a_game_is_not_asked_about():
@@ -106,8 +139,8 @@ def test_a_python_app_says_it_is_trusted():
 def test_an_update_is_asked_about_only_for_what_it_adds():
     rec = {"perms": ["graphics", "prefs"], "off": []}
     assert P.prompt({"runtime": "lua", "permissions": ["graphics", "prefs"]}, rec) is None
-    assert P.prompt({"runtime": "lua", "permissions": ["prefs", "network"]}, rec) == [
-        "Keep its own settings", "Use Wi-Fi and the internet"]
+    assert P.prompt({"runtime": "lua", "permissions": ["prefs", "pins"]}, rec) == [
+        "Keep its own settings", "Switch the console's pins"]
 
 
 # -- the checks ------------------------------------------------------------------
@@ -131,9 +164,9 @@ def test_what_the_console_lacks_is_absent_and_refuses_only_when_required():
 
 
 def test_an_added_permission_nobody_consented_to_is_absent():
-    cart = {"runtime": "lua", "permissions": ["prefs", "network"], "required": []}
+    cart = {"runtime": "lua", "permissions": ["prefs", "pins"], "required": []}
     rec = {"perms": ["prefs"], "off": []}
-    assert P.check(cart, rec, ("wifi",)) == (["prefs"], ["network"], None)
+    assert P.check(cart, rec, ("gpio",)) == (["prefs"], ["pins"], None)
 
 
 def test_a_required_name_the_manifest_does_not_list_refuses():
@@ -339,11 +372,11 @@ def _repo(**kw):
 
 
 def test_install_asks_with_the_tables_lines_and_no_has_the_focus(tmp_path):
-    repo = _repo(moybyte={"permissions": ["graphics", "network", "prefs"]})
+    repo = _repo(moybyte={"permissions": ["graphics", "pins", "prefs"]})
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     assert app.phase == "consent"
-    assert app.question == ["Use Wi-Fi and the internet", "Keep its own settings"]
+    assert app.question == ["Switch the console's pins", "Keep its own settings"]
     assert app._ui.box("No") is not None and app._ui.box("Install") is not None
     _frames(ws, 2)
     assert app._focused == "No"
@@ -355,7 +388,7 @@ def test_install_asks_with_the_tables_lines_and_no_has_the_focus(tmp_path):
 
 def test_install_is_a_tap_away(tmp_path):
     """Touch alone: a tap on Install puts the cart on the shelf."""
-    repo = _repo(moybyte={"permissions": ["network"]})
+    repo = _repo(moybyte={"permissions": ["pins"]})
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     x, y, w, h = app._ui.box("Install")
@@ -370,7 +403,7 @@ def test_install_is_a_tap_away(tmp_path):
 
 
 def test_a_denied_install_leaves_nothing(tmp_path):
-    repo = _repo(moybyte={"permissions": ["network"]})
+    repo = _repo(moybyte={"permissions": ["pins"]})
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     assert app.phase == "consent"
@@ -389,7 +422,7 @@ def test_a_denied_install_leaves_nothing(tmp_path):
 
 
 def test_an_accepted_install_records_the_consent(tmp_path):
-    repo = _repo(moybyte={"permissions": ["network", "prefs"]})
+    repo = _repo(moybyte={"permissions": ["pins", "prefs"]})
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     app._answer(True)
@@ -399,7 +432,7 @@ def test_an_accepted_install_records_the_consent(tmp_path):
             break
     assert app.phase == "done"
     assert (tmp_path / "carts" / "radio.moy").exists()
-    assert ws.consent.get("radio") == {"perms": ["network", "prefs"], "off": []}
+    assert ws.consent.get("radio") == {"perms": ["pins", "prefs"], "off": []}
 
 
 def test_a_cart_asking_for_nothing_installs_unasked_and_is_recorded(tmp_path):
@@ -418,12 +451,12 @@ def test_an_update_that_adds_a_permission_asks_again(tmp_path):
     _settle(ws, app)
     assert ws.consent.get("radio")["perms"] == ["prefs"]
     repo.add("radio", version=2, name="Radio", runtime="lua", modules=(),
-             moybyte={"permissions": ["prefs", "network"]})
+             moybyte={"permissions": ["prefs", "pins"]})
     ws.cart_net = MemNet(repo.routes())
     app.fetched_at = None
     _get(ws, app, "radio")
     assert app.phase == "consent"
-    assert app.question == ["Keep its own settings", "Use Wi-Fi and the internet"]
+    assert app.question == ["Keep its own settings", "Switch the console's pins"]
 
 
 def test_a_required_permission_the_console_lacks_is_not_installed(tmp_path):
@@ -470,7 +503,7 @@ def test_remove_forgets_the_consent(tmp_path):
 # -- Settings' App permissions page ----------------------------------------------------
 
 def test_settings_lists_each_carts_permissions_and_a_switch_turns_one_off(tmp_path):
-    _write_cart(str(tmp_path / "carts"), "Holder", ["graphics", "prefs", "network"])
+    _write_cart(str(tmp_path / "carts"), "Holder", ["graphics", "prefs", "pins"])
     ws = build_ws(tmp_path)
     cart = next(c for c in ws.carts.all if c["title"] == "Holder")
     aid = P.app_id(cart)
@@ -481,7 +514,7 @@ def test_settings_lists_each_carts_permissions_and_a_switch_turns_one_off(tmp_pa
     assert sl.page_title() == "App permissions"
     rows = {title: perms for title, _aid, perms in sl.permits.rows()}
     assert rows["Holder"] == (("prefs", "Keep its own settings"),
-                              ("network", "Use Wi-Fi and the internet"))
+                              ("pins", "Switch the console's pins"))
     sid = aid + " prefs"
     x, y, w, h = sl._sub.box(sid)
     sl.handle_pointer(x + w // 2, y + h // 2, True)
@@ -490,7 +523,7 @@ def test_settings_lists_each_carts_permissions_and_a_switch_turns_one_off(tmp_pa
     sl.handle_pointer(x + w // 2, y + h // 2, False)
     ws.mark_dirty()
     ws.frame(DT)
-    assert not ws.consent.is_on(aid, "prefs") and ws.consent.is_on(aid, "network")
+    assert not ws.consent.is_on(aid, "prefs") and ws.consent.is_on(aid, "pins")
     sl.back()
     assert sl.page is None
 

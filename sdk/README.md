@@ -5,9 +5,12 @@ What a C program needs to become a native module for a console
 
 - `include/moybyte/os.h` (generated, `tools/gen_os_table.py`): the table's
   version, its type, the event block a service's `moy_on` receives and the
-  Moybyte rows (`moy_log`, `moy_term_size`, `moy_timer_every`,
-  `moy_timer_cancel`, `moy_events`). The POSIX rows are declared by the
-  toolchain's own headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
+  Moybyte rows: the kernel's (`moy_log`, `moy_term_size`, `moy_timer_every`,
+  `moy_timer_cancel`, `moy_events`) and the app calls (`moy_files_*`,
+  `moy_prefs_*`, `moy_clipboard_*`, `moy_nav_open_app`, `moy_notify`,
+  `moy_open_with`, `moy_share`: `docs/app_api_v1.md`'s call table), all from
+  `native/os_calls.json`. The POSIX rows are declared by the toolchain's own
+  headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
 - `src/moyos_crt.c`: the module's entry, `_moy_entry`, and its
   `.moy.table` note.
 - `src/moyos_stubs.c` (generated): one stub a row, each compiled on its own

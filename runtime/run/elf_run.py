@@ -80,21 +80,23 @@ class ElfRuntime:
             return None
         return path
 
-    def command(self, cart, argv, roots=(), pid=0, bg_pid=0, budget_ms=0, net=False):
+    def command(self, cart, argv, roots=(), pid=0, bg_pid=0, budget_ms=0, net=False,
+                run=None):
         """The cart's module run as `argv` in the shell session the door's
         crossing runs in (runtime/shell/sh_door.py), reaching the `roots`
         (store-relative folders) its permissions grant, with sockets when
         `net`, a module with no signature admitted when its consent admits
-        one (app_perms.run_admits_unsigned): (exit status, None), or
-        (REFUSED, why) when it did not run."""
+        one (app_perms.run_admits_unsigned), its app calls served for `run`
+        (the bytes of its moy_app_run_t, None for none): (exit status,
+        None), or (REFUSED, why) when it did not run."""
         path = self.module(cart)
         if path is None:
             return REFUSED, "it has no module for this console (%s)" % self.engine.CHIP
         joined = "".join(r + "\0" for r in roots) or None
         return self.engine.command(path, tuple(argv), joined, pid, cart.get("id") or "",
-                                   bg_pid, budget_ms, self._flags(cart, net))
+                                   bg_pid, budget_ms, self._flags(cart, net), run)
 
-    def start(self, cart, argv, roots=(), pid=0, budget_ms=0, net=False):
+    def start(self, cart, argv, roots=(), pid=0, budget_ms=0, net=False, run=None):
         """command's run started as process `pid` and left running: (0,
         None), or (REFUSED, why)."""
         path = self.module(cart)
@@ -102,7 +104,7 @@ class ElfRuntime:
             return REFUSED, "it has no module for this console (%s)" % self.engine.CHIP
         joined = "".join(r + "\0" for r in roots) or None
         return self.engine.start(path, tuple(argv), joined, pid, cart.get("id") or "",
-                                 budget_ms, self._flags(cart, net))
+                                 budget_ms, self._flags(cart, net), run)
 
     def step(self, pid, max_ms):
         """Serve the run's session calls for `max_ms` at most: (RUNNING,

@@ -167,6 +167,21 @@ static mp_obj_t result(int status, const char *err) {
     return mp_obj_new_tuple(2, out);
 }
 
+// A run's bytes (moy_app.run's answer) copied into `out`: `out`, or NULL for
+// None, which serves the process no app calls.
+static const moy_app_run_t *run_of(mp_obj_t o, moy_app_run_t *out) {
+    if (o == mp_const_none) {
+        return NULL;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
+    if (b.len != sizeof *out) {
+        mp_raise_ValueError(MP_ERROR_TEXT("not a run"));
+    }
+    memcpy(out, b.buf, sizeof *out);
+    return out;
+}
+
 static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
     size_t argc;
@@ -193,12 +208,14 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args) {
     for (size_t i = 0; i < argc; i++) {
         argv[i] = mp_obj_str_get_str(items[i]);
     }
+    moy_app_run_t run;
+    const moy_app_run_t *rp = run_of(n_args > 8 ? args[8] : mp_const_none, &run);
     int status = moy_os_command(s, &m, NULL, (int)argc, argv, roots, pid, id, bg_pid, budget,
-                                flags, err, sizeof err);
+                                flags, rp, err, sizeof err);
     m_del(const char *, argv, argc ? argc : 1);
     return result(status, err);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_obj, 7, 8, mod_command);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_obj, 7, 9, mod_command);
 
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
@@ -225,12 +242,14 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *args) {
     for (size_t i = 0; i < argc; i++) {
         argv[i] = mp_obj_str_get_str(items[i]);
     }
+    moy_app_run_t run;
+    const moy_app_run_t *rp = run_of(n_args > 7 ? args[7] : mp_const_none, &run);
     int status = moy_os_command_start(s, &m, NULL, (int)argc, argv, roots, pid, id, 0, budget,
-                                      flags, err, sizeof err);
+                                      flags, rp, err, sizeof err);
     m_del(const char *, argv, argc ? argc : 1);
     return result(status, err);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_start_obj, 6, 7, mod_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_start_obj, 6, 8, mod_start);
 
 // The network's holder (moy_os_set_net): fn(pid, hold) on the VM's task, the
 // one that serves a command's session.

@@ -1,6 +1,6 @@
 // The public UI API's RUN face (docs/ui_api_2026-10.md): the verbs a Lua
 // cart calls as `ui.*` (native/moycore/moycore_ui.h) and the `ui` rows of
-// roles.json a compiled app imports from `moybyte.app` (`ui_<verb>`, named
+// native/os_calls.json a compiled app imports from `moybyte.app` (`ui_<verb>`, named
 // by native/moy_app/moy_app_wasm.c's table), over native/moy_ui/moy_ui_api.h.
 //
 // A verb draws into the run's draw target through the RUN sink: the canvas a
@@ -32,7 +32,9 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 43
+// MOY_UI_WASM_ROWS, each row's prototype (which must be the ones below) and
+// the natives by import name, generated from native/os_calls.json.
+#include "moy_ui_wasm_rows.h"
 
 // The run's draw target, from the module that drives the run (moycore_wasm.c on
 // an image, runtime/host/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -136,7 +138,7 @@ int moy_ui_run_rule(void *target);
 int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size_t n, uint32_t off,
                    int32_t *out);
 
-// The rows, in roles.json's order: each an import's native, the engine's
+// The rows, in the role table's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an
 // override block, moy_ui_api.h's, of length 0 is none). An answer below 0 is
 // moy_ui.h's code negated; ui_focus answers the focused id's length (0 none)

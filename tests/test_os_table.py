@@ -1,9 +1,11 @@
-"""The OS function table's one source (native/moy_elf/os_table.json,
+"""The one source of Moybyte's app and OS calls (native/os_calls.json,
 docs/os_2026-11/tiers.md section 1) and everything made from it:
 
-- the generated kernel table and SDK files are tools/gen_os_table.py's output
-  for the tree's source, byte for byte (the drift test);
-- the rows are append-only: the source's rows are the frozen copy
+- every tier's generated table (the kernel's, the SDK's, the app ABI's, the
+  wasm and Lua names, the Python console's regions and the docs table) is
+  tools/gen_os_table.py's output for the tree's source, byte for byte (the
+  drift test);
+- the ELF rows are append-only: the OS function table is the frozen copy
   (tests/fixtures/os_table_frozen.txt) line for line, so a row changed, moved
   or removed fails here and a new one is written into both;
 - the table's own rules (gen_os_table.check) hold, and a retired row answers
@@ -33,7 +35,8 @@ MACHINE = {"esp32s3": 94, "esp32p4": 243}
 
 
 def _table():
-    return gen_os_table.load()
+    """The OS function table, by ordinal."""
+    return gen_os_table.elf(gen_os_table.load())
 
 
 def test_the_generated_files_are_the_source_s():
@@ -51,16 +54,21 @@ def test_the_rows_are_the_frozen_copy_line_for_line():
 
 
 def test_the_table_s_rules():
-    t = _table()
-    gen_os_table.check(t)
-    assert t["version"] == len(t["rows"])
-    bad = json.loads(json.dumps(t))
-    bad["rows"].append(dict(bad["rows"][0], name="open2"))
+    src = gen_os_table.load()
+    gen_os_table.check(src)
+    assert src["version"] == len(_table()["rows"])
+    bad = json.loads(json.dumps(src))
+    row = dict(bad["rows"][0], name="open2", elf=src["version"])
+    bad["rows"].append(row)
     with pytest.raises(gen_os_table.TableError):
         gen_os_table.check(bad)             # an append that does not bump the version
     bad["version"] += 1
     with pytest.raises(gen_os_table.TableError):
         gen_os_table.check(bad)             # its prototype names another function
+    row["elf"] = 0
+    row["c"] = row["c"].replace("open(", "open2(")
+    with pytest.raises(gen_os_table.TableError):
+        gen_os_table.check(bad)             # an ordinal twice
 
 
 def test_a_retired_row_answers_through_a_typed_stub():

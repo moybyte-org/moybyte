@@ -933,7 +933,8 @@ class Procs:
 
     def pid_of(self, g):
         """The pid of the run whose app grant is `g` (a role's caller), the
-        shell's for a shell app's grant, None for a grant neither holds."""
+        shell's for a shell app's grant, a service's or a compiled command's
+        for the grant its start made, None for a grant none holds."""
         if g in self.ws.shell_grants:
             return _sched.SHELL
         pl = self.ws.player
@@ -942,6 +943,10 @@ class Procs:
         for p in self.list:
             if _grant(p.world.player) == g:
                 return p.world.player.pid
+        for pid, sp in _sched.SCHED.procs.items():
+            ctx = sp.ctx
+            if ctx is not None and ctx.grant == g and sp.state != _sched.EXITED:
+                return pid
         return None
 
     def runs(self):

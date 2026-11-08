@@ -1073,7 +1073,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 // -- the roles served in Python -------------------------------------------------------------
 //
 // Every row of these roles but the files role's and the wallpaper's copy is the
-// console's (roles.json's "shell" server): the binding checks the grant, counts
+// console's (native/os_calls.json's "shell" server): the binding checks the grant, counts
 // the row and calls the registered server.
 
 // -- the storage rows ---------------------------------------------------------------------

@@ -142,7 +142,7 @@ left:
   effects), installed with the theme, and `tests/test_style.py` holds the style
   tables and the `colors=` hatch.
 - **A user can add an app.** `runtime/shell/system_api.py` maps manifest permissions to
-  roles as an ALLOWLIST (`native/moy_app/roles.json` is the table); never
+  roles as an ALLOWLIST (`native/os_calls.json`'s role rows are the table); never
   grantable: `artwork`, `carts`, `damage`, `install`, `notify`, `surface`,
   `wallpaper`. `clipboard` comes with the clipboard permission, and `ui` goes to
   every app. **An ungranted verb is ABSENT, not

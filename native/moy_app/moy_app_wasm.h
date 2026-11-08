@@ -1,7 +1,8 @@
 // The app ABI's wasm import adapter (docs/history/kernel_appabi_2026-10.md section
 // 4): the role rows a compiled app imports, from module "moybyte.app" (the
 // vendor extension its manifest declares, moy-spec SPEC.md 16.2), one native
-// per row of roles.json with a wasm type, named "<role>_<verb>" at that type.
+// per row of native/os_calls.json a compiled app imports, named
+// "<role>_<verb>" at its type (moy_app_wasm_rows.h, generated).
 //
 // A native runs on the thread that calls the cart's import: a board's session
 // thread, whose stack is PSRAM (native/moy_wasm/moy_wasm_session.h), the
@@ -41,7 +42,7 @@ typedef struct {
     void *attachment;
 } moy_app_native_t;
 
-// The natives, in roles.json's order of the rows with a wasm type, and the
+// The natives, in the role table's order of the rows with an import, and the
 // table row each serves.
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count);
 int moy_app_wasm_row(uint32_t i);

@@ -2058,7 +2058,7 @@ def test_survival_trace_holds_over_the_native_spine(name, tmp_path):
 
 # -- the roles' trace (#224, sprint 5) -------------------------------------------
 #
-# Every row of the app ABI's role table (native/moy_app/roles.json) driven
+# Every row of the app ABI's role table (native/os_calls.json) driven
 # once through a context that holds every role, over a real Workstation and
 # its store, and the effect logged: the net sprint 5's steps swap the roles'
 # servers under. On CPython the Workstation is the host's (runtime/host/host_app.py);
@@ -2350,11 +2350,13 @@ def roles_trace(ws):
 
 
 def roles_rows():
-    """The role table's (role, verb) rows, in table order, but the toolkit's:
-    a compiled app's alone (tests/test_ui_wasm.py drives each)."""
-    import json
-    rows = json.loads((ROOT / "native" / "moy_app" / "roles.json").read_text())
-    return [(r["role"], r["verb"]) for r in rows["rows"] if r["role"] != "ui"]
+    """The role table's (role, verb) rows, in table order, of the roles an
+    AppContext serves: not the toolkit's, a compiled app's alone
+    (tests/test_ui_wasm.py drives each), nor the console calls'."""
+    from tools import gen_os_table
+    from runtime import app_context
+    return [(r["role"], r["verb"]) for r in gen_os_table.role_table()
+            if r["role"] in app_context.ROLES]
 
 
 def _roles_driver():
