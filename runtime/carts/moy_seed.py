@@ -162,6 +162,8 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
                 manifest[k] = cart[k]
         if cart.get("permissions") is not None:
             ven["permissions"] = cart["permissions"]
+        if cart.get("handles") is not None:      # the MIME types its app opens
+            ven["handles"] = cart["handles"]
         if cart.get("glass") is True:             # a per-glass wallpaper
             ven["glass"] = True
         if cart.get("animates") is True:          # an app drawn every frame

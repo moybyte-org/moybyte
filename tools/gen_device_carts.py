@@ -313,6 +313,8 @@ def build_carts(system_carts_dir):
             cart["canvas"] = man["canvas"]
         if "permissions" in vendor(man):
             cart["permissions"] = vendor(man)["permissions"]
+        if "handles" in vendor(man):             # the MIME types its app opens
+            cart["handles"] = vendor(man)["handles"]
         if vendor(man).get("glass") is True:   # a per-glass wallpaper
             cart["glass"] = True
         if "pictures" in vendor(man):           # a picture wallpaper

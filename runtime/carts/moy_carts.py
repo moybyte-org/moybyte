@@ -806,6 +806,9 @@ def _load(path, whole, folder=None):
             # module `main.<chip>.elf` for each, beside the manifest
             # (tools/elf_cart.py); None for every other cart.
             "native": ven.get("native") if isinstance(ven.get("native"), list) else None,
+            # The MIME types the cart's app opens (docs/os_2026-11/
+            # between_apps.md section 1): what `open_with` and `share` route by.
+            "handles": ven.get("handles", []),
             # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).

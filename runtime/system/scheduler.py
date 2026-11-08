@@ -119,6 +119,11 @@ except ImportError:  # host: the runtime package, `import moybyte` for a service
     from runtime import moybyte as _moybyte
     _sys.modules.setdefault("moybyte", _moybyte)
 
+# The console calls every Lua service holds (native/moycore/moycore_svc.c's
+# `moybyte` table), answered by the console's own verbs.
+_CALLS = {"moybyte.notify": _moybyte.notify, "moybyte.open_with": _moybyte.open_with,
+          "moybyte.share": _moybyte.share}
+
 try:
     import json as _json
 except ImportError:  # pragma: no cover - every VM has it
@@ -671,7 +676,8 @@ class Scheduler:
 
     def _answer(self, p, svc, stepped):
         """The console calls Lua service `p` waits on, answered on this
-        task as its process: `moybyte.notify`, or a function of the `env`
+        task as its process: `moybyte.notify`, `open_with` or `share`
+        (`_CALLS`), or a function of the `env`
         its start was handed. A stepped service runs on to its next call at
         once."""
         env = p.args[2] if len(p.args) > 2 else None
@@ -680,8 +686,9 @@ class Scheduler:
             if req is None:
                 return
             name, args = req
-            fn = _moybyte.notify if name == "moybyte.notify" else (
-                env.get(name) if env else None)
+            fn = _CALLS.get(name)
+            if fn is None and env:
+                fn = env.get(name)
             ans = None
             was = _L.current() if _L is not None else SHELL
             if _L is not None:

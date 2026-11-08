@@ -168,6 +168,8 @@ OS reads:
   permission the manifest also lists in `"moybyte": {"required": [...]}`
   is required: absent, it makes the launch refused with a message naming
   it, where any other absent permission reads `None`;
+- **handles**: the MIME types its app opens (`between_apps.md` §1), what
+  `open_with` and `share` route by;
 - **background**: a service's one-line reason the OS shows ("LoRa node"),
   and `"lanes"` naming the timed lanes a wasm or ELF process exports
   (`hardware.md` §2).

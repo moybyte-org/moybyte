@@ -1100,6 +1100,29 @@ manager's Notifications tab, which holding the console's key opens) brings
 your cart to the front and calls your `moy_action(id, key)`; ignoring it
 leaves it in that list. `docs/os_2026-11/processes.md` §7 has the rules.
 
+### Opening with another app (a Moybyte-side verb)
+
+`moybyte.open_with` and `moybyte.share` are Moybyte's own, like `notify`,
+and need no permission; a Lua service holds them too. Your manifest says
+what your app opens (`"moybyte": {"handles": ["text/markdown", "image/*"]}`).
+
+```python
+import moybyte
+
+moybyte.open_with("docs/todo")              # a note, in the app that opens Markdown
+moybyte.open_with("https://moybyte.org", True)   # always ask which app
+moybyte.share("a line of text", "text/plain")
+
+def moy_open(h):            # an item routed to this app
+    text = h.read()         # h.name, h.mime, h.url, h.mode ("r" or "rw")
+    h.write(text + "!")     # a file opened with open_with is "rw"
+```
+
+Where several apps open the type, the console asks once with its "open with"
+menu and keeps the answer; `True` as the second argument asks again. The
+handle reaches one item and ends with your run.
+`docs/os_2026-11/between_apps.md` §1 has the rules.
+
 ---
 
 ## Palette

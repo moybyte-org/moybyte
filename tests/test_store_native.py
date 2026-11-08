@@ -140,8 +140,9 @@ _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
          "icon", "edit", "permissions", "required", "input", "canvas", "assets", "id",
          "config", "sources", "description", "genre", "tags", "glass", "pictures",
-         "audio_ring")
-_VENDOR = ("type", "graduated", "edit", "permissions", "required", "assets", "config", "glass",
+         "audio_ring", "handles")
+_VENDOR = ("type", "graduated", "edit", "permissions", "required", "handles", "assets", "config",
+           "glass",
            "pictures", "audio_ring")
 
 

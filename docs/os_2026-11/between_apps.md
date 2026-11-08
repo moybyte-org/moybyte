@@ -6,19 +6,35 @@ Phase 6 of the order of work. Read `docs/os_2026-11.md` first.
 
 ## 1. Intents
 
-Today roles go only from an app to the shell; `nav.open_app`
-and the Files router are the one "open that, pointed here" seam
-(`docs/app_api_v1.md`). The design: an app's manifest declares what it
-**handles** (`"handles": ["text/markdown", "image/x-moyimg", "image/*",
-"x-scheme-handler/https"]`); an app calls `moybyte.open_with(file_or_url)`
-or `moybyte.share(data, mime)`; the OS
-routes to the one app that matches, or, when several do, to **the last app
-chosen** (owner, 2026-11-03), changeable from an "open with" menu drawn as
-OS chrome; there is no per-type "always". The receiving app gets the item as a
-picker grant (§2), never a broad permission.
+`nav.open_app` and the Files router are the shell's own "open that, pointed
+here" seam (`docs/app_api_v1.md`); intents are the one an app reaches
+(`runtime/system/intents.py`). An app's manifest declares what it
+**handles** (`"moybyte": {"handles": ["text/markdown", "image/*",
+"x-scheme-handler/https"]}`; `type/*` takes every subtype), which the shelf's
+catalogue entry carries. An app calls `moybyte.open_with(item)` (a URL, a user
+file named `"<kind>/<name>"`, or a grant it was handed) or
+`moybyte.share(data, mime)`; the OS routes to the one app that matches, or,
+when several do, to **the last app chosen** for that type (owner,
+2026-11-03), kept in `system/settings`' `open_with` row. With none chosen yet,
+the **"open with" menu** asks: OS chrome, the console's one question
+(`DeleteConfirm.choose`) holding a `ui.menu` of the apps that open it, the
+last chosen first and focused, then Cancel, under keys, a pad or touch alone.
+There is no per-type "always": `open_with(item, choose=True)` opens the menu
+whatever was chosen, and the row picked becomes the choice. The verbs answer
+True where the item went to an app or the menu is up, False where no app
+opens it.
+
+**The receiving app gets the item as a grant**, never a broad permission: a
+handle with its `name`, `mime`, `url` and `mode`, `read()` and, where it is
+`"rw"` (a file opened with `open_with`), `write(data)`, ending with its run.
+A user app is launched and handed it by its `moy_open(h)`, as a notification
+reaches its `moy_action`. Paint and Notes are shell code and open the one
+file through their own doors (`open_image`, `open_text_cart`); data shared
+to them is kept as a new item in their kind first (`Shared`, named for its
+type). A Lua service holds both verbs as console calls (strings only).
 
 ```
-moybyte.open_with(item) / share(data, mime) / pick(mime, mode) -> h   intents and the picker
+moybyte.open_with(item, choose=False) / share(data, mime) / pick(mime, mode) -> h   intents and the picker
 ```
 
 ## 2. The files model
@@ -50,7 +66,7 @@ folder reading as absent until wiped by hand (dev boards hold nothing of
 value). **Types are MIME types** (owner, 2026-11-03) wherever an
 app sees them: `handles`, the picker, intents, share and the clipboard
 (`text/markdown`, `image/x-moyimg`, `audio/x-moysong` for our formats,
-registered in one table). **File types**
+registered in one table, `intents.TYPES`). **File types**
 map to default apps through the `handles`
 table of §1. **The picker** is OS chrome: an app with no `files:*`
 permission calls `moybyte.pick(mime, mode)` and receives a handle to

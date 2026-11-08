@@ -1265,6 +1265,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # banner over whatever is up, and what acting on one does.
         self._init_notes()
         self._init_status()
+        self._init_intents()
         # The popover (#52, docs/theme_and_shell_2026-11.md §8.6): ONE Popup owns
         # its open/selected state and what it holds -- the system menu's rows
         # (the SYSTEM group always, a CART group prepended while a cart is

@@ -830,7 +830,32 @@ def _surface_plan(ws, cfg):
     plan.append(("script_console", run_script))
     plan.append(("web_console", park))
     plan += _terminal_plan(ws, cfg)
+    plan.append(("open_with", lambda: _open_with(ws, home)))
     return plan
+
+
+def _open_with(ws, home):
+    """The intents' "open with" menu (runtime/system/intents.py) over the
+    home: a note two apps open, a user app beside Notes, none chosen yet."""
+    import moybyte
+    from runtime import host_app, intents
+    from ws_helpers import shelf
+    if ws.webhost_serving():
+        ws.toggle_webhost()              # the web console's page goes with it
+    home()
+    root = str(ws.carts_root)
+    cart = host_app.moy_carts.create("Jot", root, src="def _draw():\n    cls(1)\n",
+                                     type="app")
+    path = os.path.join(cart["path"], "manifest.json")
+    with open(path) as f:
+        man = json.load(f)
+    man["moybyte"]["handles"] = ["text/markdown"]
+    with open(path, "w") as f:
+        json.dump(man, f)
+    ws.carts.apply(shelf(root))
+    ws.carts_store.save_file("docs", "todo", "# milk\n", root)
+    intents.INTENTS.reset()
+    assert moybyte.open_with("docs/todo", True)
 
 
 def _terminal_plan(ws, cfg):
@@ -1680,6 +1705,7 @@ def surface_names(config_name):
             names.append("app_terminal_touch")
         names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
                   "app_terminal_colours"]
+    names.append("open_with")
     return names
 
 

@@ -60,6 +60,14 @@ one, `time.ticks_us()`.
                      changed() and remove(), None where the bar is full
                      (runtime/system/status_items.py). The process's end
                      takes it out
+  open_with(item, choose=False)
+                     open `item` (a URL, a user file "<kind>/<name>", or a
+                     grant this process was handed) in the app that handles
+                     its MIME type: the one match, else the last one chosen,
+                     else the "open with" menu, which `choose` asks always;
+                     False where no app handles it (runtime/system/intents.py)
+  share(data, mime)  hand `data` (str or bytes) of type `mime` to the app
+                     that handles it, routed as open_with routes
   clock_synced()     whether the wall clock holds real time: NTP has answered
                      on a board since power-on (runtime/system/wallclock.py);
                      until then `time.time()` counts from power-on
@@ -500,6 +508,29 @@ def _status_end(pid):
 
 
 ENDS.append(_status_end)
+
+
+def _intents():
+    try:
+        from intents import INTENTS
+    except ImportError:  # host: the runtime package
+        from runtime.intents import INTENTS
+    return INTENTS
+
+
+def open_with(item, choose=False):
+    return _intents().open_with(_pid(), item, bool(choose))
+
+
+def share(data, mime):
+    return _intents().share(_pid(), data, mime)
+
+
+def _intents_end(pid):
+    _intents().end(pid)
+
+
+ENDS.append(_intents_end)
 
 
 def clock_synced():

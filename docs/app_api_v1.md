@@ -421,8 +421,9 @@ anyway: `files_app` reached straight into the notebook app's layer across five
 sites, because "open this doc in the text app" is a real product need and there
 was no seam for it. `ctx.nav.open_app(id)` is the seam --
 resolution is by REGISTERED ID, so no app holds a reference to another app's
-class and a build without the target degrades to a status line. IPC beyond
-"open that, pointed here" is still out.
+class and a build without the target degrades to a status line. An app reaches the same seam by type with
+`moybyte.open_with`/`share` (`docs/os_2026-11/between_apps.md` §1). IPC
+beyond "open that, pointed here" is still out.
 
 The Files ROUTER (docs/theme_and_shell_2026-11.md §10.2) is the seam's second customer,
 and it added verbs that are all "open that, pointed here":

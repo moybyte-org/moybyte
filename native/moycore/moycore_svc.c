@@ -641,6 +641,12 @@ static void open_names(lua_State *L) {
     lua_pushliteral(L, "moybyte.notify");
     lua_pushcclosure(L, l_console, 1);
     lua_setfield(L, -2, "notify");
+    lua_pushliteral(L, "moybyte.open_with");
+    lua_pushcclosure(L, l_console, 1);
+    lua_setfield(L, -2, "open_with");
+    lua_pushliteral(L, "moybyte.share");
+    lua_pushcclosure(L, l_console, 1);
+    lua_setfield(L, -2, "share");
     lua_setglobal(L, "moybyte");
 }
 

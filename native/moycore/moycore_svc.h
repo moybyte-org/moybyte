@@ -26,6 +26,11 @@
 //   moybyte.notify(summary[, body[, icon]]) -> id
 //                                  a notification, the console's
 //                                  moybyte.notify under the service's pid
+//   moybyte.open_with(item[, choose]) -> bool
+//   moybyte.share(data, mime) -> bool
+//                                  an item (a URL or "<kind>/<name>") or
+//                                  text routed to the app that opens it, the
+//                                  console's own (runtime/system/intents.py)
 // and `print`, which logs at info. Its allocator counts every byte it holds,
 // in PSRAM on a board, so the task manager's figure is exact
 // (moycore_svc_info's `heap`), and refuses past MOYCORE_SVC_HEAP_MAX.
@@ -40,7 +45,8 @@
 // JSON array [values, calls]): each of `values`' members a global, and each
 // name in `calls` a global function whose call the console answers, as
 // `moybyte.notify` is (its name "moybyte.notify"). Such a call enters the
-// console, so it runs on the VM's task: the service's call yields its
+// console, so it runs on the VM's task (`moybyte.open_with` and
+// `moybyte.share` are such calls too): the service's call yields its
 // coroutine with the call posted on its row (its name and its arguments as a
 // JSON array), the VM's task takes it (moycore_svc_call), runs it and
 // answers (moycore_svc_answer: a JSON value, or none where the console

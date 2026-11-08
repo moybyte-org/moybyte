@@ -56,6 +56,18 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import devices as _devices
 try:
+    from intents import INTENTS as _INTENTS
+    import intents as _intents
+    import iconsets as _iconsets
+    import system_api as _system_api
+    import text_modes as _text_modes
+except ImportError:  # host: the runtime package
+    from runtime.intents import INTENTS as _INTENTS
+    from runtime import intents as _intents
+    from runtime import iconsets as _iconsets
+    from runtime import system_api as _system_api
+    from runtime import text_modes as _text_modes
+try:
     from status_items import ITEMS as _ITEMS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.status_items import ITEMS as _ITEMS
@@ -89,6 +101,9 @@ _LOOK_ICON = {"menu.delete_cart": "trash", "menu.home": "home",
 # (the chrome's label, icon, the look's text); the star's are the string ids'.
 _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "dup", "Duplicate"),
              "delete": ("DELETE", "trash", "Delete")}
+
+
+_OPEN_WITH = "Open with"           # the "open with" menu's title
 
 
 def _row(kind, sid, action=None):
@@ -258,6 +273,109 @@ class Notices:
         _NOTES.acted = self._note_acted
         self._note_rect = None          # the banner's card where it last drew
         self._note_y0 = None            # where a press on it went down
+
+    # -- intents (docs/os_2026-11/between_apps.md §1) ------------------------
+
+    def _init_intents(self):
+        """The intents' hooks are this console's (runtime/system/intents.py):
+        the app carts that may open an item, a cart's key, the delivery, the
+        "open with" menu (the console's question, `DeleteConfirm.choose`),
+        the user-files store a file grant reads through, and the row the
+        last choices are kept in."""
+        _INTENTS.bind(self._intent_handlers, self.app_cart_id, self._intent_deliver,
+                      self._intent_ask, self._intent_read, self._intent_write,
+                      self.system)
+
+    def _intent_handlers(self):
+        return [c for c in self.carts.all
+                if c.get("type") == "app" and c.get("handles") and not c.get("broken")]
+
+    def _intent_app(self, cart):
+        """The registered app whose identity `cart` is, else None."""
+        for app, _text in self._apps:
+            if app.is_app(cart):
+                return app
+        return None
+
+    def _intent_icon(self, cart):
+        app = self._intent_app(cart)
+        if app is not None:
+            return _iconsets.ALIASES.get(app.id, app.id)
+        return "notes" if _system_api.is_text_app(cart) else "app"
+
+    def _intent_ask(self, label, carts, then):
+        return self.confirm.choose(_OPEN_WITH, label,
+                                   [str(c.get("title") or "") for c in carts],
+                                   [self._intent_icon(c) for c in carts], then)
+
+    def _intent_read(self, kind, name):
+        h = self.store
+        if self.carts_store is None or not h.ready():
+            return None
+        try:
+            return h.call(lambda: self.carts_store.load_file(kind, name, self.carts_root))
+        except Exception:  # noqa: BLE001 -- an unreadable file reads as gone
+            return None
+
+    def _intent_write(self, kind, name, data):
+        h = self.store
+        if self.carts_store is None or not h.writable():
+            return False
+        try:
+            h.call(lambda: self.carts_store.save_file(kind, name, data, self.carts_root))
+        except Exception:  # noqa: BLE001 -- the store refused: the grant says so
+            return False
+        return True
+
+    def _intent_keep(self, g, kind):
+        """Shared data a shell door opens as a file: written into `kind` as a
+        new item named for its type, `(kind, name)`, or None."""
+        h = self.store
+        if self.carts_store is None or not h.writable():
+            return None
+        ext = ""
+        for e, m in _intents.TYPES.items():
+            if m == g.mime and e != ".md":
+                ext = e
+        store, root = self.carts_store, self.carts_root
+        try:
+            name = h.call(lambda: store.free_file_name(kind, "Shared" + ext, root))
+            h.call(lambda: store.save_file(kind, name, g.read(), root))
+        except Exception:  # noqa: BLE001 -- nothing to open
+            return None
+        return kind, name
+
+    def _intent_deliver(self, cart, g):
+        """Hand `g` to `cart`'s app: Paint and the text app through their
+        doors (the shell opens the one file for them), any other app cart
+        launched and handed the grant by its `moy_open(h)`. The receiving
+        pid, the shell's for a door, or None where nothing opened."""
+        app = self._intent_app(cart)
+        door = "paint" if app is not None and app.id == "artwork" else (
+            "text" if _system_api.is_text_app(cart) else None)
+        if door is not None:
+            if g.url is not None:
+                return None
+            kn = (g.kind, g.file) if g.file is not None else self._intent_keep(
+                g, "drawings" if door == "paint" else "docs")
+            if kn is None:
+                return None
+            if door == "paint":
+                ok = self.open_image(kn[1], kn[0])
+            else:
+                ok = self.open_text_cart(kn[1], kn[0], _text_modes.mode_for(
+                    _text_modes.file_name(kn[0], kn[1])))
+            return _intents.SHELL if ok else None
+        if app is not None:
+            return None
+        self.open(cart)
+        pl = self.player
+        if pl is None or self.cart is None or pl.cart_error is not None \
+                or self.app_cart_id(self.cart) != self.app_cart_id(cart):
+            return None
+        if not pl.window_event("moy_open", g):
+            return None
+        return pl.pid
 
     # -- the apps' status items (docs/theme_and_shell_2026-11.md §8.6) --------
 
@@ -929,7 +1047,13 @@ class DeleteConfirm:
     runtime/shell/procs.py): a game that does not fit beside the ones
     running names what to close, Cancel and Close; and the Player's before
     a compiled game the VM must stop for while the music holds the Wi-Fi,
-    Cancel and Stop & play. Its line wraps, the card growing to fit."""
+    Cancel and Stop & play. Its line wraps, the card growing to fit.
+
+    And the intents' "open with" menu (`choose`, runtime/system/intents.py):
+    "Open with", the item's name over a menu of the apps that open it, each
+    row its app's icon and title, the one chosen last first and focused, and
+    Cancel. The rows are stops of the dialog's engine: up and down move
+    through them, Enter or A picks, a tap on a row picks it."""
 
     BUTTONS = ("Cancel", "Delete")
 
@@ -945,6 +1069,9 @@ class DeleteConfirm:
         self.line = self.UNDONE      # the line under the title
         self.buttons = self.BUTTONS
         self._act = None             # what the danger button does
+        self.rows = ()               # a choice's rows (`choose`), else ()
+        self.icons = ()
+        self._choice = None          # fn(i) told the row picked, None on a cancel
 
     UNDONE = "This can't be undone."
     CLOSE = ("Cancel", "Close")
@@ -961,10 +1088,33 @@ class DeleteConfirm:
         self._host.key = self._key   # the key that asked is no press of the dialog's
         ws._dirty = True
 
+    def choose(self, title, label, rows, icons, then):
+        """Ask which of `rows` (their `icons` beside them), under `label`:
+        `then(i)` with the row picked, at the frame's tail, or `then(None)`
+        where the menu was cancelled."""
+        self._drop_choice()
+        self.cart = None
+        self.title = title
+        self.line = label
+        self.rows = list(rows)
+        self.icons = list(icons)
+        self.buttons = ("Cancel",)
+        self._then = self._act = None
+        self._choice = then
+        self._arm()
+        return True
+
+    def _drop_choice(self):
+        fn, self._choice = self._choice, None
+        self.rows = self.icons = ()
+        if fn is not None:
+            fn(None)
+
     def ask_close(self, title, line, then, buttons=None):
         """Ask to close what `title` names so that what `line` says can
         open; `then()` closes it and opens that. `buttons` (Cancel, then
         the verb) name the answers where Close does not."""
+        self._drop_choice()
         self.cart = None
         self.title = title
         self.line = line
@@ -982,6 +1132,7 @@ class DeleteConfirm:
         if target is None or not target.get("path"):
             return False
         name = str(target.get("title") or "").strip()
+        self._drop_choice()
         self.cart = cart
         self.title = "Delete %s?" % name if name else "Delete this cart?"
         self.line = self.UNDONE
@@ -997,6 +1148,7 @@ class DeleteConfirm:
             return
         self.open = False
         self.cart = self._then = self._act = None
+        self._drop_choice()
         self.ws._dirty = True
 
     def _delete(self):
@@ -1062,12 +1214,23 @@ class DeleteConfirm:
         cv = ws.sys_canvas
         ws.icon_spec()                # the theme's set in the engine, as the bar has it
         settled = self._host.begin(cv, ws.theme_colors, self.surface(), _desk_class())
-        pick = _ui.dialog(self.title, self.buttons, "danger")
-        _ui.label(self.line, _WRAP)
+        got = -1
+        if self.rows:
+            pick = _ui.dialog(self.title, self.buttons, "normal")
+            got = _ui.menu(self.line, self.rows, self.icons)
+        else:
+            pick = _ui.dialog(self.title, self.buttons, "danger")
+            _ui.label(self.line, _WRAP)
         _ui.dialog()
         self._unwash_strip(cv)
         self.focused = _ui.focus()
-        if pick == 0:
+        if got >= 0:
+            self.open = False         # the answer is in: the tail hands it over
+            fn, self._choice = self._choice, None
+            self.rows = self.icons = ()
+            if fn is not None:
+                ws.defer(lambda: fn(got), toast=False)
+        elif pick == 0:
             self.cancel()
         elif pick == 1:
             self.open = False         # the answer is in: the tail acts

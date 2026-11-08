@@ -542,6 +542,11 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
         sb_str(b, ", \"permissions\": ");
         sb_canon(b, f.v, f.e);
     }
+    f = get(c, ce, "handles");              // the MIME types its app opens
+    if (f.v != NULL && *f.v != 'n') {
+        sb_str(b, ", \"handles\": ");
+        sb_canon(b, f.v, f.e);
+    }
     f = get(c, ce, "glass");                // a per-glass wallpaper
     if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
         sb_str(b, ", \"glass\": true");
