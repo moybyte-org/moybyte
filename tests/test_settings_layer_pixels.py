@@ -141,6 +141,19 @@ class _Updater(object):
         return True
 
 
+class _UsbLever(object):
+    st = 0
+
+    def start(self):
+        self.st = 1
+
+    def stop(self):
+        self.st = 0
+
+    def state(self):
+        return self.st
+
+
 _UPDATE_PHASES = ("checking", "nopublish", "uptodate", "confirm_online",
                   "downloading", "confirm", "install", "done", "updated",
                   "rolledback", "error")
@@ -271,6 +284,27 @@ def capture(cfg, carts_dir):
         for sel, label in enumerate((KEEP_OFF, TOGGLE_CONFIRMS[key][2])):
             out["confirm_%s_%d" % (key, sel)] = page(sl._sub, say(label))
         sl.close_confirm()
+    sl._draw_page()
+
+    # USB DRIVE: a board's row (absent on the host), its page off -- with the
+    # T-Deck's dev-channel line and a refusal -- and on, in each state.
+    from runtime import usb_drive as _usb
+    drive = _usb.UsbDrive(_UsbLever(), lambda: None, lambda: None,
+                          lambda: True, dev_channel=True)
+    ws.usb_drive = drive
+    sl._draw_page()
+    out["row_usb_drive"] = page(focus=say("USB DRIVE"))
+    sl.open_usb()
+    out["usb_off"] = page(sl._sub, "Turn on")
+    drive.why = _usb.NO_CARD
+    out["usb_refused"] = page(sl._sub, "Turn on")
+    drive.turn_on(ws)
+    for st in (_usb.WAITING, _usb.MOUNTED, _usb.EJECTED):
+        drive.lever.st = st
+        out["usb_on_%d" % st] = page(sl._sub, "Turn off")
+    drive.turn_off(ws)
+    sl.close_usb()
+    ws.usb_drive = None
     sl._draw_page()
 
     ws.go_home()

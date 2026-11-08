@@ -440,6 +440,8 @@ class SpineVerbs:
         (`wm.bring_forward`); one opened on a cart opens it in that window,
         the windows above left open (`wm.activate`). Returns False
         when no cart carries the app's identity."""
+        if self.usb_drive_refuses():
+            return False
         self.close_popover()
         if cart is None:
             if self.wm.bring_forward(app.id):

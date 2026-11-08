@@ -65,6 +65,10 @@ static void drop(moy_cache_t *c, int s) {
     c->ref[s] = 0;
 }
 
+int moy_cache_flush(moy_cache_t *c) {
+    return issue(c);
+}
+
 void moy_cache_drop_all(moy_cache_t *c) {
     for (int s = 0; s < MOY_CACHE_SLOTS; s++) {
         drop(c, s);

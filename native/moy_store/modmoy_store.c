@@ -1466,6 +1466,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
 #if MICROPY_VFS_FAT
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_stats_obj);
+MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_hold_obj);
 #endif
 
 // The kernel's internal volume's VFS type (moy_kvfs.c), where it compiles.
@@ -1532,6 +1533,7 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     #if MICROPY_VFS_FAT
     { MP_ROM_QSTR(MP_QSTR_card), MP_ROM_PTR(&moy_store_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_card_stats), MP_ROM_PTR(&moy_store_card_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_card_hold), MP_ROM_PTR(&moy_store_card_hold_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_store) },
     { MP_ROM_QSTR(MP_QSTR_set_publish_root), MP_ROM_PTR(&mod_set_publish_root_obj) },

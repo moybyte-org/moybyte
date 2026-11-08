@@ -974,6 +974,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
+        # USB mass storage (runtime/system/usb_drive.py): a board whose card a
+        # computer can take over USB; None where the image has no driver.
+        self.usb_drive = None
         # The network Get Carts fetches carts through (#124, runtime/carts/cart_index.py):
         # `online()` and `open(url)`, injected by a board (device/wire_links.CartNet),
         # by the live simulator (host_app.HostCartNet) and by a browser page
@@ -1874,6 +1877,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             except Exception:
                 self._online_ok = False
         return self._online_ok
+
+    def usb_drive_refuses(self):
+        """True, with a notice, while a computer has the card over USB: the
+        store is closed, so nothing that reads it opens."""
+        d = self.usb_drive
+        if d is None or not d.on:
+            return False
+        self.notice("USB drive is on", "Turn it off in Settings first")
+        return True
 
     def open_settings(self):
         if self.wm.bring_forward("settings"):
@@ -2792,6 +2804,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # isn't stranded (a silent stay-on-launcher would be a dead end on the
         # device). Authoring is a separate app (the Editor), reached through the
         # home's Make tab or CHANGE, not a tap-mode on the played tabs.
+        if self.usb_drive_refuses():
+            return
         selected = cart if cart is not None else self.launcher.selected()
         self.carts.note_recent(selected)   # #105 desk_mru: every launcher-tap run counts
         self.search_typing = False     # a RUN always ends any in-progress query typing
@@ -3278,6 +3292,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             return True
         # The System log page follows the ring: a new record draws it again.
         if kind == "settings" and self.settings_layer.log_moved():
+            return True
+        # The USB drive page follows the drive: a computer took the card or
+        # let it go.
+        if kind == "settings" and self.settings_layer.usb_moved():
             return True
         # The task manager's rows moved: a sample, a state, a run.
         if kind == "tasks" and self.tasks_layer.moved():

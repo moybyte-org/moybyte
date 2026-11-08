@@ -49,6 +49,7 @@ typedef struct {
     fs_user_mount_t *vfs;
     uint32_t sectors;
     moy_cache_t cache;
+    int held;                   // lent out whole (USB mass storage): no mount
 } card_t;
 
 // In PSRAM with the rest of the volume, made at the first call: the card adds
@@ -130,6 +131,9 @@ int moy_store_card_mount(uint32_t sectors) {
     if (!need_card()) {
         return MP_ENOMEM;
     }
+    if (card.held) {
+        return MP_EBUSY;
+    }
     if (card.vfs == NULL) {
         card.vfs = moy_store_raw_alloc(sizeof(fs_user_mount_t));
         card.cache.slots = moy_store_raw_alloc((size_t)SLOTS * SECTOR);
@@ -162,6 +166,41 @@ int moy_store_card_mount(uint32_t sectors) {
     card.cache.base = (uint32_t)v->fatfs.database;
     card.cache.every = v->fatfs.csize;
     return 0;
+}
+
+// THE HOLD: the card lent out whole, to a computer over USB mass storage
+// (native/moy_usbdisk), with the store closed. Holding answers EBUSY while
+// the volume is still in the VFS mount table (VfsFat's umount keeps its FATFS
+// mounted, so Python unmounts it first: runtime/system/usb_drive.py), then
+// puts the cache's held zero run on the card and closes the FATFS (every
+// operation FatFS finishes has synced its window). While held every mount
+// answers EBUSY, the kernel's (a VM start, the recovery floor) and Python's
+// alike, and the store resolves /sd to nothing (moy_store_card_fatfs).
+// Letting go drops the cache: the computer may have written any sector.
+int moy_store_card_hold(int on) {
+    if (!need_card()) {
+        return MP_ENOMEM;
+    }
+    if (on && card.vfs != NULL) {
+        for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
+            if (m->obj == MP_OBJ_FROM_PTR(card.vfs)) {
+                return MP_EBUSY;
+            }
+        }
+        if (card.vfs->fatfs.fs_type != 0) {
+            if (moy_cache_flush(&card.cache) != 0) {
+                return MP_EIO;
+            }
+            card.vfs->fatfs.fs_type = 0;
+        }
+    }
+    card.held = on != 0;
+    moy_cache_drop_all(&card.cache);
+    return 0;
+}
+
+int moy_store_card_held(void) {
+    return card_p != NULL && card.held;
 }
 
 // The board's card brought up and mounted with no VM, for the kernel (the
@@ -213,6 +252,23 @@ static mp_obj_t mod_card(size_t n_args, const mp_obj_t *args) {
     return MP_OBJ_FROM_PTR(card.vfs);
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_obj, 1, 2, mod_card);
+
+// card_hold(on) -> None: the hold (moy_store_card_hold), raising
+// OSError(EBUSY) while the volume is mounted; card_hold() -> whether held.
+static mp_obj_t mod_card_hold(size_t n_args, const mp_obj_t *args) {
+    if (n_args == 0) {
+        return mp_obj_new_bool(moy_store_card_held());
+    }
+    int rc = moy_store_card_hold(mp_obj_is_true(args[0]));
+    if (rc == MP_ENOMEM) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    if (rc != 0) {
+        mp_raise_OSError(rc);
+    }
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_hold_obj, 0, 1, mod_card_hold);
 
 // card_stats(check=None, skip_drop=None) -> (reads, hits, handed, stale):
 // what the card was asked for, what the cache answered, the sectors FatFS

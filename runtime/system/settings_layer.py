@@ -219,7 +219,7 @@ KEEP_OFF = "KEEP OFF"
 # row tuples keep their keys and words).
 _SAY = {"WIFI": "Wi-Fi", "FONT SIZE": "Text size", "UPDATE FW": "Update from SD card",
         "DIAG SD LOG": "Diag SD log", "UPGRADE C6 RADIO": "Upgrade C6 radio",
-        "SHOW FPS": "Show FPS"}
+        "SHOW FPS": "Show FPS", "USB DRIVE": "USB drive"}
 
 
 _SAID = {}                    # label -> its words, made once
@@ -253,12 +253,23 @@ _PAGE_ROWS = {"achievements": "Achievements", "licences": "Licences", "log": "Sy
 # Power's.
 _GROUPS = (
     ("General", ("wifi", "bluetooth", "appearance", "font_scale", "layout_theme",
-                 "volume", "brightness", "tz", "name")),
+                 "volume", "brightness", "tz", "name", "usb_drive")),
     ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
     ("Power", ()),
     ("Updates", ("webhost", "paired", "ota_channel", "update_online", "update", "update_c6")),
     ("Developer", ("diag_live", "diag_sd", "unknown_sources", "crash")),
 )
+
+# The USB drive page's words, by the drive's state (usb_drive.STOPPED ..
+# EJECTED), and what it adds while on.
+_USB_SAYS = ("Show your memory card on a computer over the USB cable. "
+             "Games and apps stay closed while it is on.",
+             "Waiting for a computer. Plug the USB cable in.",
+             "On the computer now, as a drive.",
+             "The computer let the card go.")
+_USB_EJECT = "Eject it on the computer, then turn this off."
+_USB_SERIAL_OFF = "The serial port is off while it is on."
+_USB_SERIAL_BACK = "The serial port comes back when it is off."
 
 # The keycap hints for the focused row's kind.
 _HINT_OPEN = ("confirm", "Open", "back", "Back")
@@ -401,6 +412,7 @@ class SettingsLayer:
         self._rows_onl = False
         self._rows_web = False
         self._rows_c6 = False
+        self._rows_usb = False
         self._rows_idle = None
         self._rows_lgen = -1
         self._rows_tog = None
@@ -422,6 +434,8 @@ class SettingsLayer:
         # Paired browsers: the web console's keys (WebHost.browsers), read at
         # each visit and each change, never per frame.
         self.paired_view = False
+        self.usb_view = False
+        self._usb_seen = -1
         self._paired = ()
         self._paired_words = "None"
         self._paired_fp = None
@@ -467,6 +481,8 @@ class SettingsLayer:
         self.crash_view = False
         self.tz_view = False
         self.paired_view = False
+        # a computer that has the card keeps the page up (usb_drive.py)
+        self.usb_view = self._usb_on()
         self.page = None
         self._name_bar("Settings")
         self._typing = False
@@ -514,6 +530,13 @@ class SettingsLayer:
         if self.page == "log":
             return self.syslog.title()
         return _PAGE_TITLES.get(self.page)
+
+    def usb_moved(self):
+        """The USB drive page is up and the drive's state moved since it
+        drew (a computer took the card or let it go)."""
+        if not self.usb_view:
+            return False
+        return self.ws.usb_drive.state() != self._usb_seen
 
     def log_moved(self):
         """The System log page is up and a record came since it drew: the
@@ -1240,6 +1263,57 @@ class SettingsLayer:
         if gone is not None:
             self._forget(gone)
 
+    # -- the USB drive page (runtime/system/usb_drive.py) ----------------------
+
+    def _usb_on(self):
+        d = getattr(self.ws, "usb_drive", None)
+        return d is not None and d.on
+
+    def open_usb(self):
+        self.ws.usb_drive.why = None
+        self.usb_view = True
+        self.ws._dirty = True
+
+    def close_usb(self):
+        self.usb_view = False
+        self._want = say("USB DRIVE")
+        self.ws._dirty = True
+
+    def _usb_page(self):
+        """Off: what the drive does and its one button, Turn on (and why it
+        did not, where it did not). On: where the card is, how to give it
+        back, and Turn off, the page's only way out."""
+        ws = self.ws
+        d = ws.usb_drive
+        st = d.state()
+        self._usb_seen = st
+        _x, _y, w, _h = _ui.page("")
+        n = max(8, (w - 32) // max(1, ws.layout.font_w))
+        if d.on:
+            _ui.hints(("confirm", "Turn off"))
+        else:
+            _ui.hints(("confirm", "Turn on", "back", "Back"))
+        _ui.group("USB drive")
+        for line in _wrap(_USB_SAYS[st], n):
+            _ui.label(line)
+        if d.on:
+            for line in _wrap(_USB_EJECT, n):
+                _ui.label(line)
+            if d.dev_channel:
+                for line in _wrap(_USB_SERIAL_BACK, n):
+                    _ui.label(line)
+            if _ui.button("Turn off", "danger"):
+                d.turn_off(ws)
+        else:
+            if d.dev_channel:
+                for line in _wrap(_USB_SERIAL_OFF, n):
+                    _ui.label(line)
+            if d.why is not None:
+                _ui.label(d.why)
+            if _ui.button("Turn on"):
+                d.turn_on(ws)
+        _ui.group()
+
     # -- the lent left zone (#46 zoned bar) -------------------------------------
 
     def draw_zone(self, cv, rect):
@@ -1310,6 +1384,7 @@ class SettingsLayer:
         onl = ws._online_update_available()
         web = getattr(ws, "webhost", None) is not None
         c6u = getattr(ws, "c6_updater", None) is not None
+        usb = getattr(ws, "usb_drive", None) is not None
         idle = getattr(ws, "idle_ladder", None)
         tog = self._toggle_rows()
         lgen = ws.look.layout_gen
@@ -1317,6 +1392,7 @@ class SettingsLayer:
                 and bt == self._rows_bt
                 and upd == self._rows_upd and onl == self._rows_onl
                 and web == self._rows_web and c6u == self._rows_c6
+                and usb == self._rows_usb
                 and tog is self._rows_tog and idle is self._rows_idle):
             return self._rows_cache
         # The registry block sits directly after NAME, which is where the
@@ -1339,6 +1415,10 @@ class SettingsLayer:
             rows = rows + idle.rows()
         if crash_available():
             rows = rows + (("crash", "LAST CRASH", "crash"),)
+        if usb:
+            # USB DRIVE (runtime/system/usb_drive.py): the card on a computer
+            # over USB, where the board has the driver; General's last row.
+            rows = rows + (("usb_drive", "USB DRIVE", "action"),)
         if web:
             # WEB CONSOLE (moycore plan 3.4): serve the wasm console from this
             # board, so a browser on the same network opens YOUR carts. Its own
@@ -1366,6 +1446,7 @@ class SettingsLayer:
         self._rows_onl = onl
         self._rows_web = web
         self._rows_c6 = c6u
+        self._rows_usb = usb
         self._rows_idle = idle
         self._rows_lgen = lgen
         self._rows_tog = tog
@@ -1385,6 +1466,8 @@ class SettingsLayer:
             ws.update_ui.open_update_online()
         elif key == "update_c6":
             ws.update_ui.open_update_c6()
+        elif key == "usb_drive":
+            self.open_usb()
 
     def _toggle_diag_row(self, key):
         """Flip one of the "diag"-kind ON/OFF gate rows (any tap/step/A toggles).
@@ -1864,6 +1947,8 @@ class SettingsLayer:
             return "tz"
         if self.paired_view:
             return "paired"
+        if self.usb_view:
+            return "usb"
         return self.page
 
     def _input_host(self):
@@ -1874,6 +1959,9 @@ class SettingsLayer:
         view = self._page_of()
         if view == "wifi":
             return self.wifi_input(i, self._sub)
+        if view == "usb" and self._usb_on() and (
+                i.pressed("home") or i.pressed("b") or i.pressed("stop")):
+            return True                   # the page holds while the drive is on
         if i.pressed("home"):
             if view == "confirm":
                 self.close_confirm()
@@ -1910,6 +1998,9 @@ class SettingsLayer:
             self.close_tz()
         elif view == "paired":
             self.close_paired()
+        elif view == "usb":
+            if not self._usb_on():
+                self.close_usb()
         elif view == "achievements":
             if not self.achievements.back():
                 self.close_page()
@@ -2023,6 +2114,8 @@ class SettingsLayer:
                 self._tz_page()
             elif view == "paired":
                 self._paired_page()
+            elif view == "usb":
+                self._usb_page()
             else:
                 self._crash_page()
             self._sub_focused = _ui.focus()

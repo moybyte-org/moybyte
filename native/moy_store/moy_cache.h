@@ -52,6 +52,8 @@ typedef struct {
 // Every slot empty: a card that may have changed, or a reboot. A run still
 // held goes with them, as a cut would take it.
 void moy_cache_drop_all(moy_cache_t *c);
+// The held run to the card now: 0, or the driver's error.
+int moy_cache_flush(moy_cache_t *c);
 int moy_cache_read(moy_cache_t *c, uint8_t *buf, uint32_t block, uint32_t n);
 int moy_cache_write(moy_cache_t *c, const uint8_t *buf, uint32_t block, uint32_t n);
 

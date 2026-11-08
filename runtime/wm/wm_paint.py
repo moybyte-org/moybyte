@@ -1291,6 +1291,8 @@ class WindowPaint:
             return False
         if k == "settings" and ws.settings_layer.bluetooth_animating():
             return False
+        if k == "settings" and ws.settings_layer.usb_moved():
+            return False
         if k == "tasks" and ws.tasks_layer.moved():
             return False
         if k == "menu" and ws.menu_view == "music" \
