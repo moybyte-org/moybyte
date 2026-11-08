@@ -485,15 +485,36 @@ void moy_evq_unwait(uint32_t pid) {
     MOY_SYNC_UNLOCK(&s_lock);
 }
 
-void moy_evq_reset(void) {
+// Every queue whose flags hold `mask` closed (0: every queue).
+static uint32_t close_all(uint32_t mask) {
+    uint32_t n = 0;
     for (uint32_t i = 0; i < MOY_EVQ_PROCS; i++) {
         MOY_SYNC_LOCK(&s_lock);
-        uint32_t pid = s_q[i] != NULL ? s_pid[i] : 0u;
-        bool live = s_q[i] != NULL;
+        bool live = s_q[i] != NULL && (mask == 0u || (s_q[i]->flags & mask) != 0u);
+        uint32_t pid = live ? s_pid[i] : 0u;
         MOY_SYNC_UNLOCK(&s_lock);
-        if (live) {
-            moy_evq_close(pid);
+        if (live && moy_evq_close(pid) == MOY_EVQ_OK) {
+            n++;
         }
     }
+    return n;
+}
+
+uint32_t moy_evq_vm_stop(void) {
+    return close_all(MOY_EVQ_VM);
+}
+
+uint32_t moy_evq_live(void) {
+    uint32_t n = 0;
+    MOY_SYNC_LOCK(&s_lock);
+    for (uint32_t i = 0; i < MOY_EVQ_PROCS; i++) {
+        n += s_q[i] != NULL;
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
+    return n;
+}
+
+void moy_evq_reset(void) {
+    close_all(0u);
     s_turn = 0;
 }

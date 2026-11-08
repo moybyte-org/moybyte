@@ -36,7 +36,8 @@
 // one that removes only the pins a Python handler holds, so the kernel's GPIO
 // ISRs survive; gc_sweep_all, whose finalisers close files, sockets, I2S and
 // SD and return the glass rows Python held (moy_glass_vm_swept; the theme
-// fonts, moy_text_vm_stop); the native-code arena freed; mp_deinit; the root
+// fonts, moy_text_vm_stop); the VM's processes' event queues closed
+// (moy_evq_vm_stop); the native-code arena freed; mp_deinit; the root
 // section ZEROED (a stale root would mark whatever sits at its address in the
 // next first area); the first heap area freed; the console's stdin ring and
 // the interrupt character taken by the kernel, which drains the ring and

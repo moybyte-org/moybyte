@@ -109,6 +109,7 @@
 
 #include "moy_boot.h"
 #include "moy_crash.h"
+#include "moy_evq.h"
 #include "moy_kernel.h"
 #include "moy_lease.h"
 #include "moy_log.h"
@@ -1987,6 +1988,7 @@ soft_reset_exit:
     moy_glass_vm_stop();
     moy_text_vm_stop();
     moy_net_vm_stop();
+    moy_evq_vm_stop();      // the VM's processes' event queues end with it
     if (moy_app_vm_stop != NULL) {
         moy_app_vm_stop();
     }

@@ -54,6 +54,8 @@ _SIGS = (
     ("moy_evq_queued", [_U32], _U32),
     ("moy_evq_ready", [], _U32),
     ("moy_evq_kick", [_U32], None),
+    ("moy_evq_vm_stop", [], _U32),
+    ("moy_evq_live", [], _U32),
     ("moy_evq_reset", [], None),
     ("moy_super_charge", [_U32, _U32, _B], _I),
     ("moy_super_held", [_U32], _B),
@@ -188,6 +190,14 @@ def answer(ticket, ans):
 
 def drop(pid):
     _lib().moy_vmq_drop(pid)
+
+
+def vm_stop():
+    return _lib().moy_evq_vm_stop()
+
+
+def live():
+    return _lib().moy_evq_live()
 
 
 def reset():

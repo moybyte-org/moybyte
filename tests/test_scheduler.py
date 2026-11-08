@@ -523,3 +523,26 @@ def test_on_the_vm_the_guard_aborts_kills_and_a_tick_allocates_nothing(tmp_path)
         assert "STRIKES 3 suspended\n" in out, (tag, out)
         assert "KILLED 137 True 0\n" in out, (tag, out)
         assert "ALLOC 0 True\n" in out, (tag, out)
+
+
+def test_a_vm_stop_closes_the_vms_event_queues_and_no_other():
+    """The kernel's queues are PSRAM that outlives the VM: its teardown
+    (moy_kernel.c's soft_reset_exit, a stop and a soft reset alike) closes
+    every queue the VM serves, whose processes ended with it, and leaves a
+    service's on a task of its own. Without it every VM start leaked the
+    queue of each process listening at its stop (340 bytes a soft reset on
+    glass)."""
+    from runtime import moy_evq as E
+    base = E.live()
+    py, svc = L.spawn("t.vm"), L.spawn("t.task")
+    assert E.open(py, "t.vm", "", True) == E.OK
+    assert E.open(svc, "t.task", "", False) == E.OK
+    assert E.live() == base + 2
+    assert E.vm_stop() >= 1 and not E.has(py) and E.has(svc)
+    after = E.live()
+    for _ in range(20):                     # twenty VM starts, each opening its own
+        p = L.spawn("t.again")
+        assert E.open(p, "t.again", "", True) == E.OK
+        assert E.vm_stop() == 1
+    assert E.live() == after
+    E.close(svc)

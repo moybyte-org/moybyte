@@ -135,6 +135,13 @@ void moy_evq_kick(uint32_t pid);
 // deleted while the queue lives on (the queue's owner closes it later).
 void moy_evq_unwait(uint32_t pid);
 
+// The VM's end (a stop, a soft reset): every MOY_EVQ_VM queue closed, the
+// VM's processes having ended with it; a queue of a process on a task of its
+// own (a service that runs through the stop) stays. How many it closed.
+uint32_t moy_evq_vm_stop(void);
+// How many queues are open.
+uint32_t moy_evq_live(void);
+
 // Every queue closed (a test's teardown).
 void moy_evq_reset(void);
 

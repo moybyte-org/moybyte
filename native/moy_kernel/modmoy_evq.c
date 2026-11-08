@@ -19,6 +19,8 @@
 //   next_call() -> (ticket, pid, name, args) or None
 //   answer(ticket, ans)                      ans a JSON text, or None: refused
 //   drop(pid)
+//   vm_stop() -> closed  the VM's queues closed, as its teardown does
+//   live()             the queues open
 //   reset()            every queue, row and slot (tests)
 //   OK .. RANGE, FINE .. SUSPENDED, SLICE_US, ABORT_US, STRIKES, SYSTEM
 
@@ -194,6 +196,16 @@ static mp_obj_t ev_drop(mp_obj_t pid) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ev_drop_obj, ev_drop);
 
+static mp_obj_t ev_vm_stop(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_evq_vm_stop());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_vm_stop_obj, ev_vm_stop);
+
+static mp_obj_t ev_live(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_evq_live());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_live_obj, ev_live);
+
 static mp_obj_t ev_reset(void) {
     moy_evq_reset();
     moy_super_reset();
@@ -224,6 +236,8 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_next_call), MP_ROM_PTR(&ev_next_call_obj) },
     { MP_ROM_QSTR(MP_QSTR_answer), MP_ROM_PTR(&ev_answer_obj) },
     { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&ev_drop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_vm_stop), MP_ROM_PTR(&ev_vm_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_live), MP_ROM_PTR(&ev_live_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&ev_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_OK), MP_ROM_INT(MOY_EVQ_OK) },
     { MP_ROM_QSTR(MP_QSTR_STALE), MP_ROM_INT(MOY_EVQ_STALE) },
