@@ -82,7 +82,7 @@ def _draw():                 # every frame; render here
 An app cart (`"type": "app"`) is the exception: it is drawn on change, its
 `_update` and `_draw` running while input or its page moves and not while it
 sits still (`docs/ui_api_2026-10.md`, "Drawn on change"), unless its
-manifest says `"animates": true` ("Turning a cart into an APP", below).
+manifest says `"animates": true` (`docs/app_api_v1.md` §3).
 
 ## Writing a cart in Lua (#67)
 
@@ -146,7 +146,7 @@ The few Lua-specific notes:
   `a.flags["size"]`.
 - No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
   `string.*`, `table.*` (no `load`/`require`; `io` and `os` only as an
-  app's, "Turning a cart into an APP" below).
+  app's, `docs/app_api_v1.md` §5).
 - A Lua cart's files are **source text**. A precompiled chunk (`luac` output,
   or anything opening with Lua's binary signature, `ESC "Lua"`) is refused at
   load with Lua's own "attempt to load a binary chunk" error, on every tier:
@@ -737,182 +737,13 @@ board's own built-in LED; on a P4 it is the free pins its README lists.
 
 ## Turning a cart into an APP (`#181`)
 
-A cart whose manifest says `"moybyte": {"type": "app"}` is a tool rather than a game. The
-console runs it **with its own top bar** — a title and an X — so it can never trap
-you, and it can ask for a few of the console's own powers by naming them in
-`permissions`, exactly like `"multiplayer"` above. Both are Moybyte's own
-fields, so they live in the manifest's `"moybyte"` object (SPEC.md §3.1: an
-implementation's fields go under one key named after it; loose at the top
-level, a console reads them as absent):
-
-```json
-"moybyte": {
-  "type": "app",
-  "permissions": ["graphics", "input", "files:docs", "prefs"]
-}
-```
-
-| permission | what the cart gets |
-|---|---|
-| `files` / `files:<folder>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` / `badge` — one shared folder only (`files:documents`, the default: your documents, the ones Files shows; `files:pictures`, `files:music`, `files:recordings`) — **and `open_editor`, below** |
-| `clipboard` | nothing by name: it lets an editor handle's `cut`/`copy`/`paste` reach the console's own clipboard, so text travels between your app and the Code tab |
-| `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
-| `appearance` | `set_theme(name)` / `themes()` |
-| `launch` | `open_app(id)` |
-| `front` | nothing by name: from the background, `open_app`, `moybyte.open_with`, `share` and `pick` go straight through instead of asking by a notification (below) |
-| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/moybyte.notes.moy` is that cart |
-
-Every app cart also gets five names with no permission needed, because they are
-how an app draws rather than what it may touch: **`screen()`** (the canvas),
-**`theme()`** (the console's live colors), **`content_rect()`** (`x, y, w, h`:
-the part of the screen the console's bar leaves you, wherever the bar sits —
-lay out inside it; in Lua it answers four values), **`bar_h()`** (its `y`, the
-rows above it) and **`ui`**, the console's own widget toolkit
-(buttons, rows, panels, rect maths). Storage answers `(value, error)`
-and never crashes, so there is no `try` to write.
-
-Anything you did not ask for **is not there** — no `carts`, no shell. Writing
-that name is an ordinary "name is not defined" error, like a typo.
-
-What you asked for can still be **turned off**: whoever owns the console can
-switch any permission off in Settings (About → App permissions). Then the
-name is there and is `None`, so `if prefs is None:` is how an app copes (a
-console without Wi-Fi or pins gives `network` or `pins` no names at all, as
-above). A permission your app cannot work without goes in `required` too,
-and then the console refuses to start the app, or one without what it needs
-to install it, and says which one is missing:
-
-**In Lua** an app holds the same names, answering the same way: storage's
-`(value, error)` is two results (`local name, err = files.save_text("todo",
-text)`), Python's `None` is `nil` and a list is a sequence. A permission you
-did not ask for, or one turned off, is `nil`, so `if prefs == nil then` is the
-check. With `files`, Lua's own `io` (`io.open`, `io.lines`, a file's `read`,
-`write`, `lines`, `seek`, `flush`, `close`) and `os.remove`/`os.rename` work in
-your one folder: `"notes.txt"` is a document there, and a path that climbs,
-starts at `/` or names a folder (`"../x"`, `"/sd/moybyte/carts"`,
-`"drawings/pic"`) is refused with `Permission denied`. What you write is saved
-when you `flush` or `close` the file, and `os.remove` sends it to the trash.
-Every Lua app also has `os.time()`, `os.clock()` and `os.difftime()`.
-
-```json
-"moybyte": {"type": "app", "permissions": ["graphics", "input", "prefs"], "required": ["prefs"]}
-```
-
-A cart installed from Get Carts is shown with what it asks for first, and is
-put on the shelf only if the player says Install; a cart you write yourself
-in the Editor is never asked about.
-
-An app is drawn on change (the frame loop, above), so an idle one costs the
-console nothing. An app that moves on its own — a clock, a meter, an
-animation — says `"animates": true` beside its `type` and runs every frame
-like a game. One that lists `audio` in its permissions does too, since its
-sound is pulled in the frame:
-
-```json
-"moybyte": {"type": "app", "animates": true, "permissions": ["graphics", "input"]}
-```
-
-`system_carts/moybyte.notes.moy` is the worked example: it lists your notes, opens one
-through the editor handle below, and holds no text of its own. The full rules
-(what is never grantable, and how to make an app reflow to a big screen with
-`_layout(w, h, fs)` instead of drawing at a fixed 320×240) are in
-`docs/app_api_v1.md`.
-
-### The editor handle (`#112`)
-
-`open_editor` hands your cart the console's **own** text editor over one
-document. You draw it into a rect and forward taps; it does the text, the
-caret, the selection, wrap, undo, the clipboard, the Markdown rendering and
-the saving. There is no SAVE button to build: it writes on an idle pause and
-again when the cart exits, so a note is never lost by tapping X.
-
-| call | does |
-|---|---|
-| `open_editor(name)` | an editor over the document `name` in the kind your `files` permission granted. Never a path and never another kind — you cannot name one |
-| `open_editor()` | the document the console was already ASKED to open (someone tapped a file in Files, or a project's own file on the Editor's Config tab), or `None` when there is none. Call it once in `_init` |
-
-The kind that arrives with `open_editor()` may be one you were never granted —
-a person chose that file, not your cart. One of them is a whole PROJECT:
-`project:<folder>.moy` is a `.moy` folder's own files (`manifest.json`,
-`config.json`, the main program), reached only through the Config tab's
-Files so the cart loader re-reads the folder afterwards. You still just
-draw it; nothing about the handle changes.
-
-Everything else is on the handle you get back:
-
-| call | does |
-|---|---|
-| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen. On a `ui.page` given a `gen` it draws only the rows that changed (docs/ui_api_2026-10.md) |
-| `ed.tap(x, y, click)` | forward a pointer PRESS. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
-| `ed.drag(x, y, down)` | forward what follows the press. It PANS — down the page, and sideways too in a mode that does not wrap — or, in SELECT mode, grows the selection to the finger |
-| `ed.nav(dx, dy)` | move the caret by cells. The console already feeds this from the T-Deck trackball and the host arrow keys while your handle has focus; call it yourself for an on-screen d-pad |
-| `ed.focus(on)` / `ed.focused()` | take or release the keyboard. While a handle has it, the console types into it and your own `key()`/`keyp()` read nothing |
-| `ed.key(code)` | feed one byte yourself (an on-screen key), focused or not |
-| `ed.undo()` / `ed.redo()` | one step. `ed.can_undo()` / `ed.can_redo()` for dimming a button |
-| `ed.select_all()` / `ed.copy()` / `ed.cut()` / `ed.paste()` | the clipboard. It is the CONSOLE's clipboard when your manifest asks for `clipboard`, and the document's own otherwise |
-| `ed.select_mode(on)` / `ed.selecting()` | turn SELECT mode on or off (no argument toggles). While it is on, a drag and the trackball EXTEND the selection instead of moving the caret — the only way to mark a range on a keyboard with no shift-arrow and no Ctrl |
-| `ed.has_selection()` / `ed.can_paste()` | is there anything to copy or cut, is there anything to paste — for dimming those buttons |
-| `ed.wraps()` | does this mode soft-wrap (`md`, `text`) or pan sideways (`code`, `json`) |
-| `ed.save()` | write it now. `ed.save(soft=True)` is the gentle one: it refuses a document its mode cannot parse and badges it instead |
-| `ed.badge()` | why the last save was refused, `""` when the document is fine. Print it |
-| `ed.dirty()` | are there edits no save has taken yet |
-| `ed.can_run()` / `ed.run()` | is the document a program (`.py` / `.lua`), and RUN it: saved first, then run on the console's script screen, the way Files runs one. When it ends the console opens your cart again on the same document, the caret and the scroll where they were — `open_editor()` in `_init` hands it back. `run()` answers False when there is nothing to run, and `badge()` says why a run could not start |
-| `ed.text()` / `ed.set_text(s)` | the whole document as one string |
-| `ed.caret()` | `(row, col)` — for a "Ln 3, Col 12" strip |
-| `ed.scroll(rows, cols)` | pan the view without moving the caret |
-| `ed.name()` / `ed.mode()` | the document's name, and how it is being edited: `"md"` / `"code"` / `"json"` / `"text"` |
-| `ed.close()` | save and let it go (going back to a list) |
-
-**Markdown** is what a note is, and the handle renders it: `#` headings, `- [ ]`
-checkboxes you tick by tapping, `[[another note]]` links, and `![[a drawing]]`
-which puts one of Paint's pictures inline — by NAME, so your cart never handles
-the picture. PROSE wraps — a note and a `.txt` both — while code and JSON pan
-sideways instead, because breaking one of their lines would lie about the file.
-A JSON document arrives INDENTED however it was written, and saves the way the
-person sees it.
-
-```python
-def _init():
-    global ed
-    ed = open_editor() or open_editor("my notes")
-
-def _draw():
-    cls(0)
-    x, y, w, h = content_rect()
-    ed.draw(x + 4, y + 4, w - 8, h - 8)
-
-def _update(dt):
-    t = touch()
-    if t:
-        hit = ed.tap(t[0], t[1], t[2])
-        if hit and hit[0] == "link":
-            open_note(hit[1])                 # your skin decides what that means
-```
-
-```lua
-function _init()
-  ed = open_editor() or open_editor("my notes")
-end
-
-function _draw()
-  cls(0)
-  local x, y, w, h = content_rect()
-  ed:draw(x + 4, y + 4, w - 8, h - 8)
-end
-
-function _update(dt)
-  local x, y, click = touch()
-  if x ~= nil then
-    local verb, arg = ed:tap(x, y, click)
-    if verb == "link" then open_note(arg) end
-  end
-end
-```
-
-In Lua the handle is a table with the same verbs as methods (`ed:draw(...)`,
-`ed:tap(...)`), `nil` where Python returns `None`, and `ed:tap` answering two
-values rather than a pair — the same shape `make_layer` takes, for the same
-reason: only numbers and strings cross the Lua boundary.
+A cart whose manifest says `"moybyte": {"type": "app"}` is a tool rather
+than a game: the console runs it with its own bar, so it can never trap you,
+draws it on change, and hands it the powers its `permissions` name.
+Everything an app adds to this page (the manifest's `moybyte` fields, the
+`ui` verbs' place, files, prefs, the editor handle, permissions and consent,
+services, messages, the tiers) is `docs/app_api_v1.md`, the app author's
+guide.
 
 ## Scripts — a cart with no folder
 
@@ -1068,158 +899,13 @@ same here as on any other console that implements the spec.
 | `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |
 | `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`), and `None` while that is turned off in Settings. See **Multiplayer** above |
 
-### Notifications (a Moybyte-side verb)
+### Moybyte-side verbs
 
-`moybyte.notify` is Moybyte's own, not moy-spec's: a Python cart reaches it
-with `import moybyte`, and Lua and compiled carts get it later. It asks
-for the `"notifications"` permission in the manifest
-(`"moybyte": {"permissions": ["notifications"]}`); without it the call
-answers `None` and nothing shows.
-
-```python
-import moybyte
-
-nid = moybyte.notify("Ana: are you coming?", "We start at eight.", "heart",
-                     ("default", "Open", "reply", "Reply"), 1)
-
-def moy_action(nid, key):       # the player opened it: "default", or "reply"
-    ...
-```
-
-| argument | is |
-|---|---|
-| `summary` | one line, up to 47 characters |
-| `body` | more text, up to 200 characters, shown in the task manager's list |
-| `icon` | a name from the console's icon set (`"heart"`, `"star"`, `"warn"`...), `"bubble"` if `None` |
-| `actions` | key, label, key, label...; `"default"` is what opening the notification itself means |
-| `urgency` | 0 the list only, 1 a banner for 5 s, 2 a banner for 10 s |
-| `replaces_id` | an id this cart got back before: that notification is updated in place |
-
-The console draws the banner over whatever is on screen, the game in front
-included, which never sees it. Opening it (a tap on the banner, or the task
-manager's Notifications tab, which holding the console's key opens) brings
-your cart to the front and calls your `moy_action(id, key)`; ignoring it
-leaves it in that list. `docs/os_2026-11/processes.md` §7 has the rules.
-
-### Alarms (a Moybyte-side verb)
-
-`moybyte.at(t, fn)` calls `fn()` once, no earlier than `t`, the wall
-clock's Unix seconds (`time.time()`; `moybyte.clock_synced()` says whether
-NTP has set it). It needs the `"alarms"` permission
-(`"moybyte": {"permissions": ["alarms"]}`), raises `OSError` without it,
-and answers an id `moybyte.cancel` takes. As it goes off it lights the
-screen if the console had gone dark, so a background app can wake its
-player; `docs/os_2026-11/between_apps.md` §3 has the rules.
-
-```python
-import moybyte, time
-
-def ring():
-    moybyte.notify("Tea is ready", urgency=2)
-
-moybyte.at(time.time() + 4 * 60, ring)
-```
-
-### Opening with another app, and picking a file (Moybyte-side verbs)
-
-`moybyte.open_with`, `moybyte.share` and `moybyte.pick` are Moybyte's own,
-like `notify`; a Lua service holds the first two. Your app needs no
-permission for them while the player is in it. From the background (a
-service, or an app the player left) they ask first (2026-11-08): the
-player gets a notification ("Wants to open todo.md in Notes") that does it
-when they open it, and the call answers `True` as though it went. Ask for
-`"front"` in the manifest to go straight through; `open_app` keeps the
-same rule.
-Your manifest says what your app opens (`"moybyte": {"handles":
-["text/markdown", "image/*"]}`). A file is named by its path in your shared
-folders, as the Files app and a computer show it.
-
-```python
-import moybyte
-
-moybyte.open_with("Documents/todo.md")     # a note, in the app that opens Markdown
-moybyte.open_with("https://moybyte.org", True)   # always ask which app
-moybyte.share("a line of text", "text/plain")
-
-def moy_open(h):            # an item routed to this app
-    text = h.read()         # h.name, h.mime, h.url, h.mode ("r" or "rw")
-    h.write(text + "!")     # a file opened with open_with is "rw"
-```
-
-Where several apps open the type, the console asks once with its "open with"
-menu and keeps the answer; `True` as the second argument asks again. The
-handle reaches one item and ends with your run.
-
-`moybyte.pick("image/*")` asks the user for one of their files of that type
-in the console's picker, with no `files` permission; the one they pick
-reaches your `moy_open(h)` the same way (`moybyte.pick(mime, "rw")` to write
-it back), and `None` reaches it when they cancel. It answers `False` where
-they have no file of that type. `docs/os_2026-11/between_apps.md` §1 and §2
-have the rules.
-
-### Messages between processes (Moybyte-side verbs)
-
-`moybyte.send` and `moybyte.on` are Moybyte's own, the same two names in
-Python and in a Lua service. A message has a name and arguments (any values
-JSON carries), and every process has its own queue of them:
-
-```python
-import moybyte
-
-def pong(sender, score):        # sender: the app id that sent it
-    print(sender, "says", score)
-
-moybyte.on("pong", pong)                             # listen
-moybyte.send("local.pinger", "ping", 42)             # every process of that app that listens
-```
-
-`send` answers how many took it. Your own app's processes (an app and its
-service) always hear each other. Another app hears you only on a name its
-manifest lists (`"moybyte": {"receives": ["ping"]}`), so an app chooses
-what the world may tell it. Messages from the console itself come from
-`"system"`: `moybyte.on("net", fn)` hears WiFi come and go as
-`fn("system", up, why)`. `docs/os_2026-11/processes.md` §1 has the rule.
-
-### Achievements (Moybyte-side)
-
-A game declares its badges in its manifest and tells the console when it
-earns one. The console keeps them, shows the unlock banner ("Harpoon Pop:
-badge found!") and lists them in Settings -> About -> Achievements under the
-game's name, where they stay after the game is deleted.
-
-```json
-"moybyte": {"achievements": [
-  {"id": "first_clear", "title": "Bubble Buster", "icon": "star", "hint": "Clear level 1"},
-  {"id": "high_tide", "title": "High Tide", "icon": "run", "hint": "Reach level 5", "goal": 5},
-  {"id": "untouchable", "title": "Untouchable", "icon": "heart",
-   "hint": "Clear a level without losing a life", "secret": true}]}
-```
-
-`id`, `title`, `icon` (a name of the console's icon set) and `hint` are
-text, the id at most 32 bytes and unique; `goal` is a whole number of 1 or
-more; `secret` keeps the badge "Secret" until it is found. The list is read
-strictly: one entry that breaks a rule, or a key it does not know, and the
-game declares no badges.
-
-```python
-import moybyte
-
-moybyte.award("first_clear")          # found
-moybyte.progress("high_tide", level)  # the goal's current value: found once it reaches 5
-```
-
-The game does its own counting: `progress` reports the game's value, which
-the console stores as it is told (the last value, not the best) and draws as
-the badge's bar; a best, a total or a set is the game's to keep, in its
-`pmem` for one that must outlast a run. Each is `moybyte.send` to the
-achievements process (`moybyte.send("moybyte.achievements", "award", id)`),
-which hears the two names from any app. The console stamps the sender, so a
-game reaches only the badges its own manifest declares; any other id is
-refused, and the refusal logged. A Lua game holds the same three as
-`moybyte.send`, `moybyte.award` and `moybyte.progress`, and so does a Lua
-service.
-`system_carts/moybyte.harpoon_pop.moy` is a seed game that uses all three
-kinds; `docs/os_2026-11/processes.md` §8 is the process.
+A cart also reaches Moybyte's own OS through the `moybyte` module (`import
+moybyte` in Python; a Lua run holds `moybyte.send`, `award` and
+`progress`): notifications, alarms, opening with another app, picking a
+file, messages between processes and achievements. They are not moy-spec's,
+and `docs/app_api_v1.md` is their guide (§5 to §9).
 
 ---
 

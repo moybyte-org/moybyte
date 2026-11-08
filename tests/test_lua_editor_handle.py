@@ -11,7 +11,7 @@ across the boundary.
 What each check is watching for:
 
   * every documented verb reaches the SAME handle the Python side holds, with
-    the value the Python form gives -- `docs/moy_cart_api.md` says the two
+    the value the Python form gives -- `docs/app_api_v1.md` says the two
     languages agree verbatim, so anything less is a documented lie. The cart
     compares strings IN LUA and exports 0/1, because `get_global` speaks
     numbers; the Python assertions read the handle itself.

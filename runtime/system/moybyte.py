@@ -29,7 +29,7 @@ one, `time.ticks_us()`.
                      it (native/moy_kernel/moy_evq.h, THE RULE)
   award(id)          unlock badge `id` of this app's manifest's
                      `achievements`: `send("moybyte.achievements", "award",
-                     id)` (docs/moy_cart_api.md, "Achievements")
+                     id)` (docs/app_api_v1.md section 9)
   progress(id, value)
                      badge `id`'s goal stands at `value`, the game's own
                      count: the badge is found once it reaches the goal.

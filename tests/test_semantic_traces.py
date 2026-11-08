@@ -2556,8 +2556,8 @@ def test_roles_trace_is_the_interface_on_every_vm(tmp_path):
 
 # -- the roles' trace for a Lua app (docs/os_2026-11.md §7 phase 5 step 1) --------
 #
-# The verbs an app cart's permissions name (docs/moy_cart_api.md, "Turning a
-# cart into an APP"), driven once from a Python app and once from a Lua app
+# The verbs an app cart's permissions name (docs/app_api_v1.md
+# section 6), driven once from a Python app and once from a Lua app
 # holding the same permissions, each over a fresh store: the two faces answer
 # every call alike, line for line. Python's `(value, err)` is Lua's two
 # results, its None Lua's nil. The Lua face is the role binding over the app

@@ -249,7 +249,7 @@ frame's start serves it.
 ## 2. The app manifest and the permission table
 
 Every process comes from a `.moy`; `manifest.json`'s `"moybyte"` object
-carries Moybyte's fields (`docs/moy_cart_api.md`, `docs/app_api_v1.md`). The
+carries Moybyte's fields (`docs/app_api_v1.md` §2). The
 OS reads:
 
 - **the tier**: moy-spec's `"runtime"` for `python`, `lua`, `wasm`; `elf` is
@@ -736,8 +736,8 @@ board, and it is testable with no LoRa.
 **Decision (owner, 2026-11-08, #246 decision 8): every game's badges.** A
 game declares its badges in its manifest and unlocks them with messages to
 this process; the console's own badges are declared the same way and are the
-`"system"` sender's; the game does its own counting. `docs/moy_cart_api.md`
-("Achievements") is the author's side.
+`"system"` sender's; the game does its own counting. `docs/app_api_v1.md`
+§9 is the author's side.
 
 As built, the process is the system cart
 `system_carts/moybyte.achievements.moy`, a Python service (§3, §5) whose

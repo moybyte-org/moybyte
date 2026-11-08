@@ -1,5 +1,5 @@
 """Achievements as a background process (docs/os_2026-11/processes.md section 8,
-docs/moy_cart_api.md "Achievements", runtime/system/achievements.py,
+docs/app_api_v1.md section 9, runtime/system/achievements.py,
 system_carts/moybyte.achievements.moy).
 
 The console starts the process when it loads its store. A game declares its

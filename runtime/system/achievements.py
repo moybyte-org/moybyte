@@ -1,5 +1,5 @@
 """The console's end of the achievements process (docs/os_2026-11/processes.md
-section 8, docs/moy_cart_api.md "Achievements"): `ws.ach`, the notify role's
+section 8, docs/app_api_v1.md section 9): `ws.ach`, the notify role's
 server, the shell's own badges and the readers both ends share.
 
 A game declares its badges in its manifest, `"moybyte": {"achievements":

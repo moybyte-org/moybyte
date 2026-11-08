@@ -27,7 +27,7 @@
 # AUTOPLAY (in "Make it mine") is OFF by default -- YOU play. Flip it on to watch
 # the console play itself (attract mode / the demo GIF path).
 #
-# BADGES: the manifest declares four (docs/moy_cart_api.md, "Achievements"), and
+# BADGES: the manifest declares four (docs/app_api_v1.md section 9), and
 # the game does its own counting: it tells the console when one is found
 # (moybyte.award) and how far the level badge has got (moybyte.progress, the
 # best level reached, kept in pmem(1)). Autoplay earns none.

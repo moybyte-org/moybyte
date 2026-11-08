@@ -1,5 +1,5 @@
 """Achievements: every game's badges as a background process
-(docs/os_2026-11/processes.md section 8, docs/moy_cart_api.md "Achievements").
+(docs/os_2026-11/processes.md section 8, docs/app_api_v1.md section 9).
 
 It wakes only on two messages, `award(id)` and `progress(id, value)`, which
 a game sends with `moybyte.award` and `moybyte.progress` and the console

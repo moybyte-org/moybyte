@@ -8,7 +8,7 @@
 hidden Easter eggs, Settings' Achievements page and the unlock banner's burst.
 
 The badges are the achievements process's (runtime/system/achievements.py,
-docs/moy_cart_api.md "Achievements"): the console's own and every game's.
+docs/app_api_v1.md section 9): the console's own and every game's.
 This module draws, and keeps the eggs; both reach the badges through their
 AppContext's `notify` role.
 
