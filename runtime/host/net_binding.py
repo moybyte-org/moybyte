@@ -44,6 +44,7 @@ import ctypes
 import json
 import os
 import sys
+import threading
 
 from . import host_native, native_build
 
@@ -606,6 +607,15 @@ def _taken(out, n):
         d.moy_net_free(out)
 
 
+# The webhost's C keeps ONE state, its request, chunk and read scratch among
+# it, because a board serves one connection at a time. A threaded host server
+# (serve.py's board twin) calls in from several threads at once, and ctypes
+# drops the GIL for the call: two pulls packed together read files into the
+# same scratch, and each answers with the other's bytes or crashes the process.
+# The calls that work in that scratch take this lock.
+_WEB = threading.Lock()
+
+
 def web_handle(method, target, body):
     """(response, None) when the C answered the request, else (None, its
     body opened): a request the VM answers, whose response goes through
@@ -615,8 +625,9 @@ def web_handle(method, target, body):
     b = ctypes.create_string_buffer(raw, len(raw) + 1)    # opened in place
     out = ctypes.c_void_p()
     n = ctypes.c_size_t()
-    done = _lib().moy_web_handle(m, len(m), t, len(t), b, len(raw),
-                                 ctypes.byref(out), ctypes.byref(n))
+    with _WEB:
+        done = _lib().moy_web_handle(m, len(m), t, len(t), b, len(raw),
+                                     ctypes.byref(out), ctypes.byref(n))
     if done:
         return _taken(out, n), None
     plain = b.raw[:n.value]
@@ -630,7 +641,9 @@ def web_handle_answer(resp):
     raw = _bytes(resp)
     out = ctypes.c_void_p()
     n = ctypes.c_size_t()
-    rc = _lib().moy_web_handle_answer(raw, len(raw), ctypes.byref(out), ctypes.byref(n))
+    with _WEB:
+        rc = _lib().moy_web_handle_answer(raw, len(raw), ctypes.byref(out),
+                                          ctypes.byref(n))
     got = _taken(out, n)
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -642,8 +655,9 @@ def web_pack(root, kinds, binary=False):
     where `binary`."""
     out = ctypes.c_void_p()
     n = ctypes.c_size_t()
-    rc = _lib().moy_web_pack(_bytes(root), _names(kinds), 1 if binary else 0,
-                             ctypes.byref(out), ctypes.byref(n))
+    with _WEB:
+        rc = _lib().moy_web_pack(_bytes(root), _names(kinds), 1 if binary else 0,
+                                 ctypes.byref(out), ctypes.byref(n))
     raw = _taken(out, n)
     if rc:
         raise OSError(rc, os.strerror(rc))

@@ -128,6 +128,38 @@ def test_the_bundle_is_the_shape_the_page_already_consumes(tmp_path):
     assert _pull(tmp_path / "carts") == b, "the dev server and the wire differ"
 
 
+def test_pulls_packed_on_several_threads_answer_as_one_at_a_time(tmp_path):
+    """serve.py's board twin is a THREADED server, and a page boots by asking
+    for /carts.json, /files.json and /apps.json at once. The C packs through
+    one scratch (a board serves one connection at a time), so the binding
+    serialises the calls: unserialised, two packs answered with each other's
+    bytes or crashed the twin, which the page saw as a boot fetch that failed."""
+    carts = str(_store(tmp_path))
+    apps = tmp_path / "apps" / "local.x"
+    apps.mkdir(parents=True)
+    for i in range(3):
+        (apps / ("f%d.sav" % i)).write_bytes(bytes((7 * j + i) & 0xFF
+                                                   for j in range(3000)))
+    pulls = [lambda: wh.pack_store(carts),
+             lambda: wh.pack_store(str(tmp_path / "apps"), binary=True)]
+    want = [pull() for pull in pulls]
+    wrong = []
+
+    def run(k):
+        for _ in range(40):
+            try:
+                if pulls[k]() != want[k]:
+                    wrong.append(k)
+            except ValueError as e:
+                wrong.append(e)
+    threads = [threading.Thread(target=run, args=(k,)) for k in (0, 1)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not wrong, wrong[:4]
+
+
 def test_thumbs_do_not_cross_the_wire(tmp_path):
     """`thumbs/` is a REGENERABLE cache keyed to a screen size (#66/#155) --
     sending it costs transfer time for pixels the browser will rebuild at its
