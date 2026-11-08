@@ -162,8 +162,14 @@ def test_what_a_command_left_held_is_swept(term):
 
 
 def test_ctrl_c_and_the_budget_end_a_run(term, monkeypatch):
+    """A foreground run is a job the door steps (sh_door._native_steps), so
+    the console goes on between its steps; Ctrl-C closes the job."""
     from runtime import sh_door
-    _ws, app = term
+    ws, app = term
+    rt = ws.runtimes["elf"]
+    steps = []
+    real = rt.step
+    monkeypatch.setattr(rt, "step", lambda pid, ms: steps.append(pid) or real(pid, ms))
     app.face.interrupt()
     t0 = time.monotonic()
     got = out(app, "elf.probe/probe sleep; echo not-after")
@@ -172,6 +178,30 @@ def test_ctrl_c_and_the_budget_end_a_run(term, monkeypatch):
     monkeypatch.setattr(sh_door, "COMMAND_MS", 300)
     assert out(app, "elf.probe/probe sleep; echo status $?") == [
         "killed: ran past 0 s", "status 137"]
+    assert len(steps) > 1
+
+
+def test_ctrl_c_mid_run_closes_its_job(term):
+    """Ctrl-C while the door steps a running command stops its job, which
+    ends the process with 130 and sweeps it."""
+    from runtime import elf_binding, moy_sh
+    _ws, app = term
+    before = elf_binding.stats()
+    app.face.set_line("elf.probe/probe sleep")
+    app.face.submit()
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 0.4:
+        moy_sh.jobs()
+        time.sleep(0.002)
+    assert app.face.busy()
+    app.face.interrupt()
+    t0 = time.monotonic()
+    while app.face.busy() and time.monotonic() - t0 < 10:
+        moy_sh.jobs()
+        time.sleep(0.002)
+    assert not app.face.busy() and app.face.status() == 130
+    after = elf_binding.stats()
+    assert after["started"] == before["started"] + 1 and after["leaked"] == before["leaked"]
 
 
 def log_text():

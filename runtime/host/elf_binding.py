@@ -61,6 +61,12 @@ def _lib():
         d = ctypes.CDLL(path)
         d.hl_elf_command.argtypes = [_C, _I, ctypes.POINTER(_C), _C, _U32, _C, _U32, _U32, _C, _I]
         d.hl_elf_command.restype = _I
+        d.hl_elf_start.argtypes = [_C, _I, ctypes.POINTER(_C), _C, _U32, _C, _U32, _C, _I]
+        d.hl_elf_start.restype = _I
+        d.moy_os_command_step.argtypes = [_U32, _U32]
+        d.moy_os_command_step.restype = _I
+        d.moy_os_command_stop.argtypes = [_U32]
+        d.moy_os_command_stop.restype = _I
         d.hl_elf_service.argtypes = [_C, _U32, _C, _C, _I]
         d.hl_elf_service.restype = _I
         d.hl_elf_check.argtypes = [_C, _C, _I]
@@ -103,6 +109,32 @@ def command(path, argv, roots=None, pid=0, cid="", bg_pid=0, budget_ms=0):
     if code < 0:
         return REFUSED, err.value.decode("utf-8", "replace")
     return code, None
+
+
+def start(path, argv, roots=None, pid=0, cid="", budget_ms=0):
+    """`command`'s run started in the shell session running on this thread
+    and left running, as the boards' `moy_elf.start`: (0, None), or
+    (REFUSED, why). `step` serves it, `cancel` ends it."""
+    d = _lib()
+    if d is None:
+        return REFUSED, "no host library"
+    args = (_C * max(1, len(argv)))(*[a.encode() for a in argv])
+    err = ctypes.create_string_buffer(256)
+    code = d.hl_elf_start(path.encode(), len(argv), args, (roots or "").encode() + b"\0",
+                          int(pid), (cid or "").encode(), int(budget_ms), err, len(err))
+    if code < 0:
+        return REFUSED, err.value.decode("utf-8", "replace")
+    return 0, None
+
+
+def step(pid, max_ms):
+    """MOY_OS_RUNNING (-100) while the command goes on, else its exit status."""
+    return _lib().moy_os_command_step(int(pid), int(max_ms) * 1000)
+
+
+def cancel(pid):
+    """The command ended as Ctrl-C ends it: 130."""
+    return _lib().moy_os_command_stop(int(pid))
 
 
 def check(path):

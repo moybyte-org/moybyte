@@ -124,6 +124,21 @@ int hl_elf_command(const char *path, int argc, const char **argv, const char *ro
                           (size_t)errlen);
 }
 
+int hl_elf_start(const char *path, int argc, const char **argv, const char *roots,
+                 uint32_t pid, const char *id, uint32_t budget_ms, char *err, int errlen) {
+    moy_sh_t *s = moy_sh_running();
+    if (s == NULL) {
+        put(err, errlen, "needs a shell session", NULL);
+        return -3;
+    }
+    moy_os_module_t m;
+    if (load(path, &m, err, errlen) != 0) {
+        return -3;
+    }
+    return moy_os_command_start(s, &m, NULL, argc, argv, roots, pid, id, 0, budget_ms, err,
+                                (size_t)errlen);
+}
+
 int hl_elf_service(const char *path, uint32_t pid, const char *id, char *err, int errlen) {
     moy_os_module_t m;
     if (load(path, &m, err, errlen) != 0) {

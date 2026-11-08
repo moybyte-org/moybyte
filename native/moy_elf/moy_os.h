@@ -16,10 +16,11 @@
 // the leases its pid holds (moy_lease_sweep), however it ends.
 //
 // A COMMAND is main(argc, argv) in a shell session (moy_sh.h's spawn), as a
-// WASI command is its _start: moy_os_command runs it on its own task while
-// the calling task waits, and every row that touches the session (its files,
-// its streams, its folder, its terminal) runs on the calling task, which
-// serves them while it waits. Its files are the folders its permissions grant
+// WASI command is its _start: it runs on its own task, and every row that
+// touches the session (its files, its streams, its folder, its terminal)
+// runs on the task that serves it -- moy_os_command's caller, which waits out
+// the whole run, or the shell door's, which serves it a step at a time
+// (moy_os_command_step) so the console's frame goes on between the steps. Its files are the folders its permissions grant
 // and its streams in the background the OS log's (moy_sh_prog.h, WASI's
 // rules). Ctrl-C ends it with 130 and its budget with 137, at the next row it
 // calls; a board also ends one that calls none.
@@ -82,6 +83,7 @@ typedef struct {
 
 // moy_os_command's answers below 0.
 #define MOY_OS_REFUSED (-3)         // it did not run: the reason in err
+#define MOY_OS_RUNNING (-100)       // moy_os_command_step: main goes on
 
 typedef struct moy_os_proc moy_os_proc_t;
 
@@ -99,6 +101,20 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
                    int argc, const char *const *argv, const char *roots, uint32_t pid,
                    const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
                    size_t errlen);
+
+// The same run in steps, so the task that serves it can go on between them
+// (the shell door's step, runtime/shell/sh_door.py): start answers 0 with
+// the process running, or MOY_OS_REFUSED as moy_os_command does; each step
+// serves its session's calls for `max_us` at most and answers MOY_OS_RUNNING
+// while main goes on, else its exit status, the process gone; stop ends it
+// as Ctrl-C does (130). Every step and the stop run on the task that may
+// touch the session.
+int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
+                         int argc, const char *const *argv, const char *roots, uint32_t pid,
+                         const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
+                         size_t errlen);
+int moy_os_command_step(uint32_t pid, uint32_t max_us);
+int moy_os_command_stop(uint32_t pid);
 
 // Service module `m` started as process `pid` (`id` its cart's id): the
 // process, its moy_start running on its own task, or NULL with the reason in

@@ -31,9 +31,11 @@ COMMAND_MS as its budget; a trap's exit code is TRAPPED, a module that will
 not run NOT_RUN.
 
 A NATIVE COMMAND (`"moybyte": {"native": [chips]}`) is the same door over
-the native tier's `command` (native/moy_elf/moy_os.h): its module's `main` on
-a task of its own, the same roots and budget, run only once "native" is
-granted (`app_perms.check`).
+the native tier (native/moy_elf/moy_os.h): its module's `main` on a task of
+its own, the same roots and budget, run only once "native" is granted
+(`app_perms.check`). In the foreground it is a job, as a role command is:
+the door answers RUNNING and each `step JOB` serves its session's calls for
+STEP_MS, so the frame goes on while it runs; `stop JOB` (Ctrl-C) ends it.
 """
 
 import gc
@@ -459,18 +461,21 @@ class ShellDoor:
         if cart is None:
             return ABSENT
         name = argv[0][argv[0].find("/") + 1:]
-        return self.run_command(cart, name, [name] + list(argv[1:]), bg == "1")
+        bg, _, job = bg.partition(":")
+        return self.run_command(cart, name, [name] + list(argv[1:]), bg == "1", job or None)
 
-    def run_command(self, cart, name, argv, bg):
+    def run_command(self, cart, name, argv, bg, job=None):
         """Command `cart` run as `argv`: its exit code, or in the background
-        its pid (the code kept for `status`)."""
+        its pid (the code kept for `status`). A foreground native command
+        given a `job` (the session's, as `role` names it) answers RUNNING and
+        goes on in `step JOB`s."""
         try:
             import app_perms
         except ImportError:  # host: the runtime package
             from runtime import app_perms
         tier = app_perms.tier_of(cart)
         if tier in ("wasm", "elf"):
-            return self.run_compiled(cart, name, argv, bg, tier)
+            return self.run_compiled(cart, name, argv, bg, tier, job)
         got = _sched.prepared(self.ws, cart)
         if got is None:
             self.err(name, "no source")
@@ -514,14 +519,15 @@ class ShellDoor:
         self.exits = ([(pid, code)] + self.exits)[:EXITS]
         return pid
 
-    def run_compiled(self, cart, name, argv, bg, tier):
+    def run_compiled(self, cart, name, argv, bg, tier, job=None):
         """Compiled command `cart` run as `argv`: a WASI module's `_start`
         through the wasm runtime's `command` (native/moy_wasm/moy_wasi.h), a
         native module's `main` through the native runtime's
         (native/moy_elf/moy_os.h), a process of its own holding what its
         consent grants, the folders its `files` permissions name its only
         files. Its exit code, or in the background its pid (the code kept for
-        `status`)."""
+        `status`). A native command in the foreground with a `job` runs on
+        its own task while the door steps it (`_native_steps`): RUNNING."""
         try:
             import app_perms
         except ImportError:  # host: the runtime package
@@ -544,6 +550,8 @@ class ShellDoor:
         pid = _L.spawn(name) if _L is not None else S._next_pid()
         p = S.procs[pid] = _sched.Proc(pid, _sched.COMMAND, name, run)
         p.granted = tuple(granted)
+        if tier == "elf" and job is not None and not bg and hasattr(rt, "start"):
+            return self._native_start(rt, run, name, argv, granted, pid, job)
         was = _L.current() if _L is not None else None
         if _L is not None:
             _L.current(pid)
@@ -572,6 +580,52 @@ class ShellDoor:
             return code
         self.exits = ([(pid, code)] + self.exits)[:EXITS]
         return pid
+
+    def _native_start(self, rt, run, name, argv, granted, pid, job):
+        self.v_stop(job)
+        was = _L.current() if _L is not None else None
+        if _L is not None:
+            _L.current(pid)
+        try:
+            code, why = rt.start(run, argv, wasi_roots(granted), pid, COMMAND_MS)
+        finally:
+            if _L is not None:
+                _L.current(was)
+        if why is not None:
+            _moybyte.WAKES.end(pid)
+            _sched.SCHED.procs.pop(pid, None)
+            self.err(name, why)
+            if _L is not None:
+                _L.write(_L.INFO, pid, "exit %d" % NOT_RUN)
+            return NOT_RUN
+        self.jobs[job] = (name, self._native_steps(rt, pid))
+        return self.v_step(job)
+
+    def _native_steps(self, rt, pid):
+        """A running native command as a job: each step serves its session's
+        calls for STEP_MS, as process `pid`; its return is the exit code, and
+        its close (`stop JOB`, Ctrl-C) ends the process with 130."""
+        code = rt.RUNNING
+        try:
+            while True:
+                was = _L.current() if _L is not None else None
+                if _L is not None:
+                    _L.current(pid)
+                try:
+                    code = rt.step(pid, STEP_MS)
+                finally:
+                    if _L is not None:
+                        _L.current(was)
+                if code != rt.RUNNING:
+                    return code
+                yield False
+        finally:
+            if code == rt.RUNNING:
+                code = rt.cancel(pid)
+            _moybyte.WAKES.end(pid)
+            _sched.SCHED.procs.pop(pid, None)
+            if _L is not None:
+                _L.write(_L.INFO, pid, "exit %d" % code)
 
     # A ROLE COMMAND (runtime/shell/sh_roles.py's r_<name>) answers its exit
     # code, or is a generator: one that waits yields between its polls, and

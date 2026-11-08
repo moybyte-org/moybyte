@@ -6,6 +6,7 @@
 #   -- the WebAssembly engine         wasm_modules, wasm_push
 #   -- the Player path                wasm_carts_push, wasm_cart_fps
 #   -- WASI commands in the shell     wasi_commands_run
+#   -- native (ELF) commands          elf_commands_run
 #   -- Settings -> UNKNOWN SOURCES    unknown_sources
 #   -- a cart too big for the board   wasm_fit, wasm_too_big_cart_opens_the_notice
 #   -- Doom, built by the recipe      doom_push, doom_frames_match_the_host
@@ -3614,6 +3615,81 @@ def wasi_commands_run(board, board_dir):
     if not rust:
         pytest.skip("no rustc with the wasm32-wasip1 target for the Rust hello")
     runs("wasi.hello/hello on glass", (0, ["hello from rust, 3 args", "on", "glass"]))
+
+# -- native (ELF) commands in the shell (native/moy_elf/README.md) -------------------
+
+
+def elf_commands_run(board, board_dir):
+    """Native commands (native/moy_elf/README.md) through the serial face's
+    shell: the SDK's hello and cat and the probe, built for this board's chip
+    by tools/elf_cart.py (signed with the OTA key where this machine has it;
+    an unsigned module runs too). Args, a pipe in and out, a file through
+    redirections, env, exit codes, threads and a mutex; a module built
+    against rows this console lacks refused; `sh ^C` ending a run the door
+    steps with 130, the console's frames going on meanwhile;
+    what the loads cost (`moy_elf.load()`) printed for the ledger."""
+    import json
+    import shutil
+    import tempfile
+    from tools import elf_cart, wasm_module
+    chip = _wasm_chip(board_dir)
+    if not elf_cart.available(chip):
+        pytest.skip("no %s toolchain under ~/.espressif for the native modules" % chip)
+    signed = wasm_module.signing_key() is not None
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_elf_")
+    fixtures = ROOT / "tests" / "fixtures" / "elf"
+    for name in ("elf_hello", "elf_cat", "elf_probe"):
+        out = os.path.join(tmp, name + ".moy")
+        elf_cart.build(str(fixtures / (name + ".moy")), out, [chip], signed=signed)
+        _push_folder(board, board_dir, out, root + "/" + name + ".moy")
+    newer = os.path.join(tmp, "src_newer.moy")
+    shutil.copytree(str(fixtures / "elf_hello.moy"), newer)
+    with open(os.path.join(newer, "src", "main.c"), "w") as f:
+        f.write('__asm__(".pushsection .moy.rows,\\"\\",@progbits\\n.4byte 4000\\n'
+                '.popsection");\nint main(void) { return 0; }\n')
+    with open(os.path.join(newer, "manifest.json")) as f:
+        man = json.load(f)
+    man["id"], man["title"] = "elf.newer", "Newer Native"
+    with open(os.path.join(newer, "manifest.json"), "w") as f:
+        json.dump(man, f)
+    out = os.path.join(tmp, "elf_newer.moy")
+    elf_cart.build(newer, out, [chip], signed=signed)
+    _push_folder(board, board_dir, out, root + "/elf_newer.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+
+    def runs(line, want):
+        got = _sh(board, line, timeout=60)
+        assert got == want, "%s -> %r" % (line, got)
+
+    runs("elf.hello/hello on glass", (0, ["hello from a native module on glass"]))
+    load = board.pyval("__import__('moy_elf').load()", strict=True)
+    runs("cd; printf 'one\\ntwo\\n' > elf.txt; elf.cat/cat elf.txt", (0, ["one", "two"]))
+    runs("printf 'x\\ny\\n' | elf.cat/cat | elf.cat/cat", (0, ["x", "y"]))
+    runs("elf.cat/cat < elf.txt > elf2.txt; elf.cat/cat elf2.txt", (0, ["one", "two"]))
+    runs("export ELF_ON=glass; elf.probe/probe env ELF_ON", (0, ["glass"]))
+    runs("elf.probe/probe exit 3", (3, []))
+    runs("elf.probe/probe threads", (0, ["count 4000", "joined 6"]))
+    st, out = _sh(board, "elf.newer/newer", timeout=60)
+    assert st == 126 and "needs a console update" in " ".join(out), (st, out)
+    n0 = len(board.lines)
+    board._write_line("sh elf.probe/probe sleep")
+    time.sleep(1.5)
+    f0 = board.state()["upcall_totals"][0]       # the console's frame upcalls
+    time.sleep(1.0)
+    assert board.state()["upcall_totals"][0] > f0, "the frame stopped while the command ran"
+    # the channel's Ctrl-C for a parked run (a raw 0x03 is the serial ISR's
+    # KeyboardInterrupt while the console runs)
+    board._write_line("sh ^C")
+    assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
+    runs("rm elf.txt elf2.txt", (0, []))
+    stats = board.pyval("__import__('moy_elf').stats()", strict=True)
+    assert stats[3] == 0, stats                  # no thread left running
+    mem = board.pyval("__import__('moy_elf').mem()", strict=True)
+    print("\nELF %s load: read %d us, check %d us, relocate %d us; internal free "
+          "%d before, %d loaded, %d after; stats %r"
+          % (chip, load[0], load[1], load[2], load[3], load[4], mem[0], stats))
+
 
 APP_ROLES = ("app_roles", "App Roles Wasm")
 APP_SHORT = ("app_short", "App Short Wasm")

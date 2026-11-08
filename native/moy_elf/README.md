@@ -66,8 +66,12 @@ budget). No row is a second implementation of a shell or WASI call.
   ring (`moy_input`) the VM task drains into it (`moy_os_poll`).
 - Every registration is a handle in the process's record, swept with its
   pid's leases however the process ends (`moy_os_stats`' `swept`).
-- A command's rows that touch the session run on the task that waits for it,
-  the door's, as a WASI command's do.
+- A command's rows that touch the session run on the task that serves it.
+  In the foreground that is the shell door's, a step at a time: the door
+  answers RUNNING and the session steps it as it steps a role command
+  (`native/moy_sh/moy_sh_board.c`'s `b_spawn`), so the console's frame and
+  its dev channel go on while the command runs and Ctrl-C stops the job. In
+  the background the door waits out the whole run, as a WASI command's does.
 
 ## Signing
 

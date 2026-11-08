@@ -31,6 +31,7 @@
 #include "freertos/idf_additions.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 #else
 #include <pthread.h>
 #include <setjmp.h>
@@ -171,6 +172,16 @@ static task_t task_self(void) {
     return xTaskGetCurrentTaskHandle();
 #else
     return pthread_self();
+#endif
+}
+
+// The task watchdog fed for a task that waits on a module (a background
+// command's door): a no-op where the task is not watched.
+static void task_feed(void) {
+#ifdef MOY_OS_BOARD
+    if (esp_task_wdt_status(NULL) == ESP_OK) {
+        esp_task_wdt_reset();
+    }
 #endif
 }
 
@@ -1722,10 +1733,12 @@ static uint32_t row_add(uint32_t pid, uint8_t kind, const char *id, void *engine
     return h;
 }
 
-int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
-                   int argc, const char *const *argv, const char *roots, uint32_t pid,
-                   const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
-                   size_t errlen) {
+static moy_os_proc_t *proc_of(uint32_t pid);
+
+int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
+                         int argc, const char *const *argv, const char *roots, uint32_t pid,
+                         const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
+                         size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, false, err, errlen);
     if (p == NULL) {
         if (m->unload != NULL) {
@@ -1770,26 +1783,70 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
         return MOY_OS_REFUSED;
     }
     p->row = row_add(pid, MOY_PROC_COMMAND, id, p);
-    // Serve the session's calls until main ends, its run is stopped or it
-    // calls exit.
-    while (!p->main_done) {
-        sem_take(&p->wake, MOY_SH_PROG_POLL_US);
-        void (*fn)(void *) = p->hop_fn;
-        if (fn != NULL) {
-            p->hop_fn = NULL;
-            fn(p->hop_arg);
-            sem_give(&p->hop_done);
-        }
-        if (!moy_sh_prog_poll(&p->prog, mono_us())) {
-            break;
-        }
-    }
+    return 0;
+}
+
+// The command's end: its row's, its process's, and its exit status.
+static int command_end(moy_os_proc_t *p) {
     int code = p->prog.exited ? p->prog.code : p->code;
     if (p->row) {
         moy_proc_end(p->row, code);
     }
     proc_end(p);
     return code;
+}
+
+int moy_os_command_step(uint32_t pid, uint32_t max_us) {
+    moy_os_proc_t *p = proc_of(pid);
+    if (p == NULL || p->service) {
+        return MOY_OS_REFUSED;
+    }
+    // Serve the session's calls until main ends, its run is stopped, it
+    // calls exit, or the step's time is up.
+    int64_t end = mono_us() + max_us;
+    while (!p->main_done) {
+        int64_t now = mono_us();
+        if (!moy_sh_prog_poll(&p->prog, now)) {
+            break;
+        }
+        if (now >= end) {
+            return MOY_OS_RUNNING;
+        }
+        int64_t wait = end - now < MOY_SH_PROG_POLL_US ? end - now : MOY_SH_PROG_POLL_US;
+        sem_take(&p->wake, wait);
+        void (*fn)(void *) = p->hop_fn;
+        if (fn != NULL) {
+            p->hop_fn = NULL;
+            fn(p->hop_arg);
+            sem_give(&p->hop_done);
+        }
+        task_feed();
+    }
+    return command_end(p);
+}
+
+int moy_os_command_stop(uint32_t pid) {
+    moy_os_proc_t *p = proc_of(pid);
+    if (p == NULL || p->service) {
+        return MOY_OS_REFUSED;
+    }
+    moy_sh_prog_stop(&p->prog, MOY_SH_PROG_INTERRUPTED);
+    return command_end(p);
+}
+
+int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
+                   int argc, const char *const *argv, const char *roots, uint32_t pid,
+                   const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
+                   size_t errlen) {
+    int r = moy_os_command_start(s, m, caps, argc, argv, roots, pid, id, bg_pid, budget_ms,
+                                 err, errlen);
+    if (r != 0) {
+        return r;
+    }
+    do {
+        r = moy_os_command_step(pid, 1000000u);
+    } while (r == MOY_OS_RUNNING);
+    return r;
 }
 
 moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,

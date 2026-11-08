@@ -287,20 +287,44 @@ static int code_of(int32_t r) {
     return r < 0 ? 1 : (int)r;
 }
 
+static void b_sleep(void *ctx, int ms);
+
+// A session's job name at the door: its role command's, or its native
+// command's (b_spawn), one at a time.
+static void job_of(const moy_sh_t *s, char *job, size_t n) {
+    snprintf(job, n, "%lx", (unsigned long)(uintptr_t)s);
+}
+
+// A command started in the foreground may answer RUNNING (a native command,
+// runtime/shell/sh_door.py): it is a job the console steps, as a role
+// command is (b_role), so the session waits between the steps and the
+// console's frame goes on. Ctrl-C `stop`s it.
 static int b_spawn(void *ctx, moy_sh_t *s, int argc, char **argv, int bg, int *pid) {
     (void)ctx;
-    (void)s;
+    char job[2 * sizeof(uintptr_t) + 1];
+    job_of(s, job, sizeof job);
+    char fg[sizeof job + 2];
+    snprintf(fg, sizeof fg, "0:%s", job);
     char **all = b_alloc(NULL, ((size_t)argc + 1) * sizeof *all);
     if (all == NULL) {
         return 1;
     }
-    all[0] = bg ? "1" : "0";
+    all[0] = bg ? "1" : fg;
     memcpy(all + 1, argv, (size_t)argc * sizeof *argv);
     int32_t r = door_int("spawn", argc + 1, all);
     b_free(NULL, all);
     if (bg && r > 0) {
         *pid = (int)r;
         return 0;
+    }
+    char *one[1] = { job };
+    while (r == DOOR_RUNNING) {
+        if (moy_sh_interrupted(s)) {
+            door_int("stop", 1, one);
+            return INTERRUPTED;
+        }
+        b_sleep(NULL, ROLE_POLL_MS);
+        r = door_int("step", 1, one);
     }
     return code_of(r);
 }
@@ -322,8 +346,6 @@ static const char *files_root(void) {
     return getenv("MOY_SH_ROOT") != NULL ? getenv("MOY_SH_ROOT") : "";
 #endif
 }
-
-static void b_sleep(void *ctx, int ms);
 
 typedef struct {
     moy_sh_t *s;
@@ -639,7 +661,7 @@ static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
         }
     }
     char job[2 * sizeof(uintptr_t) + 1];
-    snprintf(job, sizeof job, "%lx", (unsigned long)(uintptr_t)s);
+    job_of(s, job, sizeof job);
     char **all = b_alloc(NULL, ((size_t)argc + 1) * sizeof *all);
     if (all == NULL) {
         return 1;
