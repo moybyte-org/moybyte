@@ -28,6 +28,10 @@ try:                                    # a VM: the native module
     import moy_input as _mi
 except ImportError:
     from runtime import moy_input as _mi
+try:                                    # staged/frozen flat namespace
+    import moybyte as _moybyte
+except ImportError:                     # host: the runtime package
+    from runtime import moybyte as _moybyte
 try:                                    # staged/frozen flat namespace (web runner)
     from scheduler import SCHED as _sched
 except ImportError:                     # host: the runtime package
@@ -150,6 +154,7 @@ class FakeWifi:
         if not password and stored:
             password = stored
         self._connected = ok
+        self._net(ok)
         if (ok or (password and password != stored)) \
                 and self._store is not None and self._root is not None:
             try:
@@ -161,6 +166,14 @@ class FakeWifi:
     def disconnect(self):
         self._connected = False
         self._ssid = None
+        self._net(False)
+
+    def _net(self, up):
+        """The link's change as the board's driver posts it: NET up or down on
+        the input table the wakes read (moy_input.h, the radios)."""
+        t = _moybyte.WAKES.table
+        if t is not None and hasattr(t, "radio"):
+            t.radio(_mi.EV_NET, up, 0)
 
     def radio_on(self):
         self.radio = True

@@ -143,7 +143,9 @@ are a row of the same table, the radio's (`MOY_LEASE_WIFI`, `moy_lease.h`'s
 THE RADIO): one row the shell owns while anything holds the station, its
 holders a mask of tags (`web`, `update`, `cart`, `media`, ...), which
 `Workstation.wifi_hold` and `wifi_release` take and let go and which a VM stop
-keeps. The faces' events are NET, LORA, BLE, USB and
+keeps; the station's address coming and going is a NET record on the
+table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
+faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
 on.
 

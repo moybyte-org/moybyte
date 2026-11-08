@@ -594,8 +594,8 @@ static void on_sync(void) {
 }
 
 static void on_reset(int reason) {
-    (void)reason;
     s_synced = false;
+    moy_input_radio(s_h->table, MOY_EV_BLE, false, (uint32_t)reason, NULL);
 }
 
 static void host_task(void *param) {

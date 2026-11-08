@@ -22,6 +22,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#define WIFI_EVENTS 1
+#endif
 #if __has_include("mdns.h") && defined(MOY_NET_MDNS) && MOY_NET_MDNS
 #include "mdns.h"
 #define HAVE_MDNS 1
@@ -199,6 +203,17 @@ static void ntp_stop(void) {
     }
 }
 
+// The station's address coming and going, as the kernel table's NET up and
+// down (moy_input_radio), where the image takes moy_input.
+static void radio(bool up, uint32_t why) {
+    #ifdef WIFI_EVENTS
+    moy_input_radio(moy_input_kernel(), MOY_EV_NET, up, why, NULL);
+    #else
+    (void)up;
+    (void)why;
+    #endif
+}
+
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         s_st.on = 1;
@@ -206,6 +221,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         s_st.on = 0;
         s_st.connected = 0;
         s_scan = SCAN_IDLE;
+        radio(false, 0);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
         if (s_scan == SCAN_RUNNING) {
             s_scan = SCAN_DONE;
@@ -217,6 +233,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         s_st.ip = 0;
         s_st.reason = d ? d->reason : 0;
         portEXIT_CRITICAL(&s_latch);
+        radio(false, d ? d->reason : 0);
         if (s_want) {
             schedule_retry();
         }
@@ -234,6 +251,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
             esp_timer_stop(s_retry);
         }
         ntp_start();
+        radio(true, 0);
     }
 }
 
@@ -297,6 +315,7 @@ void moy_wifi_off(void) {
     s_st.ip = 0;
     s_st.ssid[0] = '\0';
     portEXIT_CRITICAL(&s_latch);
+    radio(false, 0);
 }
 
 // Each driver call is a round trip to the C6 on a P4, so a connect asks only

@@ -21,8 +21,10 @@
 //   moybyte.log(severity, text)    the OS log under the service's pid
 //   moybyte.exit(code)             the service ends with `code`
 //   moybyte.on(name, fn) -> id     fn(...) for each message `name` the OS
-//                                  routes to it (MOYCORE_SVC_MESSAGES); a
-//                                  message wake, which `cancel` ends too
+//                                  routes to it (MOYCORE_SVC_MESSAGES:
+//                                  "net" and "ble" are fn(up, why) as WiFi or
+//                                  BLE comes up or goes down); a message
+//                                  wake, which `cancel` ends too
 //   moybyte.notify(summary[, body[, icon]]) -> id
 //                                  a notification, the console's
 //                                  moybyte.notify under the service's pid
@@ -108,8 +110,9 @@ enum {
 #define MOYCORE_SVC_MAIL 16u            // messages queued on a service (moybyte.py's MAIL_MAX)
 #define MOYCORE_SVC_NAME 24u            // a message's or a console call's name, its NUL counted
 // The messages the OS routes to a process (runtime/system/moybyte.py's
-// MESSAGES): the notify role's events.
-#define MOYCORE_SVC_MESSAGES "achieve", "award"
+// MESSAGES): the notify role's events, and the radios' changes ("net" and
+// "ble", each `(up, why)`; docs/os_2026-11/between_apps.md section 4).
+#define MOYCORE_SVC_MESSAGES "achieve", "award", "net", "ble"
 #define MOYCORE_SVC_STOP_MS 2000u       // a start's or a stop's limit (TERM to KILL)
 #define MOYCORE_SVC_ABORT_US 300000u    // a callback's limit
 #define MOYCORE_SVC_STRIKES 3u          // aborted callbacks to the end

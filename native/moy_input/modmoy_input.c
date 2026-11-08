@@ -587,6 +587,31 @@ static mp_obj_t table_src_name(mp_obj_t self_in, mp_obj_t src) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(table_src_name_obj, table_src_name);
 
+// radio(kind, up, why=0) -> True where the radio's state changed (moy_input.h,
+// the radios); a host or a browser posts its stand-in's this way
+static mp_obj_t table_radio(size_t n_args, const mp_obj_t *args) {
+    bool changed;
+    check(moy_input_radio(table_of(args[0])->t, (uint8_t)mp_obj_get_int(args[1]),
+                          mp_obj_is_true(args[2]),
+                          n_args > 3 ? (uint32_t)mp_obj_get_int_truncated(args[3]) : 0u, &changed));
+    return mp_obj_new_bool(changed);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_radio_obj, 3, 4, table_radio);
+
+// radio_source() -> the handle of the ring source "radio", opened by the first ask
+static mp_obj_t table_radio_source(mp_obj_t self_in) {
+    uint32_t h;
+    check(moy_input_radio_source(table_of(self_in)->t, &h));
+    return mp_obj_new_int_from_uint(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(table_radio_source_obj, table_radio_source);
+
+// radio_up(kind) -> whether that radio is up
+static mp_obj_t table_radio_up(mp_obj_t self_in, mp_obj_t kind) {
+    return mp_obj_new_bool(moy_input_radio_up(table_of(self_in)->t, (uint8_t)mp_obj_get_int(kind)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(table_radio_up_obj, table_radio_up);
+
 // post(kind, a=0, id=0, b=0): a record into the ring, through the ISR writer on
 // an ISR source.
 static mp_obj_t ring_post(size_t n_args, const mp_obj_t *args) {
@@ -716,7 +741,10 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     { MP_ROM_QSTR(MP_QSTR_events), MP_ROM_PTR(&table_events_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_pending), MP_ROM_PTR(&table_pending_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ring_source), MP_ROM_PTR(&table_ring_source_obj) }, \
-    { MP_ROM_QSTR(MP_QSTR_src_name), MP_ROM_PTR(&table_src_name_obj) }
+    { MP_ROM_QSTR(MP_QSTR_src_name), MP_ROM_PTR(&table_src_name_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_radio), MP_ROM_PTR(&table_radio_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_radio_source), MP_ROM_PTR(&table_radio_source_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_radio_up), MP_ROM_PTR(&table_radio_up_obj) }
 
 static const mp_rom_map_elem_t table_locals_table[] = { TABLE_LOCALS(&names_obj) };
 static MP_DEFINE_CONST_DICT(table_locals, table_locals_table);

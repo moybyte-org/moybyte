@@ -336,6 +336,23 @@ int moy_input_isr_attach(moy_input_t *t, uint32_t h, moy_input_isr_t *w);
 void moy_input_isr_detach(moy_input_isr_t *w);
 // One record, stamped now; callable from an ISR (MOY_INPUT_ISR_TEXT).
 void moy_input_isr_put(moy_input_isr_t *w, uint8_t kind, uint16_t a, uint16_t id, uint32_t b);
+// -- the radios (docs/os_2026-11/between_apps.md section 4) --
+// WiFi (MOY_EV_NET: the station has an address) and BLE (MOY_EV_BLE: the host
+// has synced with its controller) coming up and going down, kept on the table
+// and posted on a change, and only on one, to its ring source "radio" as a
+// record of that kind: `a` 1 up, 0 down; `b` why it went down (the station's
+// disconnect reason, NimBLE's reset reason), 0 when it was put down. Their
+// drivers call moy_input_radio from their own tasks (native/moy_net/moy_wifi.c,
+// native/moy_input/moy_hid.c and moy_ble_task.c); *changed (NULL for none)
+// says whether the state changed. MOY_INPUT_BAD for another kind. The source
+// is opened by the first ask for it (moy_input_radio_source), so a change
+// before any is kept and not posted; MOY_INPUT_RADIO_DEPTH records deep, the
+// changes being rare.
+#define MOY_INPUT_RADIO_DEPTH 8u
+int moy_input_radio(moy_input_t *t, uint8_t kind, bool up, uint32_t why, bool *changed);
+int moy_input_radio_source(moy_input_t *t, uint32_t *h);
+// Whether that radio is up (false for another kind).
+bool moy_input_radio_up(const moy_input_t *t, uint8_t kind);
 // A reader of `kinds` (MOY_EV_BIT of each; MOY_EV_ALL) into *r; MOY_INPUT_FULL
 // when MOY_EV_READERS are taken.
 int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r);

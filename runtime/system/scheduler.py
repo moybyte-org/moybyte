@@ -77,7 +77,8 @@ task as the service's process, at most CALLS_MAX a service a poll), reads
 each one's heap (exact) and its calls' time onto its row, and hands an end
 to the same exit, log line and restart policy; a stop is its TERM there, the
 C side's KILL past MOY_SERVICE_STOP_MS. `send` routes a message to a Lua
-service's row, and the console's frame start (`mail`) and a tick that runs
+service's row (a radio's change reaches every row through `_routed`, the
+radios' router's hook, kept while a Lua service lives), and the console's frame start (`mail`) and a tick that runs
 first serve it with a poll, as they serve a Python service's.
 
 AUTOSTART. `boot(ws)`, at the console's first drawn frame, starts every
@@ -274,6 +275,7 @@ class Scheduler:
         self._poll = 0              # the Lua services' poll, a wake of the shell's
         self.svc_mail = False       # a message sent to a Lua service, not yet polled
         self.wakes.ended = self._ended
+        self.wakes.routed = self._routed
 
     # -- the tick ---------------------------------------------------------
 
@@ -643,6 +645,7 @@ class Scheduler:
             return None
         if not self._poll:
             self._poll = self.plain_every(POLL_MS, self.poll)
+            self._radios(True)
         self.poll()
         return p.pid if p.state != EXITED else None
 
@@ -684,6 +687,22 @@ class Scheduler:
             self.wakes.cancel(self._poll)
             self._plain.pop(self._poll, None)
             self._poll = 0
+            self._radios(False)
+
+    def _radios(self, on):
+        """The radios' router (moybyte's THE RADIOS) kept while a Lua
+        service lives, which may wait on "net" or "ble" on its own row."""
+        self.wakes.radio_keep = on
+        self.wakes.radio_sync()
+
+    def _routed(self, name, args):
+        """A radio's change, which the router queued on the Python wakes,
+        sent on to each Lua service; a row with no wake on it takes none."""
+        if not self._poll:
+            return
+        for p in list(self.procs.values()):
+            if p.native:
+                self.send(p.pid, name, args)
 
     def _answer(self, p, svc, stepped):
         """The console calls Lua service `p` waits on, answered on this
@@ -900,6 +919,7 @@ class Scheduler:
             self.wakes.cancel(self._poll)
             self._plain.pop(self._poll, None)
             self._poll = 0
+            self._radios(False)
         self.procs.clear()
         self.down.clear()
         self.svc_mail = False

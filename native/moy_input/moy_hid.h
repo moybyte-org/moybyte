@@ -199,7 +199,8 @@ uint32_t moy_hid_buttons_for_key(int32_t key, bool cart);
 
 // -- the machine --
 void moy_hid_init(moy_hid_t *h, const moy_hid_ops_t *ops, moy_input_t *table, uint32_t src);
-// The radio came up (available) or could not.
+// The radio came up (available) or could not; it went down. Each is the
+// table's BLE up or down (moy_input_radio).
 void moy_hid_started(moy_hid_t *h, bool ok, const char *why);
 void moy_hid_stopped(moy_hid_t *h);
 void moy_hid_tick(moy_hid_t *h);                    // timeouts and retries, ~2 Hz

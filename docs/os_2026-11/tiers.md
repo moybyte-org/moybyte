@@ -126,7 +126,8 @@ own, not a row of the runs (`native/moycore/moycore_svc.h`): the safe stdlib,
 P4's core 0 (`processes.md` §1). Each call runs on a coroutine under a count
 hook that yields it past its budget, so a `pcall` cannot keep a runaway
 callback. `moybyte.on` takes the OS's messages (`processes.md` §8's
-`achieve` and `award`), queued on the service's row. What enters the console
+`achieve` and `award`, `between_apps.md` §4's `net` and `ble`), queued on
+the service's row. What enters the console
 is the VM task's: `moybyte.notify` and the functions the console hands a
 system process (its `env`, whose values become globals) are CONSOLE CALLS,
 which yield the call's coroutine with the call posted on the row until the

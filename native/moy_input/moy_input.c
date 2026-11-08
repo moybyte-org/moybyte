@@ -119,6 +119,8 @@ struct moy_input {
     uint8_t ev_only[MOY_EV_READERS];        // the one source a reader reads, slot + 1; 0: every
     uint32_t ev_cur[MOY_EV_READERS][MOY_INPUT_RINGS];    // the seq each reads next
     uint32_t ev_lost[MOY_EV_READERS][MOY_INPUT_RINGS];   // its records dropped unread
+    uint32_t radio_src;                     // the ring source "radio", 0 before the first ask
+    uint32_t radio_up;                      // MOY_EV_BIT of each radio kind that is up
 };
 
 #define ONLY_NONE 0xFFu      // a reader's one source closed: it reads nothing
@@ -862,6 +864,49 @@ int moy_input_ring_close(moy_input_t *t, uint32_t h) {
     UNLOCK(t);
     ring_drop(g);
     return MOY_INPUT_OK;
+}
+
+#define RADIO_KINDS (MOY_EV_BIT(MOY_EV_NET) | MOY_EV_BIT(MOY_EV_BLE))
+
+int moy_input_radio(moy_input_t *t, uint8_t kind, bool up, uint32_t why, bool *changed) {
+    if (changed != NULL) {
+        *changed = false;
+    }
+    if (t == NULL || kind >= MOY_EV_KINDS || !(RADIO_KINDS & MOY_EV_BIT(kind))) {
+        return MOY_INPUT_BAD;
+    }
+    uint32_t bit = MOY_EV_BIT(kind);
+    LOCK(t);
+    bool moved = ((t->radio_up & bit) != 0) != up;
+    if (moved) {
+        t->radio_up = up ? t->radio_up | bit : t->radio_up & ~bit;
+        int s = t->radio_src != 0 ? ring_slot_of(t, t->radio_src) : -1;
+        if (s >= 0) {
+            put_locked(t, s, kind, up ? 1u : 0u, 0, up ? 0u : why);
+        }
+    }
+    UNLOCK(t);
+    if (changed != NULL) {
+        *changed = moved;
+    }
+    return MOY_INPUT_OK;
+}
+
+int moy_input_radio_source(moy_input_t *t, uint32_t *h) {
+    if (t->radio_src == 0 || ring_slot_of(t, t->radio_src) < 0) {
+        uint32_t src;
+        int rc = moy_input_ring_open(t, "radio", MOY_EV_FIFO, MOY_INPUT_RADIO_DEPTH, &src);
+        if (rc != MOY_INPUT_OK) {
+            return rc;
+        }
+        t->radio_src = src;
+    }
+    *h = t->radio_src;
+    return MOY_INPUT_OK;
+}
+
+bool moy_input_radio_up(const moy_input_t *t, uint8_t kind) {
+    return kind < MOY_EV_KINDS && (RADIO_KINDS & MOY_EV_BIT(kind)) && (t->radio_up & MOY_EV_BIT(kind));
 }
 
 int moy_input_isr_attach(moy_input_t *t, uint32_t h, moy_input_isr_t *w) {

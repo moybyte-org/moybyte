@@ -442,6 +442,7 @@ static bool request_scan(moy_hid_t *h, bool picker) {
 }
 
 void moy_hid_started(moy_hid_t *h, bool ok, const char *why) {
+    moy_input_radio(h->table, MOY_EV_BLE, ok, 0, NULL);
     if (!ok) {
         set_error(h, why);
         h->state = MOY_HID_OFF;
@@ -457,6 +458,7 @@ void moy_hid_started(moy_hid_t *h, bool ok, const char *why) {
 }
 
 void moy_hid_stopped(moy_hid_t *h) {
+    moy_input_radio(h->table, MOY_EV_BLE, false, 0, NULL);
     reset_connection(h);
     h->available = false;
     h->state = MOY_HID_OFF;

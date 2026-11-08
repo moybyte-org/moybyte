@@ -228,6 +228,9 @@ class _Isr(ctypes.Structure):
 
 _EV_SIGS = (
     ("moy_input_ring_open", [_P, ctypes.c_char_p, _U8, _U32, _PU32], _I),
+    ("moy_input_radio", [_P, _U8, ctypes.c_bool, _U32, ctypes.POINTER(ctypes.c_bool)], _I),
+    ("moy_input_radio_source", [_P, _PU32], _I),
+    ("moy_input_radio_up", [_P, _U8], ctypes.c_bool),
     ("moy_input_ring_close", [_P, _U32], _I),
     ("moy_input_isr_attach", [_P, _U32, ctypes.POINTER(_Isr)], _I),
     ("moy_input_isr_detach", [ctypes.POINTER(_Isr)], None),
@@ -759,6 +762,25 @@ class InputTable:
         _check(_lib().moy_input_ring_open(self._t, name.encode(), prov, depth, ctypes.byref(h)),
                "ring_source")
         return RingSource(self, h.value, prov)
+
+    def radio(self, kind, up, why=0):
+        """A radio's state (EV_NET: WiFi has an address; EV_BLE: the BLE host
+        runs): True where it changed, and then posted to `radio_source()`'s
+        ring. What a board's drivers call in C, and the host's stand-ins here."""
+        changed = ctypes.c_bool()
+        _check(_lib().moy_input_radio(self._t, kind, bool(up), why & 0xFFFFFFFF,
+                                      ctypes.byref(changed)), "radio")
+        return changed.value
+
+    def radio_source(self):
+        """The ring source "radio" whose records are the radios' changes,
+        opened by the first ask: its handle."""
+        h = _U32()
+        _check(_lib().moy_input_radio_source(self._t, ctypes.byref(h)), "radio_source")
+        return h.value
+
+    def radio_up(self, kind):
+        return bool(_lib().moy_input_radio_up(self._t, kind))
 
     def src_name(self, src):
         """The name of the source whose records carry `src`, or None."""

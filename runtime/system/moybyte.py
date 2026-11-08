@@ -18,7 +18,8 @@ one, `time.ticks_us()`.
                      that source's records. Or wake `fn(*args)` for each
                      MESSAGE the OS routes to this process by that name
                      ("achieve", "award": the notify role's events, which the
-                     shell sends the achievements process, section 8)
+                     shell sends the achievements process, section 8; "net",
+                     "ble": the radios, below)
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
@@ -105,6 +106,19 @@ slice is the scheduler's (runtime/system/scheduler.py).
 The rings are the input table the shell binds (`bind`, the Workstation's
 input), so a host and a board read the same records.
 
+THE RADIOS (docs/os_2026-11/between_apps.md section 4). WiFi having an
+address and the BLE host running, each coming up or going down, are NET and
+BLE records on the input table's ring source "radio" (moy_input.h, the
+radios), which the drivers post in C on every change and only on one.
+`on("net", fn)` and `on("ble", fn)` are message wakes: `fn(up, why)` for each
+change, `up` a bool and `why` what took it down (the station's disconnect
+reason, NimBLE's reset reason; 0 when it was put down or came up). One ROUTER
+reads that ring for everybody, a wake of the shell's that lives while any
+process waits on "net" or "ble" or anything else asks for it (`radio_keep`,
+the scheduler's Lua services), and queues each change on every such wake
+(`route`), then tells `routed` (the scheduler, which sends it on to the Lua
+services' rows), so one reader serves every process and every tier.
+
 MESSAGES are not ring records: `send(pid, name, args)`, the OS's, queues
 `args` (a tuple) on process `pid`'s wakes on `name` (MAIL_MAX a wake, the
 oldest dropped). A message wake waits in `mail`, apart from `list`: while
@@ -148,8 +162,12 @@ SOURCES = {"keys": _I.EV_KEYS, "touch": _I.EV_TOUCH, "pad": _I.EV_PAD,
 # A Lua service's row takes the same names and the same depth
 # (native/moycore/moycore_svc.h: MOYCORE_SVC_MESSAGES, MOYCORE_SVC_MAIL),
 # pinned by tests/test_lua_services.py.
-MESSAGES = ("achieve", "award")
+MESSAGES = ("achieve", "award", "net", "ble")
 MAIL_MAX = 16
+
+# The radios' messages, by the kind of their records.
+RADIO = {NET: "net", BLE: "ble"}
+_RADIO_KINDS = (1 << NET) | (1 << BLE)
 
 SHELL = 1
 ALARMS = "alarms"           # the permission `at` needs
@@ -187,12 +205,17 @@ class Wakes:
                                     # its asyncio tasks (runtime/system/aio.py)
         self.woke = None            # fn(pid) told when an alarm of process pid's that
                                     # wakes goes off: the console lights the screen
+        self.radio = None           # the radios' router, a wake of the shell's
+        self.radio_keep = False     # something beside a wake wants the router
+        self.routed = None          # fn(name, args) told each radio change routed
+        self._rbuf = None
 
     def bind(self, table):
         """The input table whose rings the readers read. A new table starts
         every reader again on it."""
         if table is self.table:
             return
+        self._radio_drop()
         self.table = table
         self.readers.clear()
         for w in self.list:
@@ -203,6 +226,7 @@ class Wakes:
                     w[_READER] = table.reader(w[_AT], w[_MS])
                 except (OSError, ValueError):  # the source is not this table's
                     w[_READER] = -1
+        self.radio_sync()
 
     def _add(self, how, ms, at, fn, reader):
         wid = self.next_id
@@ -219,7 +243,10 @@ class Wakes:
 
     def on(self, source, fn):
         if source in MESSAGES:
-            return self._add(_MAIL, source, [], fn, -1)
+            wid = self._add(_MAIL, source, [], fn, -1)
+            if source == "net" or source == "ble":
+                self.radio_sync()
+            return wid
         kinds = SOURCES.get(source)
         if kinds is None:
             raise ValueError("no wake source %r" % (source,))
@@ -266,6 +293,75 @@ class Wakes:
                 took = True
         return took
 
+    def route(self, name, args):
+        """Message `name` with `args` queued on every process's wakes on
+        it, then `routed` told: a radio's change. Answers how many took it."""
+        took = 0
+        for w in self.mail:
+            if w[_MS] == name:
+                q = w[_AT]
+                if len(q) >= MAIL_MAX:
+                    q.pop(0)
+                else:
+                    self.queued += 1
+                q.append(args)
+                took += 1
+        if self.routed is not None:
+            self.routed(name, args)
+        return took
+
+    def radio_sync(self):
+        """The router made while a process waits on "net" or "ble" or
+        `radio_keep` is set, and dropped once neither holds."""
+        want = self.radio_keep
+        if not want:
+            for w in self.mail:
+                if w[_MS] == "net" or w[_MS] == "ble":
+                    want = True
+                    break
+        if not want:
+            self._radio_drop()
+            return
+        t = self.table
+        if self.radio is not None or t is None:
+            return
+        try:
+            src = t.radio_source()
+            r = t.reader(_RADIO_KINDS, src)
+        except (AttributeError, OSError, ValueError):  # a table with no radios, or full
+            return
+        if self._rbuf is None:
+            from array import array
+            self._rbuf = array("i", [0] * (EV_FIELDS * 4))
+        wid = self.next_id
+        self.next_id += 1
+        w = [wid, SHELL, _RING, src, _RADIO_KINDS, self._route, r]
+        self.by_id[wid] = w
+        self.list.append(w)
+        self.radio = w
+        if self.added is not None:
+            self.added()
+
+    def _radio_drop(self):
+        w, self.radio = self.radio, None
+        if w is not None:
+            self.cancel(w[_WID])
+
+    def _route(self):
+        w, t, buf = self.radio, self.table, self._rbuf
+        if w is None or t is None:
+            return
+        r = w[_READER]
+        cap = len(buf) // EV_FIELDS
+        n = t.events(buf, r)
+        while n:
+            for i in range(n):
+                k = i * EV_FIELDS
+                name = RADIO.get(buf[k + EV_KIND])
+                if name is not None:
+                    self.route(name, (buf[k + EV_A] != 0, buf[k + EV_B]))
+            n = t.events(buf, r) if n == cap else 0
+
     def mail_of(self, pid):
         """How many messages wait on process `pid`'s wakes."""
         return sum(len(w[_AT]) for w in self.mail if w[_OWNER] == pid)
@@ -277,8 +373,12 @@ class Wakes:
         if w[_HOW] == _MAIL:
             self.mail.remove(w)
             self.queued -= len(w[_AT])
+            if w[_MS] == "net" or w[_MS] == "ble":
+                self.radio_sync()
             return True
         self.list.remove(w)
+        if w is self.radio:
+            self.radio = None
         if w[_READER] >= 0 and self.table is not None:
             self.table.reader_free(w[_READER])
         return True

@@ -153,3 +153,20 @@ console, and so do the alarms, which a stopped VM does not serve.
 WiFi and BLE up and down as records in the
 rings (`hardware.md` §2), so an app wakes on `moybyte.on("net", fn)` or
 `moybyte.on("ble", fn)` instead of polling `wifi`.
+
+As built: WiFi is up while the station has an address and BLE while its
+host has synced with the controller. The drivers keep each state on the
+input table and post a change, and only a change, as a NET or BLE record on
+its ring source `radio` (`native/moy_input/moy_input.h`, the radios): the
+station's event handler (`native/moy_net/moy_wifi.c`), the BLE central's
+start and stop (`native/moy_input/moy_hid.c`) and NimBLE's reset
+(`moy_ble_task.c`), and on the host and in the browser `FakeWifi`'s link
+(`runtime/run/host_api.py`). A record's `a` is 1 up and 0 down, its `b` why it
+went down (the station's disconnect reason, NimBLE's reset reason; 0 when it
+was put down). `net` and `ble` are messages, `fn(up, why)` a change, the same
+names and arguments in Python and in a Lua service: one router of the
+shell's reads the ring with the table's one reader, while a process waits on
+either or a Lua service lives, and queues each change on every wake on its
+name (`runtime/system/moybyte.py`, THE RADIOS) and on every Lua service's row
+(`runtime/system/scheduler.py`'s `_routed`), so the table's eight readers are
+not spent one a process. `tests/test_radio_events.py` holds it.
