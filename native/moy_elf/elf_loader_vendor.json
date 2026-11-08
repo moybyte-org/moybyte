@@ -10,14 +10,14 @@
     "native/moy_elf/elf_loader/include/private/elf_validate.h": "316dfa9762d33e8b6bc80dec8c82de7e27b0a49a705c9a3a835f7826f289d3f0",
     "native/moy_elf/elf_loader/include/private/esp_dlmod.h": "1555b1e6a6db5c07150df6492d069d925f8a362a980f70956c8d731d03efde90",
     "native/moy_elf/elf_loader/license.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-    "native/moy_elf/elf_loader/src/arch/esp_elf_riscv.c": "34aa2d46bdcfe17e94ddfaf16125e82e772b589698cc7c51b1958837379a51b0",
-    "native/moy_elf/elf_loader/src/arch/esp_elf_xtensa.c": "7d4f9e461b66508f4d27a6a7670977ef63892a355abefabadec9a64e5725ef6b",
+    "native/moy_elf/elf_loader/src/arch/esp_elf_riscv.c": "c60233f851a4d7a7cc288b2722282d50d196ce0d31aaca14873e3f27c3efbbfd",
+    "native/moy_elf/elf_loader/src/arch/esp_elf_xtensa.c": "29a5766e2b908fb31eec3da86c9a84ac10f95a62a507a34d287792c86ef5ec00",
     "native/moy_elf/elf_loader/src/esp_elf.c": "94bd0d19df4869d9ffe3a8e40702fbe90c35128646ab8007c27393cbca879a2a",
     "native/moy_elf/elf_loader/src/esp_elf_adapter.c": "06614b0810f1f1ef91da1e5ec30a20f40d26d6abada69ae15231f5755323fb39",
     "native/moy_elf/elf_loader/src/esp_elf_symbol.c": "3d5fb07be6d28079800ca8b090172fa8ee29fd62f8ab1318bd790ca828764bee",
-    "native/moy_elf/elf_loader/src/esp_elf_validate.c": "f9691f07c92b1286521ffa1eb04cc608a2150b44d6ed6a1413bb3c049249d81e"
+    "native/moy_elf/elf_loader/src/esp_elf_validate.c": "9edb2143cec65ccb0a019dcc8f449ffdc385c4bf8a0ab794c3562f37db4710a6"
   },
-  "patch": "e29fee27788d1c519a41de973706fbc8dc49eba7546e623b4c2d3b7d0df4b6b3",
+  "patch": "fc167bbd873ff73be3be9095e534fafa7e3614ddce2b72f395e806d36e147337",
   "sha256": "525a778528a2c962807b38e9c6ca5631de5e717a07f786a2040971b1e8dfff06",
   "url": "https://components-file.espressif.com/components/espressif/elf_loader/2.1.0/espressif__elf_loader-v2.1.0.zip",
   "version": "2.1.0"

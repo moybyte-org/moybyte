@@ -3774,12 +3774,14 @@ def _elf_nc_both_ways(board):
     srv.settimeout(60)
     port = srv.getsockname()[1]
     heard = []
+    peer = []
 
     def serve():
         try:
-            conn, _ = srv.accept()
+            conn, addr = srv.accept()
         except OSError:
             return
+        peer.append(addr[0])
         with conn:
             data = b""
             while True:
@@ -3798,7 +3800,7 @@ def _elf_nc_both_ways(board):
     if not heard:
         pytest.skip("the board's network does not reach %s (%s: %r)" % (here, st, got))
     assert heard == [b"hello\n"] and (st, got) == (0, ["world"]), (heard, st, got)
-    ip = board.pyval("ws.wifi.status()[2]", timeout=20, strict=True)
+    ip = peer[0]                # the radio's hold ended with nc: status() may read None
     lport = 7000 + os.getpid() % 1000
     answered = []
 

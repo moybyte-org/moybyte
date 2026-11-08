@@ -80,6 +80,12 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
 
     assert(elf && rela);
 
+    /* A relocation that does nothing names no word: ld leaves its
+     * unused .rela.dyn slots so, at offset 0. */
+    if (ELF_R_TYPE(rela->info) == R_XTENSA_NONE) {
+        return 0;
+    }
+
     /* Check the complete relocation word, not just its first mapped byte. */
     where = NULL;
     for (size_t i = 0; i < ELF_SECS; ++i) {

@@ -22,8 +22,10 @@ Kconfig: `micropython.cmake` sets the switches its Kconfig would.
 `patches/moybyte.patch`'s header says each fix and why: `.text`'s size kept
 exact, an `R_XTENSA_RELATIVE` relocation to one past a section's end mapped
 instead of becoming 0, the validation's section-name table taken from the
-loader's own allocator (PSRAM) instead of internal RAM, and two messages that
-formatted a long long, which the boards' printf cannot.
+loader's own allocator (PSRAM) instead of internal RAM, two messages that
+formatted a long long, which the boards' printf cannot, and a NONE
+relocation skipped before its target is looked up (ld leaves unused slots so,
+at offset 0).
 
 The fixes stay in our copy; none is reported upstream.
 

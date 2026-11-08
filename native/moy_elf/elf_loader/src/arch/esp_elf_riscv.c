@@ -85,6 +85,12 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
 
     assert(elf && rela);
 
+    /* A relocation that does nothing names no word: ld leaves its
+     * unused .rela.dyn slots so, at offset 0. */
+    if (ELF_R_TYPE(rela->info) == R_RISCV_NONE) {
+        return 0;
+    }
+
     if (!elf->psegment || rela->offset < elf->svaddr ||
             elf->segment_size < sizeof(*where) ||
             rela->offset - elf->svaddr > elf->segment_size - sizeof(*where) ||

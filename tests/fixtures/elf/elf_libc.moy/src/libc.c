@@ -32,7 +32,7 @@ static void numbers(void) {
     errno = 0;
     printf("strtol %ld %ld %ld %ld\n", strtol("  -123xyz", &end, 10), strtol("0x1f", NULL, 0),
            strtol("077", NULL, 0), strtol("zz", NULL, 36));
-    printf("end %s\n", end);
+    printf("endptr %s\n", end);
     errno = 0;
     long big = strtol("99999999999999999999", NULL, 10);
     printf("range %d %d\n", big == 2147483647L || big == 9223372036854775807L, errno == ERANGE);

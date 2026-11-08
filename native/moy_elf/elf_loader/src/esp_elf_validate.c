@@ -610,7 +610,8 @@ static int elf_validate_impl(const elf_reader_t *r)
             elf32_rela_t rela;
             if (elf_reader_read(r, rela_sec.offset + j * sizeof(rela), &rela, sizeof(rela)) ||
                     ELF_R_SYM(rela.info) >= sym_count ||
-                    !elf_relocation_target(loaded_ranges, loaded_count, rela.offset)) {
+                    (ELF_R_TYPE(rela.info) != 0 &&      /* NONE names no word */
+                     !elf_relocation_target(loaded_ranges, loaded_count, rela.offset))) {
                 result = -EINVAL;
                 break;
             }
