@@ -259,7 +259,7 @@ static int b_status(void *ctx, int pid, int *code) {
         if (strncmp(ans, "running", 7) == 0) {
             st = 0;
         } else if (strncmp(ans, "exited ", 7) == 0) {
-            *code = atoi(ans + 7);
+            *code = (atoi(ans + 7) & 0xff) << 8;    // the door's exit code, as a wait status
             st = 1;
         }
     } else if (r == DOOR_NEEDS_VM && pid == SHELL_PID) {

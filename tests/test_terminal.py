@@ -597,3 +597,19 @@ def test_neofetch_reads_the_console_s_own_rows_from_its_proc_file(term):
     lines = app.face.lines()
     assert any("\x1b[38;2;255;119;168mDisplay\x1b[0m" in ln for ln in lines)
     assert not any("\x1b[48;2;" in ln for ln in lines)
+
+
+def test_wait_reads_a_background_command_s_exit_code(term, tmp_path):
+    """`wait` turns the door's exit code (runtime/shell/sh_door.py's
+    `status`) into the code `$?` reads, not a signal's number."""
+    import json
+    ws, app = term
+    d = tmp_path / "carts" / "exits.moy"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps({
+        "format": "moy-1", "title": "exits", "id": "local.exits", "runtime": "python",
+        "main": "main.py", "moybyte": {"type": "command"}}))
+    (d / "main.py").write_text("def main(argv):\n    return 5\n")
+    ws.rescan_carts()
+    run(app, "exits & wait $!; echo status $?")
+    assert "status 5" in plain(app)
