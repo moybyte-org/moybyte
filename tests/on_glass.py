@@ -1547,8 +1547,9 @@ def a_lua_service_runs_on_a_task_of_its_own(board):
         time.sleep(1.0)
         tasks, pid = board.pyval("(ws._lt, ws._lp)", strict=True)
         assert tasks is True and pid is not None, (tasks, pid)
-        state, cpu = board.pyval(
-            "(lambda p: (p.state, p.cost_us))(__import__('scheduler').SCHED.procs[ws._lp])",
+        state, cpu = board.pyval(           # its figures read as the accounting reads them
+            "(lambda S: S.SCHED.figures() or (lambda p: (p.state, p.cost_us))"
+            "(S.SCHED.procs[ws._lp]))(__import__('scheduler'))",
             strict=True)
         assert state == "background", state
         assert cpu > 0, cpu                    # its timer ran on its task

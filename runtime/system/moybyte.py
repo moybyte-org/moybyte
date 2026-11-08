@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   Wakes                    what every process asked to be woken by, and its events() reader
+#   bind                     the kernel's input table the wakes read (events, source)
+#   every                    a timer wake (after, at, on, cancel beside it)
+#   lease                    a pin of the board's lease row (pins)
+#   snd_open                 a process's sound stream (snd, snd_close, snd_counts)
+#   notify                   a notification (status: a status-bar item)
+#   send                     a message to an app (open_with, share, pick)
+#   log                      a line of the OS log
+#   __getattr__              the device APIs (http, ble, camera, ...) by name
 """moybyte: what a Python app asks the OS for that has no standard name
 (docs/os_2026-11/processes.md sections 1 and 3). The clock is the standard
 one, `time.ticks_us()`.

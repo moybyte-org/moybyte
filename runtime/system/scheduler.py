@@ -132,8 +132,8 @@ and the board's loop then runs `woken` at the frame's tail
 the poll for the rest. A console with no such loop (`kernel_wake` False:
 the host, the desktop MicroPython), or a stepped Lua service, keeps the
 poll a wake of the shell's every POLL_MS while one lives. Either way the
-task manager's accounting reads the rows' figures (`figures`) once a
-second.
+task manager's accounting reads the rows' figures (`figures`) each
+METER_MS (runtime/shell/procs.py).
 
 THE SHARES. What a service holds beside the VM's heap counts in THE SHARES'
 PROCS row (native/moy_play/moy_play.h) with the running set's apps, as
@@ -892,7 +892,7 @@ class Scheduler:
     def figures(self):
         """Each Lua and compiled service's figures read onto its row (its
         heap or mappings, its time, its rungs), nothing reaped: the task
-        manager's accounting, once a second."""
+        manager's accounting, each METER_MS (runtime/shell/procs.py)."""
         if self._tasks:
             self._rows(_svc(), None)
 
