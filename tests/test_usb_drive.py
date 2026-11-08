@@ -276,3 +276,18 @@ def test_a_driver_that_gave_the_port_back_by_itself_reopens_the_store(ws):
     sl._draw_page()
     d.lever.st = usb_drive.STOPPED
     assert sl.usb_moved() and not d.on and log[-1] == "open"
+
+
+def test_a_computer_that_had_the_card_and_went_gives_it_back(ws):
+    """Powered off from the computer (udisksctl power-off sends no eject) or
+    unplugged: the drive falls back to WAITING, and the console takes the card
+    back then rather than at the driver's timeout. WAITING before any
+    computer had it is a drive still waiting."""
+    log = []
+    d = _drive(ws, log)
+    d.turn_on(ws)
+    assert d.poll(ws) == usb_drive.WAITING and d.on
+    d.lever.st = usb_drive.MOUNTED
+    assert d.poll(ws) == usb_drive.MOUNTED
+    d.lever.st = usb_drive.WAITING
+    assert d.poll(ws) == usb_drive.STOPPED and not d.on and log[-1] == "open"

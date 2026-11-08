@@ -113,7 +113,9 @@ board's driver starts (`native/moy_usbdisk`, which refuses a card not held),
 and the driver stops before the store mounts again and the shelf rescans. It
 is Settings' USB drive page, refused with no card or while a game or an app
 runs; while it is on the console opens nothing and the page holds the
-screen until its Turn off, or the computer ejecting the card, gives it back.
+screen until its Turn off gives the card back, or the computer lets it go
+(an eject, a power-off, the cable out), or the driver gives the port back
+by itself with no computer configuring it for 30 s.
 On the Waveshare P4 it is the high-speed OTG port (the `usb` host's port:
 each refuses while the other holds it) and the dev channel stays; on the
 T-Deck it switches the S3's one USB port from Serial/JTAG to the OTG

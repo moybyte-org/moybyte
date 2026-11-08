@@ -399,13 +399,14 @@ TinyUSB CDC, the arrangement that does NOT take input here.
 S3's one internal PHY from USB-Serial/JTAG to the OTG controller, and the
 card enumerates as a drive (`303a:4008`, native/moy_usbdisk): no dev channel,
 no console, no esptool reset until it is turned off on the glass, the
-computer ejects the card, or no computer has configured it for 30 s (the
-driver's own timeout, which needs no VM), when the PHY switches back and
-`303a:1001` returns.
+computer lets the card go (an eject, `udisksctl power-off`, the cable out),
+or no computer has configured it for 30 s (the driver's own timeout, which
+needs no VM), when the PHY switches back and `303a:1001` returns.
 A restart switches back first, the image's start puts the PHY on
 USB-Serial/JTAG before anything prints, and the trackball-in power-on below
 reaches the ROM loader either way. A tool that drives the board has to turn
-it off itself (the card ejected from the computer: `eject /dev/sdX`).
+it off itself: `udisksctl unmount` and `udisksctl power-off` on the
+drive, which need no root.
 
 The channel never calls `readline()`: it registers `select.POLLIN` only (a bare
 `register()` is truthy forever, because `mphalport.c` grants `POLL_WR`

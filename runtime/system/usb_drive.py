@@ -104,6 +104,7 @@ class UsbDrive(object):
         self.dev_channel = dev_channel
         self.on = False
         self.why = None             # the last refusal, for the page
+        self._had = False           # a computer has had the card this time
 
     def refusal(self, ws):
         """Why it cannot turn on now, or None."""
@@ -136,6 +137,7 @@ class UsbDrive(object):
         if why is not None:
             return False
         self.on = True
+        self._had = False
         ws.request_frame()
         return True
 
@@ -152,10 +154,15 @@ class UsbDrive(object):
 
     def poll(self, ws):
         """Take the card back where the computer let it go: it ejected the
-        card, or the driver gave the port back by itself (no computer came,
-        or it went: native/moy_usbdisk's timeouts). The drive's state after."""
-        if self.on and self.lever.state() in (STOPPED, EJECTED):
-            self.turn_off(ws)
+        card, it had the card and went (powered off, unplugged: WAITING after
+        MOUNTED), or the driver gave the port back by itself
+        (native/moy_usbdisk's timeouts). The drive's state after."""
+        if self.on:
+            st = self.lever.state()
+            if st == MOUNTED:
+                self._had = True
+            elif st in (STOPPED, EJECTED) or (st == WAITING and self._had):
+                self.turn_off(ws)
         return self.state()
 
     def state(self):
