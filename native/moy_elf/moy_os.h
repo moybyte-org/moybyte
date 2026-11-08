@@ -39,7 +39,7 @@
 // next poll of the descriptor, is charged to the one supervisor
 // (moy_super.h); a suspended process's poll waits, unserved, until it is
 // resumed. Native code is not aborted where it stands: a wake that never
-// polls again is struck by the watchdog at moy_os_reap and killed once it
+// polls again is struck by the watchdog (moy_os_watch) and killed once it
 // strikes out. A service has no session, so its file and stdin rows answer
 // EACCES and its stdout and stderr are the OS log's lines; its app calls
 // are hops on the VM's queue (moy_vmq.h), answered at the scheduler's poll.
@@ -69,6 +69,7 @@
 #ifndef MOY_OS_H
 #define MOY_OS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -177,12 +178,17 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
                               uint32_t pid, const char *id, const moy_app_run_t *run,
                               char *err, size_t errlen);
 
-// On the console's task, at the scheduler's poll: every service that has
-// ended swept -- main returned or exit called, or killed by the watchdog
+// On the console's task, at the scheduler's poll (a board's runs when an end
+// or a kill wants the VM, moy_os_watch): every service that has ended swept -- main returned or exit called, or killed by the watchdog
 // (moy_os.c's THE WATCHDOG: a wake struck out without a poll, or a start
 // past MOY_OS_STOP_US, MOY_PROC_KILLED). The pids swept go to `ended` (up to
 // `n`), with their exit statuses in `codes`; answers how many.
 uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n);
+// On the console's task, once a frame while it answers true (a board's loop
+// job, modmoy_elf.c): the watchdog run over the live services, and the VM
+// wanted (moy_evq.h, THE VM'S WAKE) while one has ended and waits for its
+// reap. Whether a service lives.
+bool moy_os_watch(void);
 
 // Stop service `pid`: its event descriptor hung up, main given
 // MOY_OS_STOP_US to return, then every thread ended and every registration

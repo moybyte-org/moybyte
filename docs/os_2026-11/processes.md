@@ -181,8 +181,9 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   of it, less what its calls waited for the VM's task (a WASI command's
   session calls, an ELF service's hops); a suspended program's poll waits
   unserved until it is resumed. A compiled service's wake that never polls
-  again is struck by a watchdog at the scheduler's poll (its runtime's
-  `reap`: `moy_os_reap`, `moy_wasi_watch`), once for each
+  again is struck by a watchdog (`moy_os_watch`, `moy_wasi_watch`: on a
+  board a job of the kernel loop's once a frame while a service lives, at
+  the scheduler's poll elsewhere), once for each
   `MOY_SUPER_ABORT_US` it runs on, and the strike that suspends it kills it
   (137), since a suspension cannot hold a wake that is still running; a
   start that reaches no poll within its stop time is killed too. Native
@@ -196,6 +197,13 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   by name (`moybyte.notify`, `open_with`, `share`, `send`, a function the
   console handed a system process), answered in Python as the calling
   process at the scheduler's poll, the poster woken by the answer.
+- **The VM's wake** (`moy_evq.h`, THE VM'S WAKE): the VM's task blocks on
+  no queue, and on a board nothing polls the services while they sleep. A
+  process on its own task wants the VM -- a message for a Python process, a
+  call or hop, its end, a rung, a listen -- and the kernel loop's frame tail
+  then runs the scheduler's poll (`runtime/system/scheduler.py`, THE POLL).
+  The host and the desktop MicroPython, with no such loop, poll every
+  `POLL_MS` while a service lives.
 
 **Messages are one mechanism (owner, 2026-11-08).**
 `moybyte.send(app_id, name, *args)` posts `name` to every process of app
@@ -243,8 +251,8 @@ and stderr are the OS log's lines under its pid, its stdin and env are
 empty, and a path answers NOTCAPABLE; it imports no app call. A compiled
 program's `moy_send` posts from its own thread; the door notices one that
 reached the VM's processes after each step of a command
-(`sh_door._noticed`), the scheduler's poll after a service's, and the
-frame's start serves it.
+(`sh_door._noticed`), the VM's wake after a service's, and the frame's
+start serves it.
 
 ## 2. The app manifest and the permission table
 

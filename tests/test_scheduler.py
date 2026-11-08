@@ -546,3 +546,81 @@ def test_a_vm_stop_closes_the_vms_event_queues_and_no_other():
         assert E.vm_stop() == 1
     assert E.live() == after
     E.close(svc)
+
+
+def test_a_process_on_a_task_wants_the_vm_and_nothing_else_does():
+    """THE VM'S WAKE (moy_evq.h): a message for a VM queue wants MAIL; a
+    call or hop on the VM's queue, a rung the supervisor moves and a name a
+    task's queue listens on taken or given up want POLL; a message to a
+    task's own queue and a callback within its slice want nothing. The VM
+    takes what it asks for and leaves the rest."""
+    from runtime import moy_evq as E
+    E.wanted(E.WANT_MAIL | E.WANT_POLL)
+    py, svc = L.spawn("t.vm"), L.spawn("t.task")
+    try:
+        assert E.open(py, "t.app", "", True) == E.OK
+        assert E.open(svc, "t.app", "", False) == E.OK
+        assert E.listen(py, "ping", True) == E.OK
+        assert E.wants() == 0                       # a VM queue's listen
+        assert E.listen(svc, "pong", True) == E.OK
+        assert E.wanted(E.WANT_POLL | E.WANT_MAIL) == E.WANT_POLL
+        assert E.post(svc, py, "pong", "[]") == E.OK
+        assert E.wants() == 0                       # the task's own wake
+        assert E.post(py, svc, "ping", "[]") == E.OK
+        assert E.wants() == E.WANT_MAIL
+        assert E.charge(svc, 1000, False) == E.FINE
+        assert E.wanted(E.WANT_MAIL) == E.WANT_MAIL and E.wants() == 0
+        assert E.charge(svc, S.MOY_BG_CALLBACK_US + 1, False) == E.WARNED
+        assert E.wanted(E.WANT_MAIL) == 0 and E.wants() == E.WANT_POLL
+        assert E.wanted(E.WANT_POLL) == E.WANT_POLL and E.wants() == 0
+        assert E.listening("pong") == 1 and E.listening("ping") == 0
+    finally:
+        E.close(py)
+        E.close(svc)
+        E.forget(svc)
+        E.wanted(E.WANT_MAIL | E.WANT_POLL)
+
+
+def test_a_board_runs_no_poll_and_woken_serves_what_was_wanted(sched):
+    """THE POLL on a board (`kernel_woken`): a compiled service is started
+    with no poll's wake, the radios' router is not kept for a service that
+    listens on no radio, and `woken` turns a MAIL want into `queued` and runs
+    the poll for a POLL one."""
+    from runtime import moy_evq as E
+
+    class Rt:
+        def __init__(self):
+            self.ended = []
+
+        def service(self, cart, pid, run):
+            return None
+
+        def reap(self):
+            got, self.ended = self.ended, []
+            return got
+
+        def figures(self, pid):
+            return None if any(p == pid for p, _c in self.ended) else (4096, 0)
+
+        def stop(self, pid):
+            return 0
+    rt = Rt()
+
+    class Ws:
+        runtimes = {"wasm": rt}
+    sched.kernel_woken()
+    E.wanted(E.WANT_MAIL | E.WANT_POLL)
+    pid = sched.start({"id": "t.wsvc", "runtime": "wasm", "type": "service"}, ws=Ws())
+    assert pid is not None and not sched._poll and sched._tasks
+    assert not sched.wakes.radio_keep
+    p = sched.procs[pid]
+    E.want(E.WANT_MAIL)
+    sched.wakes.queued = 0
+    sched.woken()
+    assert sched.wakes.queued == 1 and p.state == S.BACKGROUND
+    rt.ended = [(pid, 3)]
+    E.want(E.WANT_POLL)
+    sched.woken()
+    assert p.state == S.EXITED and p.code == 3 and not sched._tasks
+    assert E.wants() == 0
+

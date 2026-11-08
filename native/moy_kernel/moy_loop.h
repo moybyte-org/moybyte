@@ -162,14 +162,17 @@ typedef struct {
 // The services a frame's tail calls up into while they are live: the
 // webhost's Python routes while it serves or says goodbye, the OTA confirm's
 // marker once, the background scheduler while any wake is registered
-// (runtime/system/scheduler.py). One upcall a frame carries every bit; none while no bit is
-// set. (The radio link's drain is C, moy_match: no bit.)
+// (runtime/system/scheduler.py), and the scheduler's `woken` while a process
+// on a task of its own wants the VM (a board's, moy_evq.h's THE VM'S WAKE).
+// One upcall a frame carries every bit; none while no bit is set. (The
+// radio link's drain is C, moy_match: no bit.)
 enum {
     MOY_SVC_WEB = 1u << 0,
     MOY_SVC_UPDATE = 1u << 2,
     MOY_SVC_HEALTHY = 1u << 3,
     MOY_SVC_DIAG = 1u << 4,
     MOY_SVC_SCHED = 1u << 5,
+    MOY_SVC_TASKS = 1u << 6,
 };
 
 // The binding's upcall dispatcher: run upcall `which` (MOY_UP_*), with `arg`
@@ -246,8 +249,9 @@ void *moy_loop_alloc(size_t n);
 
 // Jobs in C the frame runs at its tail, each once a frame while it answers
 // true (the shell's runs that wait on the console: native/moy_sh/
-// moy_sh_board.h). False when the MOY_LOOP_JOBS slots are taken.
-#define MOY_LOOP_JOBS 4
+// moy_sh_board.h; the compiled services' watchdogs, modmoy_wasm.c and
+// modmoy_elf.c). False when the MOY_LOOP_JOBS slots are taken.
+#define MOY_LOOP_JOBS 6
 typedef bool (*moy_loop_job_fn)(void *arg);
 bool moy_loop_job(moy_loop_job_fn fn, void *arg);
 void moy_loop_job_drop(moy_loop_job_fn fn, void *arg);

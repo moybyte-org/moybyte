@@ -498,6 +498,9 @@ static void *thr_main(void *arg)
             p->main_done = 1;
         }
         unlock();
+        if (p->service) {
+            moy_evq_want(MOY_EVQ_WANT_POLL);    // its reap is the VM's
+        }
     } else {
 #ifdef MOY_OS_UMODE
         if (p->u != NULL) {
@@ -1456,6 +1459,9 @@ void moy_os__exit(int code) {
     }
     p->ending = 1;
     unlock();
+    if (p->service) {
+        moy_evq_want(MOY_EVQ_WANT_POLL);
+    }
     thr_end(t);
 }
 
@@ -3166,6 +3172,44 @@ static const char *watch(moy_os_proc_t *p, int64_t now) {
     return out ? "a wake ran past its strikes without a poll" : NULL;
 }
 
+// Service `p` watched (THE WATCHDOG), a kill marking its main done: whether
+// its main is done, its reap due.
+static bool watched(moy_os_proc_t *p, int64_t now) {
+    if (p->main_done) {
+        return true;
+    }
+    const char *why = watch(p, now);
+    if (why == NULL) {
+        return false;
+    }
+    char text[96];
+    snprintf(text, sizeof text, "killed: %s", why);
+    log_line(p, MOY_LOG_ERR, text);
+    lock();
+    if (!p->main_done) {
+        p->code = MOY_PROC_KILLED;
+        p->main_done = 1;
+    }
+    unlock();
+    return true;
+}
+
+bool moy_os_watch(void) {
+    bool live = false;
+    int64_t now = mono_us();
+    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
+        moy_os_proc_t *p = g_proc[i];
+        if (p == NULL || !p->service || p->reaped) {
+            continue;
+        }
+        live = true;
+        if (watched(p, now)) {
+            moy_evq_want(MOY_EVQ_WANT_POLL);
+        }
+    }
+    return live;
+}
+
 uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
     uint32_t got = 0;
     int64_t now = mono_us();
@@ -3174,20 +3218,8 @@ uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
         if (p == NULL || !p->service) {
             continue;
         }
-        if (!p->main_done) {
-            const char *why = watch(p, now);
-            if (why == NULL) {
-                continue;
-            }
-            char text[96];
-            snprintf(text, sizeof text, "killed: %s", why);
-            log_line(p, MOY_LOG_ERR, text);
-            lock();
-            if (!p->main_done) {
-                p->code = MOY_PROC_KILLED;
-                p->main_done = 1;
-            }
-            unlock();
+        if (!watched(p, now)) {
+            continue;
         }
         if (p->reaped) {
             continue;                   // left running (a host's thread): reported once

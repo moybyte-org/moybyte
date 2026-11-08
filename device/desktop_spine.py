@@ -244,12 +244,17 @@ def _want_sched(loop):
 def make_service(ws, loop):
     """The services' Python half, one upcall a frame while any is live (the
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
-    says goodbye, the OTA confirm's pending marker, once, and the background
-    scheduler while any wake is registered or a message queued, with the
-    frame's slack. Answers the bits it still wants."""
+    says goodbye, the OTA confirm's pending marker, once, the scheduler's
+    `woken` while a service's task wants the VM (MOY_SVC_TASKS, the loop's
+    own bit), and the background scheduler while any wake is registered or a
+    message queued, with the frame's slack. Answers the bits it still
+    wants."""
     slack = loop.slack
     wakes = moybyte.WAKES
-    tick = scheduler.SCHED.tick
+    sched = scheduler.SCHED
+    tick = sched.tick
+    woken = sched.woken
+    sched.kernel_woken()
 
     def service(bits):
         keep = 0
@@ -267,7 +272,9 @@ def make_service(ws, loop):
                     upd.confirmed_by_kernel()
                 except Exception as exc:  # noqa: BLE001
                     print("Moybyte OTA: confirm failed: %s" % (exc,))
-        if bits & SVC_SCHED:
+        if bits & SVC_TASKS:
+            woken()
+        if bits & SVC_SCHED or wakes.queued:
             tick(slack())
             if wakes.list or wakes.queued:
                 keep |= SVC_SCHED
@@ -275,7 +282,7 @@ def make_service(ws, loop):
     return service
 
 
-SVC_WEB, SVC_UPDATE, SVC_HEALTHY, SVC_SCHED = 1, 4, 8, 32
+SVC_WEB, SVC_UPDATE, SVC_HEALTHY, SVC_SCHED, SVC_TASKS = 1, 4, 8, 32, 64
 
 
 def bt_command(keyboard, comp=None):

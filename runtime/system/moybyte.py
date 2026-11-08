@@ -135,7 +135,8 @@ why)` for each change, `up` a bool and `why` what took it down (the
 station's disconnect reason, NimBLE's reset reason; 0 when it was put down or
 came up). One ROUTER reads that ring for everybody, a wake of the shell's
 that lives while any process waits on "net" or "ble" or anything else asks
-for it (`radio_keep`, the scheduler's Lua services), and routes each change
+for it (`radio_keep`: the scheduler's, while a service on a task of its own
+listens on one), and routes each change
 from the system to every process that listens on it, whatever its tier
 (`route`, moy_evq_route), so one reader serves every process.
 
@@ -148,8 +149,9 @@ LISTENS on its name. The queue is opened at a process's first `on` or
 message to one process (from the system), `route` an OS event to every
 listener. While `queued` is 0 a message costs a frame nothing, so the
 scheduler's tick and a board's upcall look at `list` and `queued` alone; a
-send from Python sets it, and the scheduler's poll sets it when a message
-reached the VM's processes from another task. A send does not ask a board
+send from Python sets it, and the scheduler's `woken` sets it when a
+message reached the VM's processes from another task (the kernel's wake,
+moy_evq.h). A send does not ask a board
 for the service upcall: the console serves what is queued at the start of
 its next frame (scheduler.Scheduler.mail), and a tick that runs first serves
 it too, so a run the kernel drives makes no crossing for a message its

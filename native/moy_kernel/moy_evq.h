@@ -30,6 +30,17 @@
 // processes run in the one MicroPython VM, whose loop looks at
 // moy_evq_ready() rather than blocking per process.
 //
+// THE VM'S WAKE. The VM's task blocks on no queue either: a process on a task
+// of its own that needs it WANTS it, and a board's loop asks once a frame
+// (moy_loop.h's MOY_SVC_TASKS), so the scheduler's Python runs only when one
+// did (runtime/system/scheduler.py, `woken`). A want is a bit, kept until the
+// VM takes it:
+//   MOY_EVQ_WANT_MAIL  a message queued on a MOY_EVQ_VM queue
+//   MOY_EVQ_WANT_POLL  a call or hop on the VM's queue (moy_vmq.h), a process
+//                      on a task ended or killed (its reap is due), a rung
+//                      the supervisor moved (moy_super.h), or a name a queue
+//                      that is not the VM's listens on taken or given up
+//
 // THE EVENT DESCRIPTOR. A compiled program reads its queue as descriptor
 // MOY_EVQ_FD, the same number on both compiled tiers (WASI's fd_read and
 // poll_oneoff, native/moy_wasm/moy_wasi.h; an ELF module's read and poll,
@@ -141,6 +152,17 @@ void moy_evq_unwait(uint32_t pid);
 uint32_t moy_evq_vm_stop(void);
 // How many queues are open.
 uint32_t moy_evq_live(void);
+
+#define MOY_EVQ_WANT_MAIL 0x01u
+#define MOY_EVQ_WANT_POLL 0x02u
+// The VM wanted for `bits` (THE VM'S WAKE), from any task.
+void moy_evq_want(uint32_t bits);
+// What is wanted, left set (the loop's question).
+uint32_t moy_evq_wants(void);
+// What is wanted of `mask`, taken (the VM's task, before it does it).
+uint32_t moy_evq_wanted(uint32_t mask);
+// How many queues that are not the VM's listen on `name`.
+uint32_t moy_evq_listening(const char *name);
 
 // Every queue closed (a test's teardown).
 void moy_evq_reset(void);

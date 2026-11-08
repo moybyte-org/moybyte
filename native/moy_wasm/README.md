@@ -303,9 +303,11 @@ on a Lua service's core and priority (`MOY_WASM_SVC_CORE`,
 `MOY_WASM_SVC_PRIO`), and begins its call into `_start` there; the VM's task
 never serves it. Several run at once, each a session. `service_stop()`
 hangs its event descriptor up and waits `MOY_WASI_STOP_US` for `_start` to
-return, then kills it (137); `service_reap()`, at the scheduler's poll, runs
-the watchdog (`moy_wasi_watch`) over the live ones and closes the session of
-each that returned, answering its exit status (a trap's is 134, its line in
+return, then kills it (137); the watchdog (`moy_wasi_watch`) runs over the live
+ones once a frame as a job of the kernel loop's while one lives, and
+`service_reap()`, at the scheduler's poll, which a returned `_start` wants
+(`moy_evq.h`, THE VM'S WAKE), runs it too and closes the session of each
+that returned, answering its exit status (a trap's is 134, its line in
 the OS log); `service_info()` reads its linear memory and its wakes' time.
 A killed service's instance is terminated, which its `_start` reads at its
 next import call ("Stopping a run" below), so a wake that calls none runs

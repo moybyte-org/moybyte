@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_evq.h"
 #include "moy_sync.h"
 
 // The OS log (moy_log.h), where the image has it.
@@ -80,6 +81,7 @@ int moy_super_charge(uint32_t pid, uint32_t cost_us, bool aborted) {
     }
     strikes = r->strikes;
     MOY_SYNC_UNLOCK(&s_lock);
+    moy_evq_want(MOY_EVQ_WANT_POLL);    // the row's rungs, read at the poll
     char line[96];
     if (rung == MOY_SUPER_WARNED) {
         snprintf(line, sizeof line, "callback ran %u ms, over its %u ms slice",

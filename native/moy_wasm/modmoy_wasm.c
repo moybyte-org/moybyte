@@ -67,6 +67,8 @@ void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 #include "moy_wasi.h"
 #include "moy_sh.h"
 #include "moy_log.h"
+#include "moy_evq.h"
+#include "moy_loop.h"
 #include "moy_proc_exit.h"
 #include "../moy_net/moy_ota.h"
 #include "../moy_store/moy_vol.h"
@@ -1732,7 +1734,9 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_command_stop_obj, mod_command_stop);
 // why; service_stop(pid) -> its exit status, or -1 for none: its descriptor
 // hung up, killed (137) past MOY_WASI_STOP_US; service_reap() -> [(pid,
 // status)] of the ended ones, the watchdog (moy_wasi_watch) run over the
-// live ones first; service_info(pid) -> (linear memory bytes, its wakes'
+// live ones first, as the loop's job runs it once a frame while one lives
+// (an end wants the VM for its reap: moy_evq.h, THE VM'S WAKE);
+// service_info(pid) -> (linear memory bytes, its wakes'
 // time in us) or None once reaped. A service's session closes at its reap.
 #ifndef MOY_WASM_SVC_CORE
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -1790,6 +1794,7 @@ static int svc_call(void *user, int what, float dt, char *err, size_t errlen)
     (void)errlen;
     v->main = moy_wasi_main(v->w, v->env, v->err, sizeof(v->err));
     v->returned = true;
+    moy_evq_want(MOY_EVQ_WANT_POLL);    // its reap is the VM's
     return 0;
 }
 
@@ -1850,6 +1855,34 @@ static bool svc_wait(wsvc_t *v, int64_t us)
     return v->returned;
 }
 
+// The watchdog over live service `v` (moy_wasi_watch), a kill logged.
+static void svc_watch(wsvc_t *v)
+{
+    const char *why = v->stopped ? NULL : moy_wasi_watch(v->w);
+    if (why != NULL) {
+        char line[96];
+        int k = snprintf(line, sizeof(line), "killed: %s", why);
+        moy_log_write(MOY_LOG_ERR, v->pid, line, (size_t)k);
+        moy_wasi_kill(v->w, MOY_PROC_KILLED);
+    }
+}
+
+// The loop's job (moy_loop.h) while a service lives: the watchdog once a
+// frame on the console's task, where no VM wake is due. A kill ends `_start`,
+// whose return wants the VM for the reap (svc_call).
+bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
+
+static bool svc_watch_job(void *arg)
+{
+    (void)arg;
+    for (wsvc_t *v = g_svcs; v != NULL; v = v->next) {
+        if (!v->returned) {
+            svc_watch(v);
+        }
+    }
+    return g_svcs != NULL;
+}
+
 static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
 {
     const char *path = mp_obj_str_get_str(args[0]);
@@ -1861,6 +1894,9 @@ static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
     (void)n_args;
     if (svc_of(pid) != NULL) {
         return mp_obj_new_str("a service runs as that process", 30);
+    }
+    if (moy_loop_job != NULL && !moy_loop_job(svc_watch_job, NULL)) {
+        return mp_obj_new_str("no room for its watchdog", 24);
     }
     wsvc_t *v = heap_caps_calloc(1, sizeof(wsvc_t), PSRAM_CAPS);
     if (v == NULL) {
@@ -1938,13 +1974,7 @@ static mp_obj_t mod_service_reap(void)
     for (wsvc_t *v = g_svcs; v != NULL; v = next) {
         next = v->next;
         if (!v->returned) {
-            const char *why = v->stopped ? NULL : moy_wasi_watch(v->w);
-            if (why != NULL) {
-                char line[96];
-                int k = snprintf(line, sizeof(line), "killed: %s", why);
-                moy_log_write(MOY_LOG_ERR, v->pid, line, (size_t)k);
-                moy_wasi_kill(v->w, MOY_PROC_KILLED);
-            }
+            svc_watch(v);
             continue;
         }
         bool stopped = v->stopped;

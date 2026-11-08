@@ -734,6 +734,7 @@ static void end(svc_t *s, int32_t code) {
     s->req = REQ_NONE;
     s->exit = code;
     s->state = MOYCORE_SVC_EXITED;
+    moy_evq_want(MOY_EVQ_WANT_POLL);    // its reap is the VM's
 }
 
 static bool has_wakes(const svc_t *s) {

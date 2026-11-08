@@ -16,6 +16,9 @@
 // answer when its process is woken (moy_vmq_answer kicks the poster's event
 // queue, moy_evq.h), so a stepped service yields its call and resumes it.
 //
+// A post or hop wants the VM (moy_evq.h, THE VM'S WAKE), which serves the
+// queue at the scheduler's poll that want runs.
+//
 // MOY_VMQ_SLOTS calls and hops wait at once, every process's together; a
 // process's end drops what it left. Any task may post; serve, next and answer
 // are the VM's task's.

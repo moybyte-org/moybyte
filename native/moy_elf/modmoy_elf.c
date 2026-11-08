@@ -21,7 +21,8 @@
 //   moy_elf.service(path, pid, id[, flags[, run]]) -> None, or the reason it did not
 //       start; run the bytes of its app run (moy_app's `run`), its app calls' grant
 //   moy_elf.reap() -> [(pid, status)] of the services that ended, by themselves or
-//       killed by the watchdog (moy_os_reap); the scheduler's poll calls it
+//       killed by the watchdog (moy_os_reap); the scheduler's poll calls it, and
+//       the loop's job runs the watchdog once a frame while a service lives
 //   moy_elf.stop(pid) -> status, or -1 for no such service
 //   moy_elf.info(pid) -> (threads, handles, wakes, events, mapped, cpu_us) or None
 //   moy_elf.stats() -> (started, swept, killed, leaked)
@@ -54,6 +55,7 @@
 #include "moy_elf.h"
 #include "moy_ota.h"
 #include "moy_os.h"
+#include "moy_loop.h"
 #include "moy_sh.h"
 #ifdef MOY_OS_UMODE
 #include "esp_cache.h"
@@ -434,7 +436,19 @@ static mp_obj_t mod_cancel(mp_obj_t pid) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_cancel_obj, mod_cancel);
 
+// The loop's job (moy_loop.h) while a service lives: the watchdog once a
+// frame on the console's task (moy_os_watch), where no VM wake is due.
+bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
+
+static bool watch_job(void *arg) {
+    (void)arg;
+    return moy_os_watch();
+}
+
 static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
+    if (moy_loop_job != NULL && !moy_loop_job(watch_job, NULL)) {
+        return mp_obj_new_str("no room for its watchdog", 24);
+    }
     char err[ERR_MAX];
     uint32_t flags = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : 0u;
     moy_app_run_t run;

@@ -48,6 +48,7 @@ static uint32_t s_pid[MOY_EVQ_PROCS];
 static volatile uint32_t s_seq[MOY_EVQ_PROCS];
 static moy_sync_who_t s_who[MOY_EVQ_PROCS];
 static uint32_t s_turn;
+static volatile uint32_t s_want;    // THE VM'S WAKE's bits
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
 
 static void *mem(size_t n) {
@@ -266,6 +267,9 @@ int moy_evq_listen(uint32_t pid, const char *name, bool on) {
         } else if (row != NULL) {
             row->n--;
         }
+        if (rc == MOY_EVQ_OK && !(q->flags & MOY_EVQ_VM)) {
+            moy_evq_want(MOY_EVQ_WANT_POLL);
+        }
     }
     MOY_SYNC_UNLOCK(&s_lock);
     return rc;
@@ -300,6 +304,7 @@ int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args,
     }
     ev_t *old = NULL;
     int rc = MOY_EVQ_OK;
+    bool vm = false;
     MOY_SYNC_LOCK(&s_lock);
     int i = slot_of(to);
     if (i < 0) {
@@ -311,12 +316,16 @@ int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args,
     } else {
         old = push((uint32_t)i, e);
         e = NULL;
+        vm = (s_q[i]->flags & MOY_EVQ_VM) != 0u;
     }
     MOY_SYNC_UNLOCK(&s_lock);
     free(e);
     free(old);
     if (rc == MOY_EVQ_OK) {
         wake((uint32_t)i);
+        if (vm) {
+            moy_evq_want(MOY_EVQ_WANT_MAIL);
+        }
     }
     return rc;
 }
@@ -333,7 +342,7 @@ static int fan(uint32_t from, const char *app, const char *to_app, const char *n
             break;
         }
         ev_t *old = NULL;
-        bool sent = false;
+        bool sent = false, vm = false;
         MOY_SYNC_LOCK(&s_lock);
         q_t *q = s_q[i];
         if (q != NULL && s_pid[i] != from && listens(q, name)
@@ -342,6 +351,7 @@ static int fan(uint32_t from, const char *app, const char *to_app, const char *n
                 old = push(i, e);
                 e = NULL;
                 sent = true;
+                vm = (q->flags & MOY_EVQ_VM) != 0u;
             } else {
                 refused++;
             }
@@ -352,6 +362,9 @@ static int fan(uint32_t from, const char *app, const char *to_app, const char *n
         if (sent) {
             wake(i);
             took++;
+            if (vm) {
+                moy_evq_want(MOY_EVQ_WANT_MAIL);
+            }
         }
     }
     if (denied != NULL) {
@@ -514,7 +527,31 @@ uint32_t moy_evq_live(void) {
     return n;
 }
 
+void moy_evq_want(uint32_t bits) {
+    __atomic_fetch_or(&s_want, bits, __ATOMIC_RELEASE);
+}
+
+uint32_t moy_evq_wants(void) {
+    return __atomic_load_n(&s_want, __ATOMIC_ACQUIRE);
+}
+
+uint32_t moy_evq_wanted(uint32_t mask) {
+    return __atomic_fetch_and(&s_want, ~mask, __ATOMIC_ACQ_REL) & mask;
+}
+
+uint32_t moy_evq_listening(const char *name) {
+    uint32_t n = 0;
+    MOY_SYNC_LOCK(&s_lock);
+    for (uint32_t i = 0; i < MOY_EVQ_PROCS; i++) {
+        q_t *q = s_q[i];
+        n += q != NULL && !(q->flags & MOY_EVQ_VM) && listens(q, name);
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
+    return n;
+}
+
 void moy_evq_reset(void) {
     close_all(0u);
     s_turn = 0;
+    __atomic_store_n(&s_want, 0u, __ATOMIC_RELEASE);
 }

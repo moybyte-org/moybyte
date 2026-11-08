@@ -42,6 +42,7 @@
 #endif
 
 #include "moy_devch.h"
+#include "moy_evq.h"
 #include "moy_loop.h"
 
 // The modules' loop entries (weak: an image without the module has none).
@@ -264,9 +265,10 @@ static void *b_alloc(size_t n) {
     #endif
 }
 
-// The webhost wants its Python half while it joins, serves or says goodbye.
+// The webhost wants its Python half while it joins, serves or says goodbye,
+// and the scheduler its `woken` while a service's task wants the VM.
 static uint32_t b_services(void) {
-    uint32_t bits = 0;
+    uint32_t bits = moy_evq_wants() != 0u ? MOY_SVC_TASKS : 0u;
     #if MOY_LOOP_ESP && defined(MOY_NET_WIFI) && MOY_NET_WIFI
     moy_wc_state_t wc;
     moy_wc_state(&wc);

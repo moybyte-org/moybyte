@@ -90,9 +90,9 @@ moycore's services (native/moycore/moycore_svc.h): a state of its own, on a
 task of its own on a board (a P4's core 0, an S3's core 1), with what the
 console hands a system process (its
 `env`: the values as globals, the functions as console calls) and its app's
-run, whose role names its state opens. `poll()`, a
-wake of the shell's every POLL_MS while one lives, steps them where they
-have no task (the host, the desktop MicroPython), answers the console calls
+run, whose role names its state opens. `poll()` (THE POLL, below) steps
+them where they have no task (the host, the desktop MicroPython), answers
+the console calls
 they wait on the VM's queue (native/moy_kernel/moy_vmq.h: `moybyte.notify`,
 `send` and the `env` functions, run here on the VM's task as the service's
 process, and, on a board, the role rows its task hopped), reads
@@ -100,9 +100,9 @@ each one's heap (exact) and its calls' time onto its row, and hands an end
 to the same exit, log line and restart policy; a stop is its TERM there, the
 C side's KILL past MOY_SERVICE_STOP_MS. A message reaches a Lua service's
 event queue as any process's (a radio's change too: the radios' router is
-kept while a Lua service lives), and wakes its task; a stepped one is
-stepped at the next poll, or at once by the frame start (`mail`) where the
-OS's own `send` posted it.
+kept while a service on a task of its own listens on "net" or "ble"), and
+wakes its task; a stepped one is stepped at the next poll, or at once by the
+frame start (`mail`) where the OS's own `send` posted it.
 
 COMPILED SERVICES (a native cart, `"moybyte": {"native": [chips]}`, and a
 wasm cart with no source, `"runtime": "wasm"`). The start hands the cart to
@@ -113,13 +113,27 @@ a task of its own, a loop blocked in poll on its event descriptor, the
 queue this scheduler opens with its app id and `receives`. A native one's
 app calls run for a run grant of its own (`compiled_run`, a command's too)
 as hops on the VM's queue, which `poll` serves; a WASI program imports
-none. The poll, kept while one lives, also reaps the ones that ended (its
-runtime's `reap`: main returned, a trap, or killed by its watchdog, 137)
-into the same exit, log line and restart policy, reads its memory and its
-wakes' time onto its row and its rungs from the one supervisor, and flags
-a message it sent the VM's processes (`queued`) for the frame's start. A
-stop hangs its descriptor up, the KILL (137) past MOY_SERVICE_STOP_MS. A
-console without the tier refuses one (logged, exit 1).
+none. The poll also reaps the ones that ended (its runtime's `reap`: main
+returned, a trap, or killed by its watchdog, 137) into the same exit, log
+line and restart policy, reads its memory and its wakes' time onto its row
+and its rungs from the one supervisor, and flags a message it sent the VM's
+processes (`queued`) for the frame's start. On a board the watchdog runs
+in C, a loop job of its tier's once a frame while one lives
+(modmoy_wasm.c, modmoy_elf.c). A stop hangs its descriptor up, the KILL
+(137) past MOY_SERVICE_STOP_MS. A console without the tier refuses one
+(logged, exit 1).
+
+THE POLL. On a board nothing polls while every service sleeps: a service's
+task WANTS the VM (native/moy_kernel/moy_evq.h, THE VM'S WAKE) -- a message
+it queued for a VM process, a call or hop it posted on the VM's queue, its
+end, a rung the supervisor moved, a name it listens on taken or given up --
+and the board's loop then runs `woken` at the frame's tail
+(device/desktop_spine.py), which serves a message at once (`mail`) and runs
+the poll for the rest. A console with no such loop (`kernel_wake` False:
+the host, the desktop MicroPython), or a stepped Lua service, keeps the
+poll a wake of the shell's every POLL_MS while one lives. Either way the
+task manager's accounting reads the rows' figures (`figures`) once a
+second.
 
 AUTOSTART. `boot(ws)`, at the console's first drawn frame, starts every
 service cart whose manifest asks for `autostart` and whose consent holds it
@@ -352,7 +366,9 @@ class Scheduler:
         self.pending = {}           # service id -> the wake of its restart
         self._t0 = 0                # this tick's start and budget (left_us)
         self._budget = 0
-        self._poll = 0              # the Lua services' poll, a wake of the shell's
+        self._poll = 0              # the services' poll, a wake of the shell's
+        self.kernel_wake = False    # a board's loop runs `woken` (THE POLL)
+        self._tasks = False         # a Lua or compiled service lives
         self.svc_mail = False       # a message sent to a stepped Lua service, not yet polled
         self.app_of = None          # fn(pid) -> the app id it runs, the console's (`attach`)
         self.cart_of = None         # fn(pid) -> the cart a run runs, the console's (`attach`)
@@ -412,6 +428,7 @@ class Scheduler:
         if not w.queued and not self.svc_mail:
             return 0
         t0 = _ticks_us()
+        _E.wanted(_E.WANT_MAIL)         # what this serve finds needs no wake of its own
         if self.svc_mail or (w.queued and self._poll):
             self.svc_mail = False       # a Lua service may have taken one too
             self.poll()
@@ -795,10 +812,49 @@ class Scheduler:
         return p.pid if p.state != EXITED else None
 
     def _polling(self):
-        """The poll's wake, kept while a Lua or compiled service lives."""
-        if not self._poll:
+        """A Lua or compiled service lives: the poll's wake kept where no
+        kernel wake runs `woken`, or a Lua service is stepped (THE POLL)."""
+        self._tasks = True
+        if not self._poll and (not self.kernel_wake or self._steps()):
             self._poll = self.plain_every(POLL_MS, self.poll)
-            self._radios(True)
+
+    def _steps(self):
+        """A Lua service lives that runs only at the poll."""
+        if not _stepped():
+            return False
+        for p in self.procs.values():
+            if p.native:
+                return True
+        return False
+
+    def kernel_woken(self):
+        """A board's loop runs `woken` from now on (THE POLL): the poll's
+        wake goes where no service needs stepping."""
+        self.kernel_wake = True
+        if self._poll and not self._steps():
+            self._drop_poll()
+
+    def _drop_poll(self):
+        self.wakes.cancel(self._poll)
+        self._plain.pop(self._poll, None)
+        self._poll = 0
+
+    def woken(self):
+        """THE VM'S WAKE (native/moy_kernel/moy_evq.h), at a board's frame
+        tail: a message queued for a VM process served at once (`queued`),
+        and the poll run for the rest a service's task wanted."""
+        got = _E.wanted(_E.WANT_MAIL | _E.WANT_POLL)
+        if got & _E.WANT_MAIL:
+            self.wakes.queued = 1
+        if got & _E.WANT_POLL:
+            self.poll()
+
+    def figures(self):
+        """Each Lua and compiled service's figures read onto its row (its
+        heap or mappings, its time, its rungs), nothing reaped: the task
+        manager's accounting, once a second."""
+        if self._tasks:
+            self._rows(_svc(), None)
 
     # -- the compiled services ---------------------------------------------
 
@@ -832,13 +888,16 @@ class Scheduler:
 
     def _compiled(self, p, ends):
         """Compiled service `p` at the poll: its end (in `ends`, {runtime id:
-        {pid: code}}, each runtime reaped once a poll) handed to `_exit`, else
-        its figures and its rungs read onto its row. Whether it lives."""
+        {pid: code}}, each runtime reaped once a poll; None: none reaped)
+        handed to `_exit`, else its figures and its rungs read onto its row.
+        Whether it lives."""
         rt = p.rt
-        got = ends.get(id(rt))
-        if got is None:
-            got = ends[id(rt)] = dict(rt.reap())
-        code = got.get(p.pid)
+        code = None
+        if ends is not None:
+            got = ends.get(id(rt))
+            if got is None:
+                got = ends[id(rt)] = dict(rt.reap())
+            code = got.get(p.pid)
         fig = rt.figures(p.pid) if code is None else None
         if fig is not None:
             p.mem = fig[0]
@@ -850,32 +909,45 @@ class Scheduler:
                 p.state = BACKGROUND
             p.overruns, p.strikes = _E.rungs(p.pid)
             return True
+        if ends is None:
+            return True                 # its end is the poll's to reap
         p.rt = None
         if p.state != EXITED:
             self._exit(p, code if code is not None else EXIT_OK)
         return False
 
     def poll(self):
-        """The services on tasks or steps of their own, every POLL_MS while
-        one lives: the Lua services stepped where they have no task of their
-        own, the VM's queue served (`_answer`), each one's figures read onto
-        its row (a Lua heap exact, its calls' time; a compiled one's
-        mappings and its wakes' time) and an end handed to `_exit`, which
-        its restart policy follows. What a compiled service sent to the VM's
-        processes (moy_send) is served at the next frame's start. The poll's
-        wake goes with the last service."""
+        """The services on tasks or steps of their own (THE POLL): the Lua
+        services stepped where they have no task of their own, the VM's
+        queue served (`_answer`), each one's figures read onto its row (a
+        Lua heap exact, its calls' time; a compiled one's mappings and its
+        wakes' time) and an end handed to `_exit`, which its restart policy
+        follows. What a service sent to the VM's processes is served at the
+        next frame's start. The poll's wake goes with the last service, and
+        the radios' router is kept while one listens on a radio."""
         svc = _svc()
         stepped = svc is not None and not svc.svc_tasks()
         if stepped:
             svc.svc_step(_ticks_ms())
         self._answer(svc, stepped)
+        live = self._rows(svc, {})
+        if _E.ready():
+            self.wakes.queued = 1
+        self._tasks = live
+        if not live and self._poll:
+            self._drop_poll()
+        self._radios(live and (_E.listening("net") > 0 or _E.listening("ble") > 0))
+
+    def _rows(self, svc, ends):
+        """Each Lua and compiled service's row read: its figures, and where
+        `ends` is a dict (the poll's, {runtime id: {pid: code}}) its end
+        reaped into `_exit`. Whether one lives."""
         live = False
-        ends = None
         for pid in list(self.procs):
-            p = self.procs[pid]
+            p = self.procs.get(pid)
+            if p is None:
+                continue
             if p.rt is not None:
-                if ends is None:
-                    ends = {}
                 live = self._compiled(p, ends) or live
                 continue
             if not p.native:
@@ -888,7 +960,7 @@ class Scheduler:
             why = got[5]
             p.mem = heap
             p.cost_us = cpu_us & ALLOC_WRAP
-            if state != SVC_EXITED:
+            if state != SVC_EXITED or ends is None:
                 live = True
                 if p.state == BACKGROUND and _E.held(pid):
                     p.state = SUSPENDED
@@ -900,20 +972,14 @@ class Scheduler:
                 if why:
                     _log(ERR if code else INFO, p.pid, why)
                 self._exit(p, code)
-        if ends is not None and _E.ready():
-            self.wakes.queued = 1
-        if not live and self._poll:
-            self.wakes.cancel(self._poll)
-            self._plain.pop(self._poll, None)
-            self._poll = 0
-            self._radios(False)
+        return live
 
     def _radios(self, on):
-        """The radios' router (moybyte's THE RADIOS) kept while a Lua or
-        compiled service lives, which may wait on "net" or "ble" on its own
-        queue."""
-        self.wakes.radio_keep = on
-        self.wakes.radio_sync()
+        """The radios' router (moybyte's THE RADIOS) kept while a service on
+        a task of its own listens on "net" or "ble" on its own queue."""
+        if self.wakes.radio_keep != on:
+            self.wakes.radio_keep = on
+            self.wakes.radio_sync()
 
     def _answer(self, svc, stepped):
         """The VM's queue (moy_vmq.h): the role rows the services' tasks
@@ -1151,10 +1217,9 @@ class Scheduler:
                 p.state = STOPPING
                 self._exit(p, EXIT_KILLED)
         if self._poll:
-            self.wakes.cancel(self._poll)
-            self._plain.pop(self._poll, None)
-            self._poll = 0
-            self._radios(False)
+            self._drop_poll()
+        self._tasks = False
+        self._radios(False)
         self.procs.clear()
         self.down.clear()
         self.svc_mail = False
@@ -1173,6 +1238,12 @@ def _svc():
         except ImportError:
             return None
     return moycore if hasattr(moycore, "svc_start") else None
+
+
+def _stepped():
+    """Whether the Lua services run at the poll, with no task of their own."""
+    svc = _svc()
+    return svc is not None and not svc.svc_tasks()
 
 
 def src_of(cart):

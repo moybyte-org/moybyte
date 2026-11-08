@@ -27,6 +27,7 @@ SLICE_US = 20000
 ABORT_US = 300000
 STRIKES = 3
 DEPTH = 16
+WANT_MAIL, WANT_POLL = 0x01, 0x02
 SYSTEM = "system"
 _VM = 0x01
 _APP = 48
@@ -56,6 +57,10 @@ _SIGS = (
     ("moy_evq_kick", [_U32], None),
     ("moy_evq_vm_stop", [], _U32),
     ("moy_evq_live", [], _U32),
+    ("moy_evq_want", [_U32], None),
+    ("moy_evq_wants", [], _U32),
+    ("moy_evq_wanted", [_U32], _U32),
+    ("moy_evq_listening", [_P], _U32),
     ("moy_evq_reset", [], None),
     ("moy_super_charge", [_U32, _U32, _B], _I),
     ("moy_super_held", [_U32], _B),
@@ -198,6 +203,22 @@ def vm_stop():
 
 def live():
     return _lib().moy_evq_live()
+
+
+def want(bits):
+    _lib().moy_evq_want(bits)
+
+
+def wanted(mask):
+    return _lib().moy_evq_wanted(mask)
+
+
+def wants():
+    return _lib().moy_evq_wants()
+
+
+def listening(name):
+    return _lib().moy_evq_listening(_b(name))
 
 
 def reset():

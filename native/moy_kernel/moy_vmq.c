@@ -111,6 +111,7 @@ int moy_vmq_hop(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us
     if (i < 0) {
         return MOY_VMQ_FULL;
     }
+    moy_evq_want(MOY_EVQ_WANT_POLL);
     while (__atomic_load_n(&s_slot[i].kind, __ATOMIC_ACQUIRE) != HOP_DONE) {
         moy_sync_wait(&s_done[i], seen, 1000u);
         seen = __atomic_load_n(&s_done[i], __ATOMIC_ACQUIRE);
@@ -151,6 +152,7 @@ int moy_vmq_post(uint32_t pid, const char *name, const char *args, size_t n, uin
         free(a);
         return MOY_VMQ_FULL;
     }
+    moy_evq_want(MOY_EVQ_WANT_POLL);
     return MOY_VMQ_OK;
 }
 

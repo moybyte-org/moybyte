@@ -21,6 +21,9 @@
 //   drop(pid)
 //   vm_stop() -> closed  the VM's queues closed, as its teardown does
 //   live()             the queues open
+//   want(bits), wanted(mask) -> bits    THE VM'S WAKE: bits wanted, and those
+//                      of `mask` taken; wants() what is wanted, left set
+//   listening(name)    the queues that are not the VM's listening on `name`
 //   reset()            every queue, row and slot (tests)
 //   OK .. RANGE, FINE .. SUSPENDED, SLICE_US, ABORT_US, STRIKES, SYSTEM
 
@@ -206,6 +209,27 @@ static mp_obj_t ev_live(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_live_obj, ev_live);
 
+static mp_obj_t ev_want(mp_obj_t bits) {
+    moy_evq_want((uint32_t)mp_obj_get_int(bits));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_want_obj, ev_want);
+
+static mp_obj_t ev_wanted(mp_obj_t mask) {
+    return MP_OBJ_NEW_SMALL_INT(moy_evq_wanted((uint32_t)mp_obj_get_int(mask)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_wanted_obj, ev_wanted);
+
+static mp_obj_t ev_wants(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_evq_wants());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_wants_obj, ev_wants);
+
+static mp_obj_t ev_listening(mp_obj_t name) {
+    return MP_OBJ_NEW_SMALL_INT(moy_evq_listening(mp_obj_str_get_str(name)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_listening_obj, ev_listening);
+
 static mp_obj_t ev_reset(void) {
     moy_evq_reset();
     moy_super_reset();
@@ -238,6 +262,10 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&ev_drop_obj) },
     { MP_ROM_QSTR(MP_QSTR_vm_stop), MP_ROM_PTR(&ev_vm_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_live), MP_ROM_PTR(&ev_live_obj) },
+    { MP_ROM_QSTR(MP_QSTR_want), MP_ROM_PTR(&ev_want_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wanted), MP_ROM_PTR(&ev_wanted_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wants), MP_ROM_PTR(&ev_wants_obj) },
+    { MP_ROM_QSTR(MP_QSTR_listening), MP_ROM_PTR(&ev_listening_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&ev_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_OK), MP_ROM_INT(MOY_EVQ_OK) },
     { MP_ROM_QSTR(MP_QSTR_STALE), MP_ROM_INT(MOY_EVQ_STALE) },
@@ -255,6 +283,8 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ABORT_US), MP_ROM_INT(MOY_SUPER_ABORT_US) },
     { MP_ROM_QSTR(MP_QSTR_STRIKES), MP_ROM_INT(MOY_SUPER_STRIKES) },
     { MP_ROM_QSTR(MP_QSTR_DEPTH), MP_ROM_INT(MOY_EVQ_DEPTH) },
+    { MP_ROM_QSTR(MP_QSTR_WANT_MAIL), MP_ROM_INT(MOY_EVQ_WANT_MAIL) },
+    { MP_ROM_QSTR(MP_QSTR_WANT_POLL), MP_ROM_INT(MOY_EVQ_WANT_POLL) },
     { MP_ROM_QSTR(MP_QSTR_SYSTEM), MP_ROM_QSTR(MP_QSTR_system) },
 };
 static MP_DEFINE_CONST_DICT(ev_globals, ev_globals_table);

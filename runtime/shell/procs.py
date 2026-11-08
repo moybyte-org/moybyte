@@ -835,6 +835,7 @@ class Procs:
             _sample(p.run.player, el)
         rows = _sched.SCHED.procs
         if rows:
+            _sched.SCHED.figures()      # the services on tasks: read, not polled
             for pid in rows:            # a dict's own iteration: values() is an object
                 sp = rows[pid]
                 d = (sp.cost_us - sp.seen_us) & _sched.ALLOC_WRAP
