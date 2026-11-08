@@ -2559,8 +2559,9 @@ def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     teardown gave moy_alloc's registry back). The baseline is the SECOND
     cycle: the first one's teardown still holds a 153,600 B buffer the
     session before it left (every console, 2026-10-08), which the next VM
-    gives back. From there the largest block is the
-    same to the byte and free never falls more than KSTOP_JITTER below it (the
+    gives back. From there the largest block never shrinks (a later VM may
+    still give a block back: the Guition S3's grew 128 KB at cycle 3 and held,
+    2026-11-08) and free never falls more than KSTOP_JITTER below it (the
     Guition S3 reads 8 B higher every fourth cycle)."""
     import time
     board.cmd("kstop %d" % n, wait_for="REMOTE kstop")
@@ -2573,7 +2574,7 @@ def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     assert len(after) == n, "only %d of %d soft resets came back" % (len(after), n)
     free0, largest0 = after[1][1:]
     drift = [a for a in after[1:]
-             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+             if a[2] < largest0 or a[1] < free0 - KSTOP_JITTER]
     assert not drift, "PSRAM (free, largest) after cycle 2 %s, then %s" % (
         (free0, largest0), drift)
     end = time.time() + 120.0
@@ -2628,7 +2629,7 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
         "the grant count moved across stops: %s" % grants)
     free0, largest0 = down[min(1, n - 1)][1:]
     drift = [a for a in down[1:]
-             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+             if a[2] < largest0 or a[1] < free0 - KSTOP_JITTER]
     assert not drift, "PSRAM (free, largest) down after cycle 2 %s, then %s" % (
         (free0, largest0), drift)
     _desk_back(board)
