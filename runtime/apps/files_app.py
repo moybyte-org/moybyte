@@ -722,7 +722,7 @@ class FilesAppLayer(ListShellApp):
         return True
 
     def handle_pointer(self, px, py, click):
-        if self._ui.point(px, py, click, bool(getattr(self._surf.pointer(), "down", False))):
+        if self._ui.point(px, py, click):
             self._damage.all()
         return True
 

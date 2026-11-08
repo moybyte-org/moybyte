@@ -1,7 +1,7 @@
 """Shift frames in the shipped apps (docs/history/scroll_and_text_2026-10.md §3.3,
 §3.4, §13), on the full-screen console the T-Deck runs: Settings' rows, its
 Licences and Achievements pages, My Art's drawings, Get Carts' shelf, Files'
-list of projects, Storybook's stories and Appearance's rows,
+list of projects, Storybook's stories, Appearance's rows and Music's stations,
 dragged, flung and stepped through by keys, and the text console typed into,
 on one, two and three buffers presented in turn.
 
@@ -48,6 +48,20 @@ def audit():
     failed = _C.api_audit(0)
     assert failed == 0, ("%d shift frames drew stops unlike the last frame's outside the floor, "
                          "or a stop's reach into R outside it" % failed)
+
+
+@pytest.fixture
+def music_face():
+    """Music's media face, faked (`test_music_app.Face`): its station list
+    rather than its no-audio page."""
+    from runtime import music_app
+    from test_music_app import Face
+    s = music_app.STREAM
+    s._end()
+    s.face = Face()
+    yield
+    s._end()
+    s.face = None
 
 
 def _shelf_net():
@@ -288,12 +302,14 @@ class Pair:
 
 
 APPS = ("settings", "licences", "achievements", "myart", "getcarts", "files", "storybook",
-        "appearance")
+        "appearance", "jukebox")
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 @pytest.mark.parametrize("app", APPS)
-def test_drags_flings_and_key_steps_shift_byte_for_byte(tmp_path, app, bufs):
+def test_drags_flings_and_key_steps_shift_byte_for_byte(tmp_path, app, bufs, request):
+    if app == "jukebox":
+        request.getfixturevalue("music_face")
     p = Pair(tmp_path, app, bufs)
     lay = p.a.layout
     x = lay.cx + lay.cw // 2

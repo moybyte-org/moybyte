@@ -68,18 +68,21 @@ class AppHost:
     answer whether the app owes a frame, a page of it moving on its own
     included (`moving`; its `damage.all()` is the caller's);
     `begin` begins the frame. A tap is a press frame then a release frame
-    where it went down; a host that passes `point` the pointer's `down` on
+    where it went down; a host whose `point` knows the pointer's `down` on
     every sample also drags (the press held while it moves, released where
-    it comes up), which a page scrolls by. A frame that was not settled
-    owes one more, so the rest state a press or a move leaves is painted,
-    then nothing. `app` is the app's id (its buttons take the theme's
-    `app_buttons[app]`)."""
+    it comes up), which a page scrolls by and a release flings. A frame
+    that was not settled owes one more, so the rest state a press or a
+    move leaves is painted, then nothing. `app` is the app's id (its
+    buttons take the theme's `app_buttons[app]`); `surface`, the app's
+    surface role, is where `point` reads `down` when its caller names none
+    (the console builds a shipped app's `ctx.ui` with it)."""
 
     # split_frame's answers (moy_ui_api.h's MOY_UI_SF_*)
     SPLIT_WHOLE, SPLIT_ALONE, SPLIT_LAGS = 0, 1, 2
 
-    def __init__(self, app=None):
+    def __init__(self, app=None, surface=None):
         self.app = app
+        self.surface = surface
         self.ctx = ui_context()
         self.inp = array("i", [0] * UI_IN_LEN)
         self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
@@ -164,8 +167,11 @@ class AppHost:
 
     def point(self, x, y, click, down=None):
         """A pointer sample in the app's coordinates; a click starts a tap.
-        With `down` (the pointer held), the press stays held while it moves
-        and is released where it comes up."""
+        With `down` (the pointer held; with none, the host's surface's
+        pointer says), the press stays held while it moves and is released
+        where it comes up."""
+        if down is None and self.surface is not None:
+            down = bool(getattr(self.surface.pointer(), "down", False))
         self.px = int(x)
         self.py = int(y)
         if click:

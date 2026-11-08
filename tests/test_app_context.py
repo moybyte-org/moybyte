@@ -163,6 +163,21 @@ def test_the_context_carries_only_the_declared_roles(tmp_path):
                     "%s can reach undeclared role %s" % (cls, role)
 
 
+def test_an_app_on_the_verbs_gets_a_host_that_reads_its_pointer(tmp_path):
+    """`ctx.ui` reads the held pointer off the app's surface, so an app's
+    `handle_pointer` that names no `down` still drags its pages and tables
+    (the Music lists once took every drag as a tap)."""
+    ws = _ws(tmp_path)
+    apps = [a for a, _t in ws._apps if getattr(type(a), "UI", False)]
+    assert len(apps) >= 9
+    for app in apps:
+        host = app.ctx.ui
+        assert host.surface is app.ctx.surface, type(app).__name__
+        ws.pointer.down = True
+        assert host.surface.pointer().down
+        ws.pointer.down = False
+
+
 def test_an_unknown_need_is_refused_at_construction(tmp_path):
     """A typo in a NEEDS tuple must fail loudly at boot, not silently grant
     nothing and AttributeError on some rare code path."""

@@ -335,3 +335,87 @@ def test_a_stream_that_starts_during_the_desks_draw_waits_for_the_next_frame(tmp
     app._station_rows = rows_of
     _settle(ws)
     assert app.k.c is not None
+
+
+def _list_on(tmp_path, desk):
+    """The Radio list open on the handheld or in the desk's window, settled:
+    (ws, its driver, the app, the list's view in the app's coordinates, the
+    app's origin on the screen)."""
+    ws = build_desktop_ws(tmp_path) if desk else build_ws(tmp_path)
+    app = _app(ws)
+    if desk:
+        ws.open_desk()
+    ws.open_app(app)
+    drv = make_drv(ws)
+    views = []
+    rows = type(app)._rows
+
+    def spy(self, rect, rows_, cur, oid):
+        views.append(rect)
+        return rows(self, rect, rows_, cur, oid)
+
+    app._rows = spy.__get__(app)
+    _settle(ws)
+    del app._rows
+    x, y, w, h = views[-1]
+    rh = app._row_h()
+    view = (x, y, w, h // rh * rh)          # the table ends on a whole row
+    at = ws.wm._wins["jukebox"].content_rect()[:2] if desk else (0, 0)
+    return ws, drv, app, view, at
+
+
+def _offset(app, view):
+    return ui_draw._C.api_offset(app._ui.ctx, view[0] + view[2] // 2, view[1] + 4)
+
+
+@pytest.mark.parametrize("desk", (False, True))
+def test_the_radio_list_drags_with_the_finger_and_flings_on(tmp_path, face, desk):
+    """A drag over the stations scrolls them with the finger; let go at
+    speed, the list coasts on painted frames with no input and comes to
+    rest inside its rows (the Radio list once took a drag as a tap: its
+    pointer never reported the finger held)."""
+    ws, drv, app, view, at = _list_on(tmp_path, desk)
+    rh = app._row_h()
+    n = len(app._station_rows())
+    assert n * rh > view[3], "the stations overflow the list"
+    sx = at[0] + view[0] + view[2] // 2
+    sy = at[1] + view[1] + view[3] - rh // 2
+    step = rh * 3 // 5
+    drv.touch(sx, sy)
+    drv.frame(1 / 30)
+    for k in range(1, 6):
+        drv.touch_drag(sx, sy - step * k)
+        drv.frame(1 / 30)
+        assert _offset(app, view) == step * k, "the rows follow the finger"
+    drv.touch_up()
+    drv.frame(1 / 30)
+    let_go = _offset(app, view)
+    drawn = ws.frame_state.frames_drawn
+    coast = [let_go]
+    for _ in range(90):
+        drv.frame(1 / 30)                   # no input: the fling's own frames
+        coast.append(_offset(app, view))
+    assert coast[5] > let_go, "the list coasts on after the release"
+    assert coast == sorted(coast) and coast[-1] == coast[-2], "and slows to rest"
+    assert coast[-1] <= n * rh - view[3]
+    assert ws.frame_state.frames_drawn - drawn >= 5, "each coasting step is a painted frame"
+    assert ws.wm.top_kind() == "jukebox" and face.played == [], "the drag opened nothing"
+
+
+@pytest.mark.parametrize("desk", (False, True))
+def test_the_keys_move_the_current_station_and_the_view_follows(tmp_path, face, desk):
+    ws, drv, app, view, _at = _list_on(tmp_path, desk)
+    rh = app._row_h()
+    n = len(app._station_rows())
+    for _ in range(n + 2):
+        drv.press("down")
+        for _ in range(12):                 # the glide's frames
+            drv.frame(1 / 30)
+        cur, off = app.cur[0], _offset(app, view)
+        assert off <= cur * rh and (cur + 1) * rh <= off + view[3], "the current row shows"
+    assert app.cur[0] == n - 1
+    for _ in range(n):
+        drv.press("up")
+        for _ in range(12):
+            drv.frame(1 / 30)
+    assert app.cur[0] == 0 and _offset(app, view) == 0

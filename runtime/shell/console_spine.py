@@ -366,7 +366,8 @@ class SpineVerbs:
             ctx = self.app_context(d["id"], getattr(cls, "NEEDS", ()),
                                    prefs_ns=getattr(cls, "PREFS_NS", None))
             if getattr(cls, "UI", False):
-                ctx.ui = AppHost(d["id"])   # an app on the public UI API's verbs
+                # an app on the public UI API's verbs
+                ctx.ui = AppHost(d["id"], getattr(ctx, "surface", None))
             app = cls(ctx, NAMES)
             setattr(self, str(d["id"]) + "_app", app)
             # Paint's document model is the console's reach into Paint (the
