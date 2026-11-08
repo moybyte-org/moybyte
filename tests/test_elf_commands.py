@@ -269,7 +269,7 @@ def test_the_install_prompt_says_full_access():
     from runtime import app_perms
     cart = {"id": "elf.x", "native": ["host"], "permissions": ["native", "files"]}
     assert app_perms.tier_of(cart) == "elf"
-    assert app_perms.prompt(cart) == ["Full access to the console", "Read and save your docs"]
+    assert app_perms.prompt(cart) == ["Full access to the console", "Read and save your documents"]
     assert app_perms.check(dict(cart, permissions=["files"]), None, ())[2] == \
         'a native cart must ask for "native"'
 
