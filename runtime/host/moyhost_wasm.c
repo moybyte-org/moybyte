@@ -28,7 +28,8 @@
  *
  * One run at a time, on whatever thread calls in: WAMR on Linux has no
  * pthread requirement, and the runtime is initialised once per process. A
- * WASI command's `_start` runs on a thread of its own (hw_wasi_start).
+ * WASI command's `_start` runs on a thread of its own (hw_wasi_start), and
+ * so does each WASI service's, several at once (hw_wasi_service).
  */
 
 #include <pthread.h>
@@ -48,7 +49,9 @@
 #include "moy_files.h"
 #include "moy_ui_wasm.h"
 #include "moy_app_run.h"
+#include "moy_log.h"
 #include "moy_proc.h"
+#include "moy_proc_exit.h"
 #include "moy_sh.h"
 #include "moy_wasi.h"
 
@@ -776,26 +779,12 @@ static void job_free(wasi_job *j)
     free(j);
 }
 
-/* The run started: 0 with `_start` running, or -3 with the reason in `err`
- * (a module that would not load or run here, or a command already running). */
-int hw_wasi_start(const char *path, int argc, const char **argv, const char *roots,
-                  uint32_t bg_pid, uint32_t budget_ms, char *err, int errlen)
+/* The WASI natives, registered once beside the cart table: whether they are. */
+static int wasi_natives(char *err, int errlen)
 {
-    moy_sh_t *s = moy_sh_running();
-    FILE *f;
-    long n;
-    char msg[160];
-    if (!s) {
-        put_err(err, errlen, "needs a shell session", NULL);
-        return -3;
-    }
-    if (g_job) {
-        put_err(err, errlen, "a command is running", NULL);
-        return -3;
-    }
     if (!hw_runtime()) {
         put_err(err, errlen, "the runtime would not start", NULL);
-        return -3;
+        return 0;
     }
     if (!g_wasi) {
         uint32_t term = 0, k = moy_wasi_count(&term);
@@ -804,9 +793,67 @@ int hw_wasi_start(const char *path, int argc, const char **argv, const char *roo
             free(g_wasi);
             g_wasi = NULL;
             put_err(err, errlen, "the WASI table would not register", NULL);
-            return -3;
+            return 0;
         }
     }
+    return 1;
+}
+
+/* The module `path` read, loaded, checked as a WASI program and instantiated
+ * with its exec env: 1, or 0 with the reason in `err` and what was made in
+ * the out parameters for its owner to free. */
+static int wasi_load(const char *path, uint8_t **bytes, wasm_module_t *module,
+                     wasm_module_inst_t *inst, wasm_exec_env_t *env, char *err, int errlen)
+{
+    FILE *f;
+    long n = 0;
+    char msg[160];
+    if (!(f = fopen(path, "rb"))) {
+        put_err(err, errlen, "no module", path);
+        return 0;
+    }
+    if (fseek(f, 0, SEEK_END) == 0 && (n = ftell(f)) > 0 && fseek(f, 0, SEEK_SET) == 0
+        && (*bytes = (uint8_t *)malloc((size_t)n))
+        && fread(*bytes, 1, (size_t)n, f) != (size_t)n) {
+        free(*bytes);
+        *bytes = NULL;
+    }
+    fclose(f);
+    if (!*bytes) {
+        put_err(err, errlen, "the module would not read", path);
+        return 0;
+    }
+    msg[0] = 0;
+    if (!(*module = wasm_runtime_load(*bytes, (uint32_t)n, msg, sizeof msg))) {
+        put_err(err, errlen, "load", msg);
+    } else if (moy_wasi_check(*module, msg, sizeof msg) != 0) {
+        put_err(err, errlen, "refused", msg);
+    } else if (!(*inst = wasm_runtime_instantiate(*module, MOY_WASI_STACK, 0, msg,
+                                                  sizeof msg))) {
+        put_err(err, errlen, or_oom(msg, "instantiate"), msg);
+    } else if (!(*env = wasm_runtime_create_exec_env(*inst, MOY_WASI_STACK))) {
+        put_err(err, errlen, "out of memory", "no exec env");
+    } else {
+        return 1;
+    }
+    return 0;
+}
+
+/* The run started: 0 with `_start` running, or -3 with the reason in `err`
+ * (a module that would not load or run here, or a command already running). */
+int hw_wasi_start(const char *path, int argc, const char **argv, const char *roots,
+                  uint32_t bg_pid, uint32_t budget_ms, char *err, int errlen)
+{
+    moy_sh_t *s = moy_sh_running();
+    if (!s) {
+        put_err(err, errlen, "needs a shell session", NULL);
+        return -3;
+    }
+    if (g_job) {
+        put_err(err, errlen, "a command is running", NULL);
+        return -3;
+    }
+    if (!wasi_natives(err, errlen)) return -3;
     wasi_job *j = (wasi_job *)calloc(1, sizeof *j);
     if (!j) {
         put_err(err, errlen, "out of memory", "no record for the command");
@@ -814,34 +861,8 @@ int hw_wasi_start(const char *path, int argc, const char **argv, const char *roo
     }
     pthread_mutex_init(&j->m, NULL);
     pthread_cond_init(&j->c, NULL);
-    if (!(f = fopen(path, "rb"))) {
-        put_err(err, errlen, "no module", path);
-        job_free(j);
-        return -3;
-    }
-    if (fseek(f, 0, SEEK_END) == 0 && (n = ftell(f)) > 0 && fseek(f, 0, SEEK_SET) == 0
-        && (j->bytes = (uint8_t *)malloc((size_t)n))
-        && fread(j->bytes, 1, (size_t)n, f) != (size_t)n) {
-        free(j->bytes);
-        j->bytes = NULL;
-    }
-    fclose(f);
-    if (!j->bytes) {
-        put_err(err, errlen, "the module would not read", path);
-        job_free(j);
-        return -3;
-    }
-    msg[0] = 0;
     int ok = 0;
-    if (!(j->module = wasm_runtime_load(j->bytes, (uint32_t)n, msg, sizeof msg))) {
-        put_err(err, errlen, "load", msg);
-    } else if (moy_wasi_check(j->module, msg, sizeof msg) != 0) {
-        put_err(err, errlen, "refused", msg);
-    } else if (!(j->inst = wasm_runtime_instantiate(j->module, MOY_WASI_STACK, 0, msg,
-                                                    sizeof msg))) {
-        put_err(err, errlen, or_oom(msg, "instantiate"), msg);
-    } else if (!(j->env = wasm_runtime_create_exec_env(j->inst, MOY_WASI_STACK))) {
-        put_err(err, errlen, "out of memory", "no exec env");
+    if (!wasi_load(path, &j->bytes, &j->module, &j->inst, &j->env, err, errlen)) {
     } else if (!(j->w = moy_wasi_new(s, argc, argv, roots, bg_pid, budget_ms, job_hop))) {
         put_err(err, errlen, "out of memory", "no record for the command");
     } else {
@@ -901,4 +922,194 @@ int hw_wasi_stop(char *err, int errlen)
 int hw_wasi_live(void)
 {
     return g_job != NULL;
+}
+
+/* WASI services (moy_wasi.h's A SERVICE): each its `_start` on a pthread of
+ * its own, several at once and apart from the command's job, its calls run
+ * in place there (no session, no hop). Started, stopped, reaped and read on
+ * the console's thread, which alone walks the list; a service's thread
+ * touches only its own record. A record lives until its end is reaped. */
+typedef struct wasi_svc {
+    struct wasi_svc *next;
+    uint32_t pid;
+    moy_wasi_t *w;
+    uint8_t *bytes;
+    wasm_module_t module;
+    wasm_module_inst_t inst;
+    wasm_exec_env_t env;
+    pthread_t tid;
+    int threaded;
+    int returned;               /* `_start` has returned (atomic) */
+    int main;                   /* moy_wasi_main's answer */
+    int stopped;                /* its stop answered for it: reaped unreported */
+    char err[256];
+} wasi_svc;
+
+static wasi_svc *g_svcs;
+
+static void *svc_main(void *arg)
+{
+    wasi_svc *v = (wasi_svc *)arg;
+    wasm_runtime_init_thread_env();
+    v->main = moy_wasi_main(v->w, v->env, v->err, sizeof v->err);
+    wasm_runtime_destroy_thread_env();
+    __atomic_store_n(&v->returned, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+static int svc_returned(wasi_svc *v)
+{
+    return __atomic_load_n(&v->returned, __ATOMIC_ACQUIRE);
+}
+
+static void svc_free(wasi_svc *v)
+{
+    if (v->threaded) pthread_join(v->tid, NULL);
+    moy_wasi_free(v->w);
+    if (v->env) wasm_runtime_destroy_exec_env(v->env);
+    if (v->inst) wasm_runtime_deinstantiate(v->inst);
+    if (v->module) wasm_runtime_unload(v->module);
+    free(v->bytes);
+    free(v);
+}
+
+static void svc_unlink(wasi_svc *v)
+{
+    for (wasi_svc **p = &g_svcs; *p; p = &(*p)->next) {
+        if (*p == v) {
+            *p = v->next;
+            return;
+        }
+    }
+}
+
+static wasi_svc *svc_of(uint32_t pid)
+{
+    for (wasi_svc *v = g_svcs; v; v = v->next) {
+        if (v->pid == pid && !v->stopped) return v;
+    }
+    return NULL;
+}
+
+/* Its exit status once `_start` has returned, its record freed. */
+static int svc_end(wasi_svc *v)
+{
+    pthread_join(v->tid, NULL);
+    v->threaded = 0;
+    int code = moy_wasi_service_status(v->w, v->main, v->err);
+    svc_unlink(v);
+    svc_free(v);
+    return code;
+}
+
+/* Waits up to `us` for `_start` to return: whether it has. */
+static int svc_wait(wasi_svc *v, int64_t us)
+{
+    struct timespec ms = { 0, 1000000 };
+    for (; us > 0 && !svc_returned(v); us -= 1000) nanosleep(&ms, NULL);
+    return svc_returned(v);
+}
+
+/* Service `pid` started from the module `path`, its argv `id`: 0, or -3
+ * with the reason in `err`. Its event queue is the scheduler's. */
+int hw_wasi_service(const char *path, uint32_t pid, const char *id, char *err, int errlen)
+{
+    if (svc_of(pid)) {
+        put_err(err, errlen, "a service runs as that process", NULL);
+        return -3;
+    }
+    if (!wasi_natives(err, errlen)) return -3;
+    wasi_svc *v = (wasi_svc *)calloc(1, sizeof *v);
+    if (!v) {
+        put_err(err, errlen, "out of memory", "no record for the service");
+        return -3;
+    }
+    v->pid = pid;
+    if (!wasi_load(path, &v->bytes, &v->module, &v->inst, &v->env, err, errlen)) {
+        svc_free(v);
+        return -3;
+    }
+    if (!(v->w = moy_wasi_service(pid, id))) {
+        put_err(err, errlen, "out of memory", "no record for the service");
+        svc_free(v);
+        return -3;
+    }
+    if (pthread_create(&v->tid, NULL, svc_main, v) != 0) {
+        put_err(err, errlen, "no thread for the service", NULL);
+        svc_free(v);
+        return -3;
+    }
+    v->threaded = 1;
+    v->next = g_svcs;
+    g_svcs = v;
+    return 0;
+}
+
+/* Service `pid` stopped: its descriptor hung up, killed (137) past
+ * MOY_WASI_STOP_US. Its exit status, or -1 for no such service. A killed one
+ * that has not returned is reaped, unreported, once it does. */
+int hw_wasi_service_stop(uint32_t pid)
+{
+    wasi_svc *v = svc_of(pid);
+    if (!v) return -1;
+    if (!svc_returned(v)) {
+        moy_wasi_hangup(v->w);
+        if (!svc_wait(v, MOY_WASI_STOP_US)) {
+            moy_wasi_kill(v->w, MOY_PROC_KILLED);
+            if (!svc_wait(v, 100000)) {
+                v->stopped = 1;
+                return MOY_PROC_KILLED;
+            }
+        }
+    }
+    return svc_end(v);
+}
+
+/* The services that ended, up to `n`, into `pids` and `codes`: their count.
+ * The watchdog (moy_wasi_watch) runs over the live ones first, and kills a
+ * wake past its strikes. */
+int hw_wasi_service_reap(uint32_t *pids, int32_t *codes, int n)
+{
+    int got = 0;
+    wasi_svc *next;
+    for (wasi_svc *v = g_svcs; v; v = next) {
+        next = v->next;
+        if (!svc_returned(v)) {
+            const char *why = v->stopped ? NULL : moy_wasi_watch(v->w);
+            if (why) {
+                char line[96];
+                int k = snprintf(line, sizeof line, "killed: %s", why);
+                moy_log_write(MOY_LOG_ERR, v->pid, line, (size_t)k);
+                moy_wasi_kill(v->w, MOY_PROC_KILLED);
+            }
+            continue;
+        }
+        int stopped = v->stopped;
+        uint32_t pid = v->pid;
+        int code = svc_end(v);
+        if (!stopped && got < n) {
+            pids[got] = pid;
+            codes[got] = code;
+            got++;
+        }
+    }
+    return got;
+}
+
+/* Service `pid`'s linear memory bytes and its wakes' time (us): 0, or -1
+ * once its end is reaped. */
+int hw_wasi_service_info(uint32_t pid, uint32_t *mapped, uint32_t *cost_us)
+{
+    wasi_svc *v = svc_of(pid);
+    if (!v) return -1;
+    moy_wasi_figures(v->w, mapped, cost_us);
+    return 0;
+}
+
+/* How many service records are live: what a test reads for a leak. */
+int hw_wasi_services(void)
+{
+    int n = 0;
+    for (wasi_svc *v = g_svcs; v; v = v->next) n++;
+    return n;
 }

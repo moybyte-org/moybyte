@@ -73,6 +73,11 @@ def term(tmp_path, built):
     man["id"], man["title"] = "wasi.bare", "Bare Wasi"
     man["moybyte"]["permissions"] = []
     (bare / "manifest.json").write_text(json.dumps(man))
+    svc = carts / "wasi_svc.moy"
+    if svc.exists():                    # the service fixture, run here as a command
+        man = json.loads((svc / "manifest.json").read_text())
+        man["moybyte"]["type"] = "command"
+        (svc / "manifest.json").write_text(json.dumps(man))
     ws = build_workstation(str(carts))
     app = ws.terminal_app
     app.open()

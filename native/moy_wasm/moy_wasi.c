@@ -35,6 +35,8 @@ _Static_assert(MOY_EVQ_FD >= 3 && MOY_EVQ_FD < MOY_WASI_FDS, "the event descript
 #include "esp_heap_caps.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #else
 #include <sys/random.h>
 #endif
@@ -69,7 +71,7 @@ enum { FT_UNKNOWN = 0, FT_CHAR = 2, FT_DIR = 3, FT_FILE = 4 };
 #define PATH_CAP 512
 #define MAGIC 0x77617369u
 
-enum { K_FREE = 0, K_STREAM, K_DIR, K_EVQ };
+enum { K_FREE = 0, K_STREAM, K_DIR, K_EVQ, K_LOG };   // K_LOG: a service's stdio
 
 typedef struct {
     int kind;
@@ -94,6 +96,18 @@ struct moy_wasi {
     uint32_t pid;               // its process, whose queue MOY_EVQ_FD reads (0: none)
     int64_t woke_us;            // when its last poll of the descriptor returned (0: none yet)
     int64_t hopped_us;          // what its calls waited for the session's task since
+    // A service's (moy_wasi_service): written on its thread, read by the
+    // watchdog on the console's task, each a word.
+    volatile uint32_t wakes;    // its polls of the descriptor that returned
+    volatile uint32_t cost_us;  // its wakes' time, charged to the supervisor (wraps)
+    volatile uint32_t struck;   // strikes the watchdog gave its current wake
+    volatile uint8_t polling;   // inside a poll of the descriptor
+    volatile uint8_t hup;       // stopped: the descriptor hangs up
+    wasm_module_inst_t volatile inst;   // while `_start` runs: what a kill terminates
+    // the watchdog's own, on the console's task
+    uint32_t seen;              // `wakes` when it last looked
+    int64_t seen_us;            // when the wake it watches was first seen
+    int64_t started_us;
 };
 
 // -- the host's pieces ------------------------------------------------------------
@@ -285,6 +299,35 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
     return w;
 }
 
+moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id) {
+    moy_wasi_t *w = w_alloc(sizeof *w);
+    if (w == NULL) {
+        return NULL;
+    }
+    w->magic = MAGIC;
+    w->prog.bg_pid = pid;
+    w->prog.roots = w_alloc(1);         // none: the empty list
+    const char *name = id != NULL && *id ? id : "service";
+    size_t k = strlen(name) + 1;
+    w->argv = w_alloc(sizeof(char *) + k + 1);
+    if (w->prog.roots == NULL || w->argv == NULL) {
+        moy_wasi_free(w);
+        return NULL;
+    }
+    w->argv[0] = memcpy((char *)(w->argv + 1), name, k);
+    w->argc = 1;
+    w->args_n = k;
+    for (int i = 0; i < 3; i++) {
+        w->fd[i].kind = K_LOG;
+        w->fd[i].sh = i;
+    }
+    w->pid = pid > 1u ? pid : 0u;
+    w->fd[MOY_EVQ_FD].kind = K_EVQ;
+    w->fd[MOY_EVQ_FD].sh = -1;
+    w->started_us = mono_us();
+    return w;
+}
+
 void moy_wasi_free(moy_wasi_t *w) {
     if (w == NULL) {
         return;
@@ -331,10 +374,16 @@ static void stop(moy_wasi_t *w, int code) {
     }
 }
 
+// Whether the run goes on: the session's Ctrl-C and the budget where it has
+// a session; a service's ends only by its exit, its stop or a kill.
+static bool going(moy_wasi_t *w) {
+    return w->s != NULL ? moy_sh_prog_poll(&w->prog, mono_us()) : !w->prog.exited;
+}
+
 static void run_body(void *arg) {
     call_t *c = arg;
     moy_wasi_t *w = c->w;
-    if (!moy_sh_prog_poll(&w->prog, mono_us())) {
+    if (!going(w)) {
         c->r = W_INTR;
         return;
     }
@@ -397,6 +446,9 @@ static wfd_t *fd_of(call_t *c, uint32_t fd) {
 // The shell path `rel` names under directory descriptor `fd`, checked against
 // the roots: W_OK with it in `out`, or a WASI errno.
 static uint32_t resolve(call_t *c, uint32_t fd, uint32_t p, uint32_t n, char *out) {
+    if (c->w->s == NULL) {
+        return W_NOTCAPABLE;            // a service reaches no files
+    }
     wfd_t *d = fd_of(c, fd);
     if (d == NULL) {
         return W_BADF;
@@ -579,6 +631,10 @@ static void b_evq_read(call_t *c) {
         c->r = W_BADF;
         return;
     }
+    if (w->hup) {
+        c->r = put32(c, c->a[3], 0) ? W_OK : W_FAULT;     // stopped: its end of file
+        return;
+    }
     const uint32_t *iov = mem(c, c->a[1], (uint64_t)c->a[2] * 8);
     if (iov == NULL) {
         c->r = W_FAULT;
@@ -662,6 +718,43 @@ static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int
 
 // -- streams -------------------------------------------------------------------------
 
+// A service's stdio: stdin is empty, stdout and stderr the OS log's lines
+// under its pid.
+static void b_log_rw(call_t *c) {
+    moy_wasi_t *w = c->w;
+    int fd = c->w->fd[c->a[0]].sh;
+    bool writing = c->a[4] != 0;
+    if (c->a[5]) {
+        c->r = W_SPIPE;
+        return;
+    }
+    if (writing != (fd != 0)) {
+        c->r = W_BADF;
+        return;
+    }
+    const uint32_t *iov = mem(c, c->a[1], (uint64_t)c->a[2] * 8);
+    if (iov == NULL) {
+        c->r = W_FAULT;
+        return;
+    }
+    uint32_t done = 0;
+    for (uint32_t i = 0; writing && i < c->a[2]; i++) {
+        uint32_t base, len;
+        memcpy(&base, iov + 2 * i, 4);
+        memcpy(&len, iov + 2 * i + 1, 4);
+        char *p = len ? mem(c, base, len) : NULL;
+        if (len && p == NULL) {
+            c->r = done ? (put32(c, c->a[3], done) ? W_OK : W_FAULT) : W_FAULT;
+            return;
+        }
+        if (len) {
+            moy_sh_prog_bg_write(&w->prog, fd, p, len);
+            done += len;
+        }
+    }
+    c->r = put32(c, c->a[3], done) ? W_OK : W_FAULT;
+}
+
 // fd_read, fd_write and their positioned twins: a[0] fd, a[1] iovs, a[2]
 // their count, a[3] where the count goes, a[4] 1 to write, b[0] an offset
 // (a[5] 1 when there is one).
@@ -671,6 +764,10 @@ static void b_rw(call_t *c) {
     bool writing = c->a[4] != 0;
     if (f != NULL && f->kind == K_EVQ) {
         b_evq_read(c);
+        return;
+    }
+    if (f != NULL && f->kind == K_LOG) {
+        b_log_rw(c);
         return;
     }
     if (f == NULL || f->kind != K_STREAM) {
@@ -769,6 +866,10 @@ static uint32_t w_fd_pwrite(wasm_exec_env_t e, uint32_t fd, void *iovs_at, uint3
 // fd_seek and fd_tell: a[0] fd, a[1] whence, a[2] where the offset goes, b[0] the offset.
 static void b_seek(call_t *c) {
     wfd_t *f = fd_of(c, c->a[0]);
+    if (f != NULL && f->kind == K_LOG) {
+        c->r = W_SPIPE;
+        return;
+    }
     if (f == NULL || f->kind != K_STREAM) {
         c->r = f == NULL ? W_BADF : W_ISDIR;
         return;
@@ -831,6 +932,10 @@ static int describe(call_t *c, wfd_t *f, uint64_t *rights, uint32_t *size) {
     }
     if (f->kind == K_EVQ) {
         *rights = R_FD_READ | R_POLL;
+        return FT_UNKNOWN;
+    }
+    if (f->kind == K_LOG) {
+        *rights = R_ALL & ~(R_FD_SEEK | R_FD_TELL);
         return FT_UNKNOWN;
     }
     int what = moy_sh_fd_what(c->w->s, f->sh, size);
@@ -1331,7 +1436,24 @@ static uint32_t w_path_symlink(wasm_exec_env_t e, void *p_at, uint32_t n, uint32
 // -- poll_oneoff: clocks wait, the event descriptor waits, every other is ready ---
 
 static bool h_sleeps(moy_wasi_t *w) {
-    return moy_sh_host(w->s)->sleep_ms != NULL;
+    return w->s == NULL || moy_sh_host(w->s)->sleep_ms != NULL;
+}
+
+// A wait of `ms` on the module's thread: the session's sleep, a service's
+// own task's.
+static void nap(moy_wasi_t *w, int ms) {
+    if (w->s == NULL) {
+#ifdef MOY_WASI_BOARD
+        TickType_t t = pdMS_TO_TICKS(ms);
+        vTaskDelay(t ? t : 1);
+#else
+        struct timespec t = { ms / 1000, (long)(ms % 1000) * 1000000L };
+        nanosleep(&t, NULL);
+#endif
+        return;
+    }
+    const moy_sh_host_t *h = moy_sh_host(w->s);
+    h->sleep_ms(h->ctx, ms);
 }
 
 // a[0] the subscriptions, a[1] the events, a[2] their count, a[3] where the
@@ -1363,10 +1485,13 @@ static void b_poll(call_t *c) {
             wfd_t *f = fd_of(c, fd);
             uint16_t err = f != NULL ? W_OK : W_BADF;
             uint64_t nbytes = 0;
+            uint16_t hangup = 0;
             if (f != NULL && f->kind == K_EVQ) {
                 c->a[6] = 1;
                 if (s[8] != 1 || w->pid == 0 || !moy_evq_has(w->pid)) {
                     err = W_BADF;
+                } else if (w->hup) {
+                    hangup = 1;         // __WASI_EVENTRWFLAGS_FD_READWRITE_HANGUP
                 } else if (moy_evq_queued(w->pid) == 0) {
                     evq_wait = true;
                     continue;
@@ -1380,6 +1505,7 @@ static void b_poll(call_t *c) {
             memcpy(ev + 8, &err, 2);
             ev[10] = s[8];
             memcpy(ev + 16, &nbytes, 8);
+            memcpy(ev + 24, &hangup, 2);
             continue;
         }
         uint64_t timeout;
@@ -1419,12 +1545,11 @@ static void b_poll(call_t *c) {
 // run has ended (the task serving it polls Ctrl-C and the budget; with no
 // `hop` nothing else does, so the slice polls them here).
 static uint32_t rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us) {
-    const moy_sh_host_t *h = moy_sh_host(w->s);
     int64_t end = mono_us() + us;
     for (int64_t left = us; left > 0; left = end - mono_us()) {
-        h->sleep_ms(h->ctx, left > 20000 ? 20 : (int)((left + 999) / 1000));
+        nap(w, left > 20000 ? 20 : (int)((left + 999) / 1000));
         if (w->hop == NULL) {
-            moy_sh_prog_poll(&w->prog, mono_us());
+            going(w);
         }
         if (w->prog.exited) {
             wasm_runtime_set_exception(wasm_runtime_get_module_inst(e), EXIT_MSG);
@@ -1441,7 +1566,7 @@ static uint32_t evq_rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us, bool *wok
     int64_t end = us < 0 ? 0 : mono_us() + us;
     *woke = false;
     for (;;) {
-        if (moy_evq_queued(w->pid) > 0 && !moy_super_held(w->pid)) {
+        if (w->hup || (moy_evq_queued(w->pid) > 0 && !moy_super_held(w->pid))) {
             *woke = true;
             return W_OK;
         }
@@ -1451,7 +1576,7 @@ static uint32_t evq_rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us, bool *wok
         }
         moy_evq_wait(w->pid, left > 20000 ? 20u : (uint32_t)((left + 999) / 1000));
         if (w->hop == NULL) {
-            moy_sh_prog_poll(&w->prog, mono_us());
+            going(w);
         }
         if (w->prog.exited) {
             wasm_runtime_set_exception(wasm_runtime_get_module_inst(e), EXIT_MSG);
@@ -1468,10 +1593,14 @@ static uint32_t wake_end(wasm_exec_env_t e, moy_wasi_t *w, bool *held) {
     int64_t now = mono_us();
     if (w->woke_us != 0) {
         int64_t cost = now - w->woke_us - w->hopped_us;
-        moy_super_charge(w->pid, (uint32_t)(cost > 0 ? cost : 0), false);
+        uint32_t us = (uint32_t)(cost > 0 ? cost : 0);
+        w->cost_us += us;
+        if (w->struck == 0) {
+            moy_super_charge(w->pid, us, false);   // a struck wake was charged its strikes
+        }
     }
     *held = false;
-    while (moy_super_held(w->pid)) {
+    while (moy_super_held(w->pid) && !w->hup) {
         bool woke;
         *held = true;
         if (evq_rest(e, w, 20000, &woke) != W_OK) {
@@ -1495,6 +1624,7 @@ static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint
         return r;
     }
     bool held;
+    w->polling = 1;
     r = wake_end(e, w, &held);
     if (r == W_OK && held) {
         c = (call_t){ .a = { in, out, n, nout } };
@@ -1512,6 +1642,9 @@ static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint
     }
     w->woke_us = mono_us();
     w->hopped_us = 0;
+    w->struck = 0;
+    w->wakes++;
+    w->polling = 0;
     return r;
 }
 
@@ -1562,6 +1695,10 @@ static uint32_t w_sock_shutdown(wasm_exec_env_t e, uint32_t fd, uint32_t how) {
 // -- moybyte.term ------------------------------------------------------------------
 
 static void b_term_size(call_t *c) {
+    if (c->w->s == NULL) {
+        c->r = W_NOTSUP;                // a service has no terminal
+        return;
+    }
     const moy_sh_host_t *h = moy_sh_host(c->w->s);
     int cols = 80, rows = 0;
     if (h->size != NULL) {
@@ -1707,7 +1844,9 @@ int moy_wasi_main(moy_wasi_t *w, wasm_exec_env_t env, char *err, size_t errlen) 
         return MOY_WASI_NOT_COMMAND;
     }
     wasm_runtime_set_user_data(env, w);
+    w->inst = inst;
     bool ok = wasm_runtime_call_wasm(env, start, 0, NULL);
+    w->inst = NULL;
     wasm_runtime_set_user_data(env, NULL);
     if (w->prog.exited) {
         wasm_runtime_clear_exception(inst);
@@ -1751,4 +1890,72 @@ void moy_wasi_stop(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job) {
 
 int moy_wasi_status(const moy_wasi_t *w, int main) {
     return w->prog.exited ? w->prog.code : main;
+}
+
+// -- a service ------------------------------------------------------------------------
+
+void moy_wasi_hangup(moy_wasi_t *w) {
+    w->hup = 1;
+    if (w->pid != 0) {
+        moy_evq_kick(w->pid);
+    }
+}
+
+void moy_wasi_kill(moy_wasi_t *w, int code) {
+    stop(w, code);
+    wasm_module_inst_t inst = w->inst;
+    if (inst != NULL) {
+        wasm_runtime_terminate(inst);
+    }
+}
+
+const char *moy_wasi_watch(moy_wasi_t *w) {
+    int64_t now = mono_us();
+    if (w->prog.exited || w->hup) {
+        return NULL;                    // ending
+    }
+    uint32_t wakes = w->wakes;
+    if (w->polling || wakes != w->seen) {
+        w->seen = wakes;
+        w->seen_us = now;
+        return NULL;
+    }
+    if (wakes == 0) {
+        return now - w->started_us >= MOY_WASI_STOP_US
+               ? "its start ran past its time without a poll" : NULL;
+    }
+    int64_t ran = now - w->seen_us;
+    uint32_t struck = w->struck;
+    if (ran < (int64_t)MOY_SUPER_ABORT_US * (struck + 1u)) {
+        return NULL;
+    }
+    w->struck = struck + 1u;
+    moy_super_charge(w->pid, (uint32_t)ran, true);
+    return moy_super_held(w->pid) && !w->polling && w->wakes == wakes
+           ? "a wake ran past its strikes without a poll" : NULL;
+}
+
+int moy_wasi_service_status(const moy_wasi_t *w, int main, const char *err) {
+    int code = moy_wasi_status(w, main);
+    if (code >= 0) {
+        return code;
+    }
+    if (code == MOY_WASI_TRAPPED && w->prog.bg_pid != 0) {
+        char line[MOY_SH_PROG_LINE];
+        int n = snprintf(line, sizeof line, "trapped: %s", err != NULL && *err ? err : "?");
+        moy_log_write(MOY_LOG_ERR, w->prog.bg_pid, line,
+                      (size_t)(n < (int)sizeof line ? n : (int)sizeof line - 1));
+    }
+    return code == MOY_WASI_TRAPPED ? MOY_PROC_TRAPPED : MOY_PROC_NOT_RUN;
+}
+
+void moy_wasi_figures(const moy_wasi_t *w, uint32_t *mapped, uint32_t *cost_us) {
+    *cost_us = w->cost_us;
+    *mapped = 0;
+    wasm_module_inst_t inst = w->inst;
+    wasm_memory_inst_t mem = inst != NULL ? wasm_runtime_get_default_memory(inst) : NULL;
+    if (mem != NULL) {
+        *mapped = (uint32_t)(wasm_memory_get_cur_page_count(mem)
+                             * wasm_memory_get_bytes_per_page(mem));
+    }
 }

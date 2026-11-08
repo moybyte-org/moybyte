@@ -66,6 +66,8 @@ void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 #include "moy_wasm_thread.h"
 #include "moy_wasi.h"
 #include "moy_sh.h"
+#include "moy_log.h"
+#include "moy_proc_exit.h"
 #include "../moy_net/moy_ota.h"
 #include "../moy_store/moy_vol.h"
 
@@ -1214,9 +1216,10 @@ void moy_wasm_session_close(void)
     sess_free(s);
 }
 
-int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
-                          int allow_unsigned, int interp, const moy_wasm_ops *ops,
-                          char *err, size_t errlen)
+// moy_wasm_session_open with the session's thread on `core` at `prio`.
+static int sess_open(const char *path, const char *want_sha, uint32_t memory,
+                     int allow_unsigned, int interp, const moy_wasm_ops *ops,
+                     int core, int prio, char *err, size_t errlen)
 {
     if (g_run != NULL && g_run->started) {
         snprintf(err, errlen, "a wasm run is already live");
@@ -1272,7 +1275,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
     }
     s->waiting = true;
     int pe = moy_wasm_spawn(&s->tid, sess_thread, s, MOY_WASM_STACK_BYTES,
-                            MOY_WASM_STACK_PSRAM, MOY_WASM_CORE, MOY_WASM_PRIO);
+                            MOY_WASM_STACK_PSRAM, core, prio);
     if (pe != 0) {
         sess_free(s);
         snprintf(err, errlen, "could not start the cart's thread");
@@ -1286,6 +1289,14 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         return 1;
     }
     return 0;
+}
+
+int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
+                          int allow_unsigned, int interp, const moy_wasm_ops *ops,
+                          char *err, size_t errlen)
+{
+    return sess_open(path, want_sha, memory, allow_unsigned, interp, ops, MOY_WASM_CORE,
+                     MOY_WASM_PRIO, err, errlen);
 }
 
 int moy_wasm_session_call(int what, float dt, char *err, size_t errlen)
@@ -1709,6 +1720,263 @@ static mp_obj_t mod_command_stop(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_command_stop_obj, mod_command_stop);
 
+// -- WASI services (moy_wasi.h, A SERVICE) ---------------------------------------------
+//
+// The P4s: each service is a session of its own (a task, its pool, its
+// module), its task on core 0 at MOY_WASM_SVC_PRIO, as a Lua service's
+// (moycore_svc.h); its call into `_start` begun there and left running, its
+// calls run in place on that task (no session, no hop), so the VM's task
+// never serves it. The S3s run none, as they run no Lua service
+// (moycore_svc.c's SVC_NONE): the functions are absent and the glue refuses.
+//
+// service_start(path, want_sha, interp, allow_unsigned, pid, id) -> None or
+// why; service_stop(pid) -> its exit status, or -1 for none: its descriptor
+// hung up, killed (137) past MOY_WASI_STOP_US; service_reap() -> [(pid,
+// status)] of the ended ones, the watchdog (moy_wasi_watch) run over the
+// live ones first; service_info(pid) -> (linear memory bytes, its wakes'
+// time in us) or None once reaped. A service's session closes at its reap.
+#if CONFIG_IDF_TARGET_ESP32P4
+#define MOY_WASM_SVC 1
+#endif
+
+#ifdef MOY_WASM_SVC
+
+#ifndef MOY_WASM_SVC_CORE
+#define MOY_WASM_SVC_CORE 0
+#endif
+#ifndef MOY_WASM_SVC_PRIO
+#define MOY_WASM_SVC_PRIO 2
+#endif
+
+typedef struct wsvc {
+    struct wsvc *next;
+    uint32_t pid;
+    moy_wasi_t *w;
+    NativeSymbol *store;
+    wasm_exec_env_t env;
+    moy_wasm_ops ops;               // the session's, read while it lives
+    sess_t *sess;
+    volatile bool returned;         // `_start` has returned on the session's thread
+    bool stopped;                   // its stop answered for it: reaped unreported
+    int main;
+    char err[ERR_MAX];
+} wsvc_t;
+
+static wsvc_t *g_svcs;
+
+static int svc_up(void *user, char *err, size_t errlen)
+{
+    wsvc_t *v = user;
+    uint32_t term = 0, n = moy_wasi_count(&term);
+    v->store = wasm_runtime_malloc((n + term) * sizeof(NativeSymbol));
+    if (v->store == NULL || moy_wasi_register(v->store) != 0) {
+        snprintf(err, errlen, OUT_OF_MEMORY ": the WASI table would not register");
+        return 1;
+    }
+    return 0;
+}
+
+static int svc_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
+{
+    (void)err;
+    (void)errlen;
+    ((wsvc_t *)user)->env = env;
+    return 0;
+}
+
+static int svc_call(void *user, int what, float dt, char *err, size_t errlen)
+{
+    wsvc_t *v = user;
+    (void)what;
+    (void)dt;
+    (void)err;
+    (void)errlen;
+    v->main = moy_wasi_main(v->w, v->env, v->err, sizeof(v->err));
+    v->returned = true;
+    return 0;
+}
+
+static void svc_unbound(void *user)
+{
+    wsvc_t *v = user;
+    if (v->store != NULL) {
+        moy_wasi_unregister(v->store);
+        wasm_runtime_free(v->store);
+        v->store = NULL;
+    }
+    v->env = NULL;
+}
+
+static wsvc_t *svc_of(uint32_t pid)
+{
+    for (wsvc_t *v = g_svcs; v != NULL; v = v->next) {
+        if (v->pid == pid && !v->stopped) {
+            return v;
+        }
+    }
+    return NULL;
+}
+
+// Its exit status once `_start` has returned: the call's answer taken, its
+// session closed (the current one kept), its record freed.
+static int svc_end(wsvc_t *v)
+{
+    sess_t *ss = v->sess;
+    xSemaphoreTake(ss->back, portMAX_DELAY);
+    ss->waiting = false;
+    void *was = moy_wasm_session_current();
+    moy_wasm_session_use(ss);
+    moy_wasm_session_close();
+    moy_wasm_session_use(was == ss ? NULL : was);
+    int code = moy_wasi_service_status(v->w, v->main, v->err);
+    for (wsvc_t **p = &g_svcs; *p != NULL; p = &(*p)->next) {
+        if (*p == v) {
+            *p = v->next;
+            break;
+        }
+    }
+    moy_wasi_free(v->w);
+    heap_caps_free(v);
+    return code;
+}
+
+// Waits up to `us` for `_start` to return, the task's watchdog fed: whether it has.
+static bool svc_wait(wsvc_t *v, int64_t us)
+{
+    int64_t end = esp_timer_get_time() + us;
+    while (!v->returned && esp_timer_get_time() < end) {
+        vTaskDelay(1);
+        if (esp_task_wdt_status(NULL) == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+    }
+    return v->returned;
+}
+
+static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
+{
+    const char *path = mp_obj_str_get_str(args[0]);
+    const char *sha = args[1] == mp_const_none ? NULL : mp_obj_str_get_str(args[1]);
+    int interp = mp_obj_is_true(args[2]);
+    int unsigned_ok = mp_obj_is_true(args[3]);
+    uint32_t pid = (uint32_t)mp_obj_get_int(args[4]);
+    const char *id = mp_obj_str_get_str(args[5]);
+    (void)n_args;
+    if (svc_of(pid) != NULL) {
+        return mp_obj_new_str("a service runs as that process", 30);
+    }
+    wsvc_t *v = heap_caps_calloc(1, sizeof(wsvc_t), PSRAM_CAPS);
+    if (v == NULL) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    v->pid = pid;
+    v->w = moy_wasi_service(pid, id);
+    if (v->w == NULL) {
+        heap_caps_free(v);
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    v->ops = (moy_wasm_ops){
+        .user = v, .runtime_up = svc_up, .loaded = cmd_loaded, .bound = svc_bound,
+        .call = svc_call, .unbound = svc_unbound,
+    };
+    void *was = moy_wasm_session_current();
+    char err[ERR_MAX];
+    err[0] = 0;
+    int opened = 1;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        opened = sess_open(path, sha, 0, unsigned_ok, interp, &v->ops, MOY_WASM_SVC_CORE,
+                           MOY_WASM_SVC_PRIO, err, sizeof(err));
+        nlr_pop();
+    } else {
+        moy_wasm_session_use(was);
+        moy_wasi_free(v->w);
+        heap_caps_free(v);
+        nlr_jump(nlr.ret_val);
+    }
+    if (opened != 0) {
+        moy_wasm_session_use(was);
+        moy_wasi_free(v->w);
+        heap_caps_free(v);
+        return mp_obj_new_str(err, strlen(err));
+    }
+    sess_t *ss = moy_wasm_session_current();
+    v->sess = ss;
+    ss->op = SESS_CALL;
+    ss->what = 0;
+    ss->dt = 0.0f;
+    ss->waiting = true;
+    v->next = g_svcs;
+    g_svcs = v;
+    xSemaphoreGive(ss->go);
+    moy_wasm_session_use(was);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_start_obj, 6, 6, mod_service_start);
+
+static mp_obj_t mod_service_stop(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    if (v == NULL) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    if (!v->returned) {
+        moy_wasi_hangup(v->w);
+        if (!svc_wait(v, MOY_WASI_STOP_US)) {
+            moy_wasi_kill(v->w, MOY_PROC_KILLED);
+            if (!svc_wait(v, 100000)) {
+                v->stopped = true;
+                return MP_OBJ_NEW_SMALL_INT(MOY_PROC_KILLED);
+            }
+        }
+    }
+    return MP_OBJ_NEW_SMALL_INT(svc_end(v));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_stop_obj, mod_service_stop);
+
+static mp_obj_t mod_service_reap(void)
+{
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    wsvc_t *next;
+    for (wsvc_t *v = g_svcs; v != NULL; v = next) {
+        next = v->next;
+        if (!v->returned) {
+            const char *why = v->stopped ? NULL : moy_wasi_watch(v->w);
+            if (why != NULL) {
+                char line[96];
+                int k = snprintf(line, sizeof(line), "killed: %s", why);
+                moy_log_write(MOY_LOG_ERR, v->pid, line, (size_t)k);
+                moy_wasi_kill(v->w, MOY_PROC_KILLED);
+            }
+            continue;
+        }
+        bool stopped = v->stopped;
+        uint32_t pid = v->pid;
+        int code = svc_end(v);
+        if (!stopped) {
+            mp_obj_t row[2] = { mp_obj_new_int_from_uint(pid), mp_obj_new_int(code) };
+            mp_obj_list_append(out, mp_obj_new_tuple(2, row));
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_service_reap_obj, mod_service_reap);
+
+static mp_obj_t mod_service_info(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    if (v == NULL) {
+        return mp_const_none;
+    }
+    uint32_t mapped, cost;
+    moy_wasi_figures(v->w, &mapped, &cost);
+    mp_obj_t row[2] = { mp_obj_new_int_from_uint(mapped), mp_obj_new_int_from_uint(cost) };
+    return mp_obj_new_tuple(2, row);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_info_obj, mod_service_info);
+
+#endif // MOY_WASM_SVC
+
 static const mp_rom_obj_tuple_t mod_stack_obj = {
     {&mp_type_tuple}, 2,
     { MP_ROM_INT(MOY_WASM_STACK_BYTES), MOY_WASM_STACK_PSRAM ? MP_ROM_TRUE : MP_ROM_FALSE }
@@ -1728,6 +1996,12 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_command_start), MP_ROM_PTR(&mod_command_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_command_step), MP_ROM_PTR(&mod_command_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_command_stop), MP_ROM_PTR(&mod_command_stop_obj) },
+#ifdef MOY_WASM_SVC
+    { MP_ROM_QSTR(MP_QSTR_service_start), MP_ROM_PTR(&mod_service_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_stop), MP_ROM_PTR(&mod_service_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_reap), MP_ROM_PTR(&mod_service_reap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_info), MP_ROM_PTR(&mod_service_info_obj) },
+#endif
     // The key tail this build wants (after the wasm line), the compiled-code
     // format version and the fork commit the engine was vendored from
     // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP

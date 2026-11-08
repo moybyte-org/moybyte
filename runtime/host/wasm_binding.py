@@ -276,6 +276,18 @@ def _lib():
             d.hw_wasi_stop.restype = _I
             d.hw_wasi_live.argtypes = []
             d.hw_wasi_live.restype = _I
+            d.hw_wasi_service.argtypes = [_C, ctypes.c_uint32, _C, _P, _I]
+            d.hw_wasi_service.restype = _I
+            d.hw_wasi_service_stop.argtypes = [ctypes.c_uint32]
+            d.hw_wasi_service_stop.restype = _I
+            d.hw_wasi_service_reap.argtypes = [ctypes.POINTER(ctypes.c_uint32),
+                                               ctypes.POINTER(ctypes.c_int32), _I]
+            d.hw_wasi_service_reap.restype = _I
+            d.hw_wasi_service_info.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32),
+                                               ctypes.POINTER(ctypes.c_uint32)]
+            d.hw_wasi_service_info.restype = _I
+            d.hw_wasi_services.argtypes = []
+            d.hw_wasi_services.restype = _I
             d.moy_wasm_natives.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
             d.moy_wasm_natives.restype = ctypes.POINTER(_NativeSymbol)
             if not d.hw_runtime():
@@ -382,6 +394,61 @@ def command_live():
     """Whether a command's run is live (a test's leak check)."""
     d = _lib()
     return bool(d is not None and d.hw_wasi_live())
+
+
+def start_service(path, pid, app_id):
+    """A WASI service (native/moy_wasm/moy_wasi.h, A SERVICE): the module at
+    `path` run as process `pid`, its argv `app_id`, its `_start` on a thread
+    of its own. None, or why it did not start."""
+    d = _lib()
+    if d is None:
+        return "no host wasm binding (%s)" % (why_unavailable() or "?")
+    err = ctypes.create_string_buffer(256)
+    if d.hw_wasi_service(path.encode(), int(pid), (app_id or "").encode(), err, len(err)) < 0:
+        return err.value.decode("utf-8", "replace")
+    return None
+
+
+def stop_service(pid):
+    """Service `pid` stopped: its descriptor hung up, killed (137) past its
+    time. Its exit status, or -1 for no such service."""
+    d = _lib()
+    return -1 if d is None else d.hw_wasi_service_stop(int(pid))
+
+
+REAP_MAX = 16
+_REAPED = []                    # the reap's arrays, made once
+
+
+def reap_services():
+    """[(pid, exit status)] of the services that ended, the watchdog run over
+    the live ones first."""
+    d = _lib()
+    if d is None:
+        return []
+    if not _REAPED:
+        _REAPED[:] = [(ctypes.c_uint32 * REAP_MAX)(), (ctypes.c_int32 * REAP_MAX)()]
+    pids, codes = _REAPED
+    n = d.hw_wasi_service_reap(pids, codes, REAP_MAX)
+    return [(pids[i], codes[i]) for i in range(n)]
+
+
+def service_info(pid):
+    """(linear memory bytes, its wakes' time in us) of service `pid`, or None
+    once its end is reaped."""
+    d = _lib()
+    if d is None:
+        return None
+    mapped, cost = ctypes.c_uint32(0), ctypes.c_uint32(0)
+    if d.hw_wasi_service_info(int(pid), ctypes.byref(mapped), ctypes.byref(cost)) < 0:
+        return None
+    return mapped.value, cost.value
+
+
+def services_live():
+    """How many service records are live (a test's leak check)."""
+    d = _lib()
+    return 0 if d is None else d.hw_wasi_services()
 
 
 TRAPPED, REFUSED = -1, -3                # run_command's: moy_wasi.h's MOY_WASI_TRAPPED, and the rest

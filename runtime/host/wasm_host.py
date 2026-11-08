@@ -163,6 +163,34 @@ class WasmHostRuntime:
         from runtime import wasm_binding
         return wasm_binding.stop_command()
 
+    def service(self, cart, pid, run=None):
+        """The cart's main.wasm started as service `pid` (native/moy_wasm/
+        moy_wasi.h, A SERVICE): its `_start` on a thread of its own, its
+        argv the cart's id. `run`, the app grant compiled_run made, has no
+        import to reach it: a WASI program imports no app call. None, or why
+        it did not start."""
+        del run
+        from runtime import wasm_binding
+        return wasm_binding.start_service(self._main(cart), pid, cart.get("id") or "")
+
+    def stop(self, pid):
+        """Service `pid` stopped: its descriptor hung up, killed (137) past
+        its time. Its exit status, or -1 for no such service."""
+        from runtime import wasm_binding
+        return wasm_binding.stop_service(pid)
+
+    def reap(self):
+        """[(pid, exit status)] of the services that ended: by themselves, a
+        trap (134), or killed by the watchdog (137)."""
+        from runtime import wasm_binding
+        return wasm_binding.reap_services()
+
+    def figures(self, pid):
+        """(linear memory bytes, its wakes' cost in us) of live service
+        `pid`, or None once it has ended."""
+        from runtime import wasm_binding
+        return wasm_binding.service_info(pid)
+
     @staticmethod
     def _main(cart):
         import os

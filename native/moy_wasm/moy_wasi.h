@@ -59,6 +59,29 @@
 // IN THE BACKGROUND (`&`), the program's stdout and stderr are the OS log's
 // lines under its pid, as a Python command's are (runtime/shell/sh_door.py),
 // and its stdin is empty.
+//
+// A SERVICE (docs/os_2026-11/processes.md section 1, the service model) is a
+// run with no session, its `_start` on a task of its own (each tier's
+// runner: runtime/host/moyhost_wasm.c, modmoy_wasm.c), a loop that blocks in
+// poll_oneoff on its EVENT DESCRIPTOR with its nearest deadline as the
+// timeout. Its argv is its cart's id and its env is empty; its stdout and
+// stderr are the OS log's lines under its pid and its stdin is empty; it has
+// no preopen, and a path answers NOTCAPABLE. Its calls run in place on its
+// own thread (no `hop`): none touches a session. Its stop hangs the
+// descriptor up (moy_wasi_hangup): poll_oneoff reports it ready with WASI's
+// hangup flag and fd_read reads 0 bytes, its end of file, and `_start`
+// returns within MOY_WASI_STOP_US or the run is killed (moy_wasi_kill).
+//
+// THE WATCHDOG (moy_wasi_watch, on the console's task, each tier's reap):
+// a wake, from a poll of the descriptor's return to the next poll of it, is
+// struck once for each MOY_SUPER_ABORT_US it runs (the strikes a callback's
+// abort would have charged, moy_super.h), and its own poll then charges it
+// nothing more. At the strike that suspends it, suspension cannot hold a
+// wake that still runs, so the run is killed: its end is MOY_PROC_KILLED and
+// its instance is terminated (wasm_runtime_terminate), which `_start` reads
+// at its next import call, a wait's slice included; a loop that calls none
+// runs on until it does. A service whose start runs MOY_WASI_STOP_US without
+// a first poll is killed the same way.
 
 #ifndef MOY_WASI_H
 #define MOY_WASI_H
@@ -78,6 +101,7 @@
 #define MOY_WASI_POLL_US 10000          // Ctrl-C and the budget, at most this often
 #define MOY_WASI_STACK (8 * 1024)       // the exec env's wasm stack, every tier's
 
+#define MOY_WASI_STOP_US 2000000       // a service's start to its first poll; its stop to its end
 #define MOY_WASI_TRAPPED (-1)           // moy_wasi_main: the module trapped
 #define MOY_WASI_NOT_COMMAND (-2)       // moy_wasi_main: no `_start`
 
@@ -140,5 +164,25 @@ void moy_wasi_stop(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job);
 // Its exit status once `_start` has returned, moy_wasi_main having answered
 // `main`: the exit's or the stop's where the run ended so, else `main`.
 int moy_wasi_status(const moy_wasi_t *w, int main);
+
+// A service's run as process `pid` (A SERVICE above), its argv `id`; the
+// event queue is its scheduler's to open. NULL when memory refuses.
+moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id);
+// Its stop, from any task: the event descriptor hangs up.
+void moy_wasi_hangup(moy_wasi_t *w);
+// Its run ended with `code` from any task, as proc_exit ends it, and its
+// instance terminated while `_start` runs.
+void moy_wasi_kill(moy_wasi_t *w, int code);
+// The watchdog, on the console's task, at its reap: the wake's strikes
+// charged; why the service is to be killed, or NULL.
+const char *moy_wasi_watch(moy_wasi_t *w);
+// Its exit status once `_start` has returned (moy_wasi_main's answer
+// `main`, the trap in `err`): moy_wasi_status's, a trap's MOY_PROC_TRAPPED
+// with its line logged under its pid, a run that did not start
+// MOY_PROC_NOT_RUN.
+int moy_wasi_service_status(const moy_wasi_t *w, int main, const char *err);
+// Its linear memory's bytes while `_start` runs, and its wakes' time (us,
+// wrapping).
+void moy_wasi_figures(const moy_wasi_t *w, uint32_t *mapped, uint32_t *cost_us);
 
 #endif // MOY_WASI_H

@@ -205,10 +205,11 @@ place.
 achievements process ported to it: the Lua tier's is
 `tests/fixtures/achievements_lua.moy`, a Lua service in the seed's place
 in the store, with the same events in, the same store and the same
-notifications out. Its wasm parameter is an xfail: a compiled service's ABI
-is the event descriptor (owner, 2026-11-08: WASI's `poll_oneoff`, built in
-`native/moy_wasm/moy_wasi.h`), and the achievements process is not ported
-to it.
+notifications out. Its wasm parameter is an xfail: the scheduler starts a
+WASI service (§3), whose ABI is the event descriptor (owner, 2026-11-08:
+WASI's `poll_oneoff`, built in `native/moy_wasm/moy_wasi.h`), but the
+achievements process is not ported to it, and a WASI program imports no
+console call to post its notifications with.
 
 ## 3. wasm and WASI
 
@@ -234,7 +235,10 @@ OS-called and return; a callback that overruns strikes. **The wasm tier's
 OS interface is WASI preview1** (owner, 2026-11-03): files over the tree
 under the app's permissions, clocks, args and env, stdio, random. Any WASI
 program built with wasi-sdk, Rust `wasm32-wasip1` or Zig runs as a command
-unchanged (P5.5); drawing stays moy-spec's imports. The WASI imports keep
+unchanged (P5.5), and as a service when its cart is a service with no
+source: its `_start` on a task of its own with no shell session, its stdout
+and stderr the OS log's lines, no env and no files (`moy_wasi.h`, A
+SERVICE; `processes.md` §1); drawing stays moy-spec's imports. The WASI imports keep
 WASI's names, so they are not rows of the ordinal source (§1) but adapters
 over the same C functions (`native/moy_wasm/moy_wasi.h`): stdio is the shell
 session's descriptors (the terminal, a pipe's buffer, a redirected file),

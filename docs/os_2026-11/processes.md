@@ -168,9 +168,9 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   the same two rows, `moy_on` and `moy_send` (a WASI program's `moybyte.os`
   imports), the kernel's own on the program's thread. A compiled command's
   process gets a queue from the shell's door (`runtime/shell/sh_door.py`),
-  and an ELF service's from the scheduler, its app id and `receives`; its
-  stop hangs the descriptor up (`POLLHUP`, a read's end of file) for its
-  `main` to return. `sdk/include/moybyte/os.h`
+  and a compiled service's from the scheduler, its app id and `receives`;
+  its stop hangs the descriptor up (`POLLHUP`, WASI's hangup flag, a read's
+  end of file) for its `main` or `_start` to return. `sdk/include/moybyte/os.h`
   carries the record and both rows for either tier, and the example service
   of each, a loop that blocks in poll and answers a "ping" with a "pong",
   is `tests/fixtures/elf/elf_svc.moy` and `tests/fixtures/wasm/wasi_svc.moy`.
@@ -180,12 +180,16 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   is a wake: from a poll of its event descriptor's return to its next poll
   of it, less what its calls waited for the VM's task (a WASI command's
   session calls, an ELF service's hops); a suspended program's poll waits
-  unserved until it is resumed. Native code is not aborted mid-wake: an ELF
-  service's wake that never polls again is struck by a watchdog at the
-  scheduler's poll (`moy_os_reap`), once for each `MOY_SUPER_ABORT_US` it
-  runs on, and the strike that suspends it kills it (137), since a
-  suspension cannot hold a wake that is still running; a start that reaches
-  no poll within `MOY_OS_STOP_US` is killed too.
+  unserved until it is resumed. A compiled service's wake that never polls
+  again is struck by a watchdog at the scheduler's poll (its runtime's
+  `reap`: `moy_os_reap`, `moy_wasi_watch`), once for each
+  `MOY_SUPER_ABORT_US` it runs on, and the strike that suspends it kills it
+  (137), since a suspension cannot hold a wake that is still running; a
+  start that reaches no poll within its stop time is killed too. Native
+  code is not aborted mid-wake, so an ELF wake is killed where it stands; a
+  WASI one's instance is terminated (`wasm_runtime_terminate`), which its
+  `_start` reads at its next import call, so a loop that calls none runs on
+  until it does.
 - **The VM's queue** (`native/moy_kernel/moy_vmq.h`): the one way a process
   on its own task enters the console. A HOP runs C on the VM's task while
   the poster waits (a role row of its app's run); a CALL is a console call
@@ -223,17 +227,24 @@ refuse one, and the host and the desktop MicroPython, which have no task to
 give, step their services at the scheduler's poll
 (`runtime/system/scheduler.py`, LUA SERVICES). What a Lua service asks of
 the console (a notification, a message, a function the console handed it)
-goes through the VM's queue (`tiers.md` §2). An ELF service is the
-scheduler's as a Python or Lua one is, started, listed, stopped, restarted
-and autostarted the same way (`runtime/system/scheduler.py`, COMPILED
-SERVICES): its `main` on a task of its own, on core 0 on the P4s, its app
-calls (`moy_notify` and the rest) hops on the VM's queue under a run grant
-of its own, served at the scheduler's poll, which also reaps its end. A
-compiled program's `moy_send` posts from its own thread; the door notices
-one that reached the VM's processes after each step of a command
+goes through the VM's queue (`tiers.md` §2). A compiled service, ELF or
+WASI, is the scheduler's as a Python or Lua one is, started, listed,
+stopped, restarted and autostarted the same way
+(`runtime/system/scheduler.py`, COMPILED SERVICES), and the scheduler's
+poll reaps its end. An ELF service is its `main` on a task of its own, on
+core 0 on the P4s and core 1 on the S3s, its app calls (`moy_notify` and
+the rest) hops on the VM's queue under a run grant of its own, served at
+the scheduler's poll. A WASI service (a wasm cart with no source,
+`native/moy_wasm/moy_wasi.h`, A SERVICE) is its `_start` on a task of its
+own with no shell session: a session of its own on core 0 on the P4s, a
+thread of its own on the host (several at once, apart from the door's one
+command job); the S3s refuse one, as they refuse a Lua service. Its stdout
+and stderr are the OS log's lines under its pid, its stdin and env are
+empty, and a path answers NOTCAPABLE; it imports no app call. A compiled
+program's `moy_send` posts from its own thread; the door notices one that
+reached the VM's processes after each step of a command
 (`sh_door._noticed`), the scheduler's poll after a service's, and the
-frame's start serves it. A WASI program in the service model runs as a
-command.
+frame's start serves it.
 
 ## 2. The app manifest and the permission table
 

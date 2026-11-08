@@ -28,9 +28,9 @@ from runtime import achievements as A
 from ws_helpers import build_ws, make_drv
 
 LUA_TWIN = os.path.join(os.path.dirname(__file__), "fixtures", "achievements_lua.moy")
-WASM_WHY = ("a compiled service's ABI is its event descriptor (WASI's poll_oneoff, "
-            "native/moy_wasm/moy_wasi.h); the achievements process is not ported to it, "
-            "and the scheduler starts no compiled service")
+WASM_WHY = ("the scheduler starts a WASI service (native/moy_wasm/moy_wasi.h, A SERVICE), "
+            "but the achievements process is not ported to it, and a WASI program "
+            "imports no console call to post its notifications with")
 
 
 def _lua_twin(ws):

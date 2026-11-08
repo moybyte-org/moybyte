@@ -1285,18 +1285,24 @@ class WasmRuntime:
         return _moy_wasm.command_stop()
 
     def _start(self, cart, argv, roots, bg_pid, budget_ms):
-        """The run started: its module for this console where the cart
-        carries one, as a cart's is, and main.wasm on the interpreter where
-        it carries none or that one is refused for anything but tamper
-        evidence. (0, None), or (-3, why)."""
+        """The run started: (0, None), or (-3, why)."""
         start = getattr(_moy_wasm, "command_start", None)
         if start is None:
             return -3, "this firmware runs no commands"
+        joined = "".join(r + "\0" for r in roots) or None
+        argv = tuple(argv)
+        return self._launch(cart, lambda path, sha, interp, unsigned_ok: start(
+            path, sha, interp, unsigned_ok, argv, joined, bg_pid, budget_ms))
+
+    def _launch(self, cart, start):
+        """`start(path, want_sha, interp, allow_unsigned)` on the cart's
+        module for this console where it carries one, as a cart's is, and
+        on main.wasm on the interpreter where it carries none or that one is
+        refused for anything but tamper evidence. start's answer, (code,
+        why) with -3 for a refusal."""
         path = cart["path"]
         main = cart.get("main", "main.wasm")
-        joined = "".join(r + "\0" for r in roots) or None
         unsigned_ok = run_admits_unsigned(self.ws, cart)
-        argv = tuple(argv)
         if _moy_wasm.CHIP is not None:
             module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
             try:
@@ -1305,12 +1311,46 @@ class WasmRuntime:
                 module = None
             if module is not None:
                 sha = _sha256_file(path + "/" + main)
-                code, err = start(module, sha, False, unsigned_ok, argv, joined,
-                                  bg_pid, budget_ms)
+                code, err = start(module, sha, False, unsigned_ok)
                 if code != -3 or err.startswith(_AOT_TAMPER_EVIDENCE):
                     return code, err
-        return start(path + "/" + main, None, True, unsigned_ok, argv, joined,
-                     bg_pid, budget_ms)
+        return start(path + "/" + main, None, True, unsigned_ok)
+
+    def service(self, cart, pid, run=None):
+        """The cart started as service `pid` (native/moy_wasm/moy_wasi.h, A
+        SERVICE): its `_start` on a task of its own, its argv the cart's id;
+        its module chosen as `command`'s is. `run`, the app grant
+        compiled_run made, has no import to reach it: a WASI program imports
+        no app call. None, or why it did not start; this firmware's answer
+        where it runs no services (the S3s, as for Lua services)."""
+        del run
+        go = getattr(_moy_wasm, "service_start", None)
+        if go is None:
+            return "this firmware runs no wasm services"
+        app_id = cart.get("id") or ""
+
+        def start(path, sha, interp, unsigned_ok):
+            why = go(path, sha, interp, unsigned_ok, pid, app_id)
+            return (0, None) if why is None else (-3, why)
+        return self._launch(cart, start)[1]
+
+    def stop(self, pid):
+        """Service `pid` stopped: its descriptor hung up, killed (137) past
+        its time. Its exit status, or -1 for no such service."""
+        stop = getattr(_moy_wasm, "service_stop", None)
+        return -1 if stop is None else stop(pid)
+
+    def reap(self):
+        """[(pid, exit status)] of the services that ended: by themselves, a
+        trap (134), or killed by the watchdog (137)."""
+        reap = getattr(_moy_wasm, "service_reap", None)
+        return [] if reap is None else reap()
+
+    def figures(self, pid):
+        """(linear memory bytes, its wakes' cost in us) of live service
+        `pid`, or None once it has ended."""
+        info = getattr(_moy_wasm, "service_info", None)
+        return None if info is None else info(pid)
 
 
 def make_wasm_runtime(ws):

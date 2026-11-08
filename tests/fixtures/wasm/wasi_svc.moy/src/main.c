@@ -2,8 +2,12 @@
 // section 1). main is its loop: it blocks in poll on its event descriptor
 // (WASI's poll_oneoff), with its next tick's deadline as the timeout, and
 // answers each "ping" with a "pong" carrying the same arguments, sent to the
-// app the ping came from; a "bye" ends it. The calls are the ones an ELF
-// service makes (moybyte/os.h), here its moybyte.os imports.
+// app the ping came from; a "bye" ends it, a "quit" returns 7 and a "spin"
+// runs on without polling again, sleeping in slices. Its stop is the
+// descriptor's end of file. The calls are the ones an ELF service makes
+// (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
+// as a command (tests/test_wasi_commands.py), the scheduler's as a service
+// (tests/test_wasi_services.py).
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -22,7 +26,8 @@ static long now_ms(void) {
 }
 
 int main(void) {
-    if (moy_on("ping", 1) < 0 || moy_on("bye", 1) < 0) {
+    if (moy_on("ping", 1) < 0 || moy_on("bye", 1) < 0 || moy_on("quit", 1) < 0
+        || moy_on("spin", 1) < 0) {
         printf("no queue: %d\n", errno);
         return 1;
     }
@@ -47,6 +52,10 @@ int main(void) {
             continue;
         }
         ssize_t got = read(MOY_EVQ_FD, &m, sizeof m);
+        if (got == 0) {
+            printf("stopped after %d pings, %s\n", pings, ticks >= 2 ? "ticking" : "still");
+            return 0;
+        }
         if (got < 0) {
             continue;
         }
@@ -58,6 +67,12 @@ int main(void) {
         } else if (strcmp(m.ev.name, "bye") == 0) {
             printf("bye after %d pings, %s\n", pings, ticks >= 2 ? "ticking" : "still");
             return 0;
+        } else if (strcmp(m.ev.name, "quit") == 0) {
+            return 7;
+        } else if (strcmp(m.ev.name, "spin") == 0) {
+            for (;;) {
+                usleep(10000);
+            }
         }
     }
 }

@@ -2631,3 +2631,39 @@ def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
         assert len(calls) == 1
     finally:
         world.close()
+
+
+def test_a_wasi_service_starts_on_its_module_and_is_reaped_through_the_engine(tmp_path):
+    """The scheduler's compiled-service contract (runtime/system/scheduler.py,
+    COMPILED SERVICES) over moy_wasm's service_* (the P4s'): the module for
+    this console where the cart carries one, main.wasm on the interpreter
+    where it is refused; a firmware without them (the S3s) refuses one."""
+    world, cart, _calls = _command_world(tmp_path, ("esp32s3",), [])
+    try:
+        mod = world.mod._moy_wasm
+        rt = world.mod.WasmRuntime(FakeWs())
+        assert rt.service(cart, 9) == "this firmware runs no wasm services"
+        assert rt.stop(9) == -1 and rt.reap() == [] and rt.figures(9) is None
+        starts = []
+        answers = ["refused: unsigned module", None]
+
+        def service_start(*a):
+            starts.append(a)
+            return answers.pop(0)
+        mod.service_start = service_start
+        mod.service_stop = lambda pid: 0
+        mod.service_reap = lambda: [(9, 7)]
+        mod.service_info = lambda pid: (65536, 120)
+        assert rt.service(cart, 9, run=b"grant") is None
+        assert [a[2] for a in starts] == [False, True]          # its module, then main.wasm
+        assert starts[1][0] == cart["path"] + "/main.wasm" and starts[1][4:] == (9, cart.get("id") or "")
+        assert rt.figures(9) == (65536, 120) and rt.reap() == [(9, 7)] and rt.stop(9) == 0
+        starts.clear()
+        answers[:] = ["refused: bad signature"]
+        assert rt.service(cart, 10) == "refused: bad signature"
+        assert len(starts) == 1                                  # tamper evidence: never retried
+    finally:
+        for name in ("service_start", "service_stop", "service_reap", "service_info"):
+            if hasattr(world.mod._moy_wasm, name):
+                delattr(world.mod._moy_wasm, name)
+        world.close()

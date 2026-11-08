@@ -104,20 +104,22 @@ kept while a Lua service lives), and wakes its task; a stepped one is
 stepped at the next poll, or at once by the frame start (`mail`) where the
 OS's own `send` posted it.
 
-COMPILED SERVICES (a native cart, `"moybyte": {"native": [chips]}`). The
-start hands the cart to its tier's runtime (`ws.runtimes["elf"]`,
-runtime/run/elf_run.py; native/moy_elf/moy_os.h, A SERVICE): its module's
-`main` on a task of its own, a loop blocked in poll on its event
-descriptor, the queue this scheduler opens with its app id and `receives`.
-Its app calls run for a run grant of its own (`compiled_run`, a command's
-too) as hops on the VM's queue, which `poll` serves; the poll, kept while
-one lives, also reaps the ones that ended (`moy_os_reap`: main returned,
-or killed by its watchdog, 137) into the same exit, log line and restart
-policy, reads its mappings and its wakes' time onto its row and its rungs
-from the one supervisor, and flags a message it sent the VM's processes
-(`queued`) for the frame's start. A stop hangs its descriptor up, the KILL
-(137) past MOY_SERVICE_STOP_MS. A console without the tier refuses one
-(logged, exit 1).
+COMPILED SERVICES (a native cart, `"moybyte": {"native": [chips]}`, and a
+wasm cart with no source, `"runtime": "wasm"`). The start hands the cart to
+its tier's runtime (`ws.runtimes["elf"]`, runtime/run/elf_run.py;
+native/moy_elf/moy_os.h, A SERVICE; `ws.runtimes["wasm"]`,
+native/moy_wasm/moy_wasi.h, A SERVICE): its module's `main` or `_start` on
+a task of its own, a loop blocked in poll on its event descriptor, the
+queue this scheduler opens with its app id and `receives`. A native one's
+app calls run for a run grant of its own (`compiled_run`, a command's too)
+as hops on the VM's queue, which `poll` serves; a WASI program imports
+none. The poll, kept while one lives, also reaps the ones that ended (its
+runtime's `reap`: main returned, a trap, or killed by its watchdog, 137)
+into the same exit, log line and restart policy, reads its memory and its
+wakes' time onto its row and its rungs from the one supervisor, and flags
+a message it sent the VM's processes (`queued`) for the frame's start. A
+stop hangs its descriptor up, the KILL (137) past MOY_SERVICE_STOP_MS. A
+console without the tier refuses one (logged, exit 1).
 
 AUTOSTART. `boot(ws)`, at the console's first drawn frame, starts every
 service cart whose manifest asks for `autostart` and whose consent holds it
@@ -218,7 +220,7 @@ EXITED = "exited"
 
 SHELL = 1
 SERVICE, APP, COMMAND = "service", "app", "command"
-COMPILED = {"elf": "native"}    # the tiers whose services start on their runtime, by their names
+COMPILED = {"elf": "native", "wasm": "wasm"}    # the tiers whose services start on their runtime, by their names
 
 NEVER, ON_CRASH, ALWAYS = "never", "on-crash", "always"
 POLICIES = (NEVER, ON_CRASH, ALWAYS)
@@ -688,7 +690,7 @@ class Scheduler:
             return None
         _log(INFO, pid, "start", name)
         tier = app_perms.tier_of(cart)
-        if tier == "elf":
+        if tier == "elf" or (tier in COMPILED and not cart.get("src")):
             return self._start_compiled(p, ws, cart, tier)
         try:
             roles, names = self._grant(p, ws, cart)

@@ -290,6 +290,30 @@ not run -3. The host runs the same table over its WAMR, `_start` on a thread
 of its own stepped the same way (`runtime/host/moyhost_wasm.c`'s
 `hw_wasi_start`).
 
+## A service
+
+A cart whose manifest says `"type": "service"` and `"runtime": "wasm"` and
+carries no source is a WASI service, the scheduler's as any service is
+(`runtime/system/scheduler.py`, COMPILED SERVICES; `moy_wasi.h`, A
+SERVICE): a run with no shell session, its argv its cart's id, no env, no
+preopen, stdin empty, stdout and stderr the OS log's lines under its pid,
+its calls run in place on its own task with no hop. `service_start()` opens
+a session of its own for it, its module chosen as a command's is, its task
+on core 0 at a Lua service's priority (`MOY_WASM_SVC_CORE`,
+`MOY_WASM_SVC_PRIO`), and begins its call into `_start` there; the VM's task
+never serves it. Several run at once, each a session. `service_stop()`
+hangs its event descriptor up and waits `MOY_WASI_STOP_US` for `_start` to
+return, then kills it (137); `service_reap()`, at the scheduler's poll, runs
+the watchdog (`moy_wasi_watch`) over the live ones and closes the session of
+each that returned, answering its exit status (a trap's is 134, its line in
+the OS log); `service_info()` reads its linear memory and its wakes' time.
+A killed service's instance is terminated, which its `_start` reads at its
+next import call ("Stopping a run" below), so a wake that calls none runs
+on until it does. The S3s carry none of the four, as they run no Lua
+service, and the glue refuses one. The host runs the same C, each service's
+`_start` on a pthread of its own, apart from the command's one job
+(`runtime/host/moyhost_wasm.c`'s `hw_wasi_service`).
+
 ## Where the memory goes
 
 Nothing is held between runs: the module allocates no memory at boot, so what
@@ -700,6 +724,14 @@ console's task until the loop returns.
   a module a command cannot run, the background; on glass,
   `tests/on_glass.py`'s `wasi_commands_run` (cat and the Rust hello on their
   modules, the probe on the interpreter) over the serial face.
+
+- `tests/test_wasi_services.py`: a WASI service on the host's WAMR, started
+  by the scheduler on a thread of its own: listed, a ping answered with a
+  pong, its stdout in the OS log, its stop the descriptor's end of file, an
+  end by itself into its restart policy, a wake that never polls again
+  struck out, killed and terminated, and a console without the tier
+  refusing one; the glue's half over a stubbed `moy_wasm` is
+  `tests/test_moycore_glue.py`'s.
 
 - `tests/test_wamr_vendor.py`: the copy is the fork at the pinned commit (read
   from the clone's git objects when `experiments/wasm_aot/wamr` has it), the
