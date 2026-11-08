@@ -1672,6 +1672,21 @@ static void sc_fold_snap_disarm_fence_and_reset_wait(void) {
     CHECK_EQ(h_gil_depth(), 0);
 }
 
+static void sc_fold_snap_fence_parks_until_the_copy_lands(void) {
+    // The VM's snapshot fence parks on the copy's landing instead of
+    // polling it: no delay loop runs, and it returns when the DMA lands.
+    CHECK(SNAP_NATIVE());
+    CHECK_EQ(moy_fold.copying, true);
+    int64_t lands = h_dma_lands_at();
+    int delays = h_rom_delays;
+    moy_fold_snap_fence();
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK_EQ(h_rom_delays, delays);
+    CHECK(h_now() >= lands);
+    CHECK_EQ(moy_fold.snap_timeouts, 0);
+    CHECK_EQ(h_gil_depth(), 0);
+}
+
 static void sc_fold_snap_timeout_retires_the_engine(void) {
     // A copy that never signals trips the deadline ONCE: counted, the latch
     // cleared, and every later snapshot a memcpy the engine is never asked
@@ -2194,6 +2209,8 @@ static const scenario_t SCENARIOS[] = {
       sc_fold_snap_a_full_queue_is_one_memcpy },
     { "fold_snap_disarm_fence_and_reset_wait",
       sc_fold_snap_disarm_fence_and_reset_wait },
+    { "fold_snap_fence_parks_until_the_copy_lands",
+      sc_fold_snap_fence_parks_until_the_copy_lands },
     { "fold_snap_timeout_retires_the_engine",
       sc_fold_snap_timeout_retires_the_engine },
     { "fold_snap_timeout_on_the_feeder_is_bounded",

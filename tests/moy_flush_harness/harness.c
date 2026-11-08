@@ -254,6 +254,8 @@ static void h_block_on(const void *obj, int64_t wake_us) {
 
 void h_yield(void) { h_dispatch(); }
 
+int h_rom_delays;
+
 void h_block_us(int64_t us) { h_block_on(&g_delay_obj, g_now + us); }
 
 void h_advance(int64_t us) {
@@ -443,6 +445,19 @@ BaseType_t xSemaphoreGive(SemaphoreHandle_t sem) {
         }
     }
     if (sem == g_switch_give) { h_yield(); }
+    return pdTRUE;
+}
+
+BaseType_t xSemaphoreGiveFromISR(SemaphoreHandle_t sem, BaseType_t *woken) {
+    if (sem == NULL) { h_fail("give on a NULL semaphore"); }
+    sem->count = 1;
+    for (int i = 0; i < g_ntasks; i++) {
+        if (g_tasks[i].state == H_BLOCKED && g_tasks[i].waiting_on == sem) {
+            g_tasks[i].state = H_RUNNABLE;
+            if (woken != NULL) { *woken = pdTRUE; }
+            break;
+        }
+    }
     return pdTRUE;
 }
 

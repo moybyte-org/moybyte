@@ -253,8 +253,9 @@ bool moy_fold_disarm(void);
 void moy_fold_fence(void);
 
 // VM side. Block until the snapshot in flight has finished reading the live
-// canvas -- the fence the cart's next canvas write takes. GIL released,
-// bounded; one compare when nothing is in flight.
+// canvas -- the fence the cart's next canvas write takes. GIL released, the
+// task parked on the copy's landing (the feeder's band waits park the same
+// way), bounded; one compare when nothing is in flight.
 void moy_fold_snap_fence(void);
 
 // Clear the latches (soft reset / free-all), waiting any snapshot out first

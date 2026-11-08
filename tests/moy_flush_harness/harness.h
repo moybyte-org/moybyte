@@ -50,6 +50,7 @@ void h_advance(int64_t us);
 // The running context BLOCKS for `us` -- what a board hook that waits on
 // hardware does. Other contexts run while it is out.
 void h_block_us(int64_t us);
+extern int h_rom_delays;               // esp_rom_delay_us calls (stubs/esp_rom_sys.h)
 
 // Give the CPU up without blocking (the switch-on-give modelling below).
 void h_yield(void);
