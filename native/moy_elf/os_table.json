@@ -1,6 +1,6 @@
 {
   "about": "The OS function table a native (ELF) module is built against (docs/os_2026-11/tiers.md section 1): one row per function the kernel exports, its ORDINAL its index here. Rows are APPENDED, never changed, moved or removed; a row that goes is RETIRED and keeps its slot, answering through a typed stub. version counts the rows ever appended, so it is the table's length. name is the function's name in a module's source; c its prototype exactly as the module's C library headers declare it (posix rows, from the headers in hdr) or as sdk/include/moybyte/os.h declares it (moybyte rows); va, on a row whose prototype ends in ..., the one argument the kernel takes in its place and when the module passes it; glibc the name glibc's headers call the same function by (the host's modules); fail what the typed stub of a retired row answers (errno ENOSYS), null for a function that returns nothing; noreturn a function that does not return; retired the date and the reason. tools/gen_os_table.py writes the kernel's table (native/moy_elf/moy_os_table.h, .c) and the SDK's header and stubs (sdk/include/moybyte/os.h, sdk/src/moyos_stubs.c) from this; tests/test_os_table.py holds the outputs to it and the rows to their frozen copy.",
-  "version": 41,
+  "version": 62,
   "rows": [
     {"name": "open", "kind": "posix", "hdr": "fcntl.h", "c": "int open(const char *path, int flags, ...)", "va": {"arg": "int mode", "when": "flags & O_CREAT"}, "fail": "-1"},
     {"name": "close", "kind": "posix", "hdr": "unistd.h", "c": "int close(int fd)", "fail": "-1"},
@@ -42,6 +42,27 @@
     {"name": "moy_term_size", "kind": "moybyte", "c": "int moy_term_size(int *cols, int *rows)", "fail": "-1"},
     {"name": "moy_timer_every", "kind": "moybyte", "c": "int moy_timer_every(uint32_t period_us)", "fail": "-1"},
     {"name": "moy_timer_cancel", "kind": "moybyte", "c": "int moy_timer_cancel(int timer)", "fail": "-1"},
-    {"name": "moy_events", "kind": "moybyte", "c": "int moy_events(uint32_t kinds)", "fail": "-1"}
+    {"name": "moy_events", "kind": "moybyte", "c": "int moy_events(uint32_t kinds)", "fail": "-1"},
+    {"name": "mmap", "kind": "posix", "hdr": "sys/mman.h", "c": "void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)", "fail": "((void *)-1)"},
+    {"name": "munmap", "kind": "posix", "hdr": "sys/mman.h", "c": "int munmap(void *addr, size_t len)", "fail": "-1"},
+    {"name": "socket", "kind": "posix", "hdr": "sys/socket.h", "c": "int socket(int domain, int type, int protocol)", "fail": "-1"},
+    {"name": "bind", "kind": "posix", "hdr": "sys/socket.h", "c": "int bind(int fd, const struct sockaddr *addr, socklen_t len)", "fail": "-1"},
+    {"name": "listen", "kind": "posix", "hdr": "sys/socket.h", "c": "int listen(int fd, int backlog)", "fail": "-1"},
+    {"name": "accept", "kind": "posix", "hdr": "sys/socket.h", "c": "int accept(int fd, struct sockaddr *addr, socklen_t *len)", "fail": "-1"},
+    {"name": "connect", "kind": "posix", "hdr": "sys/socket.h", "c": "int connect(int fd, const struct sockaddr *addr, socklen_t len)", "fail": "-1"},
+    {"name": "send", "kind": "posix", "hdr": "sys/socket.h", "c": "ssize_t send(int fd, const void *buf, size_t n, int flags)", "fail": "-1"},
+    {"name": "recv", "kind": "posix", "hdr": "sys/socket.h", "c": "ssize_t recv(int fd, void *buf, size_t n, int flags)", "fail": "-1"},
+    {"name": "sendto", "kind": "posix", "hdr": "sys/socket.h", "c": "ssize_t sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to, socklen_t len)", "fail": "-1"},
+    {"name": "recvfrom", "kind": "posix", "hdr": "sys/socket.h", "c": "ssize_t recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *from, socklen_t *len)", "fail": "-1"},
+    {"name": "shutdown", "kind": "posix", "hdr": "sys/socket.h", "c": "int shutdown(int fd, int how)", "fail": "-1"},
+    {"name": "setsockopt", "kind": "posix", "hdr": "sys/socket.h", "c": "int setsockopt(int fd, int level, int name, const void *val, socklen_t len)", "fail": "-1"},
+    {"name": "getsockopt", "kind": "posix", "hdr": "sys/socket.h", "c": "int getsockopt(int fd, int level, int name, void *val, socklen_t *len)", "fail": "-1"},
+    {"name": "getsockname", "kind": "posix", "hdr": "sys/socket.h", "c": "int getsockname(int fd, struct sockaddr *addr, socklen_t *len)", "fail": "-1"},
+    {"name": "getpeername", "kind": "posix", "hdr": "sys/socket.h", "c": "int getpeername(int fd, struct sockaddr *addr, socklen_t *len)", "fail": "-1"},
+    {"name": "getaddrinfo", "kind": "posix", "hdr": "netdb.h", "c": "int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res)", "fail": "EAI_FAIL"},
+    {"name": "freeaddrinfo", "kind": "posix", "hdr": "netdb.h", "c": "void freeaddrinfo(struct addrinfo *ai)", "fail": null},
+    {"name": "poll", "kind": "posix", "hdr": "sys/poll.h", "c": "int poll(struct pollfd *fds, nfds_t n, int timeout)", "fail": "-1"},
+    {"name": "select", "kind": "posix", "hdr": "sys/select.h", "c": "int select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv)", "fail": "-1"},
+    {"name": "fcntl", "kind": "posix", "hdr": "fcntl.h", "c": "int fcntl(int fd, int cmd, ...)", "va": {"arg": "int arg", "when": "cmd != F_GETFL && cmd != F_GETFD"}, "fail": "-1"}
   ]
 }

@@ -10,8 +10,8 @@
 
 #include <stdint.h>
 
-#define MOY_OS_VERSION 41u
-#define MOY_OS_ROWS 41u
+#define MOY_OS_VERSION 62u
+#define MOY_OS_ROWS 62u
 
 typedef struct {
     uint32_t version;     // bumped on every append; never on anything else
@@ -61,6 +61,27 @@ enum {
     MOY_OS_ROW_moy_timer_every = 38,
     MOY_OS_ROW_moy_timer_cancel = 39,
     MOY_OS_ROW_moy_events = 40,
+    MOY_OS_ROW_mmap = 41,
+    MOY_OS_ROW_munmap = 42,
+    MOY_OS_ROW_socket = 43,
+    MOY_OS_ROW_bind = 44,
+    MOY_OS_ROW_listen = 45,
+    MOY_OS_ROW_accept = 46,
+    MOY_OS_ROW_connect = 47,
+    MOY_OS_ROW_send = 48,
+    MOY_OS_ROW_recv = 49,
+    MOY_OS_ROW_sendto = 50,
+    MOY_OS_ROW_recvfrom = 51,
+    MOY_OS_ROW_shutdown = 52,
+    MOY_OS_ROW_setsockopt = 53,
+    MOY_OS_ROW_getsockopt = 54,
+    MOY_OS_ROW_getsockname = 55,
+    MOY_OS_ROW_getpeername = 56,
+    MOY_OS_ROW_getaddrinfo = 57,
+    MOY_OS_ROW_freeaddrinfo = 58,
+    MOY_OS_ROW_poll = 59,
+    MOY_OS_ROW_select = 60,
+    MOY_OS_ROW_fcntl = 61,
 };
 
 extern const moy_os_table_t moy_os_table;

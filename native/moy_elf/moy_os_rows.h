@@ -8,16 +8,55 @@
 #define MOY_OS_ROWS_H
 
 #include <stdint.h>
+#include <sys/types.h>
+
+// A header a board's C library lacks (sys/mman.h) leaves its rows' types
+// to sys/types.h.
+#if __has_include(<fcntl.h>)
 #include <fcntl.h>
+#endif
+#if __has_include(<unistd.h>)
 #include <unistd.h>
+#endif
+#if __has_include(<sys/stat.h>)
 #include <sys/stat.h>
+#endif
+#if __has_include(<stdio.h>)
 #include <stdio.h>
+#endif
+#if __has_include(<dirent.h>)
 #include <dirent.h>
+#endif
+#if __has_include(<stdlib.h>)
 #include <stdlib.h>
+#endif
+#if __has_include(<errno.h>)
 #include <errno.h>
+#endif
+#if __has_include(<time.h>)
 #include <time.h>
+#endif
+#if __has_include(<sys/time.h>)
 #include <sys/time.h>
+#endif
+#if __has_include(<pthread.h>)
 #include <pthread.h>
+#endif
+#if __has_include(<sys/mman.h>)
+#include <sys/mman.h>
+#endif
+#if __has_include(<sys/socket.h>)
+#include <sys/socket.h>
+#endif
+#if __has_include(<netdb.h>)
+#include <netdb.h>
+#endif
+#if __has_include(<sys/poll.h>)
+#include <sys/poll.h>
+#endif
+#if __has_include(<sys/select.h>)
+#include <sys/select.h>
+#endif
 
 // The calling thread's errno, set by a row that fails.
 void moy_os_errno_set(int e);
@@ -63,5 +102,26 @@ int moy_os_moy_term_size(int *cols, int *rows);
 int moy_os_moy_timer_every(uint32_t period_us);
 int moy_os_moy_timer_cancel(int timer);
 int moy_os_moy_events(uint32_t kinds);
+void *moy_os_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
+int moy_os_munmap(void *addr, size_t len);
+int moy_os_socket(int domain, int type, int protocol);
+int moy_os_bind(int fd, const struct sockaddr *addr, socklen_t len);
+int moy_os_listen(int fd, int backlog);
+int moy_os_accept(int fd, struct sockaddr *addr, socklen_t *len);
+int moy_os_connect(int fd, const struct sockaddr *addr, socklen_t len);
+ssize_t moy_os_send(int fd, const void *buf, size_t n, int flags);
+ssize_t moy_os_recv(int fd, void *buf, size_t n, int flags);
+ssize_t moy_os_sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to, socklen_t len);
+ssize_t moy_os_recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *from, socklen_t *len);
+int moy_os_shutdown(int fd, int how);
+int moy_os_setsockopt(int fd, int level, int name, const void *val, socklen_t len);
+int moy_os_getsockopt(int fd, int level, int name, void *val, socklen_t *len);
+int moy_os_getsockname(int fd, struct sockaddr *addr, socklen_t *len);
+int moy_os_getpeername(int fd, struct sockaddr *addr, socklen_t *len);
+int moy_os_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res);
+void moy_os_freeaddrinfo(struct addrinfo *ai);
+int moy_os_poll(struct pollfd *fds, nfds_t n, int timeout);
+int moy_os_select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv);
+int moy_os_fcntl(int fd, int cmd, int arg);
 
 #endif // MOY_OS_ROWS_H

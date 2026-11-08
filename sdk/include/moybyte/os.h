@@ -16,7 +16,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 41
+#define MOY_OS_VERSION 62
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
 typedef struct {

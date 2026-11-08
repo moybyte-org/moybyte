@@ -28,6 +28,8 @@ extern int moy_start(void) HOOK;
 extern void moy_stop(void) HOOK;
 extern void moy_timer(uint32_t t_us) HOOK;
 extern void moy_on(const moy_event_t *e) HOOK;
+// The SDK's C library's exit path (sdk/libc/), when the module links it.
+extern void __moy_exit(void) HOOK;
 
 // What the loader asks (native/moy_elf/moy_os.h's MOY_ELF_OP_*).
 enum { OP_BIND = 0, OP_MAIN, OP_START, OP_STOP, OP_TIMER, OP_ON };
@@ -46,8 +48,13 @@ int _moy_entry(const moy_os_table_t *os, int op, int argc, char **argv, const vo
         __moy_os = os;
         return (main ? H_MAIN : 0) | (moy_start ? H_START : 0) | (moy_stop ? H_STOP : 0)
                | (moy_timer ? H_TIMER : 0) | (moy_on ? H_ON : 0);
-    case OP_MAIN:
-        return main ? main(argc, argv) : -1;
+    case OP_MAIN: {
+        int code = main ? main(argc, argv) : -1;
+        if (__moy_exit) {
+            __moy_exit();
+        }
+        return code;
+    }
     case OP_START:
         return moy_start ? moy_start() : 0;
     case OP_STOP:

@@ -110,7 +110,7 @@ static int load(const char *path, moy_os_module_t *m, char *err, int errlen) {
 
 int hl_elf_command(const char *path, int argc, const char **argv, const char *roots,
                    uint32_t pid, const char *id, uint32_t bg_pid, uint32_t budget_ms,
-                   char *err, int errlen) {
+                   uint32_t flags, char *err, int errlen) {
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
         put(err, errlen, "needs a shell session", NULL);
@@ -120,12 +120,13 @@ int hl_elf_command(const char *path, int argc, const char **argv, const char *ro
     if (load(path, &m, err, errlen) != 0) {
         return -3;
     }
-    return moy_os_command(s, &m, NULL, argc, argv, roots, pid, id, bg_pid, budget_ms, err,
-                          (size_t)errlen);
+    return moy_os_command(s, &m, NULL, argc, argv, roots, pid, id, bg_pid, budget_ms, flags,
+                          err, (size_t)errlen);
 }
 
 int hl_elf_start(const char *path, int argc, const char **argv, const char *roots,
-                 uint32_t pid, const char *id, uint32_t budget_ms, char *err, int errlen) {
+                 uint32_t pid, const char *id, uint32_t budget_ms, uint32_t flags, char *err,
+                 int errlen) {
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
         put(err, errlen, "needs a shell session", NULL);
@@ -135,8 +136,8 @@ int hl_elf_start(const char *path, int argc, const char **argv, const char *root
     if (load(path, &m, err, errlen) != 0) {
         return -3;
     }
-    return moy_os_command_start(s, &m, NULL, argc, argv, roots, pid, id, 0, budget_ms, err,
-                                (size_t)errlen);
+    return moy_os_command_start(s, &m, NULL, argc, argv, roots, pid, id, 0, budget_ms, flags,
+                                err, (size_t)errlen);
 }
 
 int hl_elf_service(const char *path, uint32_t pid, const char *id, char *err, int errlen) {

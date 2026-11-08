@@ -31,6 +31,22 @@
 // session, so its file and stdin rows answer EACCES and its stdout and stderr
 // are the OS log's lines.
 //
+// MEMORY. mmap's anonymous mappings (the SDK's malloc takes its arenas so)
+// are PSRAM on a board, each in its process's record and freed at its end.
+//
+// SOCKETS (the `network` permission, MOY_OS_NET). The rows are BSD sockets
+// over the console's stack: lwIP's on a board, the host's own on the host,
+// each under its own headers' layout. A socket is a handle, its descriptor
+// MOY_OS_SOCK_FD + the handle's slot (below the C library's FD_SETSIZE, so
+// select takes it), read, written and closed by the file rows too, swept at
+// the end. Underneath every socket is non-blocking: a blocking call waits in
+// slices of MOY_OS_SLICE_US, so Ctrl-C and the budget end it there. The
+// first socket a process opens holds the network for it, on the task that
+// serves its session (the net hook, moy_os_set_net), and the process's end
+// lets it go. A row that needs the link (connect, sendto, a name lookup)
+// waits for it MOY_OS_LINK_US at most. A service has no session to hold the
+// network from, and its socket rows answer EACCES.
+//
 // ENDING. A row's wait is sliced, so a thread inside a row notices the end
 // within MOY_OS_SLICE_US and leaves; a thread in the module's own code is
 // deleted (a board) where it stands. A host cannot delete a thread: one that
@@ -80,6 +96,8 @@ typedef struct {
 #define MOY_OS_SLICE_US 20000       // a row's wait between looks at the process's end
 #define MOY_OS_REAP_US 2000000      // a stop's wait for the process's threads
 #define MOY_OS_STOP_US 2000000      // moy_stop's budget
+#define MOY_OS_LINK_US 20000000     // a socket row's wait for the network's link
+#define MOY_OS_SOCK_FD 32           // a socket's descriptor: this + its handle's slot
 
 // moy_os_command's answers below 0.
 #define MOY_OS_REFUSED (-3)         // it did not run: the reason in err
@@ -94,13 +112,15 @@ void moy_os_default_caps(moy_os_caps_t *caps);
 // task may touch), reaching the `roots` its permissions grant (NUL-separated,
 // ending in an empty one, relative to the store; NULL: none), process `pid`,
 // in the background when `bg_pid` is non-zero, ending at `budget_ms` (0: no
-// limit). `id` is the cart's id for its process row. Its exit status, or
+// limit), with what `flags` grants (MOY_OS_NET: the socket rows). `id` is
+// the cart's id for its process row. Its exit status, or
 // MOY_OS_REFUSED with the reason in `err`. The module is unloaded (m->unload)
 // before it answers, whatever it answers.
+#define MOY_OS_NET 1u
 int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                    int argc, const char *const *argv, const char *roots, uint32_t pid,
-                   const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
-                   size_t errlen);
+                   const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
+                   char *err, size_t errlen);
 
 // The same run in steps, so the task that serves it can go on between them
 // (the shell door's step, runtime/shell/sh_door.py): start answers 0 with
@@ -111,10 +131,17 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
 // touch the session.
 int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                          int argc, const char *const *argv, const char *roots, uint32_t pid,
-                         const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
-                         size_t errlen);
+                         const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
+                         char *err, size_t errlen);
 int moy_os_command_step(uint32_t pid, uint32_t max_us);
 int moy_os_command_stop(uint32_t pid);
+
+// The network's holder: net(ctx, pid, 1) when process `pid` opens its first
+// socket, net(ctx, pid, 0) at its end, each on the task that serves its
+// session (the console's, which holds the radio: runtime/run/elf_run.py).
+// NULL: nothing holds it.
+typedef void (*moy_os_net_fn)(void *ctx, uint32_t pid, int hold);
+void moy_os_set_net(moy_os_net_fn net, void *ctx);
 
 // Service module `m` started as process `pid` (`id` its cart's id): the
 // process, its moy_start running on its own task, or NULL with the reason in
@@ -126,7 +153,7 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
 // into its waiting calls, and a service that ended by itself (exit, its
 // moy_start failing) swept. The pids swept go to `ended` (up to `n`), with
 // their exit statuses in `codes`; answers how many.
-uint32_t moy_os_poll(uint32_t *ended, int32_t *codes, uint32_t n);
+uint32_t moy_os_poll_services(uint32_t *ended, int32_t *codes, uint32_t n);
 
 // Stop service `pid`: moy_stop on its task within MOY_OS_STOP_US, then every
 // thread ended and every registration swept. Its exit status (137 when
@@ -143,6 +170,9 @@ typedef struct {
     uint32_t events;            // moy_on calls made
     uint8_t service;            // 1 a service, 0 a command
     uint8_t ending;
+    uint8_t net;                // 1 while it holds the network
+    uint32_t sockets;           // sockets open
+    uint32_t mapped;            // bytes of its mappings
 } moy_os_info_t;
 int moy_os_info(uint32_t pid, moy_os_info_t *out);
 

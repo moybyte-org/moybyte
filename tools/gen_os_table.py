@@ -33,6 +33,10 @@ KERNEL_C = os.path.join(ROOT, "native", "moy_elf", "moy_os_table.c")
 SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "os.h")
 STUBS_C = os.path.join(ROOT, "sdk", "src", "moyos_stubs.c")
 
+# The rows that run the SDK's C library's exit path (__moy_exit, sdk/libc/)
+# before the kernel's: C's exit, never _exit.
+EXIT_HOOK = ("exit",)
+
 FIELDS = {"name", "kind", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired"}
 KINDS = ("posix", "moybyte")
 
@@ -193,9 +197,11 @@ def gen_rows_h(table):
          "// C library declares (a varargs row takes its one optional argument in the\n"
          "// place of the ...). native/moy_elf/moy_os.c defines them.\n",
          "#ifndef MOY_OS_ROWS_H", "#define MOY_OS_ROWS_H", "",
-         "#include <stdint.h>"]
+         "#include <stdint.h>", "#include <sys/types.h>", "",
+         "// A header a board's C library lacks (sys/mman.h) leaves its rows' types",
+         "// to sys/types.h."]
     for h in _headers(rows):
-        o.append("#include <%s>" % h)
+        o += ["#if __has_include(<%s>)" % h, "#include <%s>" % h, "#endif"]
     o += ["", "// The calling thread's errno, set by a row that fails.",
           "void moy_os_errno_set(int e);", ""]
     for r in rows:
@@ -323,6 +329,8 @@ def gen_stubs_c(table):
         o.append("typedef %s;" % kernel_proto(r, "moy_os_fn_").replace(
             "moy_os_fn_" + name + "(", "moy_os_fn_" + ident(name) + "(", 1))
         o.append("MOY_OS_USED(%d);" % i)
+        if name in EXIT_HOOK:
+            o.append('extern void __moy_exit(void) __attribute__((weak, visibility("hidden")));')
         sig = r["c"]
         if r.get("glibc"):
             o.append("#ifdef __GLIBC__")
@@ -345,6 +353,12 @@ def gen_stubs_c(table):
             o.append("        va_end(ap);")
             o.append("    }")
         call = "((moy_os_fn_%s *)__moy_os->fn[%d])(%s)" % (ident(name), i, args)
+        if name in EXIT_HOOK:
+            # The SDK's C library runs its atexit list and flushes its
+            # streams first, when the module links it (sdk/libc/).
+            o.append("    if (__moy_exit) {")
+            o.append("        __moy_exit();")
+            o.append("    }")
         if r.get("noreturn"):
             o.append("    %s;" % call)
             o.append("    __builtin_unreachable();")

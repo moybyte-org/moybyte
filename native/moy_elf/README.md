@@ -63,7 +63,7 @@ budget). No row is a second implementation of a shell or WASI call.
   ISR primitive.
 - A service's hooks are dispatched on its own task from one mailbox; a timer
   is an OS-owned `esp_timer` posting to it, an event a reader of the input
-  ring (`moy_input`) the VM task drains into it (`moy_os_poll`).
+  ring (`moy_input`) the VM task drains into it (`moy_os_poll_services`).
 - Every registration is a handle in the process's record, swept with its
   pid's leases however the process ends (`moy_os_stats`' `swept`).
 - A command's rows that touch the session run on the task that serves it.
@@ -74,6 +74,15 @@ budget). No row is a second implementation of a shell or WASI call.
   the background the door waits out the whole run, feeding the task
   watchdog. A WASI command is the same job (`native/moy_wasm/moy_wasi.h`),
   and both serve their steps through `native/moy_sh/moy_sh_prog.h`'s one loop.
+- Memory a module maps (`mmap`, the SDK's heap arenas) and its sockets are
+  handles in the same record, so the end frees and closes them
+  (`moy_os.h`'s MEMORY and SOCKETS).
+- The network is the radio's `native` lease tag
+  (`native/moy_kernel/moy_lease.h`): a process's first socket calls the net
+  hook (`moy_elf.on_net` on a board, `elf_binding.on_net` on the host) on
+  the task that serves its session, and `runtime/run/elf_run.py` holds the
+  WiFi for it until the last such process ends. The `network` permission
+  reaches the kernel as the run's `MOY_OS_NET` flag (`runtime/shell/sh_door.py`).
 
 ## Signing
 

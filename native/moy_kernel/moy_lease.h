@@ -44,7 +44,7 @@
 // one row while anything holds it, owned by the shell (pid 1, which powers
 // the station up and down), whose `tags` are its holders, each a bit of the
 // closed table moy_lease_wifi_tag names ("web", "update", "settings", "cart",
-// "link", "carts", "dev", "http", "media", "ssh"). A hold is idempotent per
+// "link", "carts", "dev", "http", "media", "ssh", "native"). A hold is idempotent per
 // tag; the last release lets the row go. The row survives a VM stop with the
 // table; a VM's fresh start (not a return start) lets it go with
 // moy_lease_wifi_reset. Dropped any other way, the holders are forgotten and
@@ -106,7 +106,7 @@ enum {
 #define MOY_LEASE_EDGES 4u          // edge sources a lease holds
 #define MOY_LEASE_NAME 7u
 #define MOY_LEASE_PIN_MAX 64u
-#define MOY_LEASE_WIFI_TAGS 10u     // the radio's holder tags
+#define MOY_LEASE_WIFI_TAGS 11u     // the radio's holder tags
 #define MOY_LEASE_SHELL 1u          // the radio row's owner, the shell's pid
 
 typedef struct {

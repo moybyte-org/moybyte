@@ -33,8 +33,34 @@
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
 #else
+#include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <setjmp.h>
+#include <unistd.h>
+#endif
+
+// The memory rows' values where a board's C library has no sys/mman.h:
+// sdk/sysroot/include/sys/mman.h's, which are Linux's.
+#if __has_include(<sys/mman.h>)
+#include <sys/mman.h>
+#endif
+#ifndef MAP_ANONYMOUS
+#define PROT_READ 0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC 0x4
+#define MAP_SHARED 0x01
+#define MAP_PRIVATE 0x02
+#define MAP_ANONYMOUS 0x20
+#define MAP_FAILED ((void *)-1)
+#endif
+
+// The sockets' stack: lwIP's calls on a board, the host's own.
+#ifdef MOY_OS_BOARD
+#define SK(f) lwip_##f
+int moy_net_link(uint32_t *ip) __attribute__((weak));
+#else
+#define SK(f) f
 #endif
 
 // The input table's readers and the lease table's sweep, where the image has them.
@@ -196,7 +222,7 @@ static bool task_is(task_t a, task_t b) {
 // -- the records ------------------------------------------------------------------
 
 enum { T_FREE = 0, T_LIVE, T_DONE };
-enum { H_FREE = 0, H_TIMER, H_MUTEX, H_DIR, H_READER, H_FD };
+enum { H_FREE = 0, H_TIMER, H_MUTEX, H_DIR, H_READER, H_FD, H_SOCK, H_ADDR };
 enum { M_START = 1, M_TIMER, M_ON, M_STOP };
 
 typedef struct {
@@ -227,10 +253,20 @@ typedef struct {
 typedef struct {
     uint8_t kind;
     uint8_t gen;
-    int fd;                     // H_FD: the session's descriptor; H_READER: the reader, -1 before the poll makes it
-    uint32_t kinds;             // H_READER: the event kinds asked for
-    void *ptr;
+    int fd;                     // H_FD: the session's descriptor; H_READER: the reader, -1 before
+                                // the poll makes it; H_SOCK: the stack's descriptor
+    uint32_t kinds;             // H_READER: the event kinds asked for; H_SOCK: SK_NONBLOCK
+    void *ptr;                  // H_ADDR: the stack's lookup answer
+    uint32_t rcv_ms, snd_ms;    // H_SOCK: SO_RCVTIMEO and SO_SNDTIMEO (0: none)
 } handle_t;
+
+#define SK_NONBLOCK 1u
+
+typedef struct map {
+    struct map *next;
+    size_t len;
+} map_t;
+#define MAP_HDR ((sizeof(map_t) + 15u) & ~(size_t)15u)
 
 typedef struct {
     uint8_t kind;
@@ -284,11 +320,17 @@ struct moy_os_proc {
     // what it holds
     thr_t thr[MOY_OS_THREADS];
     handle_t h[MOY_OS_HANDLES];
+    map_t *maps;                // mmap's, newest first
+    size_t mapped;
+    uint32_t flags;             // MOY_OS_NET
+    volatile uint8_t net_held;
     uint32_t calls, timers, events;
 };
 
 static moy_os_proc_t *g_proc[MOY_OS_PROCS];
 static moy_os_stats_t g_stats;
+static moy_os_net_fn g_net;
+static void *g_net_ctx;
 static int g_err_none;              // errno for a thread no process owns
 
 static void log_line(moy_os_proc_t *p, int level, const char *text) {
@@ -544,6 +586,12 @@ static void handle_drop(moy_os_proc_t *p, uint32_t i) {
             moy_sh_fd_close(p->s, h->fd);
         }
         break;
+    case H_SOCK:
+        SK(close)(h->fd);
+        break;
+    case H_ADDR:
+        SK(freeaddrinfo)(h->ptr);
+        break;
     default:
         return;
     }
@@ -593,6 +641,10 @@ static int on_session(thr_t *t, void (*fn)(void *arg), void *arg) {
 }
 
 // -- the rows: files and streams ----------------------------------------------------
+
+// A socket descriptor's handle slot in `p`, or -1 (the sockets' rows, below).
+static int sock_slot(moy_os_proc_t *p, int fd);
+static long sock_io(thr_t *t, int slot, void *buf, size_t n, int flags, bool wr);
 
 typedef struct {
     moy_os_proc_t *p;
@@ -860,32 +912,59 @@ int moy_os_open(const char *path, int flags, int mode) {
 
 int moy_os_close(int fd) {
     thr_t *t = enter();
-    fcall_t c = { .op = F_CLOSE, .fd = fd };
-    long r = fcall(t, &c);
+    long r;
+    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    if (k >= 0) {
+        lock();
+        handle_drop(t->p, (uint32_t)k);
+        unlock();
+        r = 0;
+    } else {
+        fcall_t c = { .op = F_CLOSE, .fd = fd };
+        r = fcall(t, &c);
+    }
     leave(t);
     return (int)r;
 }
 
 ssize_t moy_os_read(int fd, void *buf, size_t n) {
     thr_t *t = enter();
-    fcall_t c = { .op = F_READ, .fd = fd, .buf = buf, .n = n };
-    long r = fcall(t, &c);
+    long r;
+    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    if (k >= 0) {
+        r = sock_io(t, k, buf, n, 0, false);
+    } else {
+        fcall_t c = { .op = F_READ, .fd = fd, .buf = buf, .n = n };
+        r = fcall(t, &c);
+    }
     leave(t);
     return (ssize_t)r;
 }
 
 ssize_t moy_os_write(int fd, const void *buf, size_t n) {
     thr_t *t = enter();
-    fcall_t c = { .op = F_WRITE, .fd = fd, .buf = (void *)buf, .n = n };
-    long r = fcall(t, &c);
+    long r;
+    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    if (k >= 0) {
+        r = sock_io(t, k, (void *)buf, n, 0, true);
+    } else {
+        fcall_t c = { .op = F_WRITE, .fd = fd, .buf = (void *)buf, .n = n };
+        r = fcall(t, &c);
+    }
     leave(t);
     return (ssize_t)r;
 }
 
 off_t moy_os_lseek(int fd, off_t at, int whence) {
     thr_t *t = enter();
-    fcall_t c = { .op = F_SEEK, .fd = fd, .at = (int64_t)at, .whence = whence };
-    long r = fcall(t, &c);
+    long r;
+    if (t != NULL && sock_slot(t->p, fd) >= 0) {
+        moy_os_errno_set(ESPIPE);
+        r = -1;
+    } else {
+        fcall_t c = { .op = F_SEEK, .fd = fd, .at = (int64_t)at, .whence = whence };
+        r = fcall(t, &c);
+    }
     leave(t);
     return (off_t)r;
 }
@@ -913,6 +992,13 @@ int moy_os_stat(const char *path, struct stat *st) {
 
 int moy_os_fstat(int fd, struct stat *st) {
     thr_t *t = enter();
+    if (t != NULL && sock_slot(t->p, fd) >= 0) {
+        memset(st, 0, sizeof *st);
+        st->st_mode = S_IFSOCK | 0666;
+        st->st_nlink = 1;
+        leave(t);
+        return 0;
+    }
     fcall_t c = { .op = F_FSTAT, .fd = fd };
     long r = fcall(t, &c);
     if (r == 0) {
@@ -924,6 +1010,11 @@ int moy_os_fstat(int fd, struct stat *st) {
 
 int moy_os_isatty(int fd) {
     thr_t *t = enter();
+    if (t != NULL && sock_slot(t->p, fd) >= 0) {
+        moy_os_errno_set(ENOTTY);
+        leave(t);
+        return 0;
+    }
     fcall_t c = { .op = F_FSTAT, .fd = fd };
     long r = fcall(t, &c);
     leave(t);
@@ -1542,6 +1633,648 @@ int moy_os_moy_events(uint32_t kinds) {
     return r;
 }
 
+// -- the rows: memory -----------------------------------------------------------------
+
+void *moy_os_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    (void)addr;
+    (void)prot;
+    (void)off;
+    thr_t *t = enter();
+    void *out = MAP_FAILED;
+    if (t == NULL) {
+        moy_os_errno_set(EPERM);
+    } else if (len == 0 || fd != -1 || !(flags & MAP_ANONYMOUS) || (flags & MAP_SHARED)) {
+        moy_os_errno_set(len == 0 ? EINVAL : ENODEV);
+    } else {
+        map_t *m = len < (size_t)-1 - MAP_HDR ? os_alloc(MAP_HDR + len) : NULL;
+        if (m == NULL) {
+            moy_os_errno_set(ENOMEM);
+        } else {
+            m->len = len;
+            lock();
+            m->next = t->p->maps;
+            t->p->maps = m;
+            t->p->mapped += len;
+            unlock();
+            out = (char *)m + MAP_HDR;
+        }
+    }
+    leave(t);
+    return out;
+}
+
+int moy_os_munmap(void *addr, size_t len) {
+    (void)len;
+    thr_t *t = enter();
+    map_t *m = NULL;
+    if (t != NULL) {
+        lock();
+        for (map_t **at = &t->p->maps; *at != NULL; at = &(*at)->next) {
+            if ((char *)*at + MAP_HDR == (char *)addr) {
+                m = *at;
+                *at = m->next;
+                t->p->mapped -= m->len;
+                break;
+            }
+        }
+        unlock();
+    }
+    if (m != NULL) {
+        os_free(m);
+    } else {
+        moy_os_errno_set(EINVAL);
+    }
+    leave(t);
+    return m != NULL ? 0 : -1;
+}
+
+// -- the rows: sockets ----------------------------------------------------------------
+
+static int sock_slot(moy_os_proc_t *p, int fd) {
+    int k = fd - MOY_OS_SOCK_FD;
+    if (k < 0 || k >= (int)MOY_OS_HANDLES || p->h[k].kind != H_SOCK) {
+        return -1;
+    }
+    return k;
+}
+
+static void net_body(void *arg) {
+    moy_os_proc_t *p = arg;
+    if (!p->net_held) {
+        if (g_net != NULL) {
+            g_net(g_net_ctx, p->pid, 1);
+        }
+        p->net_held = 1;
+    }
+}
+
+// The process may use the network, and holds it: 0, or an errno value.
+static int net_need(thr_t *t) {
+    if (t == NULL) {
+        return EPERM;
+    }
+    moy_os_proc_t *p = t->p;
+    if (!(p->flags & MOY_OS_NET) || p->s == NULL) {
+        return EACCES;
+    }
+    if (!p->net_held && on_session(t, net_body, p) != 0) {
+        return EINTR;
+    }
+    return 0;
+}
+
+// The network's link up, waited for MOY_OS_LINK_US at most: 0, or an errno.
+static int link_wait(thr_t *t) {
+#ifdef MOY_OS_BOARD
+    if (moy_net_link == NULL) {
+        return 0;
+    }
+    int64_t end = mono_us() + MOY_OS_LINK_US;
+    uint32_t ip;
+    while (!moy_net_link(&ip)) {
+        if (mono_us() >= end) {
+            return ENETUNREACH;
+        }
+        if (doze(t, MOY_OS_SLICE_US) != 0) {
+            return EINTR;
+        }
+    }
+#else
+    (void)t;
+#endif
+    return 0;
+}
+
+// For each of `n` stack sockets lfd[i], what of POLLIN and POLLOUT in want[i]
+// is ready, and POLLERR, after waiting `us` at most for any: how many are.
+static int sk_ready(const int *lfd, const short *want, short *got, int n, int64_t us) {
+#ifdef MOY_OS_BOARD
+    fd_set rs, ws, es;
+    FD_ZERO(&rs);
+    FD_ZERO(&ws);
+    FD_ZERO(&es);
+    int top = -1;
+    for (int i = 0; i < n; i++) {
+        if (want[i] & POLLIN) {
+            FD_SET(lfd[i], &rs);
+        }
+        if (want[i] & POLLOUT) {
+            FD_SET(lfd[i], &ws);
+        }
+        FD_SET(lfd[i], &es);
+        top = lfd[i] > top ? lfd[i] : top;
+    }
+    struct timeval tv = { (time_t)(us / 1000000), (suseconds_t)(us % 1000000) };
+    int r = lwip_select(top + 1, &rs, &ws, &es, &tv);
+    int ready = 0;
+    for (int i = 0; i < n; i++) {
+        got[i] = 0;
+        if (r > 0) {
+            got[i] = (short)((FD_ISSET(lfd[i], &rs) ? POLLIN : 0)
+                             | (FD_ISSET(lfd[i], &ws) ? POLLOUT : 0)
+                             | (FD_ISSET(lfd[i], &es) ? POLLERR : 0));
+        }
+        ready += got[i] != 0;
+    }
+    return ready;
+#else
+    struct pollfd fds[MOY_OS_HANDLES];
+    for (int i = 0; i < n; i++) {
+        fds[i].fd = lfd[i];
+        fds[i].events = want[i];
+        fds[i].revents = 0;
+    }
+    int r = poll(fds, (nfds_t)n, (int)((us + 999) / 1000));
+    int ready = 0;
+    for (int i = 0; i < n; i++) {
+        got[i] = r > 0 ? fds[i].revents : 0;
+        ready += got[i] != 0;
+    }
+    return ready;
+#endif
+}
+
+// Wait for socket `slot` to be readable (or writable): 0, EAGAIN at `ms`
+// (0: no limit), EINTR when the process ends.
+static int sk_block(thr_t *t, int lfd, bool wr, uint32_t ms) {
+    int64_t end = ms ? mono_us() + (int64_t)ms * 1000 : 0;
+    for (;;) {
+        if (ending(t)) {
+            return EINTR;
+        }
+        int64_t slice = MOY_OS_SLICE_US;
+        if (end) {
+            int64_t left = end - mono_us();
+            if (left <= 0) {
+                return EAGAIN;
+            }
+            slice = left < slice ? left : slice;
+        }
+        short want = wr ? POLLOUT : POLLIN, got = 0;
+        if (sk_ready(&lfd, &want, &got, 1, slice) > 0) {
+            return 0;
+        }
+    }
+}
+
+static bool would_block(int e) {
+    return e == EAGAIN || e == EWOULDBLOCK || e == EINPROGRESS;
+}
+
+// A stack socket made non-blocking and given a handle: its descriptor, or -1.
+static int sock_adopt(thr_t *t, int lfd, uint32_t flags) {
+#ifdef MOY_OS_BOARD
+    lwip_fcntl(lfd, F_SETFL, O_NONBLOCK);
+#else
+    fcntl(lfd, F_SETFL, fcntl(lfd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+    lock();
+    int h = handle_new(t->p, H_SOCK, NULL, lfd);
+    if (h >= 0) {
+        t->p->h[h].kinds = flags;
+        t->p->h[h].rcv_ms = t->p->h[h].snd_ms = 0;
+    }
+    unlock();
+    if (h < 0) {
+        SK(close)(lfd);
+        moy_os_errno_set(EMFILE);
+        return -1;
+    }
+    return MOY_OS_SOCK_FD + h;
+}
+
+// recv or send on `slot`, as its blocking mode and `flags` say.
+static long sock_io(thr_t *t, int slot, void *buf, size_t n, int flags, bool wr) {
+    handle_t *h = &t->p->h[slot];
+    bool block = !(h->kinds & SK_NONBLOCK) && !(flags & MSG_DONTWAIT);
+    for (;;) {
+        long r = wr ? (long)SK(send)(h->fd, buf, n, flags | MSG_DONTWAIT)
+                    : (long)SK(recv)(h->fd, buf, n, flags | MSG_DONTWAIT);
+        if (r >= 0) {
+            return r;
+        }
+        int e = errno;
+        if (!block || !would_block(e)) {
+            moy_os_errno_set(e);
+            return -1;
+        }
+        if ((e = sk_block(t, h->fd, wr, wr ? h->snd_ms : h->rcv_ms)) != 0) {
+            moy_os_errno_set(e);
+            return -1;
+        }
+    }
+}
+
+// The socket row's prologue: the calling thread, and the slot of `fd` (or
+// -1 with errno set).
+static int sock_of(thr_t *t, int fd) {
+    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    if (k < 0) {
+        moy_os_errno_set(t == NULL ? EPERM : EBADF);
+    }
+    return k;
+}
+
+int moy_os_socket(int domain, int type, int protocol) {
+    thr_t *t = enter();
+    int r = -1, e = net_need(t);
+    uint32_t flags = 0;
+#ifdef SOCK_NONBLOCK
+    if (type & SOCK_NONBLOCK) {
+        flags |= SK_NONBLOCK;
+    }
+    type &= ~(SOCK_NONBLOCK | SOCK_CLOEXEC);
+#endif
+    if (e != 0) {
+        moy_os_errno_set(e);
+    } else {
+        int lfd = SK(socket)(domain, type, protocol);
+        if (lfd < 0) {
+            moy_os_errno_set(errno);
+        } else {
+            r = sock_adopt(t, lfd, flags);
+        }
+    }
+    leave(t);
+    return r;
+}
+
+// A call on the stack's socket that answers at once: its answer, errno set.
+#define SOCK_CALL(fd, call)                         \
+    thr_t *t = enter();                             \
+    int k = sock_of(t, fd), r = -1;                 \
+    if (k >= 0) {                                   \
+        int lfd = t->p->h[k].fd;                    \
+        (void)lfd;                                  \
+        r = (call);                                 \
+        if (r < 0) {                                \
+            moy_os_errno_set(errno);                \
+        }                                           \
+    }                                               \
+    leave(t);                                       \
+    return r
+
+int moy_os_bind(int fd, const struct sockaddr *addr, socklen_t len) {
+    SOCK_CALL(fd, SK(bind)(lfd, addr, len));
+}
+
+int moy_os_listen(int fd, int backlog) {
+    SOCK_CALL(fd, SK(listen)(lfd, backlog));
+}
+
+int moy_os_shutdown(int fd, int how) {
+    SOCK_CALL(fd, SK(shutdown)(lfd, how));
+}
+
+int moy_os_getsockname(int fd, struct sockaddr *addr, socklen_t *len) {
+    SOCK_CALL(fd, SK(getsockname)(lfd, addr, len));
+}
+
+int moy_os_getpeername(int fd, struct sockaddr *addr, socklen_t *len) {
+    SOCK_CALL(fd, SK(getpeername)(lfd, addr, len));
+}
+
+int moy_os_getsockopt(int fd, int level, int name, void *val, socklen_t *len) {
+    SOCK_CALL(fd, SK(getsockopt)(lfd, level, name, val, len));
+}
+
+int moy_os_setsockopt(int fd, int level, int name, const void *val, socklen_t len) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd), r = -1;
+    if (k >= 0) {
+        if (level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO)) {
+            // The OS's wait keeps them: underneath, the socket never blocks.
+            if (val == NULL || len < (socklen_t)sizeof(struct timeval)) {
+                moy_os_errno_set(EINVAL);
+            } else {
+                const struct timeval *tv = val;
+                uint32_t ms = (uint32_t)(tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000);
+                *(name == SO_RCVTIMEO ? &t->p->h[k].rcv_ms : &t->p->h[k].snd_ms) = ms;
+                r = 0;
+            }
+        } else {
+            r = SK(setsockopt)(t->p->h[k].fd, level, name, val, len);
+            if (r < 0) {
+                moy_os_errno_set(errno);
+            }
+        }
+    }
+    leave(t);
+    return r;
+}
+
+int moy_os_accept(int fd, struct sockaddr *addr, socklen_t *len) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd), r = -1;
+    while (k >= 0) {
+        handle_t *h = &t->p->h[k];
+        int lfd = SK(accept)(h->fd, addr, len);
+        if (lfd >= 0) {
+            r = sock_adopt(t, lfd, 0);
+            break;
+        }
+        int e = errno;
+        if ((h->kinds & SK_NONBLOCK) || !would_block(e)
+            || (e = sk_block(t, h->fd, false, h->rcv_ms)) != 0) {
+            moy_os_errno_set(e);
+            break;
+        }
+    }
+    leave(t);
+    return r;
+}
+
+int moy_os_connect(int fd, const struct sockaddr *addr, socklen_t len) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd), r = -1, e;
+    if (k >= 0 && (e = link_wait(t)) != 0) {
+        moy_os_errno_set(e);
+    } else if (k >= 0) {
+        handle_t *h = &t->p->h[k];
+        r = SK(connect)(h->fd, addr, len);
+        e = r < 0 ? errno : 0;
+        if (r < 0 && would_block(e) && !(h->kinds & SK_NONBLOCK)) {
+            e = sk_block(t, h->fd, true, h->snd_ms);
+            if (e == 0) {
+                int err = 0;
+                socklen_t n = sizeof err;
+                SK(getsockopt)(h->fd, SOL_SOCKET, SO_ERROR, &err, &n);
+                e = err;
+            } else if (e == EAGAIN) {
+                e = ETIMEDOUT;
+            }
+            r = e == 0 ? 0 : -1;
+        } else if (r < 0 && e == EAGAIN) {
+            e = EINPROGRESS;
+        }
+        if (r < 0) {
+            moy_os_errno_set(e);
+        }
+    }
+    leave(t);
+    return r;
+}
+
+ssize_t moy_os_send(int fd, const void *buf, size_t n, int flags) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd);
+    long r = k >= 0 ? sock_io(t, k, (void *)buf, n, flags, true) : -1;
+    leave(t);
+    return (ssize_t)r;
+}
+
+ssize_t moy_os_recv(int fd, void *buf, size_t n, int flags) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd);
+    long r = k >= 0 ? sock_io(t, k, buf, n, flags, false) : -1;
+    leave(t);
+    return (ssize_t)r;
+}
+
+ssize_t moy_os_sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to,
+                      socklen_t len) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd), e;
+    long r = -1;
+    if (k >= 0 && to != NULL && (e = link_wait(t)) != 0) {
+        moy_os_errno_set(e);
+    } else if (k >= 0) {
+        handle_t *h = &t->p->h[k];
+        bool block = !(h->kinds & SK_NONBLOCK) && !(flags & MSG_DONTWAIT);
+        for (;;) {
+            r = (long)SK(sendto)(h->fd, buf, n, flags | MSG_DONTWAIT, to, len);
+            if (r >= 0) {
+                break;
+            }
+            e = errno;
+            if (!block || !would_block(e) || (e = sk_block(t, h->fd, true, h->snd_ms)) != 0) {
+                moy_os_errno_set(e);
+                break;
+            }
+        }
+    }
+    leave(t);
+    return (ssize_t)r;
+}
+
+ssize_t moy_os_recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *from,
+                        socklen_t *len) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd), e;
+    long r = -1;
+    if (k >= 0) {
+        handle_t *h = &t->p->h[k];
+        bool block = !(h->kinds & SK_NONBLOCK) && !(flags & MSG_DONTWAIT);
+        for (;;) {
+            r = (long)SK(recvfrom)(h->fd, buf, n, flags | MSG_DONTWAIT, from, len);
+            if (r >= 0) {
+                break;
+            }
+            e = errno;
+            if (!block || !would_block(e) || (e = sk_block(t, h->fd, false, h->rcv_ms)) != 0) {
+                moy_os_errno_set(e);
+                break;
+            }
+        }
+    }
+    leave(t);
+    return (ssize_t)r;
+}
+
+int moy_os_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
+                       struct addrinfo **res) {
+    thr_t *t = enter();
+    int r = EAI_FAIL, e = net_need(t);
+    bool numeric = node == NULL || (hints != NULL && (hints->ai_flags & AI_NUMERICHOST));
+    if (e == 0 && !numeric) {
+        e = link_wait(t);
+    }
+    if (e != 0) {
+        moy_os_errno_set(e);
+    } else {
+        r = SK(getaddrinfo)(node, service, hints, res);
+        if (r == 0) {
+            lock();
+            int h = handle_new(t->p, H_ADDR, *res, -1);
+            unlock();
+            if (h < 0) {
+                SK(freeaddrinfo)(*res);
+                *res = NULL;
+                r = EAI_MEMORY;
+            }
+        }
+    }
+    leave(t);
+    return r;
+}
+
+void moy_os_freeaddrinfo(struct addrinfo *ai) {
+    thr_t *t = enter();
+    if (t != NULL && ai != NULL) {
+        lock();
+        for (uint32_t i = 0; i < MOY_OS_HANDLES; i++) {
+            if (t->p->h[i].kind == H_ADDR && t->p->h[i].ptr == ai) {
+                handle_drop(t->p, i);
+                break;
+            }
+        }
+        unlock();
+    }
+    leave(t);
+}
+
+// poll over any of the process's descriptors: a socket as the stack says, a
+// file or stream of the session at once (its reads and writes never wait).
+static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
+    moy_os_proc_t *p = t->p;
+    int64_t end = timeout_ms < 0 ? 0 : mono_us() + (int64_t)timeout_ms * 1000;
+    int lfd[MOY_OS_HANDLES];
+    short want[MOY_OS_HANDLES], got[MOY_OS_HANDLES];
+    nfds_t at[MOY_OS_HANDLES];
+    for (;;) {
+        int ready = 0, m = 0;
+        for (nfds_t i = 0; i < n; i++) {
+            struct pollfd *f = &fds[i];
+            f->revents = 0;
+            if (f->fd < 0) {
+                continue;
+            }
+            int k = sock_slot(p, f->fd);
+            if (k >= 0) {
+                if (m < (int)MOY_OS_HANDLES) {
+                    lfd[m] = p->h[k].fd;
+                    want[m] = (short)(f->events & (POLLIN | POLLOUT));
+                    at[m++] = i;
+                }
+            } else if ((f->fd >= 0 && f->fd <= 2) || fd_owned(p, f->fd) >= 0) {
+                f->revents = (short)(f->events & (POLLIN | POLLOUT));
+            } else {
+                f->revents = POLLNVAL;
+            }
+            ready += f->revents != 0;
+        }
+        int64_t slice = 0;
+        if (ready == 0) {
+            slice = MOY_OS_SLICE_US;
+            if (end) {
+                int64_t left = end - mono_us();
+                slice = left <= 0 ? 0 : left < slice ? left : slice;
+            }
+        }
+        if (m > 0 && sk_ready(lfd, want, got, m, slice) > 0) {
+            for (int j = 0; j < m; j++) {
+                fds[at[j]].revents = (short)(got[j] & (fds[at[j]].events | POLLERR | POLLHUP));
+                ready += fds[at[j]].revents != 0;
+            }
+        } else if (m == 0 && slice > 0 && doze(t, slice) != 0) {
+            return -EINTR;
+        }
+        if (ready > 0 || (end && mono_us() >= end) || timeout_ms == 0) {
+            return ready;
+        }
+        if (ending(t)) {
+            return -EINTR;
+        }
+    }
+}
+
+int moy_os_poll(struct pollfd *fds, nfds_t n, int timeout) {
+    thr_t *t = enter();
+    int r = -1;
+    if (t == NULL) {
+        moy_os_errno_set(EPERM);
+    } else {
+        r = poll_in(t, fds, n, timeout);
+        if (r < 0) {
+            moy_os_errno_set(-r);
+            r = -1;
+        }
+    }
+    leave(t);
+    return r;
+}
+
+int moy_os_select(int n, fd_set *rs, fd_set *ws, fd_set *es, struct timeval *tv) {
+    thr_t *t = enter();
+    int r = -1;
+    struct pollfd fds[FD_SETSIZE];
+    nfds_t m = 0;
+    if (t == NULL) {
+        moy_os_errno_set(EPERM);
+    } else if (n < 0 || n > FD_SETSIZE) {
+        moy_os_errno_set(EINVAL);
+    } else {
+        for (int fd = 0; fd < n; fd++) {
+            short ev = (short)((rs != NULL && FD_ISSET(fd, rs) ? POLLIN : 0)
+                               | (ws != NULL && FD_ISSET(fd, ws) ? POLLOUT : 0));
+            if (ev || (es != NULL && FD_ISSET(fd, es))) {
+                fds[m].fd = fd;
+                fds[m].events = ev;
+                m++;
+            }
+        }
+        int ms = tv == NULL ? -1 : (int)(tv->tv_sec * 1000 + (tv->tv_usec + 999) / 1000);
+        r = poll_in(t, fds, m, ms);
+        if (r < 0) {
+            moy_os_errno_set(-r);
+            r = -1;
+        } else {
+            r = 0;
+            for (nfds_t i = 0; i < m; i++) {
+                int fd = fds[i].fd;
+                short ev = fds[i].revents;
+                if (ev & POLLNVAL) {
+                    moy_os_errno_set(EBADF);
+                    r = -1;
+                    break;
+                }
+                if (rs != NULL && FD_ISSET(fd, rs) && !(ev & (POLLIN | POLLERR | POLLHUP))) {
+                    FD_CLR(fd, rs);
+                }
+                if (ws != NULL && FD_ISSET(fd, ws) && !(ev & (POLLOUT | POLLERR))) {
+                    FD_CLR(fd, ws);
+                }
+                if (es != NULL && FD_ISSET(fd, es)) {
+                    FD_CLR(fd, es);
+                }
+                r += (rs != NULL && FD_ISSET(fd, rs)) + (ws != NULL && FD_ISSET(fd, ws));
+            }
+        }
+    }
+    leave(t);
+    return r;
+}
+
+int moy_os_fcntl(int fd, int cmd, int arg) {
+    thr_t *t = enter();
+    int r = -1;
+    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    if (t == NULL) {
+        moy_os_errno_set(EPERM);
+    } else if (k < 0 && !(fd >= 0 && fd <= 2) && fd_owned(t->p, fd) < 0) {
+        moy_os_errno_set(EBADF);
+    } else if (cmd == F_GETFD || cmd == F_SETFD) {
+        r = 0;
+    } else if (cmd == F_GETFL) {
+        r = O_RDWR | (k >= 0 && (t->p->h[k].kinds & SK_NONBLOCK) ? O_NONBLOCK : 0);
+    } else if (cmd == F_SETFL) {
+        if (k >= 0) {
+            t->p->h[k].kinds = (arg & O_NONBLOCK) ? (t->p->h[k].kinds | SK_NONBLOCK)
+                                                  : (t->p->h[k].kinds & ~SK_NONBLOCK);
+        }
+        r = 0;
+    } else {
+        moy_os_errno_set(EINVAL);
+    }
+    leave(t);
+    return r;
+}
+
+void moy_os_set_net(moy_os_net_fn net, void *ctx) {
+    g_net_ctx = ctx;
+    g_net = net;
+}
+
 // -- processes --------------------------------------------------------------------------
 
 // The S3s: core 1 only (tiers.md), at the VM's own priority there, so a
@@ -1673,12 +2406,23 @@ static bool proc_end(moy_os_proc_t *p) {
         }
     }
     g_stats.swept += swept;
+    map_t *maps = p->maps;
+    p->maps = NULL;
+    p->mapped = 0;
     for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
         if (g_proc[i] == p) {
             g_proc[i] = NULL;
         }
     }
     unlock();
+    while (maps != NULL) {
+        map_t *m = maps;
+        maps = m->next;
+        os_free(m);
+    }
+    if (p->net_held && g_net != NULL) {
+        g_net(g_net_ctx, p->pid, 0);
+    }
     if (moy_lease_sweep != NULL) {
         moy_lease_sweep(p->pid);
     }
@@ -1737,8 +2481,8 @@ static moy_os_proc_t *proc_of(uint32_t pid);
 
 int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                          int argc, const char *const *argv, const char *roots, uint32_t pid,
-                         const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
-                         size_t errlen) {
+                         const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
+                         char *err, size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, false, err, errlen);
     if (p == NULL) {
         if (m->unload != NULL) {
@@ -1747,6 +2491,7 @@ int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_cap
         return MOY_OS_REFUSED;
     }
     p->s = s;
+    p->flags = flags;
     size_t args_n = 0;
     for (int i = 0; i < argc; i++) {
         args_n += strlen(argv[i]) + 1;
@@ -1836,10 +2581,10 @@ int moy_os_command_stop(uint32_t pid) {
 
 int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                    int argc, const char *const *argv, const char *roots, uint32_t pid,
-                   const char *id, uint32_t bg_pid, uint32_t budget_ms, char *err,
-                   size_t errlen) {
+                   const char *id, uint32_t bg_pid, uint32_t budget_ms, uint32_t flags,
+                   char *err, size_t errlen) {
     int r = moy_os_command_start(s, m, caps, argc, argv, roots, pid, id, bg_pid, budget_ms,
-                                 err, errlen);
+                                 flags, err, errlen);
     if (r != 0) {
         return r;
     }
@@ -1879,7 +2624,7 @@ static moy_os_proc_t *proc_of(uint32_t pid) {
     return NULL;
 }
 
-uint32_t moy_os_poll(uint32_t *ended, int32_t *codes, uint32_t n) {
+uint32_t moy_os_poll_services(uint32_t *ended, int32_t *codes, uint32_t n) {
     uint32_t got = 0;
     moy_input_t *in = moy_input_kernel != NULL ? moy_input_kernel() : NULL;
     for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
@@ -1976,6 +2721,11 @@ int moy_os_info(uint32_t pid, moy_os_info_t *out) {
     out->events = p->events;
     out->service = p->service;
     out->ending = p->ending;
+    out->net = p->net_held;
+    for (uint32_t i = 0; i < MOY_OS_HANDLES; i++) {
+        out->sockets += p->h[i].kind == H_SOCK;
+    }
+    out->mapped = (uint32_t)p->mapped;
     return 0;
 }
 

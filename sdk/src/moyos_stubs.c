@@ -206,8 +206,12 @@ char *getenv(const char *name)
 #include <stdlib.h>
 typedef void moy_os_fn_exit(int code);
 MOY_OS_USED(17);
+extern void __moy_exit(void) __attribute__((weak, visibility("hidden")));
 void exit(int code)
 {
+    if (__moy_exit) {
+        __moy_exit();
+    }
     ((moy_os_fn_exit *)__moy_os->fn[17])(code);
     __builtin_unreachable();
 }
@@ -446,5 +450,222 @@ MOY_OS_USED(40);
 int moy_events(uint32_t kinds)
 {
     return ((moy_os_fn_moy_events *)__moy_os->fn[40])(kinds);
+}
+#endif
+
+#if MOY_OS_ROW(41)
+#include <sys/mman.h>
+typedef void *moy_os_fn_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
+MOY_OS_USED(41);
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
+{
+    return ((moy_os_fn_mmap *)__moy_os->fn[41])(addr, len, prot, flags, fd, off);
+}
+#endif
+
+#if MOY_OS_ROW(42)
+#include <sys/mman.h>
+typedef int moy_os_fn_munmap(void *addr, size_t len);
+MOY_OS_USED(42);
+int munmap(void *addr, size_t len)
+{
+    return ((moy_os_fn_munmap *)__moy_os->fn[42])(addr, len);
+}
+#endif
+
+#if MOY_OS_ROW(43)
+#include <sys/socket.h>
+typedef int moy_os_fn_socket(int domain, int type, int protocol);
+MOY_OS_USED(43);
+int socket(int domain, int type, int protocol)
+{
+    return ((moy_os_fn_socket *)__moy_os->fn[43])(domain, type, protocol);
+}
+#endif
+
+#if MOY_OS_ROW(44)
+#include <sys/socket.h>
+typedef int moy_os_fn_bind(int fd, const struct sockaddr *addr, socklen_t len);
+MOY_OS_USED(44);
+int bind(int fd, const struct sockaddr *addr, socklen_t len)
+{
+    return ((moy_os_fn_bind *)__moy_os->fn[44])(fd, addr, len);
+}
+#endif
+
+#if MOY_OS_ROW(45)
+#include <sys/socket.h>
+typedef int moy_os_fn_listen(int fd, int backlog);
+MOY_OS_USED(45);
+int listen(int fd, int backlog)
+{
+    return ((moy_os_fn_listen *)__moy_os->fn[45])(fd, backlog);
+}
+#endif
+
+#if MOY_OS_ROW(46)
+#include <sys/socket.h>
+typedef int moy_os_fn_accept(int fd, struct sockaddr *addr, socklen_t *len);
+MOY_OS_USED(46);
+int accept(int fd, struct sockaddr *addr, socklen_t *len)
+{
+    return ((moy_os_fn_accept *)__moy_os->fn[46])(fd, addr, len);
+}
+#endif
+
+#if MOY_OS_ROW(47)
+#include <sys/socket.h>
+typedef int moy_os_fn_connect(int fd, const struct sockaddr *addr, socklen_t len);
+MOY_OS_USED(47);
+int connect(int fd, const struct sockaddr *addr, socklen_t len)
+{
+    return ((moy_os_fn_connect *)__moy_os->fn[47])(fd, addr, len);
+}
+#endif
+
+#if MOY_OS_ROW(48)
+#include <sys/socket.h>
+typedef ssize_t moy_os_fn_send(int fd, const void *buf, size_t n, int flags);
+MOY_OS_USED(48);
+ssize_t send(int fd, const void *buf, size_t n, int flags)
+{
+    return ((moy_os_fn_send *)__moy_os->fn[48])(fd, buf, n, flags);
+}
+#endif
+
+#if MOY_OS_ROW(49)
+#include <sys/socket.h>
+typedef ssize_t moy_os_fn_recv(int fd, void *buf, size_t n, int flags);
+MOY_OS_USED(49);
+ssize_t recv(int fd, void *buf, size_t n, int flags)
+{
+    return ((moy_os_fn_recv *)__moy_os->fn[49])(fd, buf, n, flags);
+}
+#endif
+
+#if MOY_OS_ROW(50)
+#include <sys/socket.h>
+typedef ssize_t moy_os_fn_sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to, socklen_t len);
+MOY_OS_USED(50);
+ssize_t sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to, socklen_t len)
+{
+    return ((moy_os_fn_sendto *)__moy_os->fn[50])(fd, buf, n, flags, to, len);
+}
+#endif
+
+#if MOY_OS_ROW(51)
+#include <sys/socket.h>
+typedef ssize_t moy_os_fn_recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *from, socklen_t *len);
+MOY_OS_USED(51);
+ssize_t recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr *from, socklen_t *len)
+{
+    return ((moy_os_fn_recvfrom *)__moy_os->fn[51])(fd, buf, n, flags, from, len);
+}
+#endif
+
+#if MOY_OS_ROW(52)
+#include <sys/socket.h>
+typedef int moy_os_fn_shutdown(int fd, int how);
+MOY_OS_USED(52);
+int shutdown(int fd, int how)
+{
+    return ((moy_os_fn_shutdown *)__moy_os->fn[52])(fd, how);
+}
+#endif
+
+#if MOY_OS_ROW(53)
+#include <sys/socket.h>
+typedef int moy_os_fn_setsockopt(int fd, int level, int name, const void *val, socklen_t len);
+MOY_OS_USED(53);
+int setsockopt(int fd, int level, int name, const void *val, socklen_t len)
+{
+    return ((moy_os_fn_setsockopt *)__moy_os->fn[53])(fd, level, name, val, len);
+}
+#endif
+
+#if MOY_OS_ROW(54)
+#include <sys/socket.h>
+typedef int moy_os_fn_getsockopt(int fd, int level, int name, void *val, socklen_t *len);
+MOY_OS_USED(54);
+int getsockopt(int fd, int level, int name, void *val, socklen_t *len)
+{
+    return ((moy_os_fn_getsockopt *)__moy_os->fn[54])(fd, level, name, val, len);
+}
+#endif
+
+#if MOY_OS_ROW(55)
+#include <sys/socket.h>
+typedef int moy_os_fn_getsockname(int fd, struct sockaddr *addr, socklen_t *len);
+MOY_OS_USED(55);
+int getsockname(int fd, struct sockaddr *addr, socklen_t *len)
+{
+    return ((moy_os_fn_getsockname *)__moy_os->fn[55])(fd, addr, len);
+}
+#endif
+
+#if MOY_OS_ROW(56)
+#include <sys/socket.h>
+typedef int moy_os_fn_getpeername(int fd, struct sockaddr *addr, socklen_t *len);
+MOY_OS_USED(56);
+int getpeername(int fd, struct sockaddr *addr, socklen_t *len)
+{
+    return ((moy_os_fn_getpeername *)__moy_os->fn[56])(fd, addr, len);
+}
+#endif
+
+#if MOY_OS_ROW(57)
+#include <netdb.h>
+typedef int moy_os_fn_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res);
+MOY_OS_USED(57);
+int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res)
+{
+    return ((moy_os_fn_getaddrinfo *)__moy_os->fn[57])(node, service, hints, res);
+}
+#endif
+
+#if MOY_OS_ROW(58)
+#include <netdb.h>
+typedef void moy_os_fn_freeaddrinfo(struct addrinfo *ai);
+MOY_OS_USED(58);
+void freeaddrinfo(struct addrinfo *ai)
+{
+    ((moy_os_fn_freeaddrinfo *)__moy_os->fn[58])(ai);
+}
+#endif
+
+#if MOY_OS_ROW(59)
+#include <sys/poll.h>
+typedef int moy_os_fn_poll(struct pollfd *fds, nfds_t n, int timeout);
+MOY_OS_USED(59);
+int poll(struct pollfd *fds, nfds_t n, int timeout)
+{
+    return ((moy_os_fn_poll *)__moy_os->fn[59])(fds, n, timeout);
+}
+#endif
+
+#if MOY_OS_ROW(60)
+#include <sys/select.h>
+typedef int moy_os_fn_select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv);
+MOY_OS_USED(60);
+int select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv)
+{
+    return ((moy_os_fn_select *)__moy_os->fn[60])(n, r, w, e, tv);
+}
+#endif
+
+#if MOY_OS_ROW(61)
+#include <fcntl.h>
+typedef int moy_os_fn_fcntl(int fd, int cmd, int arg);
+MOY_OS_USED(61);
+int fcntl(int fd, int cmd, ...)
+{
+    int arg = 0;
+    if (cmd != F_GETFL && cmd != F_GETFD) {
+        va_list ap;
+        va_start(ap, cmd);
+        arg = va_arg(ap, int);
+        va_end(ap);
+    }
+    return ((moy_os_fn_fcntl *)__moy_os->fn[61])(fd, cmd, arg);
 }
 #endif

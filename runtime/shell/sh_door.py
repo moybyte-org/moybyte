@@ -33,7 +33,7 @@ not run NOT_RUN.
 A NATIVE COMMAND (`"moybyte": {"native": [chips]}`) is the same door over
 the native tier (native/moy_elf/moy_os.h): its module's `main` on a task of
 its own, the same roots and budget, run only once "native" is granted
-(`app_perms.check`).
+(`app_perms.check`), and its socket rows only when "network" is.
 
 Either tier's command in the foreground is a job, as a role command is: its
 module runs on a thread of its own, the door answers RUNNING and each `step
@@ -574,9 +574,10 @@ class ShellDoor:
         p = S.procs[pid] = _sched.Proc(pid, _sched.COMMAND, name, run)
         p.granted = tuple(granted)
         roots = wasi_roots(granted)
+        net = ("network" in granted,) if tier == "elf" else ()
         if job is not None and not bg and hasattr(rt, "start"):
             self.v_stop(job)
-            code, why = self._as_pid(pid, rt.start, run, argv, roots, pid, COMMAND_MS)
+            code, why = self._as_pid(pid, rt.start, run, argv, roots, pid, COMMAND_MS, *net)
             if why is None:
                 self.jobs[job] = (name, self._compiled_steps(rt, name, pid))
                 return self.v_step(job)
@@ -584,7 +585,7 @@ class ShellDoor:
         try:
             if tier == "elf":
                 code, why = self._as_pid(pid, rt.command, run, argv, roots, pid,
-                                         pid if bg else 0, COMMAND_MS)
+                                         pid if bg else 0, COMMAND_MS, *net)
             else:
                 code, why = self._as_pid(pid, rt.command, run, argv, roots, pid if bg else 0,
                                          COMMAND_MS)

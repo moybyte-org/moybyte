@@ -489,7 +489,8 @@ class SpineVerbs:
         (a match), "carts" (the Get Carts app while it fetches), "http" (a
         process's `moybyte.http` request while it runs, dev_http.py), "media" (a
         stream while a URL of its list may play, dev_media.py), "ssh" (the SSH
-        server while it serves, ssh_service.py). A new consumer
+        server while it serves, ssh_service.py), "native" (a native process
+        from its first socket to its end, elf_run.py). A new consumer
         of the network takes a tag here and releases it on its way out, or the
         radio never goes off again. The holders are the lease table's radio
         row (`moy_lease.Wifi`), its tags `moy_lease.WIFI_TAGS`, and any other

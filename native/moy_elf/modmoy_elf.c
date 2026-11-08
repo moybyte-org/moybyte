@@ -7,10 +7,12 @@
 // constructors run once (esp_elf_request), and the process is moy_os's.
 //
 //   moy_elf.CHIP, ROWS, VERSION
-//   moy_elf.command(path, argv, roots, pid, id, bg_pid, budget_ms) -> (status, err)
-//   moy_elf.start(path, argv, roots, pid, id, budget_ms) -> (0 or -3, err): the
+//   moy_elf.command(path, argv, roots, pid, id, bg_pid, budget_ms[, flags]) -> (status, err)
+//   moy_elf.start(path, argv, roots, pid, id, budget_ms[, flags]) -> (0 or -3, err): the
 //       same run left going; step(pid, max_ms) -> -100 (running) or its exit
-//       status; cancel(pid) -> 130
+//       status; cancel(pid) -> 130. flags: NET (1), the socket rows
+//   moy_elf.on_net(fn): fn(pid, hold) when a process opens its first socket
+//       (1) and at its end (0), on this task; None: nothing holds the network
 //   moy_elf.service(path, pid, id) -> None, or the reason it did not start
 //   moy_elf.poll() -> [(pid, status)] of the services that ended by themselves
 //   moy_elf.stop(pid) -> status, or -1 for no such service
@@ -186,12 +188,13 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args) {
     for (size_t i = 0; i < argc; i++) {
         argv[i] = mp_obj_str_get_str(items[i]);
     }
+    uint32_t flags = n_args > 7 ? (uint32_t)mp_obj_get_int(args[7]) : 0u;
     int status = moy_os_command(s, &m, NULL, (int)argc, argv, roots, pid, id, bg_pid, budget,
-                                err, sizeof err);
+                                flags, err, sizeof err);
     m_del(const char *, argv, argc ? argc : 1);
     return result(status, err);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_obj, 7, 7, mod_command);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_obj, 7, 8, mod_command);
 
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
@@ -217,12 +220,37 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *args) {
     for (size_t i = 0; i < argc; i++) {
         argv[i] = mp_obj_str_get_str(items[i]);
     }
+    uint32_t flags = n_args > 6 ? (uint32_t)mp_obj_get_int(args[6]) : 0u;
     int status = moy_os_command_start(s, &m, NULL, (int)argc, argv, roots, pid, id, 0, budget,
-                                      err, sizeof err);
+                                      flags, err, sizeof err);
     m_del(const char *, argv, argc ? argc : 1);
     return result(status, err);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_start_obj, 6, 6, mod_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_start_obj, 6, 7, mod_start);
+
+// The network's holder (moy_os_set_net): fn(pid, hold) on the VM's task, the
+// one that serves a command's session.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_elf_net);
+
+static void net_hook(void *ctx, uint32_t pid, int hold) {
+    (void)ctx;
+    mp_obj_t fn = MP_STATE_VM(moy_elf_net);
+    if (fn == MP_OBJ_NULL || fn == mp_const_none) {
+        return;
+    }
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_call_function_2(fn, mp_obj_new_int(pid), mp_obj_new_int(hold));
+        nlr_pop();
+    }
+}
+
+static mp_obj_t mod_on_net(mp_obj_t fn) {
+    MP_STATE_VM(moy_elf_net) = fn;
+    moy_os_set_net(fn == mp_const_none ? NULL : net_hook, NULL);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_on_net_obj, mod_on_net);
 
 static mp_obj_t mod_step(mp_obj_t pid, mp_obj_t max_ms) {
     return mp_obj_new_int(moy_os_command_step((uint32_t)mp_obj_get_int(pid),
@@ -252,7 +280,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(mod_service_obj, mod_service);
 static mp_obj_t mod_poll(void) {
     uint32_t pids[MOY_OS_PROCS];
     int32_t codes[MOY_OS_PROCS];
-    uint32_t n = moy_os_poll(pids, codes, MOY_OS_PROCS);
+    uint32_t n = moy_os_poll_services(pids, codes, MOY_OS_PROCS);
     mp_obj_t out = mp_obj_new_list(0, NULL);
     for (uint32_t i = 0; i < n; i++) {
         mp_obj_t t[2] = { mp_obj_new_int_from_uint(pids[i]), mp_obj_new_int(codes[i]) };
@@ -323,6 +351,8 @@ static const mp_rom_map_elem_t moy_elf_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_command), MP_ROM_PTR(&mod_command_obj) },
     { MP_ROM_QSTR(MP_QSTR_load), MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&mod_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_on_net), MP_ROM_PTR(&mod_on_net_obj) },
+    { MP_ROM_QSTR(MP_QSTR_NET), MP_ROM_INT(MOY_OS_NET) },
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&mod_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_cancel), MP_ROM_PTR(&mod_cancel_obj) },
     { MP_ROM_QSTR(MP_QSTR_service), MP_ROM_PTR(&mod_service_obj) },
