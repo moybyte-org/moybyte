@@ -267,3 +267,31 @@ def test_a_manifests_receives_reaches_the_cart(tmp_path):
     man["moybyte"].pop("receives")
     (root / "manifest.json").write_text(json.dumps(man))
     assert moy_carts.load(str(root))["receives"] is None
+
+
+def test_a_vm_stop_leaves_no_services_storage_grant(tmp_path, monkeypatch):
+    """A board's app ABI is the kernel's and outlives a VM stop; a service's
+    storage grant is a run grant owned by its pid, and the stop ends the
+    service with its VM whether or not its end ran (a `kstop` runs none).
+    The next VM's start ends every run grant, so N stops with the
+    achievements process (prefs) running leave the grant count flat."""
+    import sys
+    import types
+    from runtime import console, moy_app
+    ws = build_ws(tmp_path)
+    kernel = types.ModuleType("moy_kernel")
+    kernel.start = lambda: "cold"
+    monkeypatch.setitem(sys.modules, "moy_kernel", kernel)
+    ws.app_abi = console._app_abi(None)
+    base = ws.app_abi.count()
+    kernel.start = lambda: "return"
+    try:
+        for _ in range(5):
+            monkeypatch.setattr(S, "SCHED", S.Scheduler())    # the new VM's
+            pid = ws.ach.start()
+            assert pid is not None and S.SCHED.procs[pid].ctx is not None
+            assert ws.app_abi.count() == base + 1
+            ws.app_abi = console._app_abi(None)               # the VM stopped
+            assert ws.app_abi.count() == base
+    finally:
+        moy_app.kernel(True)

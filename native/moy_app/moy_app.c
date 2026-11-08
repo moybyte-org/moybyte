@@ -195,14 +195,9 @@ const moy_app_run_t *moy_app_stopped(void) {
                                                                    : NULL;
 }
 
-void moy_app_stop_end(moy_appabi_t *a) {
-    if (a->stopped.a == a && a->stopped.g != 0u) {
-        moy_app_end(a, a->stopped.g);
-    }
-    memset(&a->stopped, 0, sizeof(a->stopped));
-}
-
-void moy_app_fresh(moy_appabi_t *a) {
+// Every RUN grant ended: the runs and services that held them were the
+// stopped VM's, and none outlives it.
+static void runs_end(moy_appabi_t *a) {
     for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
         uint32_t h = moy_htab_at(a->grants, s);
         const moy_grant_t *g;
@@ -212,6 +207,14 @@ void moy_app_fresh(moy_appabi_t *a) {
         }
     }
     memset(&a->stopped, 0, sizeof(a->stopped));
+}
+
+void moy_app_stop_end(moy_appabi_t *a) {
+    runs_end(a);
+}
+
+void moy_app_fresh(moy_appabi_t *a) {
+    runs_end(a);
     a->damage = 0u;
     seq_open(a);
     a->clip_kind = MOY_CLIP_EMPTY;

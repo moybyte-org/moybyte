@@ -24,7 +24,8 @@
 //                        for g 0; and this state the one the theme is read
 //                        from (moy_app_wasm_live)
 //   app.stop_hold(run)   the run a VM stop carries (None: none)
-//   app.stop_end()       that run is over: its grant ended, let go
+//   app.stop_end()       the stop is over: that run's grant ended, let go,
+//                        and every other run grant (the stopped VM's)
 //   wasm_rows()          the import adapter's natives: (name, type, table row)
 //   wasm_hops()          (hops made, their microseconds end to end, the rows'
 //                        own microseconds on the VM's task)

@@ -140,7 +140,9 @@ int moy_app_run_live(const moy_app_run_t *r);
 // The run a VM stop carries: a compiled app the kernel opens with no VM
 // (native/moy_play/moy_play_stop.c). The Player holds it in the state before
 // the stop, the kernel's open reads it (the kernel's state's, or NULL), and
-// the start after the stop ends its grant and lets it go.
+// the start after the stop (moy_app_stop_end) ends its grant and lets it go,
+// with every other RUN grant: a service's, whose process the stop ended
+// whether or not its end ran, and which the next console starts afresh.
 void moy_app_stop_hold(moy_appabi_t *a, const moy_app_run_t *r);
 const moy_app_run_t *moy_app_stopped(void);
 void moy_app_stop_end(moy_appabi_t *a);

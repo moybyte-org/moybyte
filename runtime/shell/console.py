@@ -595,9 +595,10 @@ def _app_abi(rows):
     """The app ABI's state (native/moy_app): the kernel's where the console
     runs on a kernel (a board), so a VM stop leaves its grants and clipboard
     for the next VM, its prefs the kernel's settings rows; elsewhere this
-    console's own, its prefs written into `rows`. A return start keeps the
-    kernel's as it was but for the stopped run's grant, which it ends; every
-    other start ends its run grants."""
+    console's own, its prefs written into `rows`. Every start ends the run
+    grants, the stopped VM's runs' and services' (a service's whether or not
+    its end ran before the stop); a return start keeps the rest of the
+    kernel's as it was, the clipboard among it."""
     try:
         import moy_kernel
     except ImportError:
@@ -607,7 +608,8 @@ def _app_abi(rows):
     app = _moy_app.kernel(not returning)
     if returning:
         # A compiled app's run that stopped the VM held its grant across the
-        # stop (Player._stop_grant); that run is over now.
+        # stop (Player._stop_grant); that run is over now, and so is every
+        # process the stopped VM ran.
         app.stop_end()
     return app
 
