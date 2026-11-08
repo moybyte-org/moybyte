@@ -195,6 +195,47 @@ def test_ctrl_c_stops_a_command_at_its_next_import(term):
     assert "not-after" not in got and app.face.status() == 130
 
 
+def test_a_long_command_is_a_job_the_door_steps(term, monkeypatch):
+    """A foreground run is a job the door steps (sh_door._compiled_steps):
+    the shell's face is busy while its `_start` sleeps on a thread of its
+    own, each step comes back, and Ctrl-C mid-run closes the job with 130,
+    the run's record freed, its process gone and the next command running."""
+    from runtime import moy_sh, scheduler, sh_door, wasm_binding
+    ws, app = term
+    rt = ws.runtimes["wasm"]
+    steps = []
+    real = rt.step
+    monkeypatch.setattr(rt, "step", lambda pid, ms: steps.append(ms) or real(pid, ms))
+    app.face.set_line("wasi.probe/probe sleep; echo not-after")
+    app.face.submit()
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 0.5:
+        moy_sh.jobs()
+        time.sleep(0.002)
+    assert app.face.busy() and wasm_binding.command_live()
+    assert len(steps) > 3 and set(steps) == {sh_door.STEP_MS}
+    assert any(p.name == "probe" for p in scheduler.SCHED.procs.values())
+    app.face.interrupt()
+    t0 = time.monotonic()
+    while app.face.busy() and time.monotonic() - t0 < 10:
+        moy_sh.jobs()
+        time.sleep(0.002)
+    assert not app.face.busy() and app.face.status() == 130
+    assert not wasm_binding.command_live()
+    assert not any(p.name == "probe" for p in scheduler.SCHED.procs.values())
+    assert "not-after" not in "".join(app.face.lines())
+    assert out(app, "wasi.probe/probe exit 4; echo status $?") == [
+        "leaving with 4", "status 4"]
+
+
+def test_a_sleeping_command_past_its_budget_is_killed(term, monkeypatch):
+    from runtime import sh_door
+    monkeypatch.setattr(sh_door, "COMMAND_MS", 300)
+    _ws, app = term
+    assert out(app, "wasi.probe/probe sleep; echo status $?") == [
+        "killed: ran past 0 s", "status 137"]
+
+
 def test_a_command_past_its_budget_is_killed(term, monkeypatch):
     from runtime import sh_door
     monkeypatch.setattr(sh_door, "COMMAND_MS", 300)

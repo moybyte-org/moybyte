@@ -3580,8 +3580,10 @@ def wasi_commands_run(board, board_dir):
     shell: wasi-sdk's cat and Rust's wasm32-wasip1 hello, each built unchanged
     by its toolchain and carrying this chip's module, signed, and the probe
     with none, on the interpreter. Args, env, a pipe in and out, files in
-    the user's folder, the exit code and a trap; the Rust hello last, skipped
-    where this machine has no rustc for wasm32-wasip1."""
+    the user's folder, the exit code and a trap; a long run the door steps,
+    the console's frames going on meanwhile, ended by `sh ^C` with 130; the
+    Rust hello last, skipped where this machine has no rustc for
+    wasm32-wasip1."""
     import tempfile
     from tools import wasm_cart
     wasm_signing_key()
@@ -3612,6 +3614,20 @@ def wasi_commands_run(board, board_dir):
     runs("wasi.probe/probe exit 3", (3, ["leaving with 3"]))
     st, out = _sh(board, "wasi.probe/probe trap", timeout=60)
     assert st == 134 and "unreachable" in " ".join(out), (st, out)
+    # a long run is a job the door steps: the frame goes on while it sleeps
+    # (its wait on the module's thread) and while it spins (an import a
+    # loop), and the channel's Ctrl-C ends it with 130 (a raw 0x03 is the
+    # serial ISR's KeyboardInterrupt while the console runs)
+    for verb in ("sleep", "spin"):
+        n0 = len(board.lines)
+        board._write_line("sh wasi.probe/probe " + verb)
+        time.sleep(1.5)
+        f0 = board.state()["upcall_totals"][0]       # the console's frame upcalls
+        time.sleep(1.0)
+        assert board.state()["upcall_totals"][0] > f0, "the frame stopped under " + verb
+        board._write_line("sh ^C")
+        assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
+    runs("wasi.probe/probe exit 3", (3, ["leaving with 3"]))    # its record went
     runs("rm wasi.txt", (0, []))
     if not rust:
         pytest.skip("no rustc with the wasm32-wasip1 target for the Rust hello")

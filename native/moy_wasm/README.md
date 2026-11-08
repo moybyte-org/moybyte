@@ -261,21 +261,29 @@ off, the state a cart plays in.
 A cart whose manifest says `"type": "command"` and `"runtime": "wasm"` is a
 WASI program: its module's `_start` run in the shell's session when the
 shell spawns its name (`runtime/shell/sh_door.py`, `docs/os_2026-11/system.md`
-section 1). `command()` opens a session of its own for it, as the Player's
-glue opens a cart's (its module for this console where the cart carries one,
-`main.wasm` on the interpreter otherwise or when that one is refused for
-anything but tamper evidence, `device/moycore_glue.py`'s
-`WasmRuntime.command`), registers the WASI table when the runtime is up,
-refuses a module importing anything but WASI and `moybyte.term` or
-exporting no `_start` once it is loaded, calls `_start` once and closes the
-session, making whichever session was current current again. The natives
-run on the session's thread and hop their bodies to the MicroPython task
-(`moy_wasm_on_vm`), which waits in the call inside the door's crossing with
-the shell's session entered, so a body reaches the session's descriptors and
-files as a built-in does. A command's exit status is `proc_exit`'s, 0 when
+section 1). `command_start()` opens a session of its own for it, as the
+Player's glue opens a cart's (its module for this console where the cart
+carries one, `main.wasm` on the interpreter otherwise or when that one is
+refused for anything but tamper evidence, `device/moycore_glue.py`'s
+`WasmRuntime`), registers the WASI table when the runtime is up, refuses a
+module importing anything but WASI and `moybyte.term` or exporting no
+`_start` once it is loaded, begins its call into `_start` on the session's
+thread and answers at once, making whichever session was current current
+again. The run then goes in steps (`moy_wasi.h`, "IN STEPS"): each
+`command_step()` serves the natives' bodies, which hop from the session's
+thread to the MicroPython task (`moy_wasm_on_vm`, which finds the session by
+its thread), for a few milliseconds inside the door's crossing with the
+shell's session entered, so a body reaches the session's descriptors and
+files as a built-in does and the console's frame goes on between the steps;
+`command_stop()` ends the run as Ctrl-C does. A clock's wait (`sleep`)
+waits on the session's thread, never in a hop. In the foreground the shell
+door steps the run as a job, either compiled tier's alike
+(`runtime/shell/sh_door.py`); with `&` the glue steps it to its end, feeding
+the task watchdog. A command's exit status is `proc_exit`'s, 0 when
 `_start` returns; a trap answers -1 with its message, a module that would
-not run -3. The host runs the same table over its WAMR on the calling thread
-(`runtime/host/moyhost_wasm.c`'s `hw_wasi_run`).
+not run -3. The host runs the same table over its WAMR, `_start` on a thread
+of its own stepped the same way (`runtime/host/moyhost_wasm.c`'s
+`hw_wasi_start`).
 
 ## Where the memory goes
 
@@ -668,8 +676,9 @@ current answer. A cart's session is ended the same way
 (`native/moy_play/moy_play.h`). A `par` item is no different: the call that handed it over
 waits for it, so an item that never returns holds the cart where it is. A
 command stops at its next import: each WASI call checks the shell's Ctrl-C
-and the door's budget first (`moy_wasi.h`), and a loop calling none holds
-the console's task until it returns.
+and the door's budget first (`moy_wasi.h`). A loop calling none runs on
+while the console goes on, but its stop (Ctrl-C, the budget) waits on the
+console's task until the loop returns.
 
 ## Testing
 

@@ -289,13 +289,13 @@ static int code_of(int32_t r) {
 
 static void b_sleep(void *ctx, int ms);
 
-// A session's job name at the door: its role command's, or its native
+// A session's job name at the door: its role command's, or its compiled
 // command's (b_spawn), one at a time.
 static void job_of(const moy_sh_t *s, char *job, size_t n) {
     snprintf(job, n, "%lx", (unsigned long)(uintptr_t)s);
 }
 
-// A command started in the foreground may answer RUNNING (a native command,
+// A command started in the foreground may answer RUNNING (a compiled command,
 // runtime/shell/sh_door.py): it is a job the console steps, as a role
 // command is (b_role), so the session waits between the steps and the
 // console's frame goes on. Ctrl-C `stop`s it.

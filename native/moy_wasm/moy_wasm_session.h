@@ -121,8 +121,9 @@ int moy_wasm_session_live(void);
 // watch's compiled half (native/moy_play/moy_play.h). Safe with no session.
 void moy_wasm_session_terminate(void);
 
-// From the session's thread: run fn(arg) on the MicroPython task, which is
-// blocked in a session call, and wait for it. fn runs with the VM available
+// From a session's thread: run fn(arg) on the MicroPython task, which is
+// blocked in a call of that session's (or steps a WASI command's,
+// modmoy_wasm.c), and wait for it. fn runs with the VM available
 // and must catch its own exceptions. Returns 0, or -1 when there is no task
 // waiting to serve it (the call is then not made).
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg);

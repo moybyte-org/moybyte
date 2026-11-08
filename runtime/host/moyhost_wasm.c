@@ -27,13 +27,17 @@
  * renders (hw_snd_mix), so the stream drains at the host output's pace.
  *
  * One run at a time, on whatever thread calls in: WAMR on Linux has no
- * pthread requirement, and the runtime is initialised once per process.
+ * pthread requirement, and the runtime is initialised once per process. A
+ * WASI command's `_start` runs on a thread of its own (hw_wasi_start).
  */
 
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "moy.h"
 #include "moy_audio.h"
@@ -665,28 +669,128 @@ void hw_free(host_wasm *r)
 }
 
 /* A WASI command (native/moy_wasm/moy_wasi.h) in the shell session running on
- * this thread, the module `path`'s own main.wasm on the interpreter, as a
- * board's interpreted session runs it: its exit status; MOY_WASI_TRAPPED or
- * MOY_WASI_NOT_COMMAND with the reason in `err`, or -3 for a module that
- * would not load or run here. The natives are registered once, beside the
- * cart table, and stay. */
+ * the calling thread, the module `path`'s own main.wasm on the interpreter, as
+ * a board's interpreted session runs it, run in steps as a board runs it: its
+ * `_start` on a thread of its own, its calls served on the thread that steps
+ * it (the runner below, moy_wasi.h's "IN STEPS"). One at a time. The natives
+ * are registered once, beside the cart table, and stay. */
 static NativeSymbol *g_wasi;
 
-int hw_wasi_run(const char *path, int argc, const char **argv, const char *roots,
-                uint32_t bg_pid, uint32_t budget_ms, char *err, int errlen)
+typedef struct {
+    moy_wasi_t *w;
+    uint8_t *bytes;
+    wasm_module_t module;
+    wasm_module_inst_t inst;
+    wasm_exec_env_t env;
+    pthread_t tid;
+    pthread_mutex_t m;
+    pthread_cond_t c;
+    void (*fn)(void *arg);      /* the call the module's thread waits on */
+    void *arg;
+    int served;
+    int returned;               /* `_start` has returned */
+    int main;                   /* moy_wasi_main's answer */
+    char err[256];
+} wasi_job;
+
+static wasi_job *g_job;
+
+/* The module's thread: a call's body handed to the stepping thread, waited for. */
+static int job_hop(void (*fn)(void *arg), void *arg)
+{
+    wasi_job *j = g_job;
+    if (!j) return -1;
+    pthread_mutex_lock(&j->m);
+    j->fn = fn;
+    j->arg = arg;
+    j->served = 0;
+    pthread_cond_broadcast(&j->c);
+    while (!j->served) pthread_cond_wait(&j->c, &j->m);
+    pthread_mutex_unlock(&j->m);
+    return 0;
+}
+
+static void *job_main(void *arg)
+{
+    wasi_job *j = (wasi_job *)arg;
+    wasm_runtime_init_thread_env();
+    int main = moy_wasi_main(j->w, j->env, j->err, sizeof j->err);
+    wasm_runtime_destroy_thread_env();
+    pthread_mutex_lock(&j->m);
+    j->main = main;
+    j->returned = 1;
+    pthread_cond_broadcast(&j->c);
+    pthread_mutex_unlock(&j->m);
+    return NULL;
+}
+
+static bool job_done(void *job)
+{
+    wasi_job *j = (wasi_job *)job;
+    pthread_mutex_lock(&j->m);
+    int r = j->returned;
+    pthread_mutex_unlock(&j->m);
+    return r != 0;
+}
+
+static void job_serve(void *job, int64_t us)
+{
+    wasi_job *j = (wasi_job *)job;
+    struct timespec at;
+    clock_gettime(CLOCK_REALTIME, &at);
+    int64_t ns = (int64_t)at.tv_nsec + us * 1000;
+    at.tv_sec += (time_t)(ns / 1000000000);
+    at.tv_nsec = (long)(ns % 1000000000);
+    pthread_mutex_lock(&j->m);
+    while (!j->fn && !j->returned && pthread_cond_timedwait(&j->c, &j->m, &at) == 0) {
+    }
+    void (*fn)(void *) = j->fn;
+    void *arg = j->arg;
+    j->fn = NULL;
+    pthread_mutex_unlock(&j->m);
+    if (fn) {
+        fn(arg);
+        pthread_mutex_lock(&j->m);
+        j->served = 1;
+        pthread_cond_broadcast(&j->c);
+        pthread_mutex_unlock(&j->m);
+    }
+}
+
+static void job_terminate(void *job)
+{
+    wasm_runtime_terminate(((wasi_job *)job)->inst);
+}
+
+static const moy_wasi_runner_t g_runner = { job_done, job_serve, job_terminate };
+
+static void job_free(wasi_job *j)
+{
+    moy_wasi_free(j->w);
+    if (j->env) wasm_runtime_destroy_exec_env(j->env);
+    if (j->inst) wasm_runtime_deinstantiate(j->inst);
+    if (j->module) wasm_runtime_unload(j->module);
+    free(j->bytes);
+    pthread_cond_destroy(&j->c);
+    pthread_mutex_destroy(&j->m);
+    free(j);
+}
+
+/* The run started: 0 with `_start` running, or -3 with the reason in `err`
+ * (a module that would not load or run here, or a command already running). */
+int hw_wasi_start(const char *path, int argc, const char **argv, const char *roots,
+                  uint32_t bg_pid, uint32_t budget_ms, char *err, int errlen)
 {
     moy_sh_t *s = moy_sh_running();
     FILE *f;
     long n;
-    uint8_t *bytes = NULL;
-    wasm_module_t module = NULL;
-    wasm_module_inst_t inst = NULL;
-    wasm_exec_env_t env = NULL;
-    moy_wasi_t *w = NULL;
     char msg[160];
-    int code = -3;
     if (!s) {
         put_err(err, errlen, "needs a shell session", NULL);
+        return -3;
+    }
+    if (g_job) {
+        put_err(err, errlen, "a command is running", NULL);
         return -3;
     }
     if (!hw_runtime()) {
@@ -703,39 +807,98 @@ int hw_wasi_run(const char *path, int argc, const char **argv, const char *roots
             return -3;
         }
     }
+    wasi_job *j = (wasi_job *)calloc(1, sizeof *j);
+    if (!j) {
+        put_err(err, errlen, "out of memory", "no record for the command");
+        return -3;
+    }
+    pthread_mutex_init(&j->m, NULL);
+    pthread_cond_init(&j->c, NULL);
     if (!(f = fopen(path, "rb"))) {
         put_err(err, errlen, "no module", path);
+        job_free(j);
         return -3;
     }
     if (fseek(f, 0, SEEK_END) == 0 && (n = ftell(f)) > 0 && fseek(f, 0, SEEK_SET) == 0
-        && (bytes = (uint8_t *)malloc((size_t)n))
-        && fread(bytes, 1, (size_t)n, f) != (size_t)n) {
-        free(bytes);
-        bytes = NULL;
+        && (j->bytes = (uint8_t *)malloc((size_t)n))
+        && fread(j->bytes, 1, (size_t)n, f) != (size_t)n) {
+        free(j->bytes);
+        j->bytes = NULL;
     }
     fclose(f);
-    if (!bytes) {
+    if (!j->bytes) {
         put_err(err, errlen, "the module would not read", path);
+        job_free(j);
         return -3;
     }
     msg[0] = 0;
-    if (!(module = wasm_runtime_load(bytes, (uint32_t)n, msg, sizeof msg))) {
+    int ok = 0;
+    if (!(j->module = wasm_runtime_load(j->bytes, (uint32_t)n, msg, sizeof msg))) {
         put_err(err, errlen, "load", msg);
-    } else if (moy_wasi_check(module, msg, sizeof msg) != 0) {
+    } else if (moy_wasi_check(j->module, msg, sizeof msg) != 0) {
         put_err(err, errlen, "refused", msg);
-    } else if (!(inst = wasm_runtime_instantiate(module, MOY_WASI_STACK, 0, msg, sizeof msg))) {
+    } else if (!(j->inst = wasm_runtime_instantiate(j->module, MOY_WASI_STACK, 0, msg,
+                                                    sizeof msg))) {
         put_err(err, errlen, or_oom(msg, "instantiate"), msg);
-    } else if (!(env = wasm_runtime_create_exec_env(inst, MOY_WASI_STACK))) {
+    } else if (!(j->env = wasm_runtime_create_exec_env(j->inst, MOY_WASI_STACK))) {
         put_err(err, errlen, "out of memory", "no exec env");
-    } else if (!(w = moy_wasi_new(s, argc, argv, roots, bg_pid, budget_ms, NULL))) {
+    } else if (!(j->w = moy_wasi_new(s, argc, argv, roots, bg_pid, budget_ms, job_hop))) {
         put_err(err, errlen, "out of memory", "no record for the command");
     } else {
-        code = moy_wasi_main(w, env, err, (size_t)errlen);
+        g_job = j;
+        if (pthread_create(&j->tid, NULL, job_main, j) == 0) {
+            ok = 1;
+        } else {
+            g_job = NULL;
+            put_err(err, errlen, "no thread for the command", NULL);
+        }
     }
-    moy_wasi_free(w);
-    if (env) wasm_runtime_destroy_exec_env(env);
-    if (inst) wasm_runtime_deinstantiate(inst);
-    if (module) wasm_runtime_unload(module);
-    free(bytes);
+    if (!ok) {
+        job_free(j);
+        return -3;
+    }
+    return 0;
+}
+
+/* The run's end: its thread joined, its record freed, its exit status, or
+ * MOY_WASI_TRAPPED with the trap in `err`. */
+static int job_end(char *err, int errlen)
+{
+    wasi_job *j = g_job;
+    pthread_join(j->tid, NULL);
+    int code = moy_wasi_status(j->w, j->main);
+    if (code < 0) put_err(err, errlen, j->err, NULL);
+    g_job = NULL;
+    job_free(j);
     return code;
+}
+
+/* The run's calls served for `max_us` at most: MOY_WASI_RUNNING while it goes
+ * on, else its end (job_end's). -3 with no run. */
+int hw_wasi_step(uint32_t max_us, char *err, int errlen)
+{
+    if (!g_job) {
+        put_err(err, errlen, "no command is running", NULL);
+        return -3;
+    }
+    if (moy_wasi_step(g_job->w, &g_runner, g_job, max_us) == MOY_WASI_RUNNING)
+        return MOY_WASI_RUNNING;
+    return job_end(err, errlen);
+}
+
+/* The run ended as Ctrl-C ends it: its end (job_end's). -3 with no run. */
+int hw_wasi_stop(char *err, int errlen)
+{
+    if (!g_job) {
+        put_err(err, errlen, "no command is running", NULL);
+        return -3;
+    }
+    moy_wasi_stop(g_job->w, &g_runner, g_job);
+    return job_end(err, errlen);
+}
+
+/* Whether a run is live: what a test reads for a leak. */
+int hw_wasi_live(void)
+{
+    return g_job != NULL;
 }

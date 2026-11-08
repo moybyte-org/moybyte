@@ -2544,19 +2544,24 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_pa
 # -- a WASI command (native/moy_wasm/moy_wasi.h) -----------------------------------
 
 
-def _command_world(tmp_path, chips, answers):
-    """A compiled command's cart and a glue whose moy_wasm.command answers
-    `answers` in turn, logging each call's arguments."""
+def _command_world(tmp_path, chips, answers, end=(0, None)):
+    """A compiled command's cart and a glue whose moy_wasm.command_start
+    answers `answers` in turn, logging each call's arguments, and whose run,
+    once started, steps twice and ends with `end`."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     cart, _main = _compiled(tmp_path, chips=chips)
     world = _wasm_world()
     calls = []
+    steps = [(-100, None), (-100, None), end]
 
-    def command(*a):
+    def command_start(*a):
         calls.append(a)
         return answers.pop(0)
-    sys.modules["moy_wasm"].command = command
-    world.mod._moy_wasm = sys.modules["moy_wasm"]
+    mod = sys.modules["moy_wasm"]
+    mod.command_start = command_start
+    mod.command_step = lambda max_ms: steps.pop(0)
+    mod.command_stop = lambda: (130, None)
+    world.mod._moy_wasm = mod
     return world, cart, calls
 
 
@@ -2577,7 +2582,7 @@ def test_a_command_runs_its_module_for_this_console_with_its_folders(tmp_path):
 
 
 def test_a_command_with_no_module_or_a_refused_one_runs_on_the_interpreter(tmp_path):
-    world, cart, calls = _command_world(tmp_path, (), [(3, None)])
+    world, cart, calls = _command_world(tmp_path, (), [(0, None)], end=(3, None))
     try:
         rt = world.mod.WasmRuntime(FakeWs())
         assert rt.command(cart, ["probe"], ()) == (3, None)
@@ -2594,12 +2599,36 @@ def test_a_command_with_no_module_or_a_refused_one_runs_on_the_interpreter(tmp_p
         world.close()
 
 
+def test_a_foreground_command_is_a_job_in_steps(tmp_path):
+    """The door's job contract (runtime/shell/sh_door.py): start leaves the
+    run going in the foreground, step answers RUNNING until its end, cancel
+    is Ctrl-C's."""
+    world, cart, calls = _command_world(tmp_path, (), [(0, None), (0, None)], end=(7, None))
+    try:
+        rt = world.mod.WasmRuntime(FakeWs())
+        assert rt.start(cart, ["probe", "sleep"], (), 42, 30000) == (0, None)
+        assert calls[0][6:] == (0, 30000)           # the foreground: no bg pid
+        assert [rt.step(42, 8) for _ in range(3)] == [
+            (rt.RUNNING, None), (rt.RUNNING, None), (7, None)]
+        assert rt.start(cart, ["probe"], (), 43, 30000) == (0, None)
+        assert rt.cancel(43) == (130, None)
+    finally:
+        world.close()
+
+
 def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
-    for answer in ((-3, "refused: bad signature"), (-1, "unreachable")):
-        world, cart, calls = _command_world(tmp_path / answer[1][:3], ("esp32s3",),
-                                            [answer])
-        try:
-            assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == answer
-            assert len(calls) == 1
-        finally:
-            world.close()
+    world, cart, calls = _command_world(tmp_path / "ref", ("esp32s3",),
+                                        [(-3, "refused: bad signature")])
+    try:
+        assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == (
+            -3, "refused: bad signature")
+        assert len(calls) == 1
+    finally:
+        world.close()
+    world, cart, calls = _command_world(tmp_path / "unr", ("esp32s3",), [(0, None)],
+                                        end=(-1, "unreachable"))
+    try:
+        assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == (-1, "unreachable")
+        assert len(calls) == 1
+    finally:
+        world.close()

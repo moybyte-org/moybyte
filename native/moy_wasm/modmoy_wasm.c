@@ -44,6 +44,7 @@
 #include "esp_heap_caps.h"
 #include "esp_task.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -854,9 +855,23 @@ static sess_t *pool_of(const void *p)
     return NULL;
 }
 
+// The session whose thread this is, else the current one: a command's
+// session runs its module while the VM's task serves another's (a WASI
+// command, below), so what its thread allocates or asks of the VM is its own.
+static sess_t *sess_here(void)
+{
+    TaskHandle_t me = xTaskGetCurrentTaskHandle();
+    for (sess_t *s = g_sessions; s != NULL; s = s->next) {
+        if (s->thread == me) {
+            return s;
+        }
+    }
+    return g_sess;
+}
+
 static void *rt_malloc(unsigned int n)
 {
-    sess_t *s = g_sess;
+    sess_t *s = sess_here();
     if (s != NULL && s->alloc != NULL && !s->rt_init) {
         return mem_allocator_malloc(s->alloc, n);
     }
@@ -905,7 +920,7 @@ static void sess_wait(sess_t *s)
 
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg)
 {
-    sess_t *s = g_sess;
+    sess_t *s = sess_here();
     if (!s || !s->live || !s->waiting || xTaskGetCurrentTaskHandle() != s->thread) {
         return -1;
     }
@@ -1527,19 +1542,26 @@ static MP_DEFINE_STR_OBJ(mod_chip_obj, KEY_CHIP);
 
 // -- a WASI command (moy_wasi.h) ----------------------------------------------------
 //
-// command(path, want_sha, interp, allow_unsigned, argv, roots, bg_pid,
-// budget_ms) -> (status, err): the module `path` run as a command in the shell
-// session the door's crossing runs in (moy_sh_running), a session of its own
-// opened and closed around it, whichever session was current made current
-// again after. The natives' bodies hop to this task (moy_wasm_on_vm), which
-// waits in the session's calls. `roots` is NUL-separated; `status` is the
-// exit status, or -1 with the trap in `err`, or -3 with the reason the module
-// did not run.
+// A command runs in steps (moy_wasi.h's "IN STEPS"), so the console's frame
+// goes on while it runs. command_start(path, want_sha, interp,
+// allow_unsigned, argv, roots, bg_pid, budget_ms) -> (status, err) runs the
+// module `path` as a command in the shell session the door's crossing runs
+// in (moy_sh_running), a session of its own opened for it and its call into
+// `_start` begun on the session's thread, whichever session was current made
+// current again: (0, None) with it running, or (-3, the reason it did not
+// run). command_step(max_ms) serves its calls for `max_ms` at most, the
+// natives' bodies hopping to this task (moy_wasm_on_vm): (-100, None) while
+// it goes on, else its end; command_stop() ends it as Ctrl-C does. Its end
+// is (the exit status, None) or (-1, the trap), its session closed. `roots`
+// is NUL-separated. One command at a time.
 
 typedef struct {
     moy_wasi_t *w;
     NativeSymbol *store;
     wasm_exec_env_t env;
+    moy_wasm_ops ops;               // the session's, read while it lives
+    sess_t *sess;
+    volatile bool returned;         // `_start` has returned on the session's thread
     int status;
     char err[ERR_MAX];
 } cmd_t;
@@ -1595,7 +1617,76 @@ static void cmd_unbound(void *user)
     c->env = NULL;
 }
 
-static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args)
+// The runner (moy_wasi_runner_t): the session's handshake, as sess_wait
+// serves it, a wait at a time.
+static bool cmd_done(void *job)
+{
+    return ((cmd_t *)job)->returned;
+}
+
+static void cmd_serve(void *job, int64_t us)
+{
+    cmd_t *c = job;
+    sess_t *s = c->sess;
+    TickType_t t = (TickType_t)((us + 999) / 1000 / portTICK_PERIOD_MS + 1);
+    if (xSemaphoreTake(s->back, t) == pdTRUE) {
+        void (*fn)(void *) = s->vm_fn;
+        if (fn == NULL) {
+            s->waiting = false;
+            c->returned = true;
+        } else {
+            s->vm_fn = NULL;
+            fn(s->vm_arg);
+            xSemaphoreGive(s->vm_done);
+        }
+    }
+    if (esp_task_wdt_status(NULL) == ESP_OK) {
+        esp_task_wdt_reset();
+    }
+}
+
+static void cmd_terminate(void *job)
+{
+    sess_t *s = ((cmd_t *)job)->sess;
+    if (s->inst) {
+        wasm_runtime_terminate(s->inst);
+    }
+}
+
+static const moy_wasi_runner_t cmd_runner = { cmd_done, cmd_serve, cmd_terminate };
+
+static mp_obj_t cmd_answer(int status, const char *err)
+{
+    mp_obj_t out[2] = {
+        mp_obj_new_int(status),
+        status < 0 && status != MOY_WASI_RUNNING ? mp_obj_new_str(err, strlen(err))
+                                                 : mp_const_none,
+    };
+    return mp_obj_new_tuple(2, out);
+}
+
+// The command's end, `_start` returned: its session closed, the session
+// current before made current again, its record freed. Its answer.
+static mp_obj_t cmd_end(void)
+{
+    cmd_t *c = g_cmd;
+    void *was = moy_wasm_session_current();
+    if (c->sess != NULL) {
+        moy_wasm_session_use(c->sess);
+        moy_wasm_session_close();
+        moy_wasm_session_use(was == c->sess ? NULL : was);
+    }
+    int code = moy_wasi_status(c->w, c->status);
+    int status = code == MOY_WASI_TRAPPED ? -1 : code < 0 ? -3 : code;
+    char err[ERR_MAX];
+    snprintf(err, sizeof(err), "%s", c->err);
+    g_cmd = NULL;
+    moy_wasi_free(c->w);
+    heap_caps_free(c);
+    return cmd_answer(status, err);
+}
+
+static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
 {
     const char *path = mp_obj_str_get_str(args[0]);
     const char *sha = args[1] == mp_const_none ? NULL : mp_obj_str_get_str(args[1]);
@@ -1612,10 +1703,10 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args)
     (void)roots_n;
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("no shell session is running"));
+        return cmd_answer(-3, "no shell session is running");
     }
     if (g_cmd != NULL) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a command is running"));
+        return cmd_answer(-3, "a command is running");
     }
     const char **argv = m_new(const char *, argc ? argc : 1);
     for (size_t i = 0; i < argc; i++) {
@@ -1632,7 +1723,7 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args)
         heap_caps_free(c);
         mp_raise_type(&mp_type_MemoryError);
     }
-    moy_wasm_ops ops = {
+    c->ops = (moy_wasm_ops){
         .user = c, .runtime_up = cmd_up, .loaded = cmd_loaded, .bound = cmd_bound,
         .call = cmd_call, .unbound = cmd_unbound,
     };
@@ -1640,16 +1731,11 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args)
     g_cmd = c;
     char err[ERR_MAX];
     err[0] = 0;
+    int opened = 1;
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        if (moy_wasm_session_open(path, sha, 0, unsigned_ok, interp, &ops, err, sizeof(err)) == 0) {
-            if (moy_wasm_session_call(0, 0.0f, err, sizeof(err)) == 0 && c->status < 0) {
-                snprintf(err, sizeof(err), "%s", c->err);
-            }
-            moy_wasm_session_close();
-        } else {
-            c->status = -3;
-        }
+        opened = moy_wasm_session_open(path, sha, 0, unsigned_ok, interp, &c->ops, err,
+                                       sizeof(err));
         nlr_pop();
     } else {
         g_cmd = NULL;
@@ -1658,18 +1744,49 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args)
         heap_caps_free(c);
         nlr_jump(nlr.ret_val);
     }
-    g_cmd = NULL;
+    if (opened != 0) {
+        g_cmd = NULL;
+        moy_wasm_session_use(was);
+        moy_wasi_free(c->w);
+        heap_caps_free(c);
+        return cmd_answer(-3, err);
+    }
+    sess_t *ss = moy_wasm_session_current();
+    c->sess = ss;
+    ss->op = SESS_CALL;
+    ss->what = 0;
+    ss->dt = 0.0f;
+    ss->waiting = true;
+    xSemaphoreGive(ss->go);
     moy_wasm_session_use(was);
-    int status = c->status == MOY_WASI_TRAPPED ? -1 : c->status < 0 ? -3 : c->status;
-    moy_wasi_free(c->w);
-    heap_caps_free(c);
-    mp_obj_t out[2] = {
-        mp_obj_new_int(status),
-        status < 0 ? mp_obj_new_str(err, strlen(err)) : mp_const_none,
-    };
-    return mp_obj_new_tuple(2, out);
+    return cmd_answer(0, "");
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_obj, 8, 8, mod_command);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_start_obj, 8, 8, mod_command_start);
+
+static mp_obj_t mod_command_step(mp_obj_t max_ms_in)
+{
+    cmd_t *c = g_cmd;
+    if (c == NULL) {
+        return cmd_answer(-3, "no command is running");
+    }
+    uint32_t max_us = (uint32_t)mp_obj_get_int(max_ms_in) * 1000u;
+    if (moy_wasi_step(c->w, &cmd_runner, c, max_us) == MOY_WASI_RUNNING) {
+        return cmd_answer(MOY_WASI_RUNNING, "");
+    }
+    return cmd_end();
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_command_step_obj, mod_command_step);
+
+static mp_obj_t mod_command_stop(void)
+{
+    cmd_t *c = g_cmd;
+    if (c == NULL) {
+        return cmd_answer(-3, "no command is running");
+    }
+    moy_wasi_stop(c->w, &cmd_runner, c);
+    return cmd_end();
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_command_stop_obj, mod_command_stop);
 
 static const mp_rom_obj_tuple_t mod_stack_obj = {
     {&mp_type_tuple}, 2,
@@ -1687,7 +1804,9 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tlanes), MP_ROM_PTR(&mod_tlanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     { MP_ROM_QSTR(MP_QSTR_interp_footprint), MP_ROM_PTR(&mod_interp_footprint_obj) },
-    { MP_ROM_QSTR(MP_QSTR_command), MP_ROM_PTR(&mod_command_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_start), MP_ROM_PTR(&mod_command_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_step), MP_ROM_PTR(&mod_command_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_stop), MP_ROM_PTR(&mod_command_stop_obj) },
     // The key tail this build wants (after the wasm line), the compiled-code
     // format version and the fork commit the engine was vendored from
     // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP

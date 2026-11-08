@@ -1796,31 +1796,31 @@ static int command_end(moy_os_proc_t *p) {
     return code;
 }
 
+static bool command_done(void *job) {
+    return ((moy_os_proc_t *)job)->main_done;
+}
+
+// One of the command's session calls served, waiting `us` at most for it.
+static void command_serve(void *job, int64_t us) {
+    moy_os_proc_t *p = job;
+    sem_take(&p->wake, us);
+    void (*fn)(void *) = p->hop_fn;
+    if (fn != NULL) {
+        p->hop_fn = NULL;
+        fn(p->hop_arg);
+        sem_give(&p->hop_done);
+    }
+    task_feed();
+}
+
 int moy_os_command_step(uint32_t pid, uint32_t max_us) {
     moy_os_proc_t *p = proc_of(pid);
     if (p == NULL || p->service) {
         return MOY_OS_REFUSED;
     }
-    // Serve the session's calls until main ends, its run is stopped, it
-    // calls exit, or the step's time is up.
-    int64_t end = mono_us() + max_us;
-    while (!p->main_done) {
-        int64_t now = mono_us();
-        if (!moy_sh_prog_poll(&p->prog, now)) {
-            break;
-        }
-        if (now >= end) {
-            return MOY_OS_RUNNING;
-        }
-        int64_t wait = end - now < MOY_SH_PROG_POLL_US ? end - now : MOY_SH_PROG_POLL_US;
-        sem_take(&p->wake, wait);
-        void (*fn)(void *) = p->hop_fn;
-        if (fn != NULL) {
-            p->hop_fn = NULL;
-            fn(p->hop_arg);
-            sem_give(&p->hop_done);
-        }
-        task_feed();
+    if (moy_sh_prog_step(&p->prog, max_us, mono_us, command_done, command_serve, p)
+        == MOY_SH_PROG_RUNNING) {
+        return MOY_OS_RUNNING;
     }
     return command_end(p);
 }

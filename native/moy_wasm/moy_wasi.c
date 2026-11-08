@@ -18,7 +18,8 @@
 #include "moy_sh_prog.h"
 
 _Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_INTERRUPTED == MOY_SH_PROG_INTERRUPTED
-               && MOY_WASI_KILLED == MOY_SH_PROG_KILLED, "a spawned program's ends are moy_sh_prog.h's");
+               && MOY_WASI_KILLED == MOY_SH_PROG_KILLED && MOY_WASI_RUNNING == MOY_SH_PROG_RUNNING,
+               "a spawned program's ends are moy_sh_prog.h's");
 
 // A board is told by the header it has: ESP_PLATFORM is not defined for a
 // usermod's sources on the esp32 port (moy_net.h's MOY_NET_CLOCK_EPOCH).
@@ -1196,6 +1197,10 @@ static uint32_t w_path_symlink(wasm_exec_env_t e, void *p_at, uint32_t n, uint32
 
 // -- poll_oneoff: clocks wait, every descriptor is ready ---------------------------
 
+static bool h_sleeps(moy_wasi_t *w) {
+    return moy_sh_host(w->s)->sleep_ms != NULL;
+}
+
 static void b_poll(call_t *c) {
     moy_wasi_t *w = c->w;
     uint32_t n = c->a[2];
@@ -1242,28 +1247,33 @@ static void b_poll(call_t *c) {
         }
     }
     if (events == 0 && clock_at >= 0) {
-        int64_t end = mono_us() + wait_us;
-        const moy_sh_host_t *h = moy_sh_host(w->s);
-        for (int64_t left = wait_us; left > 0; left = end - mono_us()) {
-            int ms = left > 20000 ? 20 : (int)((left + 999) / 1000);
-            if (h->sleep_ms != NULL) {
-                h->sleep_ms(h->ctx, ms);
-            }
-            if (moy_sh_interrupted(w->s)) {
-                stop(w, MOY_WASI_INTERRUPTED);
-                c->r = W_INTR;
-                return;
-            }
-            if (h->sleep_ms == NULL) {
-                break;
-            }
-        }
         uint8_t *ev = out;
         memset(ev, 0, 32);
         memcpy(ev, in + 48 * (uint32_t)clock_at, 8);
         events = 1;
+        c->b[0] = (uint64_t)wait_us;
+        c->a[4] = (uint32_t)(h_sleeps(w) ? 1 : 0);
     }
     c->r = put32(c, c->a[3], events) ? W_OK : W_FAULT;
+}
+
+// A clock's wait, on the module's thread, in slices: W_INTR as soon as the
+// run has ended (the task serving it polls Ctrl-C and the budget; with no
+// `hop` nothing else does, so the slice polls them here).
+static uint32_t rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us) {
+    const moy_sh_host_t *h = moy_sh_host(w->s);
+    int64_t end = mono_us() + us;
+    for (int64_t left = us; left > 0; left = end - mono_us()) {
+        h->sleep_ms(h->ctx, left > 20000 ? 20 : (int)((left + 999) / 1000));
+        if (w->hop == NULL) {
+            moy_sh_prog_poll(&w->prog, mono_us());
+        }
+        if (w->prog.exited) {
+            wasm_runtime_set_exception(wasm_runtime_get_module_inst(e), EXIT_MSG);
+            return W_INTR;
+        }
+    }
+    return W_OK;
 }
 
 static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint32_t n, void *nout_at) {
@@ -1271,7 +1281,11 @@ static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint
     uint32_t out = app_off(e, out_at);
     uint32_t nout = app_off(e, nout_at);
     call_t c = { .a = { in, out, n, nout } };
-    return go(e, b_poll, &c);
+    uint32_t r = go(e, b_poll, &c);
+    if (r == W_OK && c.a[4] && c.b[0] > 0) {
+        r = rest(e, c.w, (int64_t)c.b[0]);
+    }
+    return r;
 }
 
 // -- sockets: no descriptor is one -------------------------------------------------
@@ -1464,4 +1478,36 @@ int moy_wasi_main(moy_wasi_t *w, wasm_exec_env_t env, char *err, size_t errlen) 
         return MOY_WASI_TRAPPED;
     }
     return 0;
+}
+
+// -- a run in steps -------------------------------------------------------------------
+
+// `_start` made to return: the instance terminated, which an import call
+// reads when it returns, and its calls served (each now ends the run) until
+// it has.
+static void drain(const moy_wasi_runner_t *r, void *job) {
+    if (!r->done(job)) {
+        r->terminate(job);
+        while (!r->done(job)) {
+            r->serve(job, MOY_SH_PROG_POLL_US);
+        }
+    }
+}
+
+int moy_wasi_step(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job, uint32_t max_us) {
+    if (moy_sh_prog_step(&w->prog, max_us, mono_us, r->done, r->serve, job)
+        == MOY_SH_PROG_RUNNING) {
+        return MOY_WASI_RUNNING;
+    }
+    drain(r, job);
+    return 0;
+}
+
+void moy_wasi_stop(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job) {
+    stop(w, MOY_WASI_INTERRUPTED);
+    drain(r, job);
+}
+
+int moy_wasi_status(const moy_wasi_t *w, int main) {
+    return w->prog.exited ? w->prog.code : main;
 }

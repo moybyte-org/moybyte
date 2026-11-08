@@ -71,7 +71,9 @@ budget). No row is a second implementation of a shell or WASI call.
   answers RUNNING and the session steps it as it steps a role command
   (`native/moy_sh/moy_sh_board.c`'s `b_spawn`), so the console's frame and
   its dev channel go on while the command runs and Ctrl-C stops the job. In
-  the background the door waits out the whole run, as a WASI command's does.
+  the background the door waits out the whole run, feeding the task
+  watchdog. A WASI command is the same job (`native/moy_wasm/moy_wasi.h`),
+  and both serve their steps through `native/moy_sh/moy_sh_prog.h`'s one loop.
 
 ## Signing
 

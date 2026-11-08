@@ -124,6 +124,33 @@ static inline bool moy_sh_prog_poll(moy_sh_prog_t *p, int64_t now_us) {
     return !p->exited;
 }
 
+// A run in steps, every tier's (the shell door's job, runtime/shell/sh_door.py):
+// the task that may touch the session serves the program's calls for `max_us`
+// at most, then goes on with its own work (the console's frame) until the next
+// step. `done(job)` answers whether the program's main has returned;
+// `serve(job, us)` waits at most `us` for one of its calls, serves it and feeds
+// the task's watchdog. MOY_SH_PROG_RUNNING while the run goes on, else 0: main
+// returned, or the poll ended the run (Ctrl-C, the budget), which the tier then
+// ends.
+#define MOY_SH_PROG_RUNNING (-100)
+
+static inline int moy_sh_prog_step(moy_sh_prog_t *p, uint32_t max_us, int64_t (*now)(void),
+                                   bool (*done)(void *job), void (*serve)(void *job, int64_t us),
+                                   void *job) {
+    int64_t end = now() + (int64_t)max_us;
+    while (!done(job)) {
+        int64_t t = now();
+        if (!moy_sh_prog_poll(p, t)) {
+            return 0;
+        }
+        if (t >= end) {
+            return MOY_SH_PROG_RUNNING;
+        }
+        serve(job, end - t < MOY_SH_PROG_POLL_US ? end - t : MOY_SH_PROG_POLL_US);
+    }
+    return 0;
+}
+
 static inline bool moy_sh_prog_under(const char *path, const char *dir) {
     size_t n = strlen(dir);
     if (n == 1 && dir[0] == '/') {

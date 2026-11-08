@@ -141,6 +141,11 @@ int main(int argc, char **argv) {
             clock_gettime(CLOCK_MONOTONIC, &t);
         }
     }
+    if (strcmp(verb, "sleep") == 0) {
+        for (;;) {
+            usleep(20000);
+        }
+    }
     if (strcmp(verb, "trap") == 0) {
         __builtin_trap();
     }

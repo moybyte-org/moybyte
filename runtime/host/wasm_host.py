@@ -131,15 +131,42 @@ class WasmHostRuntime:
     def memory(self):
         return MEMORY_LIMIT, MEMORY_LIMIT
 
+    RUNNING = -100                       # moy_wasi.h's MOY_WASI_RUNNING
+
     def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0):
         """A WASI command cart run as `argv` in the shell session running on
-        this thread (runtime/shell/sh_door.py): (exit status, None), or a
-        negative kind and the reason (`wasm_binding.TRAPPED`, `REFUSED`).
-        The host interprets the cart's own main.wasm, as it does a cart."""
-        import os
+        this thread (runtime/shell/sh_door.py), to its end: (exit status,
+        None), or a negative kind and the reason (`wasm_binding.TRAPPED`,
+        `REFUSED`). The host interprets the cart's own main.wasm, as it does
+        a cart."""
         from runtime import wasm_binding
-        path = os.path.join(cart["path"], cart.get("main", "main.wasm"))
-        return wasm_binding.run_command(path, argv, roots, bg_pid, budget_ms)
+        return wasm_binding.run_command(self._main(cart), argv, roots, bg_pid, budget_ms)
+
+    def start(self, cart, argv, roots=(), pid=0, budget_ms=0):
+        """`command`'s run started in the foreground and left running, as
+        the shell door's job (moy_wasi.h's "IN STEPS"): (0, None), or
+        (REFUSED, why). `step` serves it and `cancel` ends it."""
+        del pid
+        from runtime import wasm_binding
+        return wasm_binding.start_command(self._main(cart), argv, roots, 0, budget_ms)
+
+    def step(self, pid, max_ms):
+        """The run's calls served for `max_ms` at most: (RUNNING, None), or
+        `command`'s answer once it has ended."""
+        del pid
+        from runtime import wasm_binding
+        return wasm_binding.step_command(max_ms)
+
+    def cancel(self, pid):
+        """The run ended as Ctrl-C ends it: (130, None) unless it had exited."""
+        del pid
+        from runtime import wasm_binding
+        return wasm_binding.stop_command()
+
+    @staticmethod
+    def _main(cart):
+        import os
+        return os.path.join(cart["path"], cart.get("main", "main.wasm"))
 
 
 class WasmHostRun:

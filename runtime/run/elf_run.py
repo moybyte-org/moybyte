@@ -6,7 +6,9 @@ command(path, argv, roots, pid, id, bg_pid, budget_ms) -> (status, why), the
 whole run; and the same run in steps (native/moy_elf/moy_os.h), which the
 shell's door takes for a foreground command so the console goes on while it
 runs: start(path, argv, roots, pid, id, budget_ms) -> (0 or REFUSED, why),
-step(pid, max_ms) -> RUNNING or the exit status, cancel(pid) -> 130.
+step(pid, max_ms) -> RUNNING or the exit status, cancel(pid) -> 130. The
+runtime answers the door's job contract, the WASI runtime's too: start ->
+(0, None) or (REFUSED, why), step and cancel -> (code, why).
 
 A native cart carries one module a chip, `main.<chip>.elf` beside its
 manifest (tools/elf_cart.py), and its manifest's `"moybyte": {"native":
@@ -60,13 +62,13 @@ class ElfRuntime:
                                  budget_ms)
 
     def step(self, pid, max_ms):
-        """Serve the run's session calls for `max_ms` at most: RUNNING, or its
-        exit status once it has ended."""
-        return self.engine.step(pid, max_ms)
+        """Serve the run's session calls for `max_ms` at most: (RUNNING,
+        None), or its exit status and None once it has ended."""
+        return self.engine.step(pid, max_ms), None
 
     def cancel(self, pid):
-        """End the run as Ctrl-C does: 130."""
-        return self.engine.cancel(pid)
+        """End the run as Ctrl-C does: (130, None)."""
+        return self.engine.cancel(pid), None
 
 
 def make_elf_runtime(ws):

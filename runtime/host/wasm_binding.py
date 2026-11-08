@@ -267,9 +267,15 @@ def _lib():
             d.hw_footprint.restype = None
             d.hw_interp_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
             d.hw_interp_footprint.restype = None
-            d.hw_wasi_run.argtypes = [_C, _I, ctypes.POINTER(_C), _C, ctypes.c_uint32,
-                                      ctypes.c_uint32, _P, _I]
-            d.hw_wasi_run.restype = _I
+            d.hw_wasi_start.argtypes = [_C, _I, ctypes.POINTER(_C), _C, ctypes.c_uint32,
+                                        ctypes.c_uint32, _P, _I]
+            d.hw_wasi_start.restype = _I
+            d.hw_wasi_step.argtypes = [ctypes.c_uint32, _P, _I]
+            d.hw_wasi_step.restype = _I
+            d.hw_wasi_stop.argtypes = [_P, _I]
+            d.hw_wasi_stop.restype = _I
+            d.hw_wasi_live.argtypes = []
+            d.hw_wasi_live.restype = _I
             d.moy_wasm_natives.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
             d.moy_wasm_natives.restype = ctypes.POINTER(_NativeSymbol)
             if not d.hw_runtime():
@@ -323,23 +329,63 @@ def table():
 def run_command(path, argv, roots=(), bg_pid=0, budget_ms=0):
     """A WASI command (native/moy_wasm/moy_wasi.h): the module at `path` run
     as `argv` in the shell session running on this thread, reaching the
-    `roots` (folders relative to the store) its permissions grant. (its exit
-    status, None), or (TRAPPED, why) when it trapped and (REFUSED, why) when
-    it would not run."""
+    `roots` (folders relative to the store) its permissions grant, to its
+    end. (its exit status, None), or (TRAPPED, why) when it trapped and
+    (REFUSED, why) when it would not run."""
+    got = start_command(path, argv, roots, bg_pid, budget_ms)
+    if got[1] is not None:
+        return got
+    got = (RUNNING, None)
+    while got[0] == RUNNING:
+        got = step_command(1000)
+    return got
+
+
+def start_command(path, argv, roots=(), bg_pid=0, budget_ms=0):
+    """`run_command`'s run started, its `_start` on a thread of its own:
+    (0, None), or (REFUSED, why). `step_command` serves it and
+    `stop_command` ends it; one runs at a time."""
     d = _lib()
     if d is None:
         return REFUSED, "no host wasm binding (%s)" % (why_unavailable() or "?")
     args = (_C * max(1, len(argv)))(*[a.encode() for a in argv])
     joined = b"".join(r.encode() + b"\0" for r in roots) + b"\0"
     err = ctypes.create_string_buffer(256)
-    code = d.hw_wasi_run(path.encode(), len(argv), args, joined, int(bg_pid),
-                         int(budget_ms), err, len(err))
+    if d.hw_wasi_start(path.encode(), len(argv), args, joined, int(bg_pid), int(budget_ms),
+                       err, len(err)) < 0:
+        return REFUSED, err.value.decode("utf-8", "replace")
+    return 0, None
+
+
+def _ended(code, err):
     if code < 0:
         return (TRAPPED if code == TRAPPED else REFUSED), err.value.decode("utf-8", "replace")
     return code, None
 
 
+def step_command(max_ms):
+    """The running command's calls served for `max_ms` at most: (RUNNING,
+    None) while it goes on, else `run_command`'s answer."""
+    err = ctypes.create_string_buffer(256)
+    code = _lib().hw_wasi_step(int(max_ms) * 1000, err, len(err))
+    return (RUNNING, None) if code == RUNNING else _ended(code, err)
+
+
+def stop_command():
+    """The running command ended as Ctrl-C ends it: `run_command`'s answer,
+    130 unless it had exited."""
+    err = ctypes.create_string_buffer(256)
+    return _ended(_lib().hw_wasi_stop(err, len(err)), err)
+
+
+def command_live():
+    """Whether a command's run is live (a test's leak check)."""
+    d = _lib()
+    return bool(d is not None and d.hw_wasi_live())
+
+
 TRAPPED, REFUSED = -1, -3                # run_command's: moy_wasi.h's MOY_WASI_TRAPPED, and the rest
+RUNNING = -100                           # moy_wasi.h's MOY_WASI_RUNNING
 
 
 SNAP_LEN = 15

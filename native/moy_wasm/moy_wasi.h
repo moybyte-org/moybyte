@@ -22,13 +22,22 @@
 // NOTCAPABLE, whichever preopen it came through.
 //
 // WHERE IT RUNS. A native is called on the thread running the module: a
-// board's session thread (moy_wasm_session.h), the host's caller. Its body
-// touches the session, so it runs where the session may be touched: through
-// `hop` (a board's moy_wasm_on_vm, the MicroPython task the door's crossing
-// runs on), in place where `hop` is NULL. Every call checks the session's
-// Ctrl-C and the run's budget (at most every MOY_WASI_POLL_US), and either
-// ends the run as proc_exit does: 130, or 137 with a line on stderr. A loop
-// calling no import is not stopped (moy_wasm/README.md, "Stopping a run").
+// board's session thread (moy_wasm_session.h), the host's job thread. Its
+// body touches the session, so it runs where the session may be touched:
+// through `hop` (a board's moy_wasm_on_vm, the MicroPython task the door's
+// crossing runs on), in place where `hop` is NULL. A clock's wait
+// (poll_oneoff, so sleep) waits on the module's thread, in slices. Every call
+// checks the session's Ctrl-C and the run's budget (at most every
+// MOY_WASI_POLL_US), and either ends the run as proc_exit does: 130, or 137
+// with a line on stderr. A loop calling no import is not stopped
+// (moy_wasm/README.md, "Stopping a run").
+//
+// IN STEPS. The task the session may be touched on serves the run a step at
+// a time (moy_wasi_step, the shell door's job, runtime/shell/sh_door.py), so
+// the console's frame goes on between the steps: each step serves the
+// module's calls for a while (moy_sh_prog.h's moy_sh_prog_step, the native
+// tier's loop too), and moy_wasi_stop ends the run as Ctrl-C does. The
+// tier's runner is the other end of its `hop`.
 //
 // IN THE BACKGROUND (`&`), the program's stdout and stderr are the OS log's
 // lines under its pid, as a Python command's are (runtime/shell/sh_door.py),
@@ -37,6 +46,7 @@
 #ifndef MOY_WASI_H
 #define MOY_WASI_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -85,9 +95,33 @@ void moy_wasi_unregister(NativeSymbol *store);
 // `_start`. 0, or non-zero with the first reason in `err`.
 int moy_wasi_check(wasm_module_t module, char *err, size_t errlen);
 
-// Run the command's `_start` on `env` (the thread that loaded it): its exit
-// status (proc_exit's, 0 when `_start` returns, 130 or 137 when it was
-// stopped), or MOY_WASI_TRAPPED with the trap in `err`.
+// Run the command's `_start` on `env`: its exit status (proc_exit's, 0 when
+// `_start` returns, 130 or 137 when it was stopped), or MOY_WASI_TRAPPED
+// with the trap in `err`.
 int moy_wasi_main(moy_wasi_t *w, wasm_exec_env_t env, char *err, size_t errlen);
+
+// A tier's runner of a stepped run: whether `_start` has returned on the
+// module's thread; one of its calls waited for (`us` at most) and served,
+// the task's watchdog fed; and "terminated" raised in its instance.
+typedef struct {
+    bool (*done)(void *job);
+    void (*serve)(void *job, int64_t us);
+    void (*terminate)(void *job);
+} moy_wasi_runner_t;
+
+#define MOY_WASI_RUNNING (-100)         // moy_wasi_step: `_start` goes on
+
+// Where the session may be touched, `_start` running on the module's thread
+// under runner `r`: serve its calls for `max_us` at most. MOY_WASI_RUNNING
+// while it goes on, else 0 with `_start` returned -- a run that Ctrl-C or
+// its budget ended made to return first (its instance terminated, its calls
+// served until it has) -- and moy_wasi_status its exit status.
+int moy_wasi_step(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job, uint32_t max_us);
+// The run ended as Ctrl-C ends it (130, unless it had already exited), and
+// `_start` made to return as moy_wasi_step makes it.
+void moy_wasi_stop(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job);
+// Its exit status once `_start` has returned, moy_wasi_main having answered
+// `main`: the exit's or the stop's where the run ended so, else `main`.
+int moy_wasi_status(const moy_wasi_t *w, int main);
 
 #endif // MOY_WASI_H

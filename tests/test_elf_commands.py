@@ -162,7 +162,7 @@ def test_what_a_command_left_held_is_swept(term):
 
 
 def test_ctrl_c_and_the_budget_end_a_run(term, monkeypatch):
-    """A foreground run is a job the door steps (sh_door._native_steps), so
+    """A foreground run is a job the door steps (sh_door._compiled_steps), so
     the console goes on between its steps; Ctrl-C closes the job."""
     from runtime import sh_door
     ws, app = term

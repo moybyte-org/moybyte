@@ -1245,15 +1245,46 @@ class WasmRuntime:
         m = _moy_wasm.mem()
         return m[3], m[4]
 
+    RUNNING = -100                       # moy_wasi.h's MOY_WASI_RUNNING
+
     def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0):
         """A WASI command cart run as `argv` in the shell session the door's
-        crossing runs in (runtime/shell/sh_door.py, native/moy_wasm/moy_wasi.h):
-        (exit status, None), or -1 (a trap) or -3 (it did not run) and the
-        reason. Its module for this console runs where the cart carries one,
-        as a cart's does, and main.wasm on the interpreter where it carries
-        none or that one is refused for anything but tamper evidence."""
-        command = getattr(_moy_wasm, "command", None)
-        if command is None:
+        crossing runs in (runtime/shell/sh_door.py, native/moy_wasm/moy_wasi.h),
+        to its end, the task's watchdog fed while it runs: (exit status,
+        None), or -1 (a trap) or -3 (it did not run) and the reason."""
+        got = self._start(cart, argv, roots, bg_pid, budget_ms)
+        if got[1] is not None:
+            return got
+        got = (self.RUNNING, None)
+        while got[0] == self.RUNNING:
+            got = _moy_wasm.command_step(1000)
+        return got
+
+    def start(self, cart, argv, roots=(), pid=0, budget_ms=0):
+        """`command`'s run started in the foreground and left running, as the
+        shell door's job (moy_wasi.h's "IN STEPS"): (0, None), or (-3, why).
+        `step` serves it and `cancel` ends it; one runs at a time."""
+        del pid
+        return self._start(cart, argv, roots, 0, budget_ms)
+
+    def step(self, pid, max_ms):
+        """The run's calls served for `max_ms` at most: (RUNNING, None), or
+        `command`'s answer once it has ended."""
+        del pid
+        return _moy_wasm.command_step(max_ms)
+
+    def cancel(self, pid):
+        """The run ended as Ctrl-C ends it: (130, None) unless it had exited."""
+        del pid
+        return _moy_wasm.command_stop()
+
+    def _start(self, cart, argv, roots, bg_pid, budget_ms):
+        """The run started: its module for this console where the cart
+        carries one, as a cart's is, and main.wasm on the interpreter where
+        it carries none or that one is refused for anything but tamper
+        evidence. (0, None), or (-3, why)."""
+        start = getattr(_moy_wasm, "command_start", None)
+        if start is None:
             return -3, "this firmware runs no commands"
         path = cart["path"]
         main = cart.get("main", "main.wasm")
@@ -1268,12 +1299,12 @@ class WasmRuntime:
                 module = None
             if module is not None:
                 sha = _sha256_file(path + "/" + main)
-                code, err = command(module, sha, False, unknown_sources, argv, joined,
-                                    bg_pid, budget_ms)
+                code, err = start(module, sha, False, unknown_sources, argv, joined,
+                                  bg_pid, budget_ms)
                 if code != -3 or err.startswith(_AOT_TAMPER_EVIDENCE):
                     return code, err
-        return command(path + "/" + main, None, True, unknown_sources, argv, joined,
-                       bg_pid, budget_ms)
+        return start(path + "/" + main, None, True, unknown_sources, argv, joined,
+                     bg_pid, budget_ms)
 
 
 def make_wasm_runtime(ws):
