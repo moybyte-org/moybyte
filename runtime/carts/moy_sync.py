@@ -64,7 +64,8 @@ page it serves as the board's VM decides key by key (`SYSTEM_KEYS`): the
 board is of record, its C parks a system batch for the VM, and the VM merges
 it (`SystemReceiver`) -- the portable Settings that changed set and re-applied,
 the badges among them (the achievements process's prefs row, a cart
-namespace's). A board's pin, update channel and NTP server are never
+namespace's, crossing whole: the later writer's row wins, so badges found
+on both sides between two syncs keep only one side's). A board's pin, update channel and NTP server are never
 sent to a page and never taken from one, and its consent records stay its own. A fourth root, the apps'
 private folders (`apps/<id>/<key>`, what a compiled cart wrote: `APPS_ROOT`),
 crosses between a board and the page it serves, every file as bytes.

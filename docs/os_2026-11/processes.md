@@ -773,7 +773,10 @@ strict readers both ends share.
   message. A deleted game's badges stay in the row and stay listed under
   its name. The row is a cart namespace's, so the system root carries it
   between a board and its page with the portable Settings
-  (`moy_sync.SYSTEM_KEYS`). There is no migration: a console's old
+  (`moy_sync.SYSTEM_KEYS`). It crosses whole and the later writer wins:
+  badges found on a board and on its page between two syncs keep only the
+  later side's (a per-badge union was weighed on 2026-11-08 and left out).
+  There is no migration: a console's old
   `achievements.json` is never read again (CLAUDE.md, no store migrations).
 - **The `notify` role is the console's face of it.** In
   `native/os_calls.json` its rows' `server` is `"proc:achievements"` and the

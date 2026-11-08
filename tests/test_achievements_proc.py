@@ -315,3 +315,53 @@ def test_an_idle_message_wake_costs_a_frame_nothing():
     assert wid not in w.by_id
     with pytest.raises(ValueError):
         w.on("", lambda: None)
+
+
+LUA_GAME = '''
+function _init()
+  moybyte.award("gold")
+  moybyte.award("konami")
+  moybyte.progress("steps", 2)
+end
+
+function _draw() end
+'''
+
+
+def test_a_lua_game_awards_its_own_badges(tmp_path):
+    """A Lua run holds `moybyte.award` and `moybyte.progress` (and
+    `moybyte.send`) as a service does: the Python face's verbs, run as the
+    run's process, so the OS stamps the game's app id and the game reaches
+    its own manifest's badges and no other's."""
+    if S._svc() is None:
+        pytest.skip("no Lua runtime on this host")
+    notifications.NOTES.reset()
+    ws = build_ws(tmp_path)
+    try:
+        from runtime import moy_carts, app_perms
+        cart = moy_carts.create("Lua Badges", ws.carts_root, src=LUA_GAME, type="game",
+                                runtime="lua", main="main.lua")
+        man_path = os.path.join(cart["path"], "manifest.json")
+        with open(man_path) as f:
+            man = json.load(f)
+        man["moybyte"]["achievements"] = [
+            {"id": "gold", "title": "Gold", "icon": "star", "hint": "Find gold"},
+            {"id": "steps", "title": "Steps", "icon": "run", "hint": "Walk", "goal": 3}]
+        with open(man_path, "w") as f:
+            json.dump(man, f)
+        ws.carts.rescan()
+        app = app_perms.app_id(next(c for c in ws.carts.all if c["title"] == "Lua Badges"))
+        _SINCE[0] = L.next()
+        open_cart(ws, "Lua Badges")
+        make_drv(ws).frame(1 / 30)
+        settle_badges(ws)
+        rec = ws.ach.doc()[app]
+        assert rec["name"] == "Lua Badges" and sorted(rec["found"]) == ["gold"]
+        assert rec["value"] == {"steps": 2}
+        assert ("Lua Badges: badge found!", "Gold") in [
+            (n.summary, n.body) for n in notifications.NOTES.list]
+        assert not ws.ach.has(A.SYSTEM, "konami")
+        assert any("konami refused: not declared" in t for t in _log(ws))
+    finally:
+        S.SCHED.stop(ws.ach.pid)
+        notifications.NOTES.reset()

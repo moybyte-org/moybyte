@@ -133,9 +133,10 @@ nor those docs will warn you about:
   path must start with a shared folder (`moy_store_base.SHARED_FOLDERS`), which
   is the one rule keeping `.history/` and `.Trash/` home in both directions.
 - **The console's own documents are a THIRD root** (`moy_sync.SYSTEM_ROOT`,
-  owner 2026-10-20): `system/settings` (the theme and every Setting),
-  `achievements.json`, the edited bar icons and the shared sheet ride the
-  same sweep into a site-mode page's OPFS, so a reload comes back on the same
+  owner 2026-10-20): `system/settings` (the theme, every Setting and the
+  apps' prefs, the achievements process's badges row among them), the edited
+  bar icons and the shared sheet ride the same sweep into a site-mode page's
+  OPFS, so a reload comes back on the same
   theme, Settings and badges. Each lands old-or-new (`moy_store.commitFile`),
   because a torn `system/settings` boots the console on its defaults. **On a
   board the root is the VM's, never the C's**: the page seeds from `GET
@@ -143,7 +144,8 @@ nor those docs will warn you about:
   parks (its seal checked) for `moy_webhost.ConsoleSystem`; the board is of record
   and takes a page's change KEY BY KEY (`moy_sync.SYSTEM_KEYS`: an unknown key
   is LOCAL, so the consent records are never taken; the update channel is
-  never sent and never taken, the badges are a union). Its directory is the carts folder's
+  never sent and never taken, and the badges row crosses whole, the later
+  writer's winning). Its directory is the carts folder's
   parent and proves nothing, so the page watches it only when the pull
   answered (the worker's `seeded` list); firmware without it 404s the pull and
   400s the batch, and that page keeps them in the tab. Cart paths in

@@ -179,22 +179,20 @@ for (const sync of [true, false]) {
     ok("a fresh console store is empty (" + label + ")", await store.isEmpty(s));
     const sheet = new Uint8Array(300).map((_, i) => (i * 7) & 255);
     const SYS = '{"theme": "dusk", "show_fps": false, "volume": 3}';
-    const ACH = '{"unlocked": ["first_open", "first_run"]}';
     const r = await store.applyOps(s, [
         { p: SET, t: SYS },
-        { p: "achievements.json", t: ACH },
         { p: "shared.moygfx", b: store.toBase64(sheet) },
     ]);
-    ok("its documents land (" + label + ")", r.applied === 3 && !r.errors.length,
+    ok("its documents land (" + label + ")", r.applied === 2 && !r.errors.length,
        JSON.stringify(r.errors));
     let all = await store.readAll(s);
     ok("...and read back, the sheet as bytes (" + label + ")",
-       all[SET] === SYS && all["achievements.json"] === ACH
+       all[SET] === SYS
        && store.fileData(all["shared.moygfx"]).every((x, i) => x === sheet[i]),
        JSON.stringify(Object.keys(all)));
     ok("a committed write leaves nothing beside the file (" + label + ")",
        (await dirNames(s.carts)).join() ===
-       "achievements.json,shared.moygfx,system/settings",
+       "shared.moygfx,system/settings",
        (await dirNames(s.carts)).join());
     ok("the console store is not empty now (" + label + ")", !(await store.isEmpty(s)));
     ok("...and the carts store never saw any of it (" + label + ")",
@@ -205,15 +203,16 @@ for (const sync of [true, false]) {
         { p: SET, t: big.slice(0, 20), part: 0 },
         { p: SET, t: big.slice(20), part: 1 },
         { p: SET, pub: 1 },
-        { p: "achievements.json", d: 1 },
+        { p: "shared.moygfx", d: 1 },
     ]);
     all = await store.readAll(s);
     ok("chunks publish whole and a delete lands (" + label + ")",
-       chunked.applied === 4 && all[SET] === big && !("achievements.json" in all),
+       chunked.applied === 4 && all[SET] === big && !("shared.moygfx" in all),
        JSON.stringify(chunked.errors) + " " + JSON.stringify(Object.keys(all)));
 
     const bad = await store.applyOps(s, [
         { p: "wifi.json", t: "[]" },
+        { p: "achievements.json", t: "{}" },
         { p: "installed.json", t: "{}" },
         { p: "system.json", t: "{}" },
         { p: "indexes.json", t: "{}" },
@@ -227,10 +226,10 @@ for (const sync of [true, false]) {
     ]);
     ok("a secret, another sibling, a cart path, a folder delete and bytes for a"
        + " text file are all refused (" + label + ")",
-       bad.applied === 0 && bad.errors.length === 10, JSON.stringify(bad.errors));
+       bad.applied === 0 && bad.errors.length === 11, JSON.stringify(bad.errors));
     ok("...and nothing they named was written (" + label + ")",
        (await dirNames(s.carts)).join() ===
-       "shared.moygfx,system/settings",
+       "system/settings",
        (await dirNames(s.carts)).join());
 }
 

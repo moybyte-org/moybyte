@@ -120,7 +120,7 @@ export const ROOTS = [
     { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
     { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
     { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
-      top: ["system/settings", "achievements.json", "shared.moygfx"] },
+      top: ["system/settings", "shared.moygfx"] },
     { id: "apps", vfs: "/moy/apps", endpoint: "apps.json", dcMin: 1, dcMax: 1,
       binary: true, site: false },
 ];

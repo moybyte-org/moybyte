@@ -1215,7 +1215,9 @@ the badge's bar; a best, a total or a set is the game's to keep, in its
 achievements process (`moybyte.send("moybyte.achievements", "award", id)`),
 which hears the two names from any app. The console stamps the sender, so a
 game reaches only the badges its own manifest declares; any other id is
-refused, and the refusal logged. In Lua a service holds both names.
+refused, and the refusal logged. A Lua game holds the same three as
+`moybyte.send`, `moybyte.award` and `moybyte.progress`, and so does a Lua
+service.
 `system_carts/moybyte.harpoon_pop.moy` is a seed game that uses all three
 kinds; `docs/os_2026-11/processes.md` §8 is the process.
 

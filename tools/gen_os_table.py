@@ -38,7 +38,7 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     runtime/shell/app_perms.py      TABLE, each permission's tiers derived
     runtime/shell/shell_servers.py  DOOR_ARGS
     runtime/system/scheduler.py     _CALLS
-    runtime/run/lua_ext.py          the Lua run's role names
+    runtime/run/lua_ext.py          the Lua run's role names and console calls
   docs/app_api_v1.md                the role table and the call table
 
 The output is committed: no build runs this, and tests/test_os_table.py
@@ -1110,6 +1110,13 @@ def lua_calls(src):
             if role_of(r) == "moybyte" and r.get("lua")]
 
 
+def lua_run_calls(src):
+    """The console calls a Lua RUN holds as moybyte.<verb> (runtime/run/
+    lua_ext.py): a service's that no permission gates."""
+    return [verb_of(r) for r in door_rows(src)
+            if role_of(r) == "moybyte" and r.get("lua") and r.get("perm") is None]
+
+
 def gen_lua_h(src):
     o = [HEAD,
          "// The names a Lua program holds (native/moy_app/moy_app_lua.h): a run's role\n"
@@ -1206,7 +1213,8 @@ def gen_lua_ext(src):
         h = tbl or fn
         if h not in heads:
             heads.append(h)
-    return _splice(LUA_EXT, "LUA_ROLE_NAMES = %s\n" % _tup(heads))
+    return _splice(LUA_EXT, "LUA_ROLE_NAMES = %s\nLUA_RUN_CALLS = %s\n"
+                   % (_tup(heads), _tup(lua_run_calls(src))))
 
 
 def _cell(names):
