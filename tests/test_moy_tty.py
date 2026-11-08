@@ -97,7 +97,8 @@ class Host:
             s.bind(("127.0.0.1", 0))
             self.port = s.getsockname()[1]
         self.tree = tree
-        self.logf = open(out / "tty.log", "w+")
+        self.logpath = out / "tty.log"
+        self.logf = open(self.logpath, "w")
         env = dict(os.environ, MOY_SH_ROOT=str(tree), ASAN_OPTIONS="detect_leaks=0")
         self.proc = subprocess.Popen(
             [exe, str(self.port), str(tree / "sd" / "moybyte" / "system") if sealed else "-",
@@ -111,8 +112,10 @@ class Host:
         assert "listening" in self.log(), self.log()
 
     def log(self):
-        self.logf.seek(0)
-        return self.logf.read()
+        # Its own handle: the child writes through logf's open file, whose
+        # offset a seek here would move under it.
+        with open(self.logpath) as f:
+            return f.read()
 
     def say(self, line):
         self.proc.stdin.write(line.encode() + b"\n")
