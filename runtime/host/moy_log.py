@@ -64,6 +64,20 @@ def _lib():
     return _LIB[0]
 
 
+_EXITS = ("NOT_RUN", "INTERRUPTED", "TRAPPED", "KILLED")
+
+
+def __getattr__(attr):
+    """NOT_RUN, INTERRUPTED, TRAPPED, KILLED: the process table's exit
+    statuses (native/moy_kernel/moy_proc_exit.h), read from the C's
+    `moy_log_exits` at the first use."""
+    if attr not in _EXITS:
+        raise AttributeError(attr)
+    v = (ctypes.c_uint8 * len(_EXITS)).in_dll(_lib(), "moy_log_exits")[_EXITS.index(attr)]
+    globals()[attr] = v
+    return v
+
+
 def _bytes(v):
     if isinstance(v, (bytes, bytearray)):
         return bytes(v)

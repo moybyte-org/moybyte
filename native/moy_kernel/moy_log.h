@@ -111,4 +111,9 @@ void moy_log_dump(uint32_t since, int level, const char *name, void (*say)(const
 // The clock a host's test pins (microseconds; 0: the real one).
 void moy_log_pin_clock(uint64_t us);
 
+// The exit statuses a process's `exit` line records (moy_proc_exit.h), in
+// its order -- not run, interrupted, trapped, killed -- for a binding that
+// reads them at run time (the host's ctypes, runtime/host/moy_log.py).
+extern const uint8_t moy_log_exits[4];
+
 #endif // MOY_LOG_H

@@ -22,6 +22,7 @@
 #include "system.h"
 
 #include "moy_sh_int.h"
+#include "../moy_kernel/moy_proc_exit.h"
 #include "moy_vol.h"
 
 #define CMD_BUF 4096
@@ -986,7 +987,7 @@ static int sleepcmd(int argc, char **argv) {
         ms -= step;
         if (moy_sh_poll()) {
             moy_sh_cur->interrupt = 1;
-            return 130;
+            return MOY_PROC_INTERRUPTED;
         }
     }
     return 0;

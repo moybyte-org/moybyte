@@ -22,6 +22,7 @@
 #include "py/objstr.h"
 
 #include "moy_log.h"
+#include "moy_proc_exit.h"
 
 #define JOIN_MAX 384
 
@@ -173,6 +174,10 @@ static const mp_rom_map_elem_t log_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_KERNEL), MP_ROM_INT(MOY_LOG_KERNEL) },
     { MP_ROM_QSTR(MP_QSTR_SHELL), MP_ROM_INT(MOY_LOG_SHELL) },
     { MP_ROM_QSTR(MP_QSTR_TEXT_MAX), MP_ROM_INT(MOY_LOG_TEXT_MAX) },
+    { MP_ROM_QSTR(MP_QSTR_NOT_RUN), MP_ROM_INT(MOY_PROC_NOT_RUN) },
+    { MP_ROM_QSTR(MP_QSTR_INTERRUPTED), MP_ROM_INT(MOY_PROC_INTERRUPTED) },
+    { MP_ROM_QSTR(MP_QSTR_TRAPPED), MP_ROM_INT(MOY_PROC_TRAPPED) },
+    { MP_ROM_QSTR(MP_QSTR_KILLED), MP_ROM_INT(MOY_PROC_KILLED) },
 };
 static MP_DEFINE_CONST_DICT(log_globals, log_globals_table);
 

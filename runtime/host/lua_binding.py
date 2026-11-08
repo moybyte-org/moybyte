@@ -100,7 +100,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
     "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
     "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
     "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
-    "moy_proc.h", "moy_proc.c", "moy_app_run.h", "moycore_svc.h", "moycore_svc.c",
+    "moy_proc.h", "moy_proc_exit.h", "moy_proc.c", "moy_app_run.h", "moycore_svc.h", "moycore_svc.c",
 ] + _lua_names(), (_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX, _SPINE,
                    _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI,
                    os.path.join(_NATIVE, "moy_app")), shim=_SHIM)
@@ -113,7 +113,7 @@ WASM_PART = native_build.Part("wasm", (
     "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
     "moy_ui_wasm.h", "moy.h", "moy_pixel.h", "moy_app_run.h", "moy_proc.h",
-    "moy_wasi.c", "moy_wasi.h", "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h"),
+    "moy_wasi.c", "moy_wasi.h", "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc_exit.h"),
     (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI, _KERNEL,
      os.path.join(_NATIVE, "moy_wasm"), os.path.join(_NATIVE, "moy_sh"), os.path.join(_AUDIO, "libmoy"),
      os.path.join(_NATIVE, "moy_app")))

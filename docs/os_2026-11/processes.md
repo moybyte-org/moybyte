@@ -108,7 +108,9 @@ process-table slot and generation; the states are `running`, `throttled`,
 `stopping` and `exited` (with the code the task
 manager and `ps` show); a stop is TERM (the `moy_stop`/`close` hook) and, after
 `MOY_SERVICE_STOP_MS`, KILL (§5), the same for an app, a command and a
-service.
+service. The codes the OS gives are the shell's, defined once
+(`native/moy_kernel/moy_proc_exit.h`, Python's through `moy_log`): 126 a
+start refused, 130 Ctrl-C, 134 a trap, 137 a kill.
 
 **Lifecycle verbs:** `open`/`close` for an app (`docs/shell_ux_v1.md` §11),
 `main(argv) → exit code` for a command, `moy_start`/`moy_stop` for a

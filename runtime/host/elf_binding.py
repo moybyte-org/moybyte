@@ -22,7 +22,7 @@ _ELF = os.path.join(_NATIVE, "moy_elf")
 PART = native_build.Part("elf", (
     "moy_os.h", "moy_os.c", "moy_os_table.h", "moy_os_rows.h", "moy_os_table.c",
     "moy_elf.h", "moy_elf_check.c", "moyhost_elf.c", "moy_ota.h",
-    "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc.h", "moy_input.h",
+    "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc.h", "moy_proc_exit.h", "moy_input.h",
     "moy_event.h"),
     (_ELF, _HERE, os.path.join(_NATIVE, "moy_sh"), os.path.join(_NATIVE, "moy_kernel"),
      os.path.join(_NATIVE, "moy_input"), os.path.join(_NATIVE, "moy_net")))

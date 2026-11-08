@@ -26,14 +26,13 @@
 #include <string.h>
 
 #include "moy_log.h"
+#include "moy_proc_exit.h"
 #include "moy_sh.h"
 #include "moy_sh_board.h"
 
 #define MOY_SH_PROG_LINE 200
 #define MOY_SH_PROG_PATH 512
 #define MOY_SH_PROG_POLL_US 10000       // Ctrl-C and the budget, at most this often
-#define MOY_SH_PROG_INTERRUPTED 130
-#define MOY_SH_PROG_KILLED 137
 
 typedef struct {
     moy_sh_t *s;
@@ -106,19 +105,19 @@ static inline void moy_sh_prog_stop(moy_sh_prog_t *p, int code) {
 }
 
 // At the start of a call, on the session: whether the run goes on. Ctrl-C
-// ends it with MOY_SH_PROG_INTERRUPTED, its budget with MOY_SH_PROG_KILLED
+// ends it with MOY_PROC_INTERRUPTED, its budget with MOY_PROC_KILLED
 // and a line on stderr; checked at most every MOY_SH_PROG_POLL_US.
 static inline bool moy_sh_prog_poll(moy_sh_prog_t *p, int64_t now_us) {
     if (!p->exited && now_us - p->polled_us >= MOY_SH_PROG_POLL_US) {
         p->polled_us = now_us;
         if (moy_sh_interrupted(p->s)) {
-            moy_sh_prog_stop(p, MOY_SH_PROG_INTERRUPTED);
+            moy_sh_prog_stop(p, MOY_PROC_INTERRUPTED);
         } else if (p->deadline_us && now_us >= p->deadline_us) {
             char msg[64];
             int n = snprintf(msg, sizeof msg, "killed: ran past %u s\n",
                              (unsigned)(p->budget_ms / 1000));
             moy_sh_fd_write(p->s, 2, msg, (size_t)n);
-            moy_sh_prog_stop(p, MOY_SH_PROG_KILLED);
+            moy_sh_prog_stop(p, MOY_PROC_KILLED);
         }
     }
     return !p->exited;

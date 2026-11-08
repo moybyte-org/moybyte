@@ -17,8 +17,7 @@
 #include "moy_log.h"
 #include "moy_sh_prog.h"
 
-_Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_INTERRUPTED == MOY_SH_PROG_INTERRUPTED
-               && MOY_WASI_KILLED == MOY_SH_PROG_KILLED && MOY_WASI_RUNNING == MOY_SH_PROG_RUNNING,
+_Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_RUNNING == MOY_SH_PROG_RUNNING,
                "a spawned program's ends are moy_sh_prog.h's");
 
 // A board is told by the header it has: ESP_PLATFORM is not defined for a
@@ -1504,7 +1503,7 @@ int moy_wasi_step(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job, uint32_t
 }
 
 void moy_wasi_stop(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job) {
-    stop(w, MOY_WASI_INTERRUPTED);
+    stop(w, MOY_PROC_INTERRUPTED);
     drain(r, job);
 }
 

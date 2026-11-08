@@ -2575,7 +2575,7 @@ int moy_os_command_stop(uint32_t pid) {
     if (p == NULL || p->service) {
         return MOY_OS_REFUSED;
     }
-    moy_sh_prog_stop(&p->prog, MOY_SH_PROG_INTERRUPTED);
+    moy_sh_prog_stop(&p->prog, MOY_PROC_INTERRUPTED);
     return command_end(p);
 }
 
@@ -2697,7 +2697,7 @@ int moy_os_stop(uint32_t pid) {
     while (!p->main_done && mono_us() < end) {
         sem_take(&p->stopped, MOY_OS_SLICE_US);
     }
-    int code = p->main_done ? p->code : MOY_SH_PROG_KILLED;
+    int code = p->main_done ? p->code : MOY_PROC_KILLED;
     if (p->row) {
         moy_proc_end(p->row, code);
     }

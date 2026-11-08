@@ -25,6 +25,7 @@
 #include "moy_lease.h"
 #include "moy_log.h"
 #include "moy_loop.h"
+#include "moy_proc_exit.h"
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
 #if __has_include("../moy_input/moy_gatt.h")
@@ -50,7 +51,6 @@ void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) __attribute__((weak));
 #define POLL_BYTES 64
 #define YIELD_MS 200u
 #define ROLE_POLL_MS 10                 // a waiting role command's step, at most this often
-#define INTERRUPTED 130
 #define RUN_STACK (24u * 1024u)         // a runner's stack (the SSH face's task's)
 #define ABORT_TURNS 256                 // a parked run's turns to end at its session's end
 
@@ -321,7 +321,7 @@ static int b_spawn(void *ctx, moy_sh_t *s, int argc, char **argv, int bg, int *p
     while (r == DOOR_RUNNING) {
         if (moy_sh_interrupted(s)) {
             door_int("stop", 1, one);
-            return INTERRUPTED;
+            return MOY_PROC_INTERRUPTED;
         }
         b_sleep(NULL, ROLE_POLL_MS);
         r = door_int("step", 1, one);
@@ -439,7 +439,7 @@ static int b_mic(moy_sh_t *s, int argc, char **argv) {
     int code = 0;
     while (want > 0 && run_ms() - t0 < (uint32_t)ms + 1000u) {
         if (moy_sh_interrupted(s)) {
-            code = INTERRUPTED;
+            code = MOY_PROC_INTERRUPTED;
             break;
         }
         int n = moy_mic_read(SHELL_PID, buf, want < 256u ? want : 256u);
@@ -551,7 +551,7 @@ static int b_lora(moy_sh_t *s, int argc, char **argv) {
                 break;
             }
             if (moy_sh_interrupted(s)) {
-                code = INTERRUPTED;
+                code = MOY_PROC_INTERRUPTED;
                 break;
             }
             b_sleep(NULL, POLL_MS);
@@ -625,7 +625,7 @@ static int b_ble(moy_sh_t *s, int argc, char **argv) {
     while (run_ms() - t0 < c.ms) {
         if (moy_sh_interrupted(s)) {
             moy_sh_hop(s, ble_close_here, NULL);
-            return INTERRUPTED;
+            return MOY_PROC_INTERRUPTED;
         }
         b_sleep(NULL, POLL_MS);
     }
@@ -679,7 +679,7 @@ static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     while (r == DOOR_RUNNING) {
         if (moy_sh_interrupted(s)) {
             door_int("stop", 1, one);
-            return INTERRUPTED;
+            return MOY_PROC_INTERRUPTED;
         }
         b_sleep(NULL, ROLE_POLL_MS);
         r = door_int("step", 1, one);

@@ -21,6 +21,7 @@ static uint32_t now_ms(void) {
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
 #include "moy_sh_face.h"
+#include "moy_proc_exit.h"
 #include "moy_text.h"
 
 #define ECHO "\x1b[2m"
@@ -29,7 +30,6 @@ static uint32_t now_ms(void) {
 #define MIN_COLS 8
 #define RUN_MORE 1
 #define RUN_EXIT 2
-#define INTERRUPTED 130
 #define NAMES_BYTES 8192u               // a completion's names, all of them
 #define LOG_ROWS_MAX 96                 // a text view's rows at most (MOY_UI_TEXT_ROWS)
 #define PROMPT_ROW (MOY_SH_FACE_LINE * 2 + 32)
@@ -332,7 +332,7 @@ static void ran(moy_sh_face_t *f, int r) {
             snprintf(msg, sizeof msg, "%s[the shell exited %d]%s\n", ECHO, code, PLAIN);
             write_s(f, msg);
         }
-    } else if (moy_sh_screen_status(f->scr) == INTERRUPTED) {
+    } else if (moy_sh_screen_status(f->scr) == MOY_PROC_INTERRUPTED) {
         f->swallow = 1;
     }
     f->stale = 1;

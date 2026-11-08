@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "moy_log.h"
+#include "moy_proc_exit.h"
 
 #if __has_include("esp_heap_caps.h")
 #define MOY_LOG_ESP 1
@@ -81,6 +82,10 @@ static uint64_t now_us(void) {
     return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
     #endif
 }
+
+const uint8_t moy_log_exits[4] = {
+    MOY_PROC_NOT_RUN, MOY_PROC_INTERRUPTED, MOY_PROC_TRAPPED, MOY_PROC_KILLED,
+};
 
 void moy_log_pin_clock(uint64_t us) {
     G.pinned_us = us;

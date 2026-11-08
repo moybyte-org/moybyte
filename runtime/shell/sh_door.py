@@ -88,9 +88,9 @@ EPERM, ESRCH, EIO = 1, 3, 5
 SHELL = 1
 COMMAND_MS = 30000              # a command's or a REPL's run, at most
 STEP_MS = 8                     # a role command's steps in one crossing, at most this long
-NOT_RUN = 126                   # the exit code of a command refused its start
-KILLED = 137
-TRAPPED = 134                   # a compiled command that trapped, as SIGABRT's
+# The process table's exit statuses (native/moy_kernel/moy_proc_exit.h): a
+# command refused its start, ended by Ctrl-C, trapped, killed.
+NOT_RUN, INTERRUPTED, TRAPPED, KILLED = _L.NOT_RUN, _L.INTERRUPTED, _L.TRAPPED, _L.KILLED
 WASI_TRAPPED = -1               # the wasm runtime's `command` answer for a trap
 EXITS = 8                       # background commands' exit codes kept for `wait`
 LINE = 256                      # what a stdin read takes at a time
@@ -697,7 +697,7 @@ class ShellDoor:
         if got is None:
             return ABSENT
         self._as_shell(got[0], got[1].close)
-        return 130
+        return INTERRUPTED
 
     def _as_shell(self, name, fn):
         """fn() as the shell (pid 1): its answer, a generator's return value

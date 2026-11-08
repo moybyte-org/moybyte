@@ -34,6 +34,7 @@
 
 #include "cd.h"
 #include "moy_sh_int.h"
+#include "../moy_kernel/moy_proc_exit.h"
 
 #define main_handler (*moy_sh_g->main_handler)
 
@@ -848,7 +849,7 @@ static int exec_named(moy_sh_t *s, char **argv, const char *name) {
     argv[0] = was;
     if (r == MOY_SH_NEEDS_VM) {
         sh_warnx("%s: needs the console", was);
-        return 126;
+        return MOY_PROC_NOT_RUN;
     }
     if (r == MOY_SH_NOT_FOUND) {
         return -1;

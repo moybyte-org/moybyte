@@ -55,7 +55,7 @@ except ImportError:  # host: the runtime package
 SHELL = 1
 JOB = "job"                     # a running job's kind in the scheduler's table
 NAME = "crontab"                # in the system folder
-NOT_RUN = 126
+NOT_RUN = _L.NOT_RUN             # the process table's (moy_proc_exit.h)
 POLL_MS = 20                    # how often a parked job is looked at
 WATCH_MS = 60000                # how often an unsynced clock is looked at
 YEARS = 5                       # how far ahead a line's next minute is looked for

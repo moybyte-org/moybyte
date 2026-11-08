@@ -62,8 +62,6 @@
 
 #define MOY_WASI_TRAPPED (-1)           // moy_wasi_main: the module trapped
 #define MOY_WASI_NOT_COMMAND (-2)       // moy_wasi_main: no `_start`
-#define MOY_WASI_INTERRUPTED 130
-#define MOY_WASI_KILLED 137
 
 typedef struct moy_wasi moy_wasi_t;
 

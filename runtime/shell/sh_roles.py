@@ -100,7 +100,7 @@ except ImportError:  # host: the runtime package
     from runtime import sh_door as _door
 
 USAGE = 2
-INTERRUPTED = 130
+INTERRUPTED = _door.INTERRUPTED
 WAIT_MS = 20000                 # an http request's wait, at most
 POLL_MS = 10
 

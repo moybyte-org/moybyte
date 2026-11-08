@@ -29,6 +29,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "moy_proc_exit.h"
+
 // The grant a row holds is moy_app's (native/moy_app/moy_app_run.h); an image
 // without native/moy_app (the Zero) holds none, and a row's grant reads
 // absent there.
