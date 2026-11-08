@@ -38,6 +38,8 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from board_config import runtime_file  # noqa: E402
 SOURCE = os.path.join(ROOT, "native", "os_calls.json")
 EVENT_H = os.path.join(ROOT, "native", "moy_input", "moy_event.h")
 
@@ -50,11 +52,11 @@ APP_H = os.path.join(ROOT, "native", "moy_app", "moy_app_rows.h")
 WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
 LUA_H = os.path.join(ROOT, "native", "moy_app", "moy_app_lua_rows.h")
-APP_CONTEXT = os.path.join(ROOT, "runtime", "shell", "app_context.py")
-APP_PERMS = os.path.join(ROOT, "runtime", "shell", "app_perms.py")
-SHELL_SERVERS = os.path.join(ROOT, "runtime", "shell", "shell_servers.py")
-SCHEDULER = os.path.join(ROOT, "runtime", "system", "scheduler.py")
-LUA_EXT = os.path.join(ROOT, "runtime", "run", "lua_ext.py")
+APP_CONTEXT = str(runtime_file("app_context.py"))
+APP_PERMS = str(runtime_file("app_perms.py"))
+SHELL_SERVERS = str(runtime_file("shell_servers.py"))
+SCHEDULER = str(runtime_file("scheduler.py"))
+LUA_EXT = str(runtime_file("lua_ext.py"))
 APP_DOC = os.path.join(ROOT, "docs", "app_api_v1.md")
 
 # The rows that run the SDK's C library's exit path (__moy_exit, sdk/libc/)
