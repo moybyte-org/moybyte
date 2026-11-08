@@ -3636,7 +3636,7 @@ def wasi_commands_run(board, board_dir):
         got = _sh(board, line, timeout=60)
         assert got == want, "%s -> %r" % (line, got)
 
-    runs("cd /files/Documents; printf 'one\\ntwo\\n' > wasi.txt; wasi.cat/cat wasi.txt", (0, ["one", "two"]))
+    runs("cd; mkdir -p Documents; cd Documents; printf 'one\\ntwo\\n' > wasi.txt; wasi.cat/cat wasi.txt", (0, ["one", "two"]))
     runs("wasi.probe/probe args a b | wasi.cat/cat", (0, ["0=probe", "1=args", "2=a", "3=b"]))
     runs("wasi.cat/cat < wasi.txt | wasi.probe/probe stdin", (0, ["8 bytes 2 lines"]))
     runs("export WASI_ON=glass; wasi.probe/probe env WASI_ON", (0, ["glass"]))
@@ -3718,7 +3718,7 @@ def elf_commands_run(board, board_dir):
 
     runs("elf.hello/hello on glass", (0, ["hello from a native module on glass"]))
     load = board.pyval("__import__('moy_elf').load()", strict=True)
-    runs("cd /files/Documents; printf 'one\\ntwo\\n' > elf.txt; elf.cat/cat elf.txt", (0, ["one", "two"]))
+    runs("cd; mkdir -p Documents; cd Documents; printf 'one\\ntwo\\n' > elf.txt; elf.cat/cat elf.txt", (0, ["one", "two"]))
     runs("printf 'x\\ny\\n' | elf.cat/cat | elf.cat/cat", (0, ["x", "y"]))
     runs("elf.cat/cat < elf.txt > elf2.txt; elf.cat/cat elf2.txt", (0, ["one", "two"]))
     runs("export ELF_ON=glass; elf.probe/probe env ELF_ON", (0, ["glass"]))
