@@ -142,6 +142,7 @@ there (`docs/os_2026-11/tiers.md` §1; the toolkit's `ui` rows are
 | `moybyte.tell` | none | `moybyte.tell` | `moybyte.tell` |  |  |
 | `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
+| `console` | `console` | `print` | `print` |  |  |
 <!-- END GENERATED -->
 
 Read that module for the signatures. Both tables are written from

@@ -253,7 +253,7 @@
     {"name": "wifi", "server": "python", "perm": "network", "py": ["wifi"]},
     {"name": "net", "server": "python", "perm": "multiplayer", "py": ["net", "on_net"], "lua": ["on_net"]},
     {"name": "pins", "server": "python", "perm": "pins", "py": ["pin_write", "pin_read"], "lua": ["pin_write", "pin_read"]},
-    {"name": "console", "server": "python", "perm": "console", "py": ["print"]},
+    {"name": "console", "server": "python", "perm": "console", "py": ["print"], "lua": ["print"]},
     {"name": "moybyte.lease", "server": "python", "perm": "lease", "py": ["moybyte.lease"]},
     {"name": "moybyte.at", "server": "python", "perm": "alarms", "py": ["moybyte.at"]},
     {"name": "moybyte.http", "server": "python", "perm": "http", "py": ["moybyte.http"]},

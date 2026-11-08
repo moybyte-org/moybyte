@@ -461,7 +461,7 @@ def test_install_brings_its_depends_first_and_refuses_what_it_cannot(tmp_path):
 
 def test_a_no_at_the_prompt_installs_nothing(tmp_path):
     repo = Repo(BASE)
-    repo.add("cam", moybyte={"permissions": ["camera"]})
+    repo.add("cam", moybyte={"permissions": ["clipboard"]})
     inst, p, out, err = _pkg(tmp_path, repo)
     inst._consent.check = lambda cart, install=False: ([], [], None)
     assert done(p.install(["cam"])) == 1

@@ -84,7 +84,7 @@ TABLE = (
      "Talk to nearby consoles", "net", ("net", "on_net")),
     ("pins", "api:gpio", ("python", "lua"),
      "Switch the console's pins", "gpio", ("pin_write", "pin_read")),
-    ("console", "api:console", ("python",), None, None, ()),
+    ("console", "api:console", ("python", "lua"), None, None, ()),
     ("notifications", "api:notify", ("python", "lua", "elf"), "Show notifications", None, ()),
     ("front", "api:front", ("python", "lua", "wasm", "elf"),
      "Take over the screen from the background", None, ()),
