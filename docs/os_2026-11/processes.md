@@ -167,7 +167,7 @@ OS reads:
   `camera`, `http`, `network`, `multiplayer`, `media`, `media:url`,
   `notifications` §7), `front` (below), `autostart` (§5), a lease
   (`lease:<resource>` naming a row of the board's resource table,
-  `hardware.md` §1), or `native` (full access: what a native cart must
+  `hardware.md` §1), or `full_access` (full access: what a native cart must
   ask for, and what admits a module with no signature on either compiled
   tier, `moy_ota_admit_module`). A permission the manifest also lists in `"moybyte": {"required": [...]}`
   is required: absent, it makes the launch refused with a message naming
@@ -261,7 +261,7 @@ same way. `http` needs `wifi`; the others need the board's class, which
 `devices.apis()` adds to the console's services. P2.4 adds `media` (it
 needs the board's media service, `hardware.md` §3) and `media:url` (it needs
 `wifi`), both granting `api:media`. The later rows (USB host,
-`midi`, `camera`, `native`) arrive with their APIs, each saying whether it
+`midi`, `camera`, `full_access`) arrive with their APIs, each saying whether it
 is enforced on its tier or informational (above).
 
 **`front`: taking the screen from the background (owner, 2026-11-08).**

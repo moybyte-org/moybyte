@@ -1092,7 +1092,7 @@ def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
     """The board runs the cart only from a module for its chip, and a cart
     made with `moy build` carries none: the push compiles one, unsigned, and
     sends it beside main.wasm, leaving the cart folder as it was. Unsigned
-    runs natively only for a cart that asks for "native", which the tool
+    runs natively only for a cart that asks for "full_access", which the tool
     reads from the manifest and says plainly before the push when it does
     not."""
     import json
@@ -1102,7 +1102,7 @@ def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
         path = os.path.join(cart, "manifest.json")
         with open(path, encoding="utf-8") as f:
             man = json.load(f)
-        man.setdefault("moybyte", {}).setdefault("permissions", []).append("native")
+        man.setdefault("moybyte", {}).setdefault("permissions", []).append("full_access")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(man, f)
     before = sorted(os.listdir(cart))
@@ -1118,7 +1118,7 @@ def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
     assert wm.split(module)[1] is None                  # unsigned
     assert sorted(os.listdir(cart)) == before           # the cart is untouched
     out = capsys.readouterr().out
-    assert ('does not ask for "native"' in out) is (not native)
+    assert ('does not ask for "full_access"' in out) is (not native)
     assert out.index("compiling one, unsigned") < out.index("demo.moy ->")
 
 

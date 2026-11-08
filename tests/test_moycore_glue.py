@@ -1893,7 +1893,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
-        # a cart that does not ask for "native" loads signed modules only
+        # a cart that does not ask for "full_access" loads signed modules only
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
         # the cart declares no writable paths; its files are moycore's C
@@ -1965,12 +1965,12 @@ def test_the_cart_s_audio_ring_reaches_the_binding(tmp_path):
 def test_the_load_asks_the_engine_what_the_cart_s_consent_says_now(tmp_path):
     """The cart's consent rides every load as it stands at that load
     (app_perms.run_admits_unsigned): the engine lets a module with no
-    signature through only for a cart granted "native"."""
+    signature through only for a cart granted "full_access"."""
     cart, _main = _compiled(tmp_path)
     for native in (True, False, True):
         world = _wasm_world()
         try:
-            perms = ["native"] if native else []
+            perms = ["full_access"] if native else []
             ws = FakeWs(project=_CartProject(dict(cart, permissions=perms)))
             world.mod.WasmRun(ws, make_ns(), None)
             assert world.core.calls[1][0] == "wasm_open"
@@ -1981,7 +1981,7 @@ def test_the_load_asks_the_engine_what_the_cart_s_consent_says_now(tmp_path):
 
 def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
     """The engine's refusal for a module with no signature (its cart not
-    granted "native") is not tamper evidence, so WasmRun retries the open on the
+    granted "full_access") is not tamper evidence, so WasmRun retries the open on the
     interpreter -- main.wasm itself -- instead of raising
     (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). The cart plays; run.interp says so, and interp_cause says

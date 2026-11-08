@@ -36,7 +36,7 @@ product), with the owner's later calls dated where they land.
   is one block its manifest sizes. The author's toolchain is clang. C apps as
   ELF modules against a versioned OS interface are a tier too (owner,
   2026-11-01; #227, #246): trusted native code under the consent its
-  install asks for (`native`, "Full access to the console"), where wasm
+  install asks for (`full_access`, "Full access to the console"), where wasm
   stays the sealed one the store lists.
 - **A per-chip module is native code, trusted only by provenance.** The
   sandbox is in the compiler's output, not the loader, so a board loads a
@@ -125,7 +125,7 @@ allow_unsigned=False)` reads the
 module file through the VFS (the T-Deck's SD and the P4s' flash store look the
 same) into a PSRAM buffer, checks its signature (see Provenance; a refused
 module ends the run at once, with no thread; `allow_unsigned` is what a
-cart's consent to `native` gives its load) and starts a thread that does,
+cart's consent to `full_access` gives its load) and starts a thread that does,
 `loops` times over: load, check the key, instantiate, call `export(*args)`
 with i32 arguments, and unload. `stack`/`psram_stack` override the board's
 setting and `pool` the pool's sizing rule, for a measurement: a module's
@@ -499,18 +499,18 @@ module is `refused: unsigned module` unless the cart's consent admits it
 signing key (`$MOYBYTE_OTA_SIGNING_KEY`, else the file `make ota-keygen`
 writes) and its `verify` IS the board's call, through the host's binding
 (`runtime/host/net_binding.py`; `--consented` answers for a cart granted
-`native`); `--unsigned` builds a module with no signature, and so does
+`full_access`); `--unsigned` builds a module with no signature, and so does
 `tools/wasm_cart.py --unsigned` for a whole cart.
 
 ### An unsigned module
 
 Signing is the default, not a lock (owner, 2026-09-29). A module with **no**
 signature loads AT FULL SPEED (native trust) for a cart whose consent grants
-`native`: the install prompt's "Full access to the console", the one line
+`full_access`: the install prompt's "Full access to the console", the one line
 that says what native code can do; there is no console-wide switch
 (`docs/os_2026-11.md` section 1). So
 someone who rebuilds a cart from its source -- Doom from moybyte-org/carts,
-their own game -- adds `native` to its manifest and runs it on their own
+their own game -- adds `full_access` to its manifest and runs it on their own
 console; a cart pushed by hand has no consent record and runs on its manifest
 as written. The consent is the cart's (`app_perms.run_admits_unsigned`); the
 engine is told it per load: `moycore_glue.WasmRun` hands it to
@@ -522,7 +522,7 @@ before the runtime sees a byte, after the signature.
 ("A cart survives its firmware" above): `WasmRun` catches
 the engine's `refused: unsigned module` and retries the open on the
 interpreter, `main.wasm` itself, which needs neither signature nor consent, so
-the cart plays regardless -- natively with `native` granted, interpreted with
+the cart plays regardless -- natively with `full_access` granted, interpreted with
 a short "isn't signed" notice without it. The same retry covers a
 corrupted or mismatched AOT module (rare: its file name matched this
 console's chip and format, its content did not; that one reads as "needs an
@@ -534,7 +534,7 @@ PRESENT but does not verify is the one case that still refuses to the
 ordinary error panel, because that module was changed after it was signed,
 which is not staleness.
 
-| the module file | no `native` | `native` granted |
+| the module file | no `full_access` | `full_access` granted |
 |---|---|---|
 | signed with a key the image trusts | loads natively | loads natively |
 | no signature trailer | interpreter, "isn't signed" | loads natively |
@@ -720,7 +720,7 @@ console's task until the loop returns.
   comes back as it was built; a byte changed anywhere, the key section
   included, another chip's signature, another key's, an unsigned module and a
   malformed trailer are refused -- and the table above, each kind of file
-  without and with the consent; that the consent is `native` granted; and
+  without and with the consent; that the consent is `full_access` granted; and
   that only the two tamper-evidence refusals are what `WasmRun` never retries.
 - `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
   (the arguments `wasm_open` gets, AOT and interpreted), the retry -- an
@@ -768,7 +768,7 @@ console's task until the loop returns.
   a cart with no module, one built for another chip, and one named for a
   stale format all play on the interpreter with the short "needs an update"
   notice and the hello cart's greeting check; an unsigned cart follows its
-  consent -- the interpreter and its "isn't signed" notice without `native`,
+  consent -- the interpreter and its "isn't signed" notice without `full_access`,
   native and no notice with it, a tampered one still refused either way. The suites build the
   modules with the pinned compilers (`python3 tools/wasm_module.py
   compilers`), sign them with the OTA signing key (a suite without it skips

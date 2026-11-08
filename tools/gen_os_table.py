@@ -433,9 +433,9 @@ def check(src):
         if set(p) - PERM_FIELDS:
             raise TableError("%s's fields: %s" % (p["perm"], sorted(p)))
         kind = p["grants"].split(":")[0]
-        if "tiers" in p and kind not in ("native", "boot"):
+        if "tiers" in p and kind not in ("full_access", "boot"):
             raise TableError("%s: only what no row serves states its tiers" % p["perm"])
-        if kind in ("native", "boot") and "tiers" not in p:
+        if kind in ("full_access", "boot") and "tiers" not in p:
             raise TableError("%s: no row serves it, so it states its tiers" % p["perm"])
         if not perm_tiers(p, src):
             raise TableError("%s: no tier serves it" % p["perm"])

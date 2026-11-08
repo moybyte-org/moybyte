@@ -91,7 +91,7 @@ int moy_ota_verify(const void *payload, size_t n, const char *sig_hex,
 // "<scheme>\n<chip>\n<module length>\n<sha256 hex>" under `keys` (`nkeys`
 // of them; NULL: the baked ones). A signature that is present must verify,
 // whatever the consent. A file with no trailer is admitted only when
-// `consented`: the cart's install consent grants `native`, the prompt's
+// `consented`: the cart's install consent grants `full_access`, the prompt's
 // "Full access to the console" (runtime/shell/app_perms.py's
 // admits_unsigned), since an unsigned module runs at the kernel's trust.
 // NULL when the module may load, else the refusal: MOY_OTA_MODULE_UNSIGNED,

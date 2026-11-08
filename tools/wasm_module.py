@@ -44,7 +44,7 @@ moy_wasm_key.h's (the magic native/moy_net/moy_ota.h's), which this tool
 reads, and the board admits it with moy_ota_admit_module against the keys
 its image trusts before the runtime sees a byte (`verify` here is that call,
 through the host's binding). `--unsigned` builds a module with no signature,
-which a board runs natively only for a cart whose consent grants "native" --
+which a board runs natively only for a cart whose consent grants "full_access" --
 the way to run a cart you rebuilt from its source on your own console; a
 module signed with a key the board does not trust is refused whatever the
 consent says.
@@ -277,7 +277,7 @@ def verify(data, chip, keys=None, consented=False, scheme=None):
     (as (modulus_hex, exponent) pairs; default: the image's own) admits,
     otherwise the refusal the board gives: the board's own call,
     moy_ota_admit_module (native/moy_net/moy_ota.h), through the host's
-    binding. `consented` is the cart's consent to `native`: with it, a
+    binding. `consented` is the cart's consent to `full_access`: with it, a
     module with no signature is admitted; a signature that is present must
     verify either way."""
     if ROOT not in sys.path:
@@ -409,7 +409,7 @@ def build(wasm, chip, out, key=True, format=None, override=None, sign_with=None,
     key naming another compiled-code format version, or flags (and a key
     saying so) the board's build does not want. `signed=False` leaves the
     signature off: a module a board runs natively only for a cart whose
-    consent grants "native"."""
+    consent grants "full_access"."""
     pem = None
     if signed:
         pem = sign_with or signing_key()
@@ -417,7 +417,7 @@ def build(wasm, chip, out, key=True, format=None, override=None, sign_with=None,
             raise ToolError("no signing key: set $%s or pass --key (a board "
                             "trusts only the keys its image carries), or build "
                             "--unsigned, a module a board runs only for a cart "
-                            "granted \"native\"" % ota_sign.ENV_KEY)
+                            "granted \"full_access\"" % ota_sign.ENV_KEY)
     target = dict(fields(chip, override))["target"]
     text = key_text(wasm, chip, format, override)
     src = with_custom_section(wasm, KEY_SECTION, text.encode()) if key else wasm
@@ -519,14 +519,14 @@ def main(argv):
                        "%s)" % (ota_sign.ENV_KEY, ota_sign.DEFAULT_KEY))
         p.add_argument("--unsigned", action="store_true",
                        help="leave the signature off (a module a board runs "
-                       "only for a cart granted \"native\")")
+                       "only for a cart granted \"full_access\")")
     k = sub.add_parser("key", help="print the key tail a chip's build wants")
     k.add_argument("--chip", required=True, choices=sorted(targets()))
     v = sub.add_parser("verify", help="check a module's signature as a board would")
     v.add_argument("aot")
     v.add_argument("--chip", required=True, choices=sorted(targets()))
     v.add_argument("--consented", action="store_true",
-                   help="answer for a cart whose consent grants \"native\"")
+                   help="answer for a cart whose consent grants \"full_access\"")
     sub.add_parser("compilers", help="locate and verify the pinned compilers")
     fs = sub.add_parser("format-stamp", help="print or refresh the compiled-code "
                         "format version's stamp (wasm_format_version.json)")
@@ -557,7 +557,7 @@ def main(argv):
                 data = f.read()
             why = verify(data, args.chip, consented=args.consented)
             ok = ("signed, trusted" if split(data)[1] else
-                  "unsigned, loads for a cart granted \"native\"")
+                  "unsigned, loads for a cart granted \"full_access\"")
             print("%s: %s" % (args.aot, ok if why is None
                               else "REFUSED: %s" % why))
             return 0 if why is None else 1

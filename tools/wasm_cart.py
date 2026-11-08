@@ -20,7 +20,7 @@ it is, so the Code tab has the source to show.
 `tools/wasm_module.py` with the pinned compiler, carrying the provenance key
 that board's build wants and signed with the OTA signing key (that tool says
 where the key comes from). `--unsigned` leaves the signature off: a board runs
-such a module natively only for a cart whose consent grants "native" (its
+such a module natively only for a cart whose consent grants "full_access" (its
 manifest asks for it), which is how a cart rebuilt from its source runs on its
 builder's own console.
 
@@ -184,7 +184,7 @@ def main(argv):
                          "esp32p4); repeatable")
     ap.add_argument("--unsigned", action="store_true",
                     help="leave the modules' signatures off (a board runs them "
-                         "natively only for a cart granted \"native\")")
+                         "natively only for a cart granted \"full_access\")")
     args = ap.parse_args(argv)
     for name, path in sorted(build(args.cart, args.out, args.chip,
                                    signed=not args.unsigned).items()):

@@ -56,7 +56,7 @@ def test_a_permission_s_tiers_are_the_tiers_that_serve_what_it_grants():
         kind = p["grants"].split(":")[0]
         if kind in ("floor", "marker"):
             continue
-        if kind in ("native", "boot"):
+        if kind in ("full_access", "boot"):
             assert tiers == set(p["tiers"]), p["perm"]
             continue
         want = served.get(p["perm"], set()) | (set(gen_os_table.SPEC_TIERS)
@@ -80,7 +80,7 @@ def test_the_table_is_well_formed():
         assert perm not in seen, perm
         seen.add(perm)
         kind = grants.split(":")[0]
-        assert kind in ("floor", "role", "api", "boot", "lease", "native", "marker"), grants
+        assert kind in ("floor", "role", "api", "boot", "lease", "full_access", "marker"), grants
         assert tiers and set(tiers) <= set(P.ALL), tiers
         assert needs in (None, "wifi", "net", "gpio", "lease", "mic", "lora", "ble", "usb", "midi", "camera",
                          "media"), needs
@@ -124,6 +124,19 @@ def test_files_kinds_share_the_files_row_and_name_their_kind():
 def test_the_prompt_is_the_tables_lines_in_the_manifests_order():
     cart = {"runtime": "lua", "permissions": ["graphics", "pins", "prefs", "pins"]}
     assert P.prompt(cart) == ["Switch the console's pins", "Keep its own settings"]
+
+
+def test_full_access_says_the_board_s_line(monkeypatch):
+    """`full_access` says the table's line on every board, and a board's own
+    line where FULL_ACCESS_LINES names one (the P4s', once U-mode isolation
+    lands: docs/os_2026-11/tiers.md section 1)."""
+    cart = {"id": "a.b", "native": ["esp32p4"], "permissions": ["full_access"]}
+    assert P.prompt(cart) == ["Full access to the console"]
+    monkeypatch.setattr(P, "_board", lambda: "p4")
+    monkeypatch.setattr(P, "FULL_ACCESS_LINES", {"p4": "Run its own machine code"})
+    assert P.prompt(cart) == ["Run its own machine code"]
+    monkeypatch.setattr(P, "_board", lambda: "tdeck")
+    assert P.prompt(cart) == ["Full access to the console"]
 
 
 def test_a_cart_that_asks_for_no_more_than_a_game_is_not_asked_about():

@@ -3354,7 +3354,7 @@ def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
 
 def wasm_consent_lets_only_a_missing_signature_through(board, paths):
     """The engine with the cart's consent given (`allow_unsigned`, what
-    app_perms.admits_unsigned hands a load of a cart granted "native"): a
+    app_perms.admits_unsigned hands a load of a cart granted "full_access"): a
     module with no signature loads and runs, its provenance key still
     checked -- an unsigned module keyed for another runtime is refused by
     the key -- and a module whose signature is present but does not verify
@@ -4284,7 +4284,7 @@ def wasm_tampered_module_is_refused(board, board_dir):
 # -- an unsigned module's admission (moy_ota_admit_module) -------------------
 #
 # A compiled cart whose module carries no signature runs natively only when
-# its consent grants "native" (app_perms.admits_unsigned; a cart pushed by
+# its consent grants "full_access" (app_perms.admits_unsigned; a cart pushed by
 # hand has no consent record, so its manifest decides); without it the module
 # is refused -- same as no module at all -- and the cart plays on the
 # interpreter with the short notice (2026-09-30, "A cart survives its
@@ -4294,20 +4294,20 @@ UNSIGNED_TITLE = "Unsigned Wasm"
 UNSIGNED_NATIVE_TITLE = "Unsigned Native Wasm"
 
 
-def _asks_native(folder):
+def _asks_full_access(folder):
     path = os.path.join(folder, "manifest.json")
     with open(path) as f:
         man = json.load(f)
-    man.setdefault("moybyte", {}).setdefault("permissions", []).append("native")
+    man.setdefault("moybyte", {}).setdefault("permissions", []).append("full_access")
     with open(path, "w") as f:
         json.dump(man, f)
 
 
 def wasm_unsigned_cart_follows_its_consent(board, board_dir):
     """The hello cart with its module built unsigned: a cart that does not
-    ask for "native" has the module REFUSED, same as an absent one, and plays
+    ask for "full_access" has the module REFUSED, same as an absent one, and plays
     on the interpreter with the short "isn't signed" notice; the same module
-    in a cart that asks for "native" runs natively and reads its greeting,
+    in a cart that asks for "full_access" runs natively and reads its greeting,
     with no notice. A cart whose module was tampered with after signing is
     refused either way -- that is tamper evidence, not staleness."""
     wasm_signing_key()
@@ -4315,7 +4315,7 @@ def wasm_unsigned_cart_follows_its_consent(board, board_dir):
     _wasm_fixture_variant(board, board_dir, chip, UNSIGNED_TITLE, "unsigned",
                           signed=False)
     _wasm_fixture_variant(board, board_dir, chip, UNSIGNED_NATIVE_TITLE,
-                          "unsigned_native", change=_asks_native, signed=False)
+                          "unsigned_native", change=_asks_full_access, signed=False)
     _tampered_cart(board, board_dir, chip)
     notice = _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
                                   check=hello_read_its_greeting)
@@ -4527,7 +4527,7 @@ INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # every one of those is simply the wrong file name to this console, so the
 # Player cannot tell them apart and shows the same "needs an update"; a
 # module that matched this console's name but carried no signature, its cart
-# not granted "native", is "unsigned"; one whose load stopped on a helper
+# not granted "full_access", is "unsigned"; one whose load stopped on a helper
 # this firmware does not register is "firmware".
 INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
                      "firmware": "console needs an update"}

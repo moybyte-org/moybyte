@@ -19,7 +19,7 @@
 // text naming the chip, the module's length and its sha256 (tools/elf_cart.py
 // signs), admitted by the one call both tiers make, moy_ota_admit_module: a
 // file that carries one must verify; one that carries none runs on the
-// consent its install asked for, `native` ("Full access to the console").
+// consent its install asked for, `full_access` ("Full access to the console").
 
 #ifndef MOY_ELF_H
 #define MOY_ELF_H

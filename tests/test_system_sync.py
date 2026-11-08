@@ -189,11 +189,11 @@ def test_a_page_cannot_change_a_key_the_board_keeps():
         assert rows.get(key) is None
 
 
-NATIVE = {"a.b": {"perms": ["native"], "off": []}}
+NATIVE = {"a.b": {"perms": ["full_access"], "off": []}}
 
 
 def test_a_page_can_never_consent_to_unsigned_code_or_move_the_channel():
-    """A page that sends a consent record granting "native" (what admits
+    """A page that sends a consent record granting "full_access" (what admits
     unsigned code) and the unstable channel changes neither."""
     page = dict(BOARD_DOC, consent=NATIVE, ota_channel="unstable")
     rows, changed = _merge(page)

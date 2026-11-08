@@ -506,7 +506,7 @@ stutter-free; crash/cart-exit diag flushes happen regardless.
 
 There is no Unknown sources switch in Settings: a compiled cart whose module
 carries no signature (a cart somebody rebuilt from its source) runs at full
-native speed when its consent grants `native`, the install prompt's "Full
+native speed when its consent grants `full_access`, the install prompt's "Full
 access to the console" (`docs/os_2026-11.md` §1); without it the module is
 ignored and the cart plays on the interpreter instead, with a short system
 notice ("isn't signed") saying so (2026-09-30, "A cart survives its

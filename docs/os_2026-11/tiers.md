@@ -20,6 +20,13 @@ memory and what it is lent, and reaches the kernel only through the table. The
 S3s get none: their C tier runs at the kernel's own trust level, with the crash
 record and the strike ledger as its floor.
 
+**The consent (owner, 2026-11-08).** The permission is `full_access`. On the
+S3s, as built, its install prompt line is "Full access to the console", the
+truth for a module at the kernel's trust. The plan for the P4s is the line
+"Run its own machine code" once U-mode isolation lands, since a confined
+module cannot reach the rest of the console; `app_perms.FULL_ACCESS_LINES` is
+where a board's line goes, and until then every board says the S3s'.
+
 - **Process model.** An ELF process has the same hooks as a wasm one
   (`moy_start`, `moy_stop`, `moy_timer`, `moy_on` for an event, the lane
   exports; a command is `main(argc, argv)` over the POSIX rows, as a wasm

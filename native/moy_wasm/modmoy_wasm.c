@@ -561,7 +561,7 @@ static void read_file(run_t *r, mp_obj_t path)
 // sizing rule for this run (a measurement, not a product knob: result()'s
 // `pool_peak` under a pool bigger than the rule's is what the rule must
 // hold). `allow_unsigned` lets a module with no signature load, as a cart's
-// consent to `native` does. done() says when it ended, result()
+// consent to `full_access` does. done() says when it ended, result()
 // collects it; a module refused for its signature ends at once, with no
 // thread.
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args)

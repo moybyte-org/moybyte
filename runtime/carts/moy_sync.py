@@ -733,7 +733,7 @@ BOARD = "board"         # never sent to a browser, never taken from one
 # carries the shape its value must have to be taken (None: any JSON value).
 # BOARD keys guard the board: its pairing pin, its update channel and the NTP
 # server its certificate dates rest on. The consent records (`consent`, which
-# admit unsigned code through `native`) are LOCAL: a page's are ignored.
+# admit unsigned code through `full_access`) are LOCAL: a page's are ignored.
 SYSTEM_KEYS = {
     "theme": (PORTABLE, str),
     "theme_variant": (PORTABLE, str),

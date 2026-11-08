@@ -89,7 +89,7 @@ carries none at all. So when the cart has no module for this board's chip --
 the chip is its board.toml's `[board] chip` -- or has one built for another
 main.wasm, this compiles one with tools/wasm_module.py, UNSIGNED, and pushes
 it in its place; the cart folder itself is left as it was. An unsigned module
-runs at full speed only for a cart whose manifest asks for "native" (the
+runs at full speed only for a cart whose manifest asks for "full_access" (the
 consent to full access, app_perms.admits_unsigned); without it the module is
 refused and the cart plays on the interpreter instead, so when the module
 going over is unsigned and the cart does not ask, the tool says so plainly
@@ -548,8 +548,8 @@ def board_chip(board):
     return cfg.get("board", {}).get("chip")
 
 
-def asks_native(cart):
-    """Whether the cart folder's manifest asks for "native": the consent
+def asks_full_access(cart):
+    """Whether the cart folder's manifest asks for "full_access": the consent
     that admits an unsigned module (runtime/shell/app_perms.py)."""
     try:
         with open(os.path.join(cart, "manifest.json"), encoding="utf-8") as f:
@@ -559,7 +559,7 @@ def asks_native(cart):
     sys.path.insert(0, ROOT)
     from runtime import app_perms
     got = app_perms.manifest_cart(man, os.path.basename(cart)) if isinstance(man, dict) else {}
-    return "native" in (got.get("permissions") or ())
+    return "full_access" in (got.get("permissions") or ())
 
 
 def compiled_module(cart, chip, work, log=print):
@@ -822,10 +822,10 @@ def _push(a, cart, names, local, work):
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
         if (module is not None and not module[2] and module[0] in names
-                and not asks_native(cart)):
+                and not asks_full_access(cart)):
             print("NOTE: %s's module is unsigned and the cart does not ask for "
-                  "\"native\", so the console runs it on the interpreter. Add "
-                  "\"native\" to its manifest's permissions to run the module."
+                  "\"full_access\", so the console runs it on the interpreter. Add "
+                  "\"full_access\" to its manifest's permissions to run the module."
                   % os.path.basename(cart))
         # A store without the room says so in one line, before or during the
         # push, and so does any other failure: this is a command a person

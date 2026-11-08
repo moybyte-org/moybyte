@@ -1,5 +1,5 @@
 """A per-architecture module loads only when it is admitted: signed the way OTA
-images are, or unsigned under its cart's consent to `native`.
+images are, or unsigned under its cart's consent to `full_access`.
 
 The board's admission is one call, `moy_ota_admit_module`
 (native/moy_net/moy_ota.h), which both compiled tiers make -- an AOT module's
@@ -185,18 +185,18 @@ def test_an_unsigned_module_passes_whole_and_its_key_is_left_to_the_thread():
 
 
 def test_the_consent_is_native_granted():
-    """The consent the admission takes is the cart's `native`, the install
+    """The consent the admission takes is the cart's `full_access`, the install
     prompt's "Full access to the console", on either compiled tier; a cart
     with no consent record runs on its manifest as written, and one whose
-    `native` was turned off in Settings is not admitted."""
+    `full_access` was turned off in Settings is not admitted."""
     from runtime import app_perms as P
-    cart = {"id": "a.b", "runtime": "wasm", "permissions": ["native"]}
+    cart = {"id": "a.b", "runtime": "wasm", "permissions": ["full_access"]}
     assert P.admits_unsigned(P.check(cart, None, ())[0])
     assert not P.admits_unsigned(P.check(dict(cart, permissions=[]), None, ())[0])
-    assert P.line("native") == "Full access to the console"
-    off = {"perms": ["native"], "off": ["native"]}
+    assert P.line("full_access") == "Full access to the console"
+    off = {"perms": ["full_access"], "off": ["full_access"]}
     assert not P.admits_unsigned(P.check(cart, off, ())[0])
-    native = {"id": "a.c", "native": ["host"], "permissions": ["native"]}
+    native = {"id": "a.c", "native": ["host"], "permissions": ["full_access"]}
     assert P.admits_unsigned(P.check(native, None, ())[0])
 
 
@@ -222,7 +222,7 @@ def test_the_verify_command_answers_with_and_without_consent(tmp_path, capsys):
     assert wm.main(["verify", str(path), "--chip", "esp32s3"]) == 1
     assert "REFUSED: unsigned module" in capsys.readouterr().out
     assert wm.main(["verify", str(path), "--chip", "esp32s3", "--consented"]) == 0
-    assert 'unsigned, loads for a cart granted "native"' in capsys.readouterr().out
+    assert 'unsigned, loads for a cart granted "full_access"' in capsys.readouterr().out
     path.write_bytes(_tampered())
     assert wm.main(["verify", str(path), "--chip", "esp32s3", "--consented"]) == 1
     assert "REFUSED: bad signature" in capsys.readouterr().out

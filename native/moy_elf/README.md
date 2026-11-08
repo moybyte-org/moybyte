@@ -112,14 +112,14 @@ another kind. It is admitted by the call the AOT tier makes,
 `moy_ota_admit_module` (`native/moy_net/moy_ota.h`): a signature that is
 present must verify, and an unsigned module runs only with the loader's
 UNSIGNED flag, which `runtime/run/elf_run.py` sets from the cart's consent to
-`native` (`app_perms.run_admits_unsigned`).
+`full_access` (`app_perms.run_admits_unsigned`).
 `tools/elf_cart.py` signs as `tools/wasm_module.py` does.
 
 ## The cart
 
 A native cart's manifest names its chips, `"moybyte": {"native": ["esp32s3",
-"esp32p4"], "permissions": ["native", ...]}`, and carries `main.<chip>.elf`
-for each; a cart that does not ask for `native` is refused
+"esp32p4"], "permissions": ["full_access", ...]}`, and carries `main.<chip>.elf`
+for each; a cart that does not ask for `full_access` is refused
 (`runtime/shell/app_perms.py`). The shell runs it as a command through the
 door WASI commands use (`runtime/shell/sh_door.py`, `run_compiled`). The
 Player opens no native app.

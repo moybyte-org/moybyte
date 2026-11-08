@@ -644,7 +644,7 @@ class MoycoreRun:
 # signature bytes are present but do not verify -- and so stay a hard
 # refusal to the ordinary error panel. Every other reason an AOT open can
 # fail (no file by this console's name, unsigned without the cart's consent
-# to `native`, a corrupted key) means only that THIS console's copy of the module is
+# to `full_access`, a corrupted key) means only that THIS console's copy of the module is
 # unusable, not that the cart is; WasmRun retries those on the interpreter
 # instead ("A cart survives its firmware", 2026-09-30).
 _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature")

@@ -5,7 +5,7 @@ service, through the boards' C (native/moy_elf/moy_os.c) over the host's
 loader (runtime/host/moyhost_elf.c). Its args, env, stdio through the
 session's pipes and redirections, exit codes, files under its permissions,
 threads, Ctrl-C and budget; the sweep of what it held; a module that needs a
-newer console refused; the "native" consent."""
+newer console refused; the "full_access" consent."""
 
 import json
 import os
@@ -50,7 +50,7 @@ def term(tmp_path, built):
     shutil.copytree(built["elf_probe"], str(bare))
     man = json.loads((bare / "manifest.json").read_text())
     man["id"], man["title"] = "elf.bare", "Bare Native"
-    man["moybyte"]["permissions"] = ["native"]
+    man["moybyte"]["permissions"] = ["full_access"]
     (bare / "manifest.json").write_text(json.dumps(man))
     blind = carts / "elf_blind.moy"
     shutil.copytree(built["elf_hello"], str(blind))
@@ -62,7 +62,7 @@ def term(tmp_path, built):
     shutil.copytree(built["elf_nc"], str(ncblind))
     man = json.loads((ncblind / "manifest.json").read_text())
     man["id"], man["title"] = "elf.ncblind", "Netcat Blind"
-    man["moybyte"]["permissions"] = ["native"]
+    man["moybyte"]["permissions"] = ["full_access"]
     (ncblind / "manifest.json").write_text(json.dumps(man))
     ws = build_workstation(str(carts))
     assert "elf" in ws.runtimes
@@ -245,10 +245,10 @@ def test_in_the_background_its_output_is_the_log_s(term):
     assert "hello from a native module in the background" in log_text()
 
 
-def test_a_native_cart_must_ask_for_native(term):
+def test_a_native_cart_must_ask_for_full_access(term):
     _ws, app = term
     got = out(app, "elf.blind/blind; echo status $?")
-    assert got[-1] == "status 126" and "native" in got[0]
+    assert got[-1] == "status 126" and 'must ask for "full_acc' in got[0]
 
 
 def test_a_module_needing_a_newer_console_is_refused(tmp_path):
@@ -264,7 +264,7 @@ def test_a_module_needing_a_newer_console_is_refused(tmp_path):
     ok.write_text("int main(void) { return 0; }\n")
     unsigned = elf_cart.build_module([str(ok)], "host", str(tmp_path / "ok.elf"), signed=False)
     assert elf_binding.check(unsigned, elf_binding.UNSIGNED) is None
-    # without its cart's consent to "native", a module with no signature is not admitted
+    # without its cart's consent to "full_access", a module with no signature is not admitted
     assert elf_binding.check(unsigned) == "refused: unsigned module"
 
 
@@ -297,16 +297,16 @@ def test_a_service_s_hooks_on_its_task_and_its_sweep(built):
 
 def test_the_install_prompt_says_full_access():
     from runtime import app_perms
-    cart = {"id": "elf.x", "native": ["host"], "permissions": ["native", "files"]}
+    cart = {"id": "elf.x", "native": ["host"], "permissions": ["full_access", "files"]}
     assert app_perms.tier_of(cart) == "elf"
     assert app_perms.prompt(cart) == ["Full access to the console", "Read and save your documents"]
     assert app_perms.check(dict(cart, permissions=["files"]), None, ())[2] == \
-        'a native cart must ask for "native"'
+        'a native cart must ask for "full_access"'
 
 
 def test_the_install_check_reads_a_manifest_s_chips():
     from runtime import app_perms
-    man = {"id": "elf.x", "moybyte": {"native": ["esp32s3"], "permissions": ["native"]}}
+    man = {"id": "elf.x", "moybyte": {"native": ["esp32s3"], "permissions": ["full_access"]}}
     cart = app_perms.manifest_cart(man, "elf_x.moy")
     assert cart["native"] == ["esp32s3"] and app_perms.tier_of(cart) == "elf"
     assert app_perms.manifest_cart({"id": "a.b"}, "a_b.moy")["native"] is None

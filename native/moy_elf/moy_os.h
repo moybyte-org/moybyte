@@ -122,7 +122,7 @@ void moy_os_default_caps(moy_os_caps_t *caps);
 #define MOY_OS_NET 1u
 // A loader's flag, read before the module is handed here: the cart's consent
 // admits a module with no signature (moy_ota_admit_module's `consented`,
-// app_perms.admits_unsigned: its `native` granted).
+// app_perms.admits_unsigned: its `full_access` granted).
 #define MOY_OS_UNSIGNED 2u
 int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *caps,
                    int argc, const char *const *argv, const char *roots, uint32_t pid,

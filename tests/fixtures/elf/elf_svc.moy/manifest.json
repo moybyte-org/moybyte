@@ -4,7 +4,7 @@
   "moybyte": {
     "type": "service",
     "permissions": [
-      "native"
+      "full_access"
     ]
   }
 }

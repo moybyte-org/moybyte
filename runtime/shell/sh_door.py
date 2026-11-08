@@ -32,7 +32,7 @@ not run NOT_RUN.
 
 A NATIVE COMMAND (`"moybyte": {"native": [chips]}`) is the same door over
 the native tier (native/moy_elf/moy_os.h): its module's `main` on a task of
-its own, the same roots and budget, run only once "native" is granted
+its own, the same roots and budget, run only once "full_access" is granted
 (`app_perms.check`), and its socket rows only when "network" is.
 
 Either tier's command in the foreground is a job, as a role command is: its
