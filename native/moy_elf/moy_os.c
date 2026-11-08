@@ -1822,6 +1822,7 @@ static int evq_errno(int rc) {
     }
 }
 
+// A send no listener took for BACKPRESSURE (moy_evq.h) is EAGAIN: try later.
 int moy_os_moy_send(const char *app, const char *name, const char *args) {
     thr_t *t = enter();
     int r = -1;
@@ -1836,7 +1837,7 @@ int moy_os_moy_send(const char *app, const char *name, const char *args) {
     } else {
         r = moy_evq_send(t->p->pid, app, name, a, strlen(a), NULL);
         if (r < 0) {
-            moy_os_errno_set(evq_errno(-r));
+            moy_os_errno_set(-r == MOY_EVQ_FULL ? EAGAIN : evq_errno(-r));
             r = -1;
         }
     }
@@ -2536,7 +2537,8 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
 
 // A poll of `p`'s event descriptor: the wake that ends here charged to the
 // supervisor (unless the watchdog struck it while it ran, moy_os_reap), and
-// while the supervisor holds the process suspended, no wake served.
+// while the supervisor holds the process suspended, no wake served. The
+// next wake is the queue's STEP (moy_evq.h, IN TURN).
 static int wake_end(thr_t *t) {
     moy_os_proc_t *p = t->p;
     lock();
@@ -2560,6 +2562,7 @@ static int wake_end(thr_t *t) {
             return EINTR;
         }
     }
+    moy_evq_step(p->pid);               // the next wake reads MOY_EVQ_BATCH at most
     return 0;
 }
 

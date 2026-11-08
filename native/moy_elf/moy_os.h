@@ -31,8 +31,9 @@
 // (docs/os_2026-11/processes.md section 1, the service model). The
 // descriptor is the process's event queue (moy_evq.h): readable while an
 // event is queued, each read one record (moy_evq_read), never blocking
-// (EAGAIN). It listens with moy_on and sends with moy_send, both the
-// kernel's, under the queue's rule. Its stop makes the descriptor hang up
+// (EAGAIN), MOY_EVQ_BATCH reads a wake (the poll is the queue's step). It
+// listens with moy_on and sends with moy_send, both the kernel's, under the
+// queue's rule; a send BACKPRESSURE refuses is EAGAIN. Its stop makes the descriptor hang up
 // (poll's POLLHUP, a read's end of file), and main returns within
 // MOY_OS_STOP_US or the process is killed. A command whose process has a
 // queue reads the same descriptor. Each wake, from the poll's return to its

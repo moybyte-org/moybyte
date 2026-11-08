@@ -701,7 +701,7 @@ static int32_t w_os_send(wasm_exec_env_t e, const char *app, uint32_t app_n, con
         return -(int32_t)W_INVAL;
     }
     int took = moy_evq_send(w->pid, a, nm, j, jn, NULL);
-    return took < 0 ? os_errno(-took) : took;
+    return took == -MOY_EVQ_FULL ? -(int32_t)W_AGAIN : took < 0 ? os_errno(-took) : took;
 }
 
 static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int32_t on) {
@@ -1735,8 +1735,9 @@ static uint32_t evq_rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us, bool *wok
 
 // A poll of the event descriptor ends a wake, charged to the supervisor less
 // what its calls waited for the session's task; while the supervisor holds
-// the process suspended, the poll waits unserved. W_OK with *held where it
-// waited so, W_INTR where the run ended meanwhile.
+// the process suspended, the poll waits unserved. The next wake is the
+// queue's STEP (moy_evq.h, IN TURN). W_OK with *held where it waited so,
+// W_INTR where the run ended meanwhile.
 static uint32_t wake_end(wasm_exec_env_t e, moy_wasi_t *w, bool *held) {
     int64_t now = mono_us();
     if (w->woke_us != 0) {
@@ -1755,6 +1756,7 @@ static uint32_t wake_end(wasm_exec_env_t e, moy_wasi_t *w, bool *held) {
             return W_INTR;
         }
     }
+    moy_evq_step(w->pid);               // the next wake reads MOY_EVQ_BATCH at most
     return W_OK;
 }
 

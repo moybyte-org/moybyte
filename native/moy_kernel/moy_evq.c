@@ -33,13 +33,23 @@ typedef struct {
 } listen_t;
 
 typedef struct {
+    uint32_t who;               // a sender (who_of)
+    uint32_t at;                // the take that last served it, 0: none
+} peer_t;
+
+typedef struct {
     uint32_t flags;
     char app[MOY_EVQ_APP];
     char *receives;             // one name a line, NUL ended; NULL: none
     listen_t on[MOY_EVQ_LISTEN];
-    ev_t *ev[MOY_EVQ_DEPTH];    // a ring, its oldest at `at`
-    uint8_t at, count;
+    ev_t *ev[MOY_EVQ_DEPTH];    // oldest first
+    uint8_t count;
+    int8_t left;                // takes this step leaves; -1: never stepped
+    uint32_t takes;
+    peer_t peer[MOY_EVQ_PEERS];
 } q_t;
+
+_Static_assert(MOY_EVQ_DEPTH <= 255u && MOY_EVQ_BATCH <= 127u, "a queue's counts fit");
 
 // A slot's pid, wait word and waiter live outside its queue, so a waiter
 // blocked on a slot outlives the queue's close.
@@ -61,6 +71,12 @@ static void *mem(size_t n) {
 
 static bool system_pid(uint32_t pid) {
     return pid <= 1u;
+}
+
+// A message's sender as BACKPRESSURE and IN TURN count it: pid 0 and 1 are
+// one, the system (0).
+static uint32_t who_of(uint32_t pid) {
+    return system_pid(pid) ? 0u : pid;
 }
 
 // The slot of `pid`'s queue, or -1. Under the lock.
@@ -111,19 +127,81 @@ static bool allowed(const q_t *q, bool sys, const char *app, const char *name) {
     return sys || strcmp(q->app, app) == 0 || receives(q, name);
 }
 
-// Event `e` queued on slot `i` and its waiter woken; the oldest it pushes out
-// handed back to free. Under the lock.
-static ev_t *push(uint32_t i, ev_t *e) {
+// Event `k` of `q` out of its queue. Under the lock.
+static ev_t *unlink_at(q_t *q, uint32_t k) {
+    ev_t *e = q->ev[k];
+    memmove(&q->ev[k], &q->ev[k + 1u], (q->count - k - 1u) * sizeof q->ev[0]);
+    q->count--;
+    q->ev[q->count] = NULL;
+    return e;
+}
+
+// Event `e` queued on slot `i` under BACKPRESSURE: OK, or FULL with nothing
+// queued; *old an event the system's post pushed out, to free. Under the lock.
+static int push(uint32_t i, ev_t *e, ev_t **old) {
     q_t *q = s_q[i];
-    ev_t *old = NULL;
-    if (q->count == MOY_EVQ_DEPTH) {
-        old = q->ev[q->at];
-        q->at = (uint8_t)((q->at + 1u) % MOY_EVQ_DEPTH);
-        q->count--;
+    uint32_t me = who_of(e->h.from);
+    uint32_t mine = 0, first = MOY_EVQ_DEPTH;
+    *old = NULL;
+    for (uint32_t k = 0; k < q->count; k++) {
+        if (who_of(q->ev[k]->h.from) == me) {
+            first = mine++ == 0 ? k : first;
+        }
     }
-    q->ev[(q->at + q->count) % MOY_EVQ_DEPTH] = e;
-    q->count++;
-    return old;
+    if (mine >= MOY_EVQ_SENDER || q->count == MOY_EVQ_DEPTH) {
+        if (me != 0u) {
+            return MOY_EVQ_FULL;
+        }
+        *old = unlink_at(q, first < MOY_EVQ_DEPTH ? first : 0u);
+    }
+    q->ev[q->count++] = e;
+    return MOY_EVQ_OK;
+}
+
+// The take that last served sender `who` of `q`, 0 for none. Under the lock.
+static uint32_t served(const q_t *q, uint32_t who) {
+    for (uint32_t k = 0; k < MOY_EVQ_PEERS; k++) {
+        if (q->peer[k].at != 0u && q->peer[k].who == who) {
+            return q->peer[k].at;
+        }
+    }
+    return 0u;
+}
+
+// Sender `who` of `q` served now: its row, else the row served longest ago.
+// Under the lock.
+static void serve(q_t *q, uint32_t who) {
+    if (++q->takes == 0u) {
+        memset(q->peer, 0, sizeof q->peer);
+        q->takes = 1u;
+    }
+    peer_t *row = &q->peer[0];
+    for (uint32_t k = 0; k < MOY_EVQ_PEERS; k++) {
+        peer_t *p = &q->peer[k];
+        if (p->at != 0u && p->who == who) {
+            row = p;
+            break;
+        }
+        if (p->at < row->at) {
+            row = p;
+        }
+    }
+    row->who = who;
+    row->at = q->takes;
+}
+
+// IN TURN: the index of the oldest event of the sender `q` served longest
+// ago. Under the lock; `q` holds one at least.
+static uint32_t next_of(const q_t *q) {
+    uint32_t best = 0, best_at = UINT32_MAX;
+    for (uint32_t k = 0; k < q->count && best_at != 0u; k++) {
+        uint32_t at = served(q, who_of(q->ev[k]->h.from));
+        if (at < best_at) {
+            best = k;
+            best_at = at;
+        }
+    }
+    return best;
 }
 
 static ev_t *make(uint32_t from, const char *app, const char *name, const char *args, size_t n) {
@@ -189,6 +267,7 @@ int moy_evq_open(uint32_t pid, const char *app, const char *recv, uint32_t flags
     }
     fresh->receives = r;
     fresh->flags = flags;
+    fresh->left = -1;
     copy_name(fresh->app, sizeof fresh->app, app);
     s_pid[i] = pid;
     s_who[i] = NULL;
@@ -212,7 +291,7 @@ int moy_evq_close(uint32_t pid) {
     MOY_SYNC_UNLOCK(&s_lock);
     moy_sync_wake(&s_seq[i], who);
     for (uint32_t k = 0; k < q->count; k++) {
-        free(q->ev[(q->at + k) % MOY_EVQ_DEPTH]);
+        free(q->ev[k]);
     }
     free(q->receives);
     free(q);
@@ -314,9 +393,11 @@ int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args,
     } else if (!allowed(s_q[i], system_pid(from), app, name)) {
         rc = MOY_EVQ_DENIED;
     } else {
-        old = push((uint32_t)i, e);
-        e = NULL;
-        vm = (s_q[i]->flags & MOY_EVQ_VM) != 0u;
+        rc = push((uint32_t)i, e, &old);
+        if (rc == MOY_EVQ_OK) {
+            e = NULL;
+            vm = (s_q[i]->flags & MOY_EVQ_VM) != 0u;
+        }
     }
     MOY_SYNC_UNLOCK(&s_lock);
     free(e);
@@ -330,11 +411,12 @@ int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args,
     return rc;
 }
 
-// Message `name` to every listening queue `want` picks, one copy each.
+// Message `name` to every listening queue of app `to_app` (NULL: every
+// one), one copy each: how many took it; *full counts the queues that were.
 static int fan(uint32_t from, const char *app, const char *to_app, const char *name,
-               const char *args, size_t n, uint32_t *denied) {
+               const char *args, size_t n, uint32_t *denied, uint32_t *full) {
     int took = 0;
-    uint32_t refused = 0;
+    uint32_t refused = 0, fulls = 0;
     bool sys = system_pid(from);
     for (uint32_t i = 0; i < MOY_EVQ_PROCS; i++) {
         ev_t *e = make(from, app, name, args, n);
@@ -347,13 +429,14 @@ static int fan(uint32_t from, const char *app, const char *to_app, const char *n
         q_t *q = s_q[i];
         if (q != NULL && s_pid[i] != from && listens(q, name)
             && (to_app == NULL || strcmp(q->app, to_app) == 0)) {
-            if (allowed(q, sys, app, name)) {
-                old = push(i, e);
+            if (!allowed(q, sys, app, name)) {
+                refused++;
+            } else if (push(i, e, &old) == MOY_EVQ_OK) {
                 e = NULL;
                 sent = true;
                 vm = (q->flags & MOY_EVQ_VM) != 0u;
             } else {
-                refused++;
+                fulls++;
             }
         }
         MOY_SYNC_UNLOCK(&s_lock);
@@ -370,6 +453,9 @@ static int fan(uint32_t from, const char *app, const char *to_app, const char *n
     if (denied != NULL) {
         *denied = refused;
     }
+    if (full != NULL) {
+        *full = fulls;
+    }
     return took;
 }
 
@@ -385,11 +471,13 @@ int moy_evq_send(uint32_t from, const char *app, const char *name, const char *a
         }
         return -MOY_EVQ_STALE;
     }
-    return fan(from, me, app != NULL ? app : "", name, args, n, denied);
+    uint32_t full = 0;
+    int took = fan(from, me, app != NULL ? app : "", name, args, n, denied, &full);
+    return took == 0 && full != 0u ? -MOY_EVQ_FULL : took;
 }
 
 int moy_evq_route(const char *name, const char *args, size_t n) {
-    return fan(0u, MOY_EVQ_SYSTEM, NULL, name, args, n, NULL);
+    return fan(0u, MOY_EVQ_SYSTEM, NULL, name, args, n, NULL, NULL);
 }
 
 int moy_evq_take(uint32_t pid, moy_evq_ev_t *ev, char *args, size_t cap) {
@@ -399,19 +487,22 @@ int moy_evq_take(uint32_t pid, moy_evq_ev_t *ev, char *args, size_t cap) {
     int i = slot_of(pid);
     if (i < 0) {
         rc = MOY_EVQ_STALE;
-    } else if (s_q[i]->count == 0) {
+    } else if (s_q[i]->count == 0 || s_q[i]->left == 0) {
         rc = MOY_EVQ_EMPTY;
     } else {
         q_t *q = s_q[i];
-        e = q->ev[q->at];
+        uint32_t k = next_of(q);
+        e = q->ev[k];
         *ev = e->h;
         if ((size_t)e->h.n + 1u > cap) {
             rc = MOY_EVQ_RANGE;
             e = NULL;
         } else {
-            q->ev[q->at] = NULL;
-            q->at = (uint8_t)((q->at + 1u) % MOY_EVQ_DEPTH);
-            q->count--;
+            unlink_at(q, k);
+            serve(q, who_of(e->h.from));
+            if (q->left > 0) {
+                q->left--;
+            }
         }
     }
     MOY_SYNC_UNLOCK(&s_lock);
@@ -453,7 +544,8 @@ uint32_t moy_evq_ready(void) {
     for (uint32_t k = 0; k < MOY_EVQ_PROCS; k++) {
         uint32_t i = (s_turn + k) % MOY_EVQ_PROCS;
         q_t *q = s_q[i];
-        if (q != NULL && (q->flags & MOY_EVQ_VM) && q->count != 0 && !moy_super_held(s_pid[i])) {
+        if (q != NULL && (q->flags & MOY_EVQ_VM) && q->count != 0 && q->left != 0
+            && !moy_super_held(s_pid[i])) {
             pid = s_pid[i];
             s_turn = i + 1u;
             break;
@@ -461,6 +553,28 @@ uint32_t moy_evq_ready(void) {
     }
     MOY_SYNC_UNLOCK(&s_lock);
     return pid;
+}
+
+uint32_t moy_evq_step(uint32_t pid) {
+    uint32_t n = 0;
+    MOY_SYNC_LOCK(&s_lock);
+    if (pid != 0u) {
+        int i = slot_of(pid);
+        if (i >= 0) {
+            s_q[i]->left = (int8_t)MOY_EVQ_BATCH;
+            n = s_q[i]->count;
+        }
+    } else {
+        for (uint32_t i = 0; i < MOY_EVQ_PROCS; i++) {
+            q_t *q = s_q[i];
+            if (q != NULL && (q->flags & MOY_EVQ_VM)) {
+                q->left = (int8_t)MOY_EVQ_BATCH;
+                n += q->count != 0 && !moy_super_held(s_pid[i]);
+            }
+        }
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
+    return n;
 }
 
 uint32_t moy_evq_wait(uint32_t pid, uint32_t ms) {

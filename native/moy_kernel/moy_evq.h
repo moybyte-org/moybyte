@@ -1,11 +1,27 @@
 // moy_evq: every process's event queue and the one wait (docs/os_2026-11/
 // processes.md section 1, "The service model").
 //
-// A QUEUE is a process's, by pid: the messages the OS routed to it, oldest
-// first, MOY_EVQ_DEPTH at most (a post to a full queue drops its oldest). The
-// OS opens it at the process's start with the process's app id and the names
-// its manifest lists under `receives`, and closes it at its end; a closed
-// queue's waiter is woken and its events freed.
+// A QUEUE is a process's, by pid: the messages the OS routed to it,
+// MOY_EVQ_DEPTH at most. The OS opens it at the process's start with the
+// process's app id and the names its manifest lists under `receives`, and
+// closes it at its end; a closed queue's waiter is woken and its events freed.
+//
+// BACKPRESSURE. A sender holds MOY_EVQ_SENDER unread messages on one queue at
+// most: past that, or on a queue holding MOY_EVQ_DEPTH, a post or a send
+// answers FULL and queues nothing, so a flood stops at its sender and never
+// pushes out another sender's messages. The system (pid 0 and 1, one sender)
+// is never refused: its post drops its own oldest there, else the queue's
+// oldest.
+//
+// IN TURN. A take hands the oldest message of the sender served longest ago
+// (one never served first), so each sender's messages arrive in its order and
+// senders take turns: a message from a second sender is the next take behind
+// a flood. A STEP (moy_evq_step) hands MOY_EVQ_BATCH at most: past that a
+// take answers EMPTY with the rest still queued, until the next step. Each
+// tier steps where its process's wake begins (the scheduler's mail() for the
+// VM's queues, a Lua service's run, a compiled program's poll), so one wake
+// sums at most MOY_EVQ_BATCH messages' work under the supervisor's slice. A
+// queue never stepped is not bounded (a compiled app's moybyte_recv).
 //
 // A MESSAGE is a name, the sender's pid and app (STAMPED here from the
 // sender's own queue, so a process cannot claim another app's name; pid 0 and
@@ -63,7 +79,8 @@
 enum {
     MOY_EVQ_OK = 0,
     MOY_EVQ_STALE = 1,          // no queue for that pid
-    MOY_EVQ_FULL = 2,           // every queue is taken
+    MOY_EVQ_FULL = 2,           // every queue is taken; the receiver holds the sender's
+                                // MOY_EVQ_SENDER, or MOY_EVQ_DEPTH (BACKPRESSURE)
     MOY_EVQ_NOMEM = 3,
     MOY_EVQ_DENIED = 4,         // the rule refused it
     MOY_EVQ_DEAF = 5,           // the receiver does not listen on that name
@@ -72,7 +89,10 @@ enum {
 };
 
 #define MOY_EVQ_PROCS 24u           // queues at once
-#define MOY_EVQ_DEPTH 16u           // events a queue holds
+#define MOY_EVQ_DEPTH 64u           // events a queue holds
+#define MOY_EVQ_SENDER 16u          // ... of one sender's
+#define MOY_EVQ_BATCH 4u            // events a step hands
+#define MOY_EVQ_PEERS 8u            // senders a queue remembers serving (IN TURN)
 #define MOY_EVQ_NAME 24u            // a message's name, its NUL counted
 #define MOY_EVQ_APP 48u             // an app id, its NUL counted
 #define MOY_EVQ_LISTEN 8u           // names a process listens on at once
@@ -100,12 +120,13 @@ int moy_evq_listen(uint32_t pid, const char *name, bool on);
 
 // Message `name` with `args` (a JSON array, n bytes) from process `from` to
 // process `to`, under the rule. OK, STALE (either has no queue; pid 0 and 1
-// need none to send), DEAF, DENIED, NOMEM.
+// need none to send), DEAF, DENIED, FULL (BACKPRESSURE), NOMEM.
 int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args, size_t n);
 // Message `name` from process `from` to every process of app `app` that
 // listens on it, the sender apart, under the rule: how many took it (0 or
-// more), or -MOY_EVQ_STALE where the sender has no queue. *denied (may be
-// NULL) counts the listeners the rule refused.
+// more), -MOY_EVQ_STALE where the sender has no queue, -MOY_EVQ_FULL where
+// none took it and a listener was full (BACKPRESSURE). *denied (may be NULL)
+// counts the listeners the rule refused.
 int moy_evq_send(uint32_t from, const char *app, const char *name, const char *args, size_t n,
                  uint32_t *denied);
 // An OS event: message `name` from the system (the kernel, pid 0) to every
@@ -119,11 +140,12 @@ typedef struct {
     char name[MOY_EVQ_NAME];
 } moy_evq_ev_t;
 
-// `pid`'s oldest event taken: its record in *ev, its arguments into `args`
-// (cap bytes, NUL-terminated where they fit). OK, STALE, EMPTY, RANGE (ev->n
-// says what it needs; the event stays queued).
+// `pid`'s next event taken (IN TURN): its record in *ev, its arguments into
+// `args` (cap bytes, NUL-terminated where they fit). OK, STALE, EMPTY (none,
+// or the step's MOY_EVQ_BATCH taken), RANGE (ev->n says what it needs; the
+// event stays queued).
 int moy_evq_take(uint32_t pid, moy_evq_ev_t *ev, char *args, size_t cap);
-// `pid`'s oldest event taken as the event descriptor's RECORD into `buf`
+// `pid`'s next event taken as the event descriptor's RECORD into `buf`
 // (cap bytes): its moy_evq_ev_t, its arguments and a NUL, *len the record's
 // bytes (the NUL not counted). OK, STALE, EMPTY, RANGE (the event stays; its
 // moy_evq_ev_t is written where cap holds one, its `n` what the arguments
@@ -131,10 +153,14 @@ int moy_evq_take(uint32_t pid, moy_evq_ev_t *ev, char *args, size_t cap);
 int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len);
 // The events queued on `pid`'s queue (0 for none).
 uint32_t moy_evq_queued(uint32_t pid);
-// A MOY_EVQ_VM queue with an event queued whose process the supervisor has
-// not suspended (moy_super.h), taken in turn so none starves: its pid, 0 for
-// none.
+// A MOY_EVQ_VM queue with an event its step may still hand, whose process
+// the supervisor has not suspended (moy_super.h), taken in turn so none
+// starves: its pid, 0 for none.
 uint32_t moy_evq_ready(void);
+// A new STEP for `pid`'s queue: MOY_EVQ_BATCH takes afresh; the events it
+// holds. `pid` 0: every MOY_EVQ_VM queue's; how many of them hold an event
+// and are not suspended.
+uint32_t moy_evq_step(uint32_t pid);
 
 // Block the calling task until `pid`'s queue has an event, it is kicked, or
 // `ms` passes (0: look and return). How many events are queued then. A tier

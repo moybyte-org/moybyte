@@ -54,7 +54,11 @@ MESSAGES are the kernel's per-process event queues (native/moy_kernel/
 moy_evq.h, the module `moy_evq`). `mail()` serves the queues of the VM's
 processes (moy_evq.ready), each message handed to every wake of its process
 on its name as `fn(sender, *args)` under the guard and the rungs, at most
-MAIL_SERVE a call. The console calls it at the start of its frame while
+MAIL_SERVE a call and a queue's MOY_EVQ_BATCH (a call is each queue's STEP,
+moy_evq.h: its senders in turn, so a flood from one leaves another's message
+the next served). What is left waits for the next frame's. A stepped Lua
+service's run hands a batch too, and a poll that leaves it more serves it at
+the next frame's start. The console calls it at the start of its frame while
 `queued` is set, so a message sent by the frame's input is served before the
 frame draws, and a tick that runs first serves it too. A send asks a board
 for no upcall of its own. `_open` opens a process's queue at its first
@@ -390,6 +394,7 @@ class Scheduler:
         self._fns = []              # the handlers of the message being served
         self.wakes.ended = self._ended
         self.wakes.opener = self._open
+        self.wakes.goal = self._goal
 
     # -- the tick ---------------------------------------------------------
 
@@ -448,6 +453,7 @@ class Scheduler:
             self.svc_mail = False       # a Lua service may have taken one too
             self.poll()
         w.queued = 0
+        _E.step(0)                      # each VM queue hands MOY_EVQ_BATCH at most
         fns = self._fns
         for _ in range(MAIL_SERVE):
             pid = _E.ready()            # a suspended process's queue is never ready
@@ -473,6 +479,8 @@ class Scheduler:
                 self._exit(p, EXIT_OK)
         else:
             w.queued = 1                # more than one serve's worth: the next frame's
+        if _E.step(0):
+            w.queued = 1                # past a queue's batch: the next frame's
         return _ticks_diff(_ticks_us(), t0)
 
     def send(self, pid, name, args):
@@ -505,6 +513,19 @@ class Scheduler:
         recv = cart.get("receives") if cart is not None else None
         recv = "\n".join(r for r in recv if isinstance(r, str)) if isinstance(recv, list) else ""
         _E.open(pid, app, recv, vm)
+
+    def _goal(self, pid, ach_id):
+        """The goal of badge `ach_id` in the manifest of the cart process
+        `pid` runs, None where it declares none (moybyte's COALESCING)."""
+        p = self.procs.get(pid)
+        cart = p.cart if p is not None else None
+        if cart is None and self.cart_of is not None:
+            cart = self.cart_of(pid)
+        for a in (cart.get("achievements") if cart is not None else None) or ():
+            if isinstance(a, dict) and a.get("id") == ach_id:
+                goal = a.get("goal")
+                return goal if type(goal) is int and goal >= 1 else None
+        return None
 
     def wakes_of(self, pid):
         """How many wakes process `pid` holds: its timers, readers and
@@ -978,8 +999,8 @@ class Scheduler:
         the radios' router is kept while one listens on a radio."""
         svc = _svc()
         stepped = svc is not None and not svc.svc_tasks()
-        if stepped:
-            svc.svc_step(_ticks_ms())
+        if stepped and svc.svc_step(_ticks_ms()) == 0:
+            self.svc_mail = True        # a service with more than a run's batch: the next frame's
         self._answer(svc, stepped)
         live = self._rows(svc, {})
         if _E.ready():
@@ -1065,8 +1086,8 @@ class Scheduler:
                 if _L is not None:
                     _L.current(was)
             _E.answer(ticket, ans)
-            if stepped:
-                svc.svc_step(_ticks_ms())
+            if stepped and svc.svc_step(_ticks_ms()) == 0:
+                self.svc_mail = True
 
     def calls(self):
         """The VM's queue served now (`_answer`): what a foreground compiled

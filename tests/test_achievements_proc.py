@@ -23,6 +23,7 @@ put in the seed's place in the store.
 import json
 import os
 import shutil
+import time
 
 import pytest
 
@@ -234,6 +235,100 @@ def test_the_page_lists_by_game_and_keeps_a_deleted_games_badges(ws):
     assert ws.ach.total() == len(A.SHELL) + 1
 
 
+
+def test_a_game_calling_progress_every_frame_sends_a_few_and_unlocks_at_its_goal(
+        ws, monkeypatch):
+    """moybyte's COALESCING (Steam's SetStat/StoreStats): a game's award and
+    progress every frame make a few sends -- an award once, a progress
+    value once an ACH_EVERY_MS at most and at once where it reaches the
+    goal its manifest declares, the newest value sent by the shell's wake
+    when the game stops calling, and at its end -- and the badge unlocks."""
+    now = [1000]
+    clock = lambda: now[0]                      # noqa: E731
+    monkeypatch.setattr(moybyte, "_ticks_ms", clock)
+    monkeypatch.setattr(S, "_ticks_ms", clock)
+    sends = []
+    real = moybyte.WAKES.send
+
+    def send(frm, app, name, args):
+        sends.append((name,) + tuple(args))
+        return real(frm, app, name, args)
+    monkeypatch.setattr(moybyte.WAKES, "send", send)
+    cart = next(c for c in ws.carts.all if c.get("id") == GAME)
+    pid = L.spawn("t.game")
+    moy_evq.open(pid, GAME, "", True)
+    S.SCHED.procs[pid] = S.Proc(pid, S.APP, "t.game", cart)
+
+    def frame(fn):
+        now[0] += 16
+        was = L.current()
+        L.current(pid)
+        try:
+            return fn()
+        finally:
+            L.current(was)
+    try:
+        for f in range(100):                    # 1.6 s at 60 fps, a level each 20 frames
+            frame(lambda: moybyte.progress("high_tide", f // 20))
+            frame(lambda: moybyte.award("first_clear"))
+            S.SCHED.tick(0)
+        settle_badges(ws)
+        assert sends.count(("award", "first_clear")) == 1
+        tide = [v for name, _id, *v in sends if name == "progress"]
+        assert tide == [[0], [1], [2], [3], [4]], sends
+        assert not ws.ach.has(GAME, "high_tide")
+        frame(lambda: moybyte.progress("high_tide", 5))    # the goal: sent at once
+        settle_badges(ws)
+        assert tide + [[5]] == [v for name, _id, *v in sends if name == "progress"]
+        assert ws.ach.has(GAME, "high_tide")
+        del sends[:]
+        for f in range(60):
+            frame(lambda: moybyte.progress("high_tide", 9))
+            frame(lambda: moybyte.award("first_clear"))
+        assert sends == []                      # found: nothing more
+        frame(lambda: moybyte.progress("pop_star", 1))      # no goal: the interval alone
+        frame(lambda: moybyte.progress("pop_star", 2))
+        frame(lambda: moybyte.progress("pop_star", 3))
+        assert sends == [("progress", "pop_star", 1)]
+        now[0] += moybyte.ACH_EVERY_MS
+        for _ in range(4):                      # the shell's wake: the newest value
+            S.SCHED.tick(0)
+        assert sends[-1] == ("progress", "pop_star", 3) and len(sends) == 2
+        frame(lambda: moybyte.progress("pop_star", 4))
+        moybyte.WAKES.end(pid)                  # its end sends what waits
+        assert sends[-1] == ("progress", "pop_star", 4) and len(sends) == 3
+        assert pid not in moybyte._ACH
+    finally:
+        S.SCHED.procs.pop(pid, None)
+        moybyte.WAKES.end(pid)
+        moybyte.WAKES.cancel(moybyte._ACH_WAKE[0])     # its wake, on this test's clock
+
+
+def test_an_award_the_process_is_full_for_goes_at_the_shells_wake(ws):
+    """BACKPRESSURE meets the COALESCING: a game holding MOY_EVQ_SENDER
+    unread messages on the process gets FULL for its award, which waits and
+    goes at the shell's wake once the process has read them."""
+    pid = L.spawn("t.flood")
+    moy_evq.open(pid, GAME, "", True)
+    was = L.current()
+    L.current(pid)
+    try:
+        for i in range(moy_evq.SENDER):
+            assert moybyte.send(A.PROC, "progress", "high_tide", i % 2) == 1
+        assert moybyte.award("first_clear") == moybyte.FULL
+        assert moybyte.award("first_clear") == moybyte.FULL     # waits its turn
+    finally:
+        L.current(was)
+    settle_badges(ws)
+    assert not ws.ach.has(GAME, "first_clear")
+    now = moybyte._ticks_ms()
+    while moybyte._ticks_diff(moybyte._ticks_ms(), now) <= moybyte.ACH_EVERY_MS + 20:
+        time.sleep(0.005)
+        S.SCHED.tick(0)
+    settle_badges(ws)
+    assert ws.ach.has(GAME, "first_clear")
+    moybyte.WAKES.end(pid)
+
 def test_with_the_process_stopped_messages_go_nowhere_and_reads_hold(ws):
     ws.ach.award("first_run")
     S.SCHED.tick(0)
@@ -308,9 +403,9 @@ def test_an_idle_message_wake_costs_a_frame_nothing():
     assert w.due(0, out) == 0               # a message is no due wake: the frame's start serves it
     s.mail()
     assert got == [("system", "run", None)] and w.queued == 0
-    for i in range(moy_evq.DEPTH + 3):
+    for i in range(moy_evq.SENDER + 3):
         w.post(pid, "ping", ("open", i))
-    assert s.mail_of(pid) == moy_evq.DEPTH  # the oldest dropped
+    assert s.mail_of(pid) == moy_evq.SENDER     # the system's oldest dropped
     w.end(pid)
     assert w.mail == [] and w.by_id == {} and not moy_evq.has(pid)
     assert wid not in w.by_id

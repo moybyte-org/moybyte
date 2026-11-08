@@ -144,8 +144,17 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
 
 - **The event queue** (`native/moy_kernel/moy_evq.h`, the module `moy_evq`):
   one per process, by pid, opened by the OS at its start with its app id and
-  its manifest's `receives`, closed at its end, `MOY_EVQ_DEPTH` (16) events
-  deep with the oldest dropped. An event is a message: a name, its sender's
+  its manifest's `receives`, closed at its end, `MOY_EVQ_DEPTH` (64) events
+  deep. It pushes back (BACKPRESSURE): a sender holds `MOY_EVQ_SENDER` (16)
+  unread on one queue at most, and past that its send answers FULL and
+  queues nothing, so a flood stops at the sender and never pushes out
+  another's message (the system is never refused: its own oldest goes). A
+  take hands the next message IN TURN across senders, each sender's in its
+  order, and a step hands `MOY_EVQ_BATCH` (4) at most (`moy_evq_step`: the
+  frame's mail for the VM's queues, a Lua service's run, a compiled
+  program's poll), so one wake sums a bounded batch under the supervisor's
+  slice and a second sender's message is served behind a flood's oldest.
+  An event is a message: a name, its sender's
   pid and app id (stamped by the kernel from the sender's own queue) and its
   arguments, a JSON array. The OS's events are messages from the system
   (pid 0 and 1, app `"system"`): the radios' `net` and `ble`
@@ -209,7 +218,8 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
 
 **Messages are one mechanism (owner, 2026-11-08).**
 `moybyte.send(app_id, name, *args)` posts `name` to every process of app
-`app_id` that listens on it, the sender apart, and answers how many took it;
+`app_id` that listens on it, the sender apart, and answers how many took it
+(FULL, `-2`, where none did and a receiver was full: BACKPRESSURE above);
 `moybyte.on(name, fn)` listens, `fn(sender, *args)` with `sender` the app id
 the kernel stamped. The rule is the kernel's (`moy_evq.h`, THE RULE):
 
@@ -776,6 +786,15 @@ start runs it again.
   console's next frame, before it draws (`Scheduler.mail`), so the banner
   an unlock raises shows in the frame of the input that earned it, or by a
   tick that runs first.
+- **The game's own process coalesces** (Steam's SetStat and StoreStats):
+  `moybyte.award` and `moybyte.progress` are the one Python layer every
+  tier's call reaches (a Lua or compiled tier's console call runs them as
+  its process), which sends an `award` once a process, a badge's newest
+  `progress` value once `ACH_EVERY_MS` (250 ms) at most and at once at the
+  goal its manifest declares, what waits by a wake of the shell's, and all
+  of it at the process's end (`runtime/system/moybyte.py`, COALESCING). A
+  game may call either every frame; a raw `send` of the two names is
+  bounded by §1's BACKPRESSURE alone.
 - **The sender is the OS's stamp.** The process asks the console for the
   sender's declaration (`game(app)`, handed at its start with `clock_day()`
   by `Workstation.service_env`; for `"system"` the console's own), so a game

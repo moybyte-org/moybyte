@@ -280,8 +280,8 @@ says. The console calls are imported too (`moybyte_notify`, `open_with`,
 `moybyte` module's verb run as the app's process through the door
 (`runtime/shell/shell_servers.py`, ConsoleCalls), under the permission it
 names there. **A compiled app polls its messages (2026-11-08)**: `moybyte_on`
-is the kernel's listen and `moybyte_recv` takes the oldest event of its
-process's queue as the record the event descriptor reads (`moy_evq_ev_t`, the
+is the kernel's listen and `moybyte_recv` takes the next event of its
+process's queue (its senders in turn, `moy_evq.h`) as the record the event descriptor reads (`moy_evq_ev_t`, the
 arguments, a NUL), 0 when none waits. A callback export the host called at
 the frame's start would need room in the module's memory for three strings
 and a new call in each engine's glue (a board's, the host's, the browser's);

@@ -13,7 +13,8 @@
 // it). Descriptor MOY_EVQ_FD reads that process's event queue (moy_evq.h,
 // THE EVENT DESCRIPTOR): fd_read takes one record into its first buffer
 // that is not empty (MSGSIZE where it is short, AGAIN while nothing is
-// queued), and poll_oneoff reports it readable while an event is queued.
+// queued or once the wake has read MOY_EVQ_BATCH: a poll is the queue's
+// step), and poll_oneoff reports it readable while an event is queued.
 // A poll_oneoff that waits on it blocks on the module's thread in the one
 // kernel wait (moy_evq_wait), until an event, the run's end or its nearest
 // clock. Each wake, from a poll of the descriptor's return to the next
@@ -21,7 +22,7 @@
 // calls waited for the session's task; while the supervisor holds the
 // process suspended, its poll waits unserved. send, on and log are the
 // kernel's calls on the module's thread, answering a number or a WASI errno
-// below 0.
+// below 0 (send's AGAIN: BACKPRESSURE, moy_evq.h).
 //
 // ADAPTERS, NOT A SECOND OS. Each import keeps WASI's name and calls the C a
 // shell built-in calls: stdio is the session's descriptors 0, 1 and 2 (the

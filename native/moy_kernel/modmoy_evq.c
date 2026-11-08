@@ -8,11 +8,12 @@
 //   close(pid), has(pid), app(pid)
 //   listen(pid, name, on)                    OK, STALE or FULL
 //   post(to, frm, name, args)                one message (args a JSON array
-//                      text): OK, STALE, DEAF, DENIED, NOMEM
-//   send(frm, app, name, args) -> (took, denied)   -1 took: no queue
+//                      text): OK, STALE, DEAF, DENIED, FULL, NOMEM
+//   send(frm, app, name, args) -> (took, denied)   took -STALE: no queue,
+//                      -FULL: none took it, a listener full (BACKPRESSURE)
 //   route(name, args) -> took                an OS event, from the system
 //   take(pid) -> (frm, app, name, args) or None
-//   queued(pid), ready()
+//   queued(pid), ready(), step(pid) -> held  a step's batch afresh (0: the VM's)
 //   charge(pid, cost_us, aborted) -> rung    the supervisor
 //   held(pid), resume(pid), rungs(pid) -> (overruns, strikes), forget(pid)
 //   serve() -> calls waiting                 the VM's queue: hops run
@@ -25,7 +26,8 @@
 //                      of `mask` taken; wants() what is wanted, left set
 //   listening(name)    the queues that are not the VM's listening on `name`
 //   reset()            every queue, row and slot (tests)
-//   OK .. RANGE, FINE .. SUSPENDED, SLICE_US, ABORT_US, STRIKES, SYSTEM
+//   OK .. RANGE, FINE .. SUSPENDED, SLICE_US, ABORT_US, STRIKES, DEPTH, SENDER,
+//   BATCH, SYSTEM
 
 #include <string.h>
 
@@ -85,7 +87,7 @@ static mp_obj_t ev_send(size_t n, const mp_obj_t *a) {
     uint32_t denied = 0;
     int took = moy_evq_send(mp_obj_get_int(a[0]), mp_obj_str_get_str(a[1]),
                             mp_obj_str_get_str(a[2]), args, len, &denied);
-    mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(took < 0 ? -1 : took),
+    mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(took),
                       MP_OBJ_NEW_SMALL_INT(denied) };
     return mp_obj_new_tuple(2, t);
 }
@@ -134,6 +136,11 @@ static mp_obj_t ev_ready(void) {
     return mp_obj_new_int_from_uint(moy_evq_ready());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_ready_obj, ev_ready);
+
+static mp_obj_t ev_step(mp_obj_t pid) {
+    return MP_OBJ_NEW_SMALL_INT(moy_evq_step(mp_obj_get_int(pid)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_step_obj, ev_step);
 
 static mp_obj_t ev_charge(mp_obj_t pid, mp_obj_t cost, mp_obj_t aborted) {
     return MP_OBJ_NEW_SMALL_INT(moy_super_charge(mp_obj_get_int(pid), mp_obj_get_int(cost),
@@ -251,6 +258,7 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&ev_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_queued), MP_ROM_PTR(&ev_queued_obj) },
     { MP_ROM_QSTR(MP_QSTR_ready), MP_ROM_PTR(&ev_ready_obj) },
+    { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&ev_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_charge), MP_ROM_PTR(&ev_charge_obj) },
     { MP_ROM_QSTR(MP_QSTR_held), MP_ROM_PTR(&ev_held_obj) },
     { MP_ROM_QSTR(MP_QSTR_resume), MP_ROM_PTR(&ev_resume_obj) },
@@ -283,6 +291,8 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ABORT_US), MP_ROM_INT(MOY_SUPER_ABORT_US) },
     { MP_ROM_QSTR(MP_QSTR_STRIKES), MP_ROM_INT(MOY_SUPER_STRIKES) },
     { MP_ROM_QSTR(MP_QSTR_DEPTH), MP_ROM_INT(MOY_EVQ_DEPTH) },
+    { MP_ROM_QSTR(MP_QSTR_SENDER), MP_ROM_INT(MOY_EVQ_SENDER) },
+    { MP_ROM_QSTR(MP_QSTR_BATCH), MP_ROM_INT(MOY_EVQ_BATCH) },
     { MP_ROM_QSTR(MP_QSTR_WANT_MAIL), MP_ROM_INT(MOY_EVQ_WANT_MAIL) },
     { MP_ROM_QSTR(MP_QSTR_WANT_POLL), MP_ROM_INT(MOY_EVQ_WANT_POLL) },
     { MP_ROM_QSTR(MP_QSTR_SYSTEM), MP_ROM_QSTR(MP_QSTR_system) },

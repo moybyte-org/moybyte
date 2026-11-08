@@ -32,6 +32,7 @@ def sched():
     _clear(wakes)
     wakes.ended = S.SCHED._ended
     wakes.opener = S.SCHED._open
+    wakes.goal = S.SCHED._goal
 
 
 def _cart(src, cid="t.lua"):
@@ -185,15 +186,47 @@ def test_a_message_name_is_any_name_that_fits(sched):
     assert p.code == S.EXIT_CRASHED
 
 
-def test_a_full_event_queue_drops_the_oldest(sched):
+def test_the_systems_flood_drops_its_own_oldest_and_a_run_serves_a_batch(sched):
     since = L.next()
     pid = sched.start(_cart('moybyte.on("ping", function(who, k, i) print(i) end)'))
-    for i in range(moy_evq.DEPTH + 3):
+    for i in range(moy_evq.SENDER + 3):
         sched.send(pid, "ping", ("open", i))
-    assert sched.mail_of(pid) == moy_evq.DEPTH
+    assert sched.mail_of(pid) == moy_evq.SENDER
     sched.mail()
-    assert _texts(since, pid)[1:] == [str(i) for i in range(3, moy_evq.DEPTH + 3)]
+    assert _texts(since, pid)[1:] == [str(i) for i in range(3, 3 + moy_evq.BATCH)]
+    assert sched.svc_mail                       # the rest: the next frames'
+    for _ in range(moy_evq.SENDER):
+        sched.mail()
+    assert _texts(since, pid)[1:] == [str(i) for i in range(3, moy_evq.SENDER + 3)]
 
+
+
+def test_a_flood_stops_at_its_sender_and_another_app_is_answered_in_one_run(sched):
+    """A pinger's flood at a Lua service: FULL past MOY_EVQ_SENDER, the
+    service never struck, a second app's message the take behind the
+    flood's oldest, and a run handing MOY_EVQ_BATCH (moy_evq.h)."""
+    since = L.next()
+    src = 'moybyte.on("ping", function(who, n) print(who .. ":" .. n) end)'
+    cart = dict(_cart(src, "t.svc"), receives=["ping"])
+    pid = sched.start(cart)
+    p = sched.procs[pid]
+    pinger, other = L.spawn("t.pinger"), L.spawn("t.other")
+    moy_evq.open(pinger, "t.pinger", "", True)
+    moy_evq.open(other, "t.other", "", True)
+    took = [moy_evq.send(pinger, "t.svc", "ping", "[%d]" % i)[0] for i in range(100)]
+    assert took == [1] * moy_evq.SENDER + [-moy_evq.FULL] * (100 - moy_evq.SENDER)
+    assert moy_evq.send(other, "t.svc", "ping", "[-1]")[0] == 1
+    sched.poll()                                # one run
+    assert _texts(since, pid)[1:] == ["t.pinger:0", "t.other:-1", "t.pinger:1", "t.pinger:2"]
+    assert sched.svc_mail                       # the rest: the next frames'
+    for _ in range(moy_evq.SENDER):
+        sched.mail()
+    assert sched.mail_of(pid) == 0 and len(_texts(since, pid)) == 2 + moy_evq.SENDER
+    assert (p.state, p.overruns, p.strikes) == (S.BACKGROUND, 0, 0)
+    assert moy_evq.send(pinger, "t.svc", "ping", "[0]")[0] == 1    # served: it may send again
+    moy_evq.close(pinger)
+    moy_evq.close(other)
+    sched.stop(pid)
 
 CALLS = """
 moybyte.on("go", function()

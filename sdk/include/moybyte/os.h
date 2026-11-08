@@ -31,11 +31,18 @@ extern "C" {
 // message kept). A native service that is stopped reads end of file (0),
 // its poll answering POLLHUP, and returns from main. A message reaches
 // the process only on a name it listens on (moy_on); moy_send answers
-// how many processes took one.
+// how many processes took one, or -1 with EAGAIN where none did because
+// a receiver holds MOY_EVQ_SENDER of this process's messages unread (the
+// kernel's backpressure: send again later). A poll's wake reads
+// MOY_EVQ_BATCH records at most (EAGAIN past that, the rest queued for the
+// next poll, which returns at once): each sender's messages in its order,
+// the senders in turn.
 #define MOY_EVQ_FD 31
 #define MOY_EVQ_VERSION 1
 #define MOY_EVQ_NAME 24u
 #define MOY_EVQ_APP 48u
+#define MOY_EVQ_SENDER 16u
+#define MOY_EVQ_BATCH 4u
 
 typedef struct {
     uint32_t from;              // the sender's pid

@@ -26,7 +26,9 @@ FINE, WARNED, STRUCK, SUSPENDED = range(4)
 SLICE_US = 20000
 ABORT_US = 300000
 STRIKES = 3
-DEPTH = 16
+DEPTH = 64
+SENDER = 16
+BATCH = 4
 WANT_MAIL, WANT_POLL = 0x01, 0x02
 SYSTEM = "system"
 _VM = 0x01
@@ -54,6 +56,7 @@ _SIGS = (
     ("moy_evq_take", [_U32, ctypes.POINTER(_Ev), _VP, _SZ], _I),
     ("moy_evq_queued", [_U32], _U32),
     ("moy_evq_ready", [], _U32),
+    ("moy_evq_step", [_U32], _U32),
     ("moy_evq_kick", [_U32], None),
     ("moy_evq_vm_stop", [], _U32),
     ("moy_evq_live", [], _U32),
@@ -123,7 +126,7 @@ def send(frm, app, name, args):
     b = _b(args)
     denied = _U32(0)
     took = _lib().moy_evq_send(frm, _b(app), _b(name), b, len(b), ctypes.byref(denied))
-    return (-1 if took < 0 else took, denied.value)
+    return (took, denied.value)
 
 
 def route(name, args):
@@ -149,6 +152,10 @@ def queued(pid):
 
 def ready():
     return _lib().moy_evq_ready()
+
+
+def step(pid):
+    return _lib().moy_evq_step(pid)
 
 
 def charge(pid, cost_us, aborted):

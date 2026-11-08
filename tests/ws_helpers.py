@@ -157,10 +157,14 @@ def make_drv(ws):
 
 def settle_badges(ws=None):
     """Serve the achievements process's queued events now (the console's
-    next frame would, before it draws): an unlock banner they raise is then
-    up before a test takes it down."""
+    next frames would, before they draw, a queue's MOY_EVQ_BATCH a frame):
+    an unlock banner they raise is then up before a test takes it down."""
     from runtime import scheduler
-    scheduler.SCHED.mail()
+    s = scheduler.SCHED
+    for _ in range(64):
+        s.mail()
+        if not s.wakes.queued and not s.svc_mail:
+            break
     return ws
 
 

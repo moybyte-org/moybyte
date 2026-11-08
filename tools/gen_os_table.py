@@ -738,19 +738,20 @@ def gen_kernel_c(table):
 
 
 def _evq_block(path=EVQ_H):
-    """The event descriptor, its record's version and the record, as
-    moy_evq.h states them."""
+    """The event descriptor, its record's version, the backpressure's
+    bounds and the record, as moy_evq.h states them."""
     with open(path) as f:
         text = f.read()
     out = []
     for pat in (r"#define MOY_EVQ_FD \d+", r"#define MOY_EVQ_VERSION \d+",
                 r"#define MOY_EVQ_NAME \d+u", r"#define MOY_EVQ_APP \d+u",
+                r"#define MOY_EVQ_SENDER \d+u", r"#define MOY_EVQ_BATCH \d+u",
                 r"typedef struct \{[^}]*\} moy_evq_ev_t;"):
         m = re.search(pat, text, re.S)
         if not m:
             raise TableError("moy_evq.h no longer has %r" % pat)
         out.append(m.group(0))
-    return "\n".join(out[:4]) + "\n\n" + out[4]
+    return "\n".join(out[:-1]) + "\n\n" + out[-1]
 
 
 def _wasi_import(r):
@@ -805,7 +806,12 @@ def gen_sdk_h(table):
          "// message kept). A native service that is stopped reads end of file (0),",
          "// its poll answering POLLHUP, and returns from main. A message reaches",
          "// the process only on a name it listens on (moy_on); moy_send answers",
-         "// how many processes took one.",
+         "// how many processes took one, or -1 with EAGAIN where none did because",
+         "// a receiver holds MOY_EVQ_SENDER of this process's messages unread (the",
+         "// kernel's backpressure: send again later). A poll's wake reads",
+         "// MOY_EVQ_BATCH records at most (EAGAIN past that, the rest queued for the",
+         "// next poll, which returns at once): each sender's messages in its order,",
+         "// the senders in turn.",
          _evq_block(), "",
          "// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).",
          "#define MOY_LOG_ERR 3", "#define MOY_LOG_WARNING 4", "#define MOY_LOG_INFO 6",

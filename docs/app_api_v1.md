@@ -467,13 +467,21 @@ taken from the sender's word. The rule holds both ways: an app that waits
 for another app's answer lists the answer's name under its own `receives`
 too (`"receives": ["pong"]` beside a `send` of `"ping"`). The tier does not matter: a Lua service
 hears a Python app's `send`, and the app hears the service's answer. A process that
-does not listen on a name does not take it, and a queue holds the newest
-`MOY_EVQ_DEPTH` (16).
+does not listen on a name does not take it.
+
+A queue pushes back (`moy_evq.h`, BACKPRESSURE): it holds `MOY_EVQ_SENDER`
+(16) unread messages of one sender at most, `MOY_EVQ_DEPTH` (64) in all, and
+past that `send` answers FULL (`moybyte.FULL`, `-2`) and queues nothing, so
+a flood stops at its sender, which sends again later; the system is never
+refused. The receiver takes its senders' messages in turn, each sender's in
+its order, `MOY_EVQ_BATCH` (4) a step: a frame's start for a Python process,
+a run for a Lua service, a `poll` for a WASI or C service. A second app's
+message is served behind a flood's oldest, never behind the whole flood.
 
 A compiled program reads its messages: a WASI or C service from its event
 descriptor (§7), a compiled app with `moybyte_recv(buf, cap)`, which it calls
-in its `_update` as it reads its buttons. Each read takes the oldest message
-as one record: `moy_evq_ev_t` (`sdk/include/moybyte/os.h`: the sender's pid,
+in its `_update` as it reads its buttons. Each read takes the next message
+(its senders in turn) as one record: `moy_evq_ev_t` (`sdk/include/moybyte/os.h`: the sender's pid,
 the arguments' length, its app id, the name), then the arguments as a JSON
 array, then a NUL. A compiled app's read answers the record's length, the NUL
 counted, 0 when nothing waits, and FULL (`-2`) where the buffer is short,
@@ -537,7 +545,13 @@ moybyte.progress("high_tide", level)  # the goal's current value: found once it 
 
 `progress` reports the game's own count, which the console stores as told
 (the last value, not the best); a best or a total is the game's to keep, in
-`pmem`. Each is a message to the achievements process
+`pmem`. Both may be called freely, every frame or on every kill: the game's
+own process coalesces them (`runtime/system/moybyte.py`, COALESCING) and
+allocates nothing doing so. An `award` of a badge it found already sends
+nothing; `progress` keeps each badge's newest value and sends it once a
+quarter second (`ACH_EVERY_MS`) at most, at once when it reaches the goal the
+manifest declares, and at the game's end; an unchanged value sends nothing.
+Each answers what its badge's last send answered. Each is a message to the achievements process
 (`moybyte.send("moybyte.achievements", "award", id)`), which takes those two
 names from every app. Because the kernel stamps the sender, a game unlocks
 only its own manifest's badges; the process refuses any other id and logs

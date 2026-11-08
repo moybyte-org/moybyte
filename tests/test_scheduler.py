@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from runtime import moybyte, os_log, scheduler as S
+from runtime import moy_evq, moybyte, os_log, scheduler as S
 from runtime import moy_log as L
 from unix_mp import find_unix_mp, require_unix_mp, runtime_tree
 
@@ -60,6 +60,7 @@ def sched():
     _clear(wakes)
     wakes.ended = S.SCHED._ended
     wakes.opener = S.SCHED._open
+    wakes.goal = S.SCHED._goal
 
 
 def _since():
@@ -442,6 +443,52 @@ def test_a_vm_stop_starts_its_services_again_after_it(console):
     assert _running() == ["t.auto", "t.manual", "t.off"]
 
 
+# -- a flood: backpressure and turns (moy_evq.h) ----------------------------------
+
+PONG = """
+import moybyte
+got = []
+def ping(who, n):
+    got.append((who, n))
+    moybyte.send(who, "pong", n)
+def moy_start():
+    moybyte.on("ping", ping)
+"""
+
+
+def test_a_flood_stops_at_its_sender_and_another_app_is_answered_in_one_step(sched):
+    """A pinger sending at ~100 messages a second, unserved for a second:
+    past MOY_EVQ_SENDER its sends answer FULL and queue nothing, the service
+    is never struck, and a second app's message is the take behind the
+    flood's oldest (IN TURN), its answer served in the same step."""
+    pid = sched.start({"id": "t.svc", "title": "svc", "src": PONG, "permissions": [],
+                       "receives": ["ping"]})
+    svc = sched.procs[pid]
+    pinger = _app("t.pinger")
+    other = _app("t.other")
+    answers = []
+    moy_evq.open(other, "t.other", "pong", True)
+    _as(other, lambda: sched.wakes.on("pong", lambda who, n: answers.append((who, n))))
+    sent = [_as(pinger, lambda: moybyte.send("t.svc", "ping", i)) for i in range(100)]
+    assert sent == [1] * moy_evq.SENDER + [moybyte.FULL] * (100 - moy_evq.SENDER)
+    assert sched.mail_of(pid) == moy_evq.SENDER
+    assert _as(other, lambda: moybyte.send("t.svc", "ping", -1)) == 1
+    sched.mail()                                # one step
+    got = svc.ns["got"]
+    assert got[1] == ("t.other", -1) and len(got) == moy_evq.BATCH
+    assert [n for who, n in got if who == "t.pinger"] == list(range(moy_evq.BATCH - 1))
+    assert answers == [("t.svc", -1)]
+    for _ in range(100 // moy_evq.BATCH):      # ~100 a second, served a batch a frame
+        for _ in range(2):
+            _as(pinger, lambda: moybyte.send("t.svc", "ping", 0))
+        sched.mail()
+    assert (svc.state, svc.overruns, svc.strikes) == (S.BACKGROUND, 0, 0)
+    assert sched.mail_of(pid) < moy_evq.SENDER
+    sched.stop(pid)
+    sched.wakes.end(other)
+    sched.wakes.end(pinger)
+
+
 # -- the real guard, on the desktop MicroPython ---------------------------------
 
 VM_SCRIPT = r'''
@@ -502,6 +549,21 @@ for _ in range(200):
     deltas.append(gc.mem_alloc() - a)
 print("ALLOC", sum(deltas), q.ns["n"][0] > 100)
 print("DELTAS", [d for d in deltas if d][:10])
+import moy_log as L
+game = L.spawn("t.game")
+L.current(game)
+moybyte.award("gold")                   # nothing listens: tried again in its turn
+moybyte.progress("kills", 0)            # sent
+moybyte.progress("kills", 1)            # waits: the shell's wake made
+gc.collect()
+a = gc.mem_alloc()
+i = 0
+while i < 100:                          # a frame each: award and a moving count
+    moybyte.award("gold")
+    moybyte.progress("kills", i + 2)
+    i += 1
+print("COALESCE", gc.mem_alloc() - a)
+L.current(1)
 '''
 
 
@@ -523,6 +585,7 @@ def test_on_the_vm_the_guard_aborts_kills_and_a_tick_allocates_nothing(tmp_path)
         assert "STRIKES 3 suspended\n" in out, (tag, out)
         assert "KILLED 137 True 0\n" in out, (tag, out)
         assert "ALLOC 0 True\n" in out, (tag, out)
+        assert "COALESCE 0\n" in out, (tag, out)
 
 
 def test_a_vm_stop_closes_the_vms_event_queues_and_no_other():

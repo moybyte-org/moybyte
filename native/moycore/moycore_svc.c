@@ -971,6 +971,9 @@ static uint32_t run(svc_t *s, uint32_t now) {
             return UINT32_MAX;
         }
     }
+    if (s->msg == NULL) {
+        moy_evq_step(s->pid);           // a run hands MOY_EVQ_BATCH messages at most
+    }
     while (s->state == MOYCORE_SVC_RUNNING && !s->stop_req && !moy_super_held(s->pid)
            && take_mail(s)) {
         begin(s, MOY_SUPER_ABORT_US, 1, THEN_CB);
@@ -981,8 +984,9 @@ static uint32_t run(svc_t *s, uint32_t now) {
     if (s->state != MOYCORE_SVC_RUNNING) {
         return UINT32_MAX;
     }
-    if (s->stop_req) {
-        return 0;
+    if (s->stop_req
+        || (s->msg == NULL && moy_evq_queued(s->pid) != 0u && !moy_super_held(s->pid))) {
+        return 0;                       // the next run hands the rest
     }
     if (!has_wakes(s)) {
         end(s, 0);
