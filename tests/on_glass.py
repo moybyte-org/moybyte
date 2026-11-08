@@ -3738,14 +3738,16 @@ def elf_commands_run(board, board_dir):
     assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
     runs("elf.head/head -n 1 elf.txt", (0, ["one"]))
     args = "-a -b x -a op1 op2"
+    # The probe's own status first: a probe that dies leaves an empty file,
+    # which the cat alone would read as a clean run.
     st, got = _sh(board, "echo 'first line' | elf.libc/libc %s > elf3.txt 2> /dev/null; "
-                  "elf.cat/cat elf3.txt" % args, timeout=60)
+                  "echo $?; elf.cat/cat elf3.txt" % args, timeout=60)
     exe = os.path.join(tmp, "libc_native")
     subprocess.run(["cc", "-O1", "-w", "-o", exe,
                     str(fixtures / "elf_libc.moy" / "src" / "libc.c")], check=True)
     want = subprocess.run([exe] + args.split(), input=b"first line\n", capture_output=True,
                           check=True).stdout.decode().splitlines()
-    assert (st, got) == (0, want), (st, got)
+    assert (st, got) == (0, ["0"] + want), (st, got)
     runs("rm elf.txt elf2.txt elf3.txt", (0, []))
     stats = board.pyval("__import__('moy_elf').stats()", strict=True)
     assert stats[3] == 0, stats                  # no thread left running
