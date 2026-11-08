@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   -- the source's views      the rows read as roles, verbs, permissions and tiers
+#   TableError                 a source the rules refuse, named by its row
+#   perm_tiers                 the tiers a permission is served on, derived from its rows
+#   -- the prototype           a row's C prototype, parsed
+#   -- the source's rules      check: what the source may say
+#   -- the ELF tier            the OS function table, the kernel's rows, the SDK
+#   -- the app ABI             the C rows, the wasm and ui imports, Lua's names
+#   -- the Python console and the docs  the GENERATED splices and the doc tables
+#   outputs                    every file and its text, the one list main writes or checks
 """Write every tier's table of Moybyte's app and OS calls from their one
 source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
 

@@ -6,6 +6,7 @@
 #   NavServer        where the console goes next
 #   WallpaperServer  the desktop backdrop
 #   InstallServer    carts from outside: the radio lease, the store, the engine
+#   ConsoleCalls     the moybyte role: console calls run as the calling process
 #   RoleDoor         the ROLE upcall's Python half: a compiled app's call
 #   serve_all        register every server on the console's app ABI
 """The console's servers for the app ABI's rows it serves (native/moy_app/
