@@ -21,8 +21,10 @@ of a fresh find as the unlock banner (`badge_of`).
 
 The console starts the process when it loads its store (`Link.start`),
 handing it (`Link.env`): `game(app)`, the app's name and the badges it
-declares (None for an app that declares none), and `clock_day()`, today as
-YYYYMMDD off the bar's clock (0 without one).
+declares (None for an app that declares none), `clock_day()`, today as
+YYYYMMDD off the bar's clock (0 without one), and `row_stamp()`, which
+moves when the row's text does, so the process can hold the row in memory
+and read it again only after a write that is not its own (`seed`, a sync).
 """
 
 try:
@@ -210,6 +212,8 @@ class Link:
         self._groups = ()
         self._found = 0
         self._total = 0
+        self._games = {}        # app -> game(app)'s answer, at the shelf's `_games_at`
+        self._games_at = (-1, -1)
 
     # -- the process --------------------------------------------------------
 
@@ -232,21 +236,40 @@ class Link:
 
     def env(self):
         """What the console hands the process, in its namespace."""
-        return {"game": self.game, "clock_day": self.ws._today_ymd}
+        return {"game": self.game, "clock_day": self.ws._today_ymd,
+                "row_stamp": self.stamp}
 
     def game(self, app):
         """App `app`'s name and declared badges, `{"name", "achievements"}`,
-        or None for an app that declares none."""
-        if app == SYSTEM:
-            return {"name": SHELL_NAME, "achievements": declared(list(SHELL))}
+        or None for an app that declares none: read once a sender while the
+        shelf's roster and titles stand (`carts.gen`, `carts.titled`: a
+        rescan, an install, a delete or a rename reads it afresh)."""
         carts = getattr(self.ws, "carts", None)
-        for c in (carts.all if carts is not None else ()):
+        at = (carts.gen, carts.titled) if carts is not None else (0, 0)
+        if at != self._games_at:
+            self._games = {}
+            self._games_at = at
+        if app in self._games:
+            return self._games[app]
+        got = None
+        if app == SYSTEM:
+            got = {"name": SHELL_NAME, "achievements": declared(list(SHELL))}
+        for c in (carts.all if carts is not None and app != SYSTEM else ()):
             if not is_proc(c) and _perms.app_id(c) == app:
-                got = declared(c.get("achievements"))
-                if got is None:
-                    return None
-                return {"name": c.get("title") or app, "achievements": got}
-        return None
+                decl = declared(c.get("achievements"))
+                if decl is not None:
+                    got = {"name": c.get("title") or app, "achievements": decl}
+                break
+        self._games[app] = got
+        return got
+
+    def stamp(self):
+        """Which text of the process's row stands: a number that moves only
+        when the row's text does. The process keeps the row in memory and
+        reads it again only where the stamp moved past its own last write
+        (`seed`, a restore)."""
+        self.doc()
+        return self._doc_n
 
     def _proc(self):
         pid = self.pid
@@ -336,7 +359,9 @@ class Link:
 
     def seed(self, found):
         """Put the shell's badges `found` ({id: day}) as the process's
-        whole row: what a tool or a test starts from."""
+        whole row: what a tool or a test starts from. The process, which
+        holds the row in memory, reads it again at its next message
+        (`stamp`)."""
         f = {}
         for a in SHELL:
             if a["id"] in found:

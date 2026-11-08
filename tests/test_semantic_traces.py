@@ -2260,11 +2260,15 @@ def roles_trace(ws):
 
     # -- notify
     # award is a message to the achievements process, served at the start of
-    # the console's next frame (`mail`); groups reads what it keeps
+    # the console's next frames (`mail`, a queue's batch a frame); groups
+    # reads what it keeps
     import scheduler
     nt = ctx.notify
     a1 = nt.award("konami")
-    scheduler.SCHED.mail()
+    for _ in range(16):
+        scheduler.SCHED.mail()
+        if not scheduler.SCHED.wakes.queued:
+            break
     shell = {}
     for b in nt.groups()[0][2]:
         shell[b[0]] = b

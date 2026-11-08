@@ -797,7 +797,9 @@ start runs it again.
   bounded by §1's BACKPRESSURE alone.
 - **The sender is the OS's stamp.** The process asks the console for the
   sender's declaration (`game(app)`, handed at its start with `clock_day()`
-  by `Workstation.service_env`; for `"system"` the console's own), so a game
+  and `row_stamp()` by `Workstation.service_env`; for `"system"` the
+  console's own; kept per sender while the shelf's roster and titles
+  stand), so a game
   reaches only the badges its own manifest declares, read strictly
   (`achievements.declared`). An id the sender does not declare, a `progress`
   on a badge with no goal and a value that is no whole number are refused,
@@ -810,8 +812,14 @@ start runs it again.
   `Link.used`), as a game keeps its best in its pmem.
 - **Its store is its prefs** (one row, `badges`; `read_badges` is the strict
   reader): a record a sender, its name, each found badge's day, title, icon
-  and hint, and each goal's last value, read and written whole on each
-  message. A deleted game's badges stay in the row and stay listed under
+  and hint, and each goal's last value. **One message is cheap**: the
+  process holds the row in memory, reads it at its first message and again
+  only where `row_stamp()` (`Link.stamp`, moving only when the row's text
+  does) moved past its own last write -- the console's `seed`, a sync -- so
+  an award for a found badge or an unchanged value reads and writes
+  nothing. A fresh find writes the row at once; a new value is written
+  `SAVE_MS` (2 s) later with what else moved, and at the process's stop. A
+  deleted game's badges stay in the row and stay listed under
   its name. The row is a cart namespace's, so the system root carries it
   between a board and its page with the portable Settings
   (`moy_sync.SYSTEM_KEYS`). It crosses whole and the later writer wins:

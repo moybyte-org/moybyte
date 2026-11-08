@@ -329,6 +329,60 @@ def test_an_award_the_process_is_full_for_goes_at_the_shells_wake(ws):
     assert ws.ach.has(GAME, "first_clear")
     moybyte.WAKES.end(pid)
 
+
+def test_a_repeat_message_reads_nothing_and_writes_nothing(ws, monkeypatch):
+    """One message is cheap (what struck the process on a T-Deck): the
+    sender's declaration is read once while the shelf stands, the row once
+    and then held, an award for a found badge or an unchanged value does no
+    I/O, a new value is written once SAVE_MS later, and the console's own
+    write of the row (`seed`) is read again before the next message."""
+    p = S.SCHED.procs[ws.ach.pid]
+    if p.native:
+        pytest.skip("the Lua twin (tests/fixtures/achievements_lua.moy) reads its row each message")
+    io = []
+    real = p.ns["prefs"]
+
+    class Spy:
+        def get(self, key, default=None):
+            io.append("get")
+            return real.get(key, default)
+
+        def set(self, key, value):
+            io.append("set")
+            return real.set(key, value)
+    monkeypatch.setitem(p.ns, "prefs", Spy())
+    reads = []
+    declared = A.declared
+    monkeypatch.setattr(A, "declared", lambda raw: reads.append(1) or declared(raw))
+    _as(GAME, "award", "first_clear")
+    _as(GAME, "progress", "high_tide", 3)
+    settle_badges(ws)
+    assert io == ["get", "set", "set"] and len(reads) == 1     # the find at once, the value later
+    del io[:], reads[:]
+    for _ in range(10):
+        _as(GAME, "award", "first_clear")
+        _as(GAME, "progress", "high_tide", 3)
+    settle_badges(ws)
+    assert io == [] and reads == []
+    _as(GAME, "progress", "high_tide", 4)
+    while S.SCHED.wakes.queued:
+        S.SCHED.mail()
+    assert io == []                             # held: written SAVE_MS later
+    assert p.ns["_ROW"][p.ns["_DIRTY"]] and p.ns["_ROW"][p.ns["_WAKE"]]
+    settle_badges(ws)
+    assert io == ["set"] and _row(ws)[GAME]["value"] == {"high_tide": 4}
+    del io[:]
+    ws.ach.seed({"first_run": 20260101})        # the console's write: it stands
+    _as(GAME, "award", "first_clear")
+    settle_badges(ws)
+    assert io == ["get", "set"]
+    assert ws.ach.has(A.SYSTEM, "first_run") and ws.ach.has(GAME, "first_clear")
+    assert "high_tide" not in _row(ws)[GAME].get("value", {})
+    ws.carts.rescan()                           # the shelf moved: read again
+    _as(GAME, "progress", "high_tide", 2)
+    settle_badges(ws)
+    assert len(reads) == 1
+
 def test_with_the_process_stopped_messages_go_nowhere_and_reads_hold(ws):
     ws.ach.award("first_run")
     S.SCHED.tick(0)

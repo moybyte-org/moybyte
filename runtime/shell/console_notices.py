@@ -152,8 +152,8 @@ class Notices:
 
     def service_env(self, cart):
         """What the console hands service `cart` in its namespace beside
-        its app's roles: the achievements process's `game` and `clock_day`;
-        None for any other."""
+        its app's roles: the achievements process's `game`, `clock_day` and
+        `row_stamp`; None for any other."""
         if _ach.is_proc(cart):
             return self.ach.env()
         return None

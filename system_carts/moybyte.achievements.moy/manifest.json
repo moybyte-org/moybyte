@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Achievements",
   "id": "moybyte.achievements",
   "runtime": "python",

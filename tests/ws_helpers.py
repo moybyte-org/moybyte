@@ -157,14 +157,20 @@ def make_drv(ws):
 
 def settle_badges(ws=None):
     """Serve the achievements process's queued events now (the console's
-    next frames would, before they draw, a queue's MOY_EVQ_BATCH a frame):
-    an unlock banner they raise is then up before a test takes it down."""
+    next frames would, before they draw, a queue's MOY_EVQ_BATCH a frame),
+    and write what its row holds unwritten (the write it makes SAVE_MS
+    later): an unlock banner they raise is then up before a test takes it
+    down, and the row reads what the events made it."""
     from runtime import scheduler
     s = scheduler.SCHED
     for _ in range(64):
         s.mail()
         if not s.wakes.queued and not s.svc_mail:
             break
+    for p in list(s.procs.values()):
+        ns = p.ns
+        if p.state != scheduler.EXITED and ns and "SAVE_MS" in ns and "_later" in ns:
+            s._guarded(p.pid, ns["_later"])
     return ws
 
 
