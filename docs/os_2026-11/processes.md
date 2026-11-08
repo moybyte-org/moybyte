@@ -163,8 +163,9 @@ OS reads:
   (`graphics`, `input`, `audio`), a device API (`mic`, `battery`, `brightness`,
   `alarms` (`between_apps.md` §3), `gps`, `lora`, `ble`, `usb:hid`, `midi`,
   `camera`, `http`, `network`, `multiplayer`, `media`, `media:url`,
-  `notifications` §7), `autostart` (§5), a lease (`lease:<resource>` naming a
-  row of the board's resource table, `hardware.md` §1), or `native`. A
+  `notifications` §7), `front` (below), `autostart` (§5), a lease
+  (`lease:<resource>` naming a row of the board's resource table,
+  `hardware.md` §1), or `native`. A
   permission the manifest also lists in `"moybyte": {"required": [...]}`
   is required: absent, it makes the launch refused with a message naming
   it, where any other absent permission reads `None`;
@@ -253,6 +254,17 @@ needs the board's media service, `hardware.md` §3) and `media:url` (it needs
 `wifi`), both granting `api:media`. The later rows (USB host,
 `midi`, `camera`, `native`) arrive with their APIs, each saying whether it
 is enforced on its tier or informational (above).
+
+**`front`: taking the screen from the background (owner, 2026-11-08).**
+`api:front`, every tier's, its line "Take over the screen from the
+background", with no names: one gate, `runtime/system/front.py`'s `take`,
+reads it for every way a process brings an app to the front
+(`between_apps.md` §1 lists them). The run on screen needs no permission,
+the shell is never gated, and a process in the background without `front`
+gets its request as a notification it can be opened from (§7). A run is
+named by its pid (`moybyte` verbs, the current process) or by its role
+grant (`Procs.pid_of`, the nav role's verbs: a system app's grant is the
+shell's, one no run holds is gated), never by the app id it claims.
 
 ## 3. Python: one VM, stepped cooperatively
 
@@ -543,6 +555,10 @@ collide.
 - **Acting on it** focuses the posting app; a game that was in front loses
   focus (throttled on the desk, minimised on a handheld, §1). **Dismissing** it keeps the game playing.
 - **Missed notifications** are a list, in the bar or the task manager.
+- **A request to take the screen** a process in the background may not make
+  (§2's `front`) is a notification too (owner, 2026-11-08): the shell posts
+  it under the process's title, with no permission, and opening it does what
+  was asked.
 - **There is no do-not-disturb (owner):** a user who wants no interruptions
   closes the app that posts them.
 
@@ -579,7 +595,10 @@ notifications, updated in place under its id.
   runs (a run's through `Player.window_event`, a service's through
   `Scheduler.hook`, under the guard and the rungs). A service has no window,
   so acting on its notification calls the hook alone until §2's `entries`
-  give a service cart an app.
+  give a service cart an app. A request (`NOTES.request`) is acted on by
+  running what was asked, as the user's own input, in place of the hook;
+  a process's newer request replaces one nobody opened, and its summary
+  is the request ("Wants to open todo.md in Notes").
 - **Dismissing** is the banner's deadline passing, a press on it dragged up,
   or opening the task manager; the game in front plays on, and the
   notification stays in the list until opened or cleared.

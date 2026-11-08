@@ -743,6 +743,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # as a table of contents). The ORDER is load-bearing: the WM must exist
         # before anything reads/writes `screen`, Project/Player/EditorApp before
         # anything sets their forwarded fields, and the layer stack last.
+        self.shell_grants = set()      # the system apps' grants (app_context)
         self._init_canvases(comp, canvas, sys_canvas, font_scale,
                             panel_diagonal_in)
         self._init_components(input, carts)
@@ -2717,8 +2718,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         the whole point: Phase 7's `make_system_api(ctx, cart)` is this same
         call with a cart's manifest permissions in place of a class constant,
         its grant a RUN grant (`run`) scoped to its files `kind`; a
-        service's names its pid as the grant's `owner`."""
-        return AppContext(self, app_id, needs, prefs_ns, run, kind, owner)
+        service's names its pid as the grant's `owner`. A system app's grant
+        is the shell's (`shell_grants`): what it asks of the nav role is
+        never gated (runtime/system/front.py)."""
+        ctx = AppContext(self, app_id, needs, prefs_ns, run, kind, owner)
+        if not run:
+            self.shell_grants.add(ctx.grant)
+        return ctx
 
     # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
     #

@@ -759,6 +759,7 @@ level, a console reads them as absent):
 | `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
+| `front` | nothing by name: from the background, `open_app`, `moybyte.open_with`, `share` and `pick` go straight through instead of asking by a notification (below) |
 | `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/moybyte.notes.moy` is that cart |
 
 Every app cart also gets five names with no permission needed, because they are
@@ -1122,7 +1123,13 @@ moybyte.at(time.time() + 4 * 60, ring)
 ### Opening with another app, and picking a file (Moybyte-side verbs)
 
 `moybyte.open_with`, `moybyte.share` and `moybyte.pick` are Moybyte's own,
-like `notify`, and need no permission; a Lua service holds the first two.
+like `notify`; a Lua service holds the first two. Your app needs no
+permission for them while the player is in it. From the background (a
+service, or an app the player left) they ask first (2026-11-08): the
+player gets a notification ("Wants to open todo.md in Notes") that does it
+when they open it, and the call answers `True` as though it went. Ask for
+`"front"` in the manifest to go straight through; `open_app` keeps the
+same rule.
 Your manifest says what your app opens (`"moybyte": {"handles":
 ["text/markdown", "image/*"]}`). A file is named by its path in your shared
 folders, as the Files app and a computer show it.

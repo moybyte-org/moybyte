@@ -288,7 +288,7 @@ def test_a_lua_service_opens_and_shares_through_the_same_verbs(tmp_path):
            'moybyte.on("award", function() moybyte.share("hi", "text/plain") end)\n')
     try:
         pid = S.SCHED.start({"id": "t.lua", "title": "t.lua", "type": "service",
-                             "runtime": "lua", "src": src, "permissions": [],
+                             "runtime": "lua", "src": src, "permissions": ["front"],
                              "required": [], "path": "/carts/t.lua.moy"})
         assert pid is not None
         S.SCHED.send(pid, "achieve", ())

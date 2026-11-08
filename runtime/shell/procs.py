@@ -195,6 +195,11 @@ def _sample(pl, el):
     pl.us_upd = pl.us_draw = 0
 
 
+def _grant(pl):
+    ctx = getattr(pl, "_app_ctx", None) if pl is not None else None
+    return ctx.grant if ctx is not None else None
+
+
 def _poster(cart, granted):
     return (str((cart or {}).get("title") or "App"), cart, NOTIFY in (granted or ()))
 
@@ -925,6 +930,19 @@ class Procs:
         if sp is not None and sp.kind in _GRANTED and sp.state != _sched.EXITED:
             return sp.granted
         return ()
+
+    def pid_of(self, g):
+        """The pid of the run whose app grant is `g` (a role's caller), the
+        shell's for a shell app's grant, None for a grant neither holds."""
+        if g in self.ws.shell_grants:
+            return _sched.SHELL
+        pl = self.ws.player
+        if _grant(pl) == g:
+            return pl.pid
+        for p in self.list:
+            if _grant(p.world.player) == g:
+                return p.world.player.pid
+        return None
 
     def runs(self):
         """[(pid, name, kind, state)]: the task manager's rows that are runs,

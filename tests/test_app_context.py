@@ -906,7 +906,12 @@ def test_the_launch_grant_opens_apps_by_id_and_nothing_else(tmp_path):
     assert "set_theme" not in ns and "files" not in ns and "prefs" not in ns
     assert ns["open_app"]("no_such_app") is False
     assert ws.screen == "launcher"
+    # A grant no run holds is no app on screen: the front's gate
+    # (runtime/system/front.py) asks by a notification, whose act opens it.
+    from runtime.notifications import NOTES
     assert ns["open_app"]("calc") is True
+    assert ws.screen == "launcher"
+    assert NOTES.act(NOTES.list[0].id)
     assert ws.screen == "calc"
 
 

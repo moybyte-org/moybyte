@@ -62,10 +62,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import intents as _intents
-    import moybyte as _moybyte
 except ImportError:  # pragma: no cover - direct host import
     from runtime import intents as _intents
-    from runtime import moybyte as _moybyte
 
 
 # The carts root, as a place beside the user-files kinds. NOT a
@@ -574,8 +572,9 @@ class FilesAppLayer(ListShellApp):
         elif verb == "WITH":
             # The apps whose manifest opens its type, asked always
             # (runtime/system/intents.py): the one picked becomes the choice.
+            # Files is the shell's, so it asks as the shell.
             item = _intents.item_of(kind, name)
-            if item is None or not _moybyte.open_with(item, True):
+            if item is None or not _intents.INTENTS.open_with(_intents.SHELL, item, True):
                 self.status = "No app opens it"
         elif verb == "PLAY":
             self._nav.play(row[4])

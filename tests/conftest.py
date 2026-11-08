@@ -327,6 +327,9 @@ def _processes_reset():
         if m is not None:
             gate = getattr(m, "LEASES", m)
             gate.grants = None
+    F = sys.modules.get("runtime.front")
+    if F is not None:
+        F.FRONT.bind(None, None)
     N = sys.modules.get("runtime.notifications")
     if N is not None and (N.NOTES.list or N.NOTES.banner is not None):
         N.NOTES.reset()
@@ -359,8 +362,9 @@ def _processes_fresh():
     and an item freed after its console's last frame left the count at 1, so
     the next console's first layout placed the bar's cells around a status
     item it did not have. Each test starts, and leaves, the shell current,
-    the gates unbound, no notification and no status item, as a fresh VM has
-    them before its console boots."""
+    the gates unbound (the front's among them, `front.FRONT`), no
+    notification and no status item, as a fresh VM has them before its
+    console boots."""
     _processes_reset()
     yield
     _processes_reset()

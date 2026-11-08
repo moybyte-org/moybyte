@@ -56,6 +56,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import devices as _devices
 try:
+    from front import FRONT as _FRONT
+except ImportError:  # host: the runtime package
+    from runtime.front import FRONT as _FRONT
+try:
     from intents import INTENTS as _INTENTS
     import intents as _intents
     import iconsets as _iconsets
@@ -103,6 +107,7 @@ _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "du
              "delete": ("DELETE", "trash", "Delete")}
 
 
+_FRONT_KEY = "desktop"            # the front run's window key (procs.FRONT)
 _OPEN_WITH = "Open with"           # the "open with" menu's title
 # The picker's title by the type asked for, and a row's icon by its file's kind.
 _PICK_TITLE = (("image/", "Choose a picture"), ("text/", "Choose a document"),
@@ -289,11 +294,22 @@ class Notices:
         "open with" menu (the console's question, `DeleteConfirm.choose`),
         the user-files store a file grant reads through, the row the last
         choices are kept in, and the picker: its listing, its question and
-        the running app it hands a pick to."""
+        the running app it hands a pick to. The front's gate
+        (runtime/system/front.py) reads the run on screen and brings a
+        process's run forward as acting on a notification does."""
         _INTENTS.bind(self._intent_handlers, self.app_cart_id, self._intent_deliver,
                       self._intent_ask, self._intent_read, self._intent_write,
                       self.system, self._intent_list, self._intent_ask_pick,
                       self._intent_hand)
+        _FRONT.bind(self._front_pid, self._bring)
+
+    def _front_pid(self):
+        """The pid of the run the user is in: the front run while its
+        window holds the input, else None (the shell's)."""
+        pl = self.player
+        if pl is None or pl.pid is None or self.cart is None:
+            return None
+        return pl.pid if self.wm.input_holder() == _FRONT_KEY else None
 
     def _intent_handlers(self):
         return [c for c in self.carts.all
@@ -512,20 +528,11 @@ class Notices:
         the call alone."""
         self._dirty = True
         procs = self.procs
-        pl = self.player
-        if pl is not None and n.pid is not None and pl.pid == n.pid:
-            if not procs.handheld():
-                self.wm.bring_forward("desktop")
-            elif self.wm.top_is("tasks"):
-                self.close_tasks()
-            pl.window_event("moy_action", n.id, key)
+        brought = self._bring(n.pid)
+        if brought is not None:
+            if brought:
+                self.player.window_event("moy_action", n.id, key)
             return
-        for p in procs.list:
-            if p.player.pid == n.pid:
-                self.tasks_switch(p.key)
-                if self.player.pid == n.pid:
-                    self.player.window_event("moy_action", n.id, key)
-                return
         try:
             import scheduler as _sched
         except ImportError:  # pragma: no cover - host fallback
@@ -537,6 +544,26 @@ class Notices:
             if self.wm.top_is("tasks") and procs.handheld():
                 self.close_tasks()
             self.open(c)
+
+    def _bring(self, pid):
+        """Process `pid`'s run comes to the front, as the task manager's
+        Switch to brings it: True where it is the front run after, False
+        where it could not come, None where no run is `pid`'s."""
+        if pid is None:
+            return None
+        procs = self.procs
+        pl = self.player
+        if pl is not None and pl.pid == pid:
+            if not procs.handheld():
+                self.wm.bring_forward("desktop")
+            elif self.wm.top_is("tasks"):
+                self.close_tasks()
+            return True
+        for p in procs.list:
+            if p.player.pid == pid:
+                self.tasks_switch(p.key)
+                return self.player.pid == pid
+        return None
 
     def _note_top(self):
         """The banner's top: under the bar where there is one, at the

@@ -20,7 +20,13 @@ type, and where none was chosen yet, the "open with" menu asks. There is no
 per-type "always": the menu changes the choice (`open_with(..., choose=True)`
 opens it whatever was chosen), and the console keeps one choice a type in
 `system/settings`' `open_with` row. Both answer True where the item went to
-an app or the menu is up to choose one, False where no app opens it.
+an app, the menu is up to choose one or the request waits in a
+notification, False where no app opens it.
+
+THE FRONT. Opening an item takes the screen, and so does the picker: each
+passes runtime/system/front.py's gate (owner, 2026-11-08) for the asking
+process, so one in the background without the `front` permission gets a
+notification that does it when the user opens it, the route read then.
 
 THE GRANT. The receiver gets the item as a Grant, never a permission: its
 `name`, `mime`, `url` and `mode`, `read()` and, where it is "rw", `write(data)`,
@@ -60,6 +66,14 @@ OCTET = "application/octet-stream"
 SCHEME = "x-scheme-handler/"
 KEY = "open_with"                 # system/settings' row: {mime: app key}
 SHELL = 1
+
+
+def _front():
+    try:
+        from front import FRONT
+    except ImportError:  # host: the runtime package
+        from runtime.front import FRONT
+    return FRONT
 
 
 def _ext(name):
@@ -298,14 +312,26 @@ class Intents:
 
     def open_with(self, pid, item, choose=False):
         g = self.grant_for(item)
-        return False if g is None else self._send(g, choose)
+        return False if g is None else self._send(pid, g, choose)
 
     def share(self, pid, data, mime):
         if not isinstance(mime, str) or "/" not in mime or data is None:
             return False
-        return self._send(Grant(mime, "r", data=data), False)
+        return self._send(pid, Grant(mime, "r", data=data), False)
 
-    def _send(self, g, choose):
+    def _send(self, pid, g, choose):
+        """`g` routed for process `pid`, through the front's gate."""
+        cands, pick = self.route(g.mime)
+        if not cands:
+            return False
+        app = None if pick is None or choose else str(pick.get("title") or "an app")
+        if g.name:
+            what = "Wants to open " + g.name + (" in " + app if app else "")
+        else:
+            what = "Wants to share with " + app if app else "Wants to share"
+        return _front().take(pid, what, lambda: self._route(g, choose))
+
+    def _route(self, g, choose):
         cands, pick = self.route(g.mime)
         if not cands:
             return False
@@ -363,7 +389,21 @@ class Intents:
     def pick(self, pid, mime, mode="r"):
         if mode not in ("r", "rw") or not isinstance(mime, str) or "/" not in mime:
             return False
-        items = self.files_of(mime)
+        got = [self.files_of(mime)]
+        if not got[0] or self.ask_pick is None:
+            return False
+        ok = _front().take(pid, "Wants you to pick a file",
+                           lambda: self._pick(pid, mime, mode, got[0]))
+        got[0] = None           # a deferred pick lists the files as it goes up
+        return ok
+
+    def _pick(self, pid, mime, mode, items=None):
+        """The picker up for process `pid`, its run brought to the front
+        first, where the pick reaches it."""
+        if pid != SHELL:
+            _front().come(pid)
+        if items is None:
+            items = self.files_of(mime)
         if not items or self.ask_pick is None:
             return False
         if not self.ask_pick(pid, mime, items, self.picked):

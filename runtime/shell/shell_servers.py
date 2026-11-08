@@ -48,9 +48,11 @@ door copies back.
 try:
     from app_context import NO_STORE
     from achievements import NotifyRole
+    from front import FRONT as _FRONT
 except ImportError:  # pragma: no cover - host package lane
     from runtime.app_context import NO_STORE
     from runtime.achievements import NotifyRole
+    from runtime.front import FRONT as _FRONT
 
 _COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
 
@@ -244,18 +246,30 @@ class CartsServer(_Session):
 
 class NavServer:
     """Where the console goes next. `open_app` is the app-to-app seam,
-    resolved by registered id, so an app never holds another app's class."""
+    resolved by registered id, so an app never holds another app's class.
+
+    Every verb that changes what is on screen passes the front's gate
+    (runtime/system/front.py) for its caller, the run whose grant `g` is
+    (`Procs.pid_of`; a shell app's grant is the shell's): a run in the
+    background without `front` gets a notification that goes there when
+    the user opens it, and the verb answers as though it went."""
 
     def __init__(self, ws):
         self.__ws = ws
 
+    def _go(self, g, what, then, wait=True):
+        return _FRONT.take(self.__ws.procs.pid_of(g), what, then, wait)
+
     def open_app(self, g, app_id, cart=None):
         """Spawn the registered app `app_id`. False when this build does not
         carry it or no cart carries its identity."""
-        app = self.__ws._apps_by_id.get(app_id)
+        ws = self.__ws
+        app = ws._apps_by_id.get(app_id)
         if app is None:
             return False
-        return bool(self.__ws.open_app(app, cart))
+        title = ws.app_title(app.id) or app.id
+        return self._go(g, "Wants to open " + str(title),
+                        lambda: bool(ws.open_app(app, cart)))
 
     def is_system_app(self, g, cart):
         """True when a registered app's identity claims `cart` -- what keeps
@@ -278,23 +292,30 @@ class NavServer:
         if cart is None:
             return False
         ws = self.__ws
-        ws._note_app_caller()
-        ws.open_in_editor(cart)
-        if ws.project is None or ws.project.cart is not cart:
-            return False
-        if tab:
-            ws.set_menu_view(tab)
-        return True
+
+        def then():
+            ws._note_app_caller()
+            ws.open_in_editor(cart)
+            if ws.project is None or ws.project.cart is not cart:
+                return False
+            if tab:
+                ws.set_menu_view(tab)
+            return True
+        return self._go(g, "Wants to edit " + str(cart.get("title") or "a cart"), then)
 
     def open_image(self, g, name, kind=None, cart=None):
         """Open a PICTURE in Paint: a gallery drawing, or a cart's OWN image
         (`cart` given). False when the build carries no Paint."""
-        return self.__ws.open_image(name, kind, cart)
+        ws = self.__ws
+        return self._go(g, "Wants to open " + str(name) + " in Paint",
+                        lambda: ws.open_image(name, kind, cart))
 
     def open_text(self, g, name, kind=None, mode=None):
         """Open a user-files TEXT document in the console's text app, in
         `mode`. False when the build carries no text app."""
-        return self.__ws.open_text_cart(name, kind, mode)
+        ws = self.__ws
+        return self._go(g, "Wants to open " + str(name),
+                        lambda: ws.open_text_cart(name, kind, mode))
 
     def edit_file(self, g, cart, name, mode=None):
         """Open one of `cart`'s OWN files in the editor, through that
@@ -302,8 +323,11 @@ class NavServer:
         if cart is None:
             return False
         ws = self.__ws
-        ws._note_app_caller()
-        return bool(ws.open_project_file(cart, name, mode))
+
+        def then():
+            ws._note_app_caller()
+            return bool(ws.open_project_file(cart, name, mode))
+        return self._go(g, "Wants to edit " + str(name), then)
 
     def play(self, g, cart):
         """Open `cart` as a workspace and RUN it, returning to the calling
@@ -312,12 +336,17 @@ class NavServer:
         caller = ws._apps_by_id.get(ws.app_abi.grant_id(g))
         if caller is None:
             caller = ws.launcher_layer
-        ws._open_workspace(cart)
-        ws.run(ws.project, caller)
+
+        def then():
+            ws._open_workspace(cart)
+            ws.run(ws.project, caller)
+        self._go(g, "Wants to play " + str((cart or {}).get("title") or "a cart"), then)
 
     def run_script(self, g, kind, name):
         """RUN a vault SCRIPT (a bare `.py`/`.lua` file): `(ok, why)`."""
-        return self.__ws.run_script(kind, name)
+        ws = self.__ws
+        return self._go(g, "Wants to run " + str(name),
+                        lambda: ws.run_script(kind, name), (True, None))
 
     def text_mode(self, g, on):
         """Flip the keyboard between typing and game mode, for an app that

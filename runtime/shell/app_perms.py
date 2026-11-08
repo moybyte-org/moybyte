@@ -70,6 +70,7 @@ TABLE = (
     ("pins", "api:gpio", ALL, "Switch the console's pins", "gpio", ("pin_write", "pin_read")),
     ("console", "api:console", ALL, None, None, ()),
     ("notifications", "api:notify", ALL, "Show notifications", None, ()),
+    ("front", "api:front", ALL, "Take over the screen from the background", None, ()),
     ("autostart", "boot", ALL, "Start when the console starts", None, ()),
     ("lease", "lease", PY, "full", "lease", ()),
     ("native", "native", ("elf",), NATIVE, None, ()),

@@ -80,7 +80,10 @@ one, `time.ticks_us()`.
                      handed) in the app that handles its MIME type: the one
                      match, else the last one chosen, else the "open with"
                      menu, which `choose` asks always; False where no app
-                     handles it (runtime/system/intents.py)
+                     handles it (runtime/system/intents.py). From the
+                     background without the `front` permission it, `share`
+                     and `pick` become a notification that does it when
+                     opened (runtime/system/front.py)
   share(data, mime)  hand `data` (str or bytes) of type `mime` to the app
                      that handles it, routed as open_with routes
   pick(mime, mode="r")

@@ -22,8 +22,24 @@ the **"open with" menu** asks: OS chrome, the console's one question
 last chosen first and focused, then Cancel, under keys, a pad or touch alone.
 There is no per-type "always": `open_with(item, choose=True)` opens the menu
 whatever was chosen, and the row picked becomes the choice. The verbs answer
-True where the item went to an app or the menu is up, False where no app
-opens it.
+True where the item went to an app, the menu is up or the request waits in a
+notification (below), False where no app opens it.
+
+**Taking the screen is one gate (owner, 2026-11-08).** Every way a process
+brings an app to the front passes `runtime/system/front.py`'s `take`:
+`open_with` and `share`, the picker (§2), and the nav role's verbs
+(`open_app`, `edit`, `open_image`, `open_text`, `edit_file`, `play`,
+`run_script`; `NavServer`, whose caller is the run holding the role's
+grant), on every tier that holds them: Python, a Lua service's console
+calls, a Lua app's `open_app` and a compiled app's through the ROLE door.
+The request goes through where its process is the run on screen (the front
+run, its window holding the input) or holds the **`front`** permission
+(`processes.md` §2); the shell and the user's own input are never gated.
+Any other process's request becomes a notification under its title ("Wants
+to open todo.md in Notes", `processes.md` §7) whose act does what it asked,
+the route read as it is opened; the verb answers as though it went. An alarm
+lights the screen and takes nothing: what its callback asks for passes the
+gate as any call of its process does.
 
 **The receiving app gets the item as a grant**, never a broad permission: a
 handle with its `name`, `mime`, `url` and `mode`, `read()` and, where it is
@@ -83,7 +99,10 @@ file picked reaches the asking process's `moy_open(h)` as the §1 grant in
 `mode` (`"r"`, or `"rw"` to write it back), held for its run; a cancel
 hands it None (#231's shape). `pick` answers False where no file has the
 type. It is a Python app's verb: a Lua service and a compiled cart hold no
-import of it, and picking a folder is not offered.
+import of it, and picking a folder is not offered. The picker takes the
+screen, so it passes §1's gate: from the background without `front` it is a
+notification, and opening that brings the asking run to the front with the
+picker over it, where the pick reaches it.
 
 **The Files app** (`runtime/apps/files_app.py`) is the tree's browser: its
 places are Projects, the shared folders by their names, Themes and the

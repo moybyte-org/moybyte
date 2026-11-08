@@ -23,11 +23,18 @@ drives) and reads the input that acts on it.
                     `moy_action(id, key)` (`acted`, the shell's hook)
   dismiss()         the banner goes; the notification stays in the list
   clear(nid)        it leaves the list unopened
+  request(pid, summary, then)
+                    the shell posts for process `pid` what it asked for and
+                    may not take now (runtime/system/front.py): its act
+                    runs `then()` in place of the process's hook, and a
+                    request of the same process nobody acted on is
+                    replaced
 
 A process posts only while it holds the `notifications` permission, which
 the shell's `who(pid)` answers at the post from the grant its run or its
 service was bound with; the shell itself (pid 1) always may. Without it the
-post answers None and nothing shows.
+post answers None and nothing shows. A request is the shell's to post and
+needs no permission.
 
 `gen` moves with every change, the task manager's cue to read the list again.
 """
@@ -62,6 +69,7 @@ class Note:
         self.actions = ()           # ((key, label), ...)
         self.urgency = NORMAL
         self.at = 0                 # ticks_ms it was posted
+        self.then = None            # a request's: what acting on it does
 
     def labels(self):
         """The actions a user picks from by name: every one but `default`."""
@@ -122,8 +130,25 @@ class Notifications:
             urgency = NORMAL
         urgency = LOW if urgency < LOW else CRITICAL if urgency > CRITICAL else urgency
         n = self.find(replaces_id) if replaces_id else None
-        if n is not None and n.pid != pid:
+        if n is not None and (n.pid != pid or n.then is not None):
             n = None
+        return self._put(n, pid, title, cart, summary, body, icon, acts, urgency).id
+
+    def request(self, pid, summary, then):
+        """Process `pid` asked for what `then()` does: a notification under
+        its title, posted by the shell, whose act runs `then()`. Its id."""
+        title, cart, _may = self._who(pid)
+        n = None
+        for m in self.list:
+            if m.pid == pid and m.then is not None:
+                n = m
+                break
+        n = self._put(n, pid, title or "App", cart, summary, summary, None, (), NORMAL)
+        n.then = then
+        return n.id
+
+    def _put(self, n, pid, title, cart, summary, body, icon, acts, urgency):
+        """Notification `n` (None: a new one) as posted, the banner up for it."""
         if n is None:
             n = Note(self.next_id, pid, title, cart)
             self.next_id += 1
@@ -146,7 +171,7 @@ class Notifications:
         elif n is self.banner:
             self._down()
         self.gen += 1
-        return n.id
+        return n
 
     def _who(self, pid):
         if self.who is not None:
@@ -203,7 +228,8 @@ class Notifications:
     def act(self, nid, key=None):
         """The user opened notification `nid` (by `key`, else its `default`
         or first action): it leaves the list and the shell's `acted` takes
-        it to its process. False where there is no such notification."""
+        it to its process; a request's `then()` runs instead. False where
+        there is no such notification."""
         n = self.find(nid)
         if n is None:
             return False
@@ -216,7 +242,9 @@ class Notifications:
                 if n.actions:
                     key = n.actions[0][0]
         self.clear(nid)
-        if self.acted is not None:
+        if n.then is not None:
+            n.then()
+        elif self.acted is not None:
             self.acted(n, key)
         return True
 
