@@ -149,6 +149,11 @@ nor those docs will warn you about:
   400s the batch, and that page keeps them in the tab. Cart paths in
   `favorites`/`plays`/`desk_mru` cross as folder names and land under each
   side's own carts root.
+- **The apps' private folders are a FOURTH root** (`moy_sync.APPS_ROOT`), all
+  bytes, with one writer per mode (`docs/os_2026-11/between_apps.md` §2): what
+  bites is that `Root.site` is False, so the worker's `initStore` and
+  `web_boot._build_watchers` both skip it in site mode, where the keeper owns
+  OPFS `apps/`.
 - **Get Carts runs in a page that keeps its own carts (#124), and in no other.**
   In site mode `carts_link.py` gives the console the page's fetch
   (`ws.cart_net`), an OPFS keeper (`ws.cart_keep`) and the page's file picker

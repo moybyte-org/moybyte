@@ -385,6 +385,90 @@ def test_the_two_roots_ship_separate_batches(tmp_path):
     assert not any(k.endswith(".moy") for k in _files_visible(b))
 
 
+# ---------------------------------------------------------------------------
+# The apps' private folders as the FOURTH root: every file bytes, a staged
+# write stays home, and an app's folder is the unit a whole delete names.
+# ---------------------------------------------------------------------------
+
+
+def _apps_wire(a, b):
+    root = moy_sync.APPS_ROOT
+    return Wire(StoreWatcher(root.path(a), root_id=root.id,
+                             skip=root.watch_skip(False), read=root.watch_read()),
+                root.path(b))
+
+
+def _apps_visible(carts_root):
+    """{rel: bytes} of every app's files, staged writes included, so a staged
+    name that crossed would show."""
+    root = Path(moy_sync.apps_root(carts_root))
+    if not root.is_dir():
+        return {}
+    return {str(f.relative_to(root)): f.read_bytes()
+            for f in sorted(root.rglob("*")) if f.is_file()}
+
+
+def test_apps_files_converge_as_bytes_and_a_staged_write_stays_home(tmp_path):
+    a = _mkstore(tmp_path, "browser")
+    b = _mkstore(tmp_path, "board")
+    wire = _apps_wire(a, b)
+    apps = Path(moy_sync.apps_root(a))
+    (apps / "pong").mkdir(parents=True)
+    (apps / "pong" / "hiscore").write_bytes(bytes(range(256)))
+    (apps / "pong" / "notes.txt").write_text("plain text crosses as bytes")
+    (apps / "tetris").mkdir()
+    (apps / "tetris" / "lines").write_bytes(b"\x00\x01")
+    wire.pump()
+    assert all("b" in op for op in wire.sent)
+    (apps / "pong" / "save~part").write_bytes(b"a write in flight")
+    (apps / "pong" / "hiscore").write_bytes(b"\xff" * 40)
+    wire.pump()
+    vb = _apps_visible(b)
+    assert "pong/save~part" not in vb
+    va = _apps_visible(a)
+    va.pop("pong/save~part")
+    assert va == vb != {}
+    assert vb["pong/hiscore"] == b"\xff" * 40
+
+
+def test_a_large_apps_file_crosses_in_parts_and_leaves_no_bak(tmp_path):
+    """Past one part a file stages and publishes; the previous copy is not
+    left beside it, where it would read as a key of its own."""
+    a = _mkstore(tmp_path, "browser")
+    b = _mkstore(tmp_path, "board")
+    wire = _apps_wire(a, b)
+    apps = Path(moy_sync.apps_root(a))
+    (apps / "doom").mkdir(parents=True)
+    (apps / "doom" / "save0").write_bytes(b"old")
+    wire.pump()
+    big = bytes((i * 7) & 0xFF for i in range(3 * moy_sync.BINARY_PART + 5))
+    (apps / "doom" / "save0").write_bytes(big)
+    wire.pump()
+    assert any(op.get("pub") for op in wire.sent)
+    assert _apps_visible(b) == {"doom/save0": big}
+
+
+def test_an_app_that_goes_is_one_dc_and_a_key_that_goes_is_one_d(tmp_path):
+    a = _mkstore(tmp_path, "browser")
+    b = _mkstore(tmp_path, "board")
+    wire = _apps_wire(a, b)
+    apps = Path(moy_sync.apps_root(a))
+    for app in ("pong", "tetris"):
+        (apps / app).mkdir(parents=True)
+        (apps / app / "k1").write_bytes(b"1")
+        (apps / app / "k2").write_bytes(b"2")
+    wire.pump()
+    (apps / "pong" / "k1").unlink()
+    for f in (apps / "tetris").iterdir():
+        f.unlink()
+    (apps / "tetris").rmdir()
+    n = len(wire.sent)
+    wire.pump()
+    assert sorted(map(str, wire.sent[n:])) == sorted(map(str, [
+        {"p": "pong/k1", "d": 1}, {"p": "tetris", "dc": 1}]))
+    assert _apps_visible(a) == _apps_visible(b) == {"pong/k2": b"2"}
+
+
 def test_reapplying_a_batch_is_idempotent(tmp_path):
     """The client clears an ANSWERED batch; the failure mode left is an
     answer lost on the wire, after which the same batch is sent again."""

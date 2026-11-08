@@ -26,7 +26,7 @@
 //   {t:"state"}          the console's `state` (web_boot.state_json), for a harness
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
-//   {t:"reload"}         dev hot-reload: re-read carts.json/files.json, restart
+//   {t:"reload"}         dev hot-reload: re-read carts/files/apps.json, restart
 //   {t:"kept", state}    the page's answer to {t:"keep"}: "granted" | "denied"
 //   {t:"carts"}          list the cart folders (the export picker)
 //   {t:"export", cart}   zip one cart out of the VFS
@@ -34,6 +34,7 @@
 //                        PICO-8 .p8 / .p8.png, which is CONVERTED first (#194)
 //   {t:"edit", cart, tab}  open a cart in the Editor (the import report's
 //                        action); `tab` optionally lands on paint/map/music
+//   {t:"open", cart}     play a cart the console holds, as ?cart= does at boot
 //   {t:"picked", id, name, buf}  the player's own copy of a file Get Carts
 //                        asked for ({t:"pick"}), TRANSFERRED; or
 //   {t:"picked", id, cancel}     ...the player closed the question
@@ -663,6 +664,9 @@ async function initStore(fetched) {
         // refuses); in SITE mode still give it an empty OPFS store, so a
         // drawing the kid makes locally has somewhere to persist.
         if (!site && data == null && root.id !== "carts") continue;
+        // A root another keeper writes in site mode (the apps' folders:
+        // seedWritten, commitWritten) is that keeper's alone there.
+        if (site && root.site === false) continue;
         seededRoots.push(root.id);
         const w = await seedRoot(root, data, site);
         if (w === "seed" || w === "load") anySite = true;
@@ -1186,14 +1190,16 @@ async function init(search, coarse, channel, scheme, signin) {
         .then((r) => ({ status: r.status, wait: r.wait,
                         json: r.status >= 200 && r.status < 300 ? sealedJson(r) : null }));
     const none = () => ({ status: 0, wait: -1, json: null });
-    const [mods, cartsRes, filesRes, shelves, systemRes] = await Promise.all([
+    const [mods, cartsRes, filesRes, shelves, systemRes, appsRes] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
         gated("/carts.json"),
         gated("/files.json").catch(none),
         fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null),
         // The console's own documents, where the serving board keeps them
         // (its portable Settings and its badges); firmware before them 404s.
-        gated("/console.json").catch(none)]);
+        gated("/console.json").catch(none),
+        // The apps' private folders, every file bytes; firmware before them 404s.
+        gated("/apps.json").catch(none)]);
     if (!signedIn && !authOpen && !(authNeed && authNeed.gone)) {
         // A BOARD THAT HAS NOT PAIRED THIS BROWSER: stop the boot here --
         // there is nothing to boot, and seeding the VFS from a refusal would
@@ -1220,7 +1226,7 @@ async function init(search, coarse, channel, scheme, signin) {
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
-    await initStore({ carts: carts, files: files, system: system });
+    await initStore({ carts: carts, files: files, system: system, apps: appsRes.json });
     // Music's songs: the serving board's music folder, or this browser's.
     await mediaList(mode === "board" ? () => gated("/media").then((r) => r.json) : siteSongs);
     if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
@@ -2258,15 +2264,18 @@ self.onmessage = async (ev) => {
             // hold megabytes hostage.
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
-            const [cr, fr] = await Promise.all([
+            const [cr, fr, ar] = await Promise.all([
                 sealed("GET", "/carts.json"),
-                sealed("GET", "/files.json").catch(() => ({ status: 0 }))]);
+                sealed("GET", "/files.json").catch(() => ({ status: 0 })),
+                sealed("GET", "/apps.json").catch(() => ({ status: 0 }))]);
             if (cr.wait >= 0) { say(signInWaitSays(cr.wait)); return; }
             const carts = cr.status === 200 ? sealedJson(cr) : null;
             const files = fr.status === 200 ? sealedJson(fr) : null;
+            const apps = ar.status === 200 ? sealedJson(ar) : null;
             if (!carts) { say("the console did not send its carts"); return; }
             writeStore(CARTS_ROOT, carts);
             if (files) writeStore(store.rootById("files").vfs, files);
+            if (apps) writeStore(store.rootById("apps").vfs, apps);
             reload();
             self.postMessage({ t: "assets", json: assets() });
         } else if (m.t === "pod") {
@@ -2321,6 +2330,8 @@ self.onmessage = async (ev) => {
             }
         } else if (m.t === "picked") {
             cartsPicked(m);
+        } else if (m.t === "open") {
+            if (openCart) openCart(m.cart);
         } else if (m.t === "edit") {
             // The import report's one action. Like export, a failure is a
             // MESSAGE and never the fatal {t:"error"}: the console is fine.

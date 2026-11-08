@@ -153,6 +153,8 @@ static const char *SEEDS[] = {
     "PUT  /x HTTP/1.1\ncontent-length:  +7 \n\nbody",
     "GET /a?x&pin=&pin=9 HTTP/1.0\r\nCONTENT-LENGTH: 99999999999\r\n\r\n",
     "{\"v\": 2, \"root\": \"files\", \"ops\": [{\"p\": \"x\", \"t\": \"\\u00e9\"}], \"pin\": \"1\"}",
+    "{\"v\": 2, \"root\": \"apps\", \"ops\": [{\"p\": \"a/k\", \"b\": \"AA==\"}, "
+    "{\"p\": \"a\", \"dc\": 1}]}",
     "{\"v\": 1, \"ops\": [], \"v\": \"again\"}",
     "[1, 2]",
     "\xff\xfe",
@@ -248,7 +250,8 @@ static void one(const char *src, size_t n) {
     moy_sync_batch_t bt;
     if (moy_sync_batch(buf, n, &bt) == MOY_SYNC_OK) {
         CHECK(moy_sync_decode(buf, n, &e) == MOY_SYNC_OK);
-        CHECK(bt.root == MOY_SYNC_CARTS || bt.root == MOY_SYNC_FILES);
+        CHECK(bt.root == MOY_SYNC_CARTS || bt.root == MOY_SYNC_FILES
+              || bt.root == MOY_SYNC_SYSTEM || bt.root == MOY_SYNC_APPS);
         inside(buf, n, bt.ops, (size_t)(bt.ops_end - bt.ops));
         CHECK(moy_json_kind(bt.ops, bt.ops_end) == MOY_JSON_ARR);
     }

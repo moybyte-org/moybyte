@@ -290,7 +290,7 @@ last answer):
 
 | capability | the route | the browser's half | where |
 |---|---|---|---|
-| the store | `POST /sync`, `GET /carts.json`, `GET /files.json` | the worker's sync pump, `runtime/carts/moy_sync.py` | every board |
+| the store | `POST /sync`, `GET /carts.json`, `GET /files.json`, `GET /apps.json` | the worker's sync pump, `runtime/carts/moy_sync.py` | every board |
 | pins | `GET`/`POST /gpio` | `firmware/web_runner/gpio_link.py` (`ws.gpio`) | the Zero only (`MOY_NET_GPIO_PINS`) |
 | the firmware | `GET`/`POST /update` | `firmware/web_runner/update_link.py` (`ws.updater`) | every board |
 | the board's Settings | `GET /console.json`, system batches | the worker | consoles |

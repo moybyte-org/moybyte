@@ -93,9 +93,18 @@ the choice for the type.
 
 **Sync, the web and USB see the same tree**: the sync RPC's files root
 takes and walks the shared folders alone (`moy_sync.file_folders`, the one
-allowlist that keeps `.Trash/` and `.history/` home), and `apps/` becomes a
-fourth root, with the same strict reader rule; a board-served page edits
-the board's tree, a site page its OPFS copy; SFTP mounts it from a computer
+allowlist that keeps `.Trash/` and `.history/` home), and `apps/` is the
+fourth root (`moy_sync.APPS_ROOT`): every file of it crosses as bytes, a
+name holding `~` (a write staged on its way to its key) stays home, and a
+whole delete is one app's folder. **One writer per mode**: a board-served
+page pulls `GET /apps.json` and pushes what a cart wrote in the tab as `apps`
+batches, the board being of record; a site page leaves its OPFS `apps/` to
+the keeper alone (`moy_store.commitWritten`, a write whole or not at all,
+moy-spec SPEC.md §16.12), and no sweep seeds or watches that root there. A
+cart's session reads its folder once, when it opens (`cart_files.py`), so a
+batch that lands while the same cart plays on the board's glass is what
+that session finds the next time it opens. A board-served page edits the
+board's tree, a site page its OPFS copy; SFTP mounts it from a computer
 (`system.md` §4). **USB mass storage** (owner, 2026-11-03) exposes the card's
 `moybyte/` folder while the store is held closed, never both at once: on the
 P4s, and on the T-Deck as a mode in Settings that switches the S3's one USB

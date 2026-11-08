@@ -139,6 +139,74 @@ def test_a_cart_made_in_chrome_lands_on_disk(tmp_path):
         assert "main.py" in {e["file"] for e in entries}, entries
 
 
+def _files_wasm_zip(tmp_path):
+    """The Files Wasm fixture built (tools/wasm_cart.py) and zipped as an
+    export is, its sources left behind: the cart a page plays from its VFS."""
+    import zipfile
+    sys.path.insert(0, str(ROOT))
+    from tools import wasm_cart                               # noqa: E402
+    built = tmp_path / "built" / "wasm_files.moy"
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "wasm_files.moy"),
+                    str(built))
+    out = tmp_path / "wasm_files.moy.zip"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
+        for p in sorted(built.rglob("*")):
+            rel = p.relative_to(built)
+            if p.is_file() and rel.parts[0] != "src":
+                z.write(p, "wasm_files.moy/" + rel.as_posix())
+    return out
+
+
+def _played(out):
+    """The console's state the scenario read after it opened the cart."""
+    for m in re.findall(r"^   js -> (.*)$", out, re.M):
+        v = json.loads(m)
+        if isinstance(v, str) and v.startswith("{") and '"pmem"' in v:
+            return json.loads(v)
+    return None
+
+
+def test_a_written_file_round_trips_through_the_apps_root(tmp_path):
+    """What a compiled cart writes in a board-served page lands on the board,
+    and comes back to the next page whole.
+
+    Files Wasm (its src/main.wat says what it checks) writes in its first turn
+    and, in its second, finds every file as it was and erases it. The first
+    turn runs in one page: its writes cross as an apps batch, every file as
+    bytes, and land under the board's `apps/<id>/` -- the staged halves of a
+    write stay in the page. The second runs in the next page, which pulled
+    them from /apps.json: the cart's own checks are the proof they arrived
+    byte for byte, and its erases cross back as deletes. The module never
+    crosses the carts pull, so each page takes the cart in as a dropped zip;
+    the board's copy of the cart (no module) goes between the two, so the
+    second drop lands under the same name and the same app id."""
+    web_e2e.require("sync", "store", "apps")
+    zipped = _files_wasm_zip(tmp_path)
+    store = _seeded_store(tmp_path)
+    written = tmp_path / "apps" / "local.wasm_files"
+    with _twin(store) as base:
+        out = _browsershot("sync_apps.json", base, tmp_path / "one", drop=zipped)
+        st = _played(out)
+        assert st and st["cart"] == "Files Wasm" and st["err"] is None, out[-3000:]
+        assert st["pmem"][:4] == [1, 0, 0, 4], st
+        assert written.is_dir(), "the cart's writes never reached the board:\n%s" \
+            % out[-2500:]
+        assert sorted(p.name for p in written.iterdir()) == [
+            "options.cfg", "saves%2f%43ase.sav", "saves%2fcase.sav",
+            "saves%2fslot1.sav"]
+        assert (written / "saves%2fslot1.sav").read_bytes() == \
+            bytes(7 * i & 0xFF for i in range(300))
+
+        shutil.rmtree(store / "local.wasm_files.moy")
+        out = _browsershot("sync_apps.json", base, tmp_path / "two", drop=zipped)
+        st = _played(out)
+        assert st and st["cart"] == "Files Wasm" and st["err"] is None, out[-3000:]
+        assert st["pmem"][:4] == [2, 0, 0, 4], \
+            "the board's written files did not reach the page whole: %r" % st
+        assert not written.exists() or not any(written.iterdir()), \
+            sorted(p.name for p in written.iterdir())
+
+
 def _probes(out):
     """browsershot's `js` results, keyed by their `at`. Each line is a JSON
     string CONTAINING the JSON the expression returned."""

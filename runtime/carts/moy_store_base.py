@@ -185,6 +185,16 @@ def files_root(root):
     return _sibling_path(root, FILES_DIR)
 
 
+# The apps' private folders, `apps/<id>/`, beside the carts folder too: what a
+# compiled cart writes (runtime/carts/cart_files.py).
+APPS_DIR = "apps"
+
+
+def apps_root(root):
+    """The apps' private folders' root, beside the carts folder."""
+    return _sibling_path(root, APPS_DIR)
+
+
 # A cart is a folder whose name ends in CART_EXT. Its path is composed here and
 # nowhere else (native/moy_index/moy_index.h): a store that shards its
 # root or keeps a cart elsewhere changes these and no caller.

@@ -23,7 +23,9 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # achievements.json) are the
                                             # board's too: GET /console.json,
                                             # and a system batch merged key by
-                                            # key (moy_sync.SYSTEM_KEYS).
+                                            # key (moy_sync.SYSTEM_KEYS). So
+                                            # are the apps' folders beside D:
+                                            # GET /apps.json, an apps batch.
     python serve.py ... --carts D --update glass|headless
                                             # ...and a board's FIRMWARE routes
                                             # (GET/POST /update) on top, faked.
@@ -360,6 +362,12 @@ else:
                     tops=moy_sync.file_folders())).encode()
                 self._send(200, body)
                 return
+            if path == moy_sync.APPS_ROOT.endpoint:
+                # The apps' private folders, every file as bytes.
+                body = json.dumps(moy_webhost.pack_store(
+                    moy_sync.apps_root(carts_dir), binary=True)).encode()
+                self._send(200, body)
+                return
             if path == moy_sync.SYSTEM_PULL and console is not None:
                 # The console's own documents, as a board's VM answers them.
                 self._send(200, json.dumps(console.pull()).encode())
@@ -421,8 +429,7 @@ else:
                 self._send(200, json.dumps(
                     {"ok": applied, "err": [list(e) for e in errors]}).encode())
                 return
-            target = (moy_sync.files_root(carts_dir)
-                      if root_id == moy_sync.FILES_ROOT_ID else carts_dir)
+            target = moy_sync.root_by_id(root_id).path(carts_dir)
             # JOURNALED, like a board's apply: this directory is the store of
             # record for the page it serves, so a browser commit lands in the
             # cart's own journal/ here too (moy_sync's docstring has the
@@ -458,7 +465,7 @@ if board_to is not None:
             local = self.translate_path(path)
             # The store is the board's, sealed: the bundle's seed carts.json
             # never stands in for it.
-            if path in ("/carts.json", "/files.json"):
+            if path in ("/carts.json", "/files.json", "/apps.json"):
                 return False
             return path == "/" or os.path.isfile(local)
 

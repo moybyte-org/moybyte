@@ -64,7 +64,9 @@ page it serves as the board's VM decides key by key (`SYSTEM_KEYS`): the
 board is of record, its C parks a system batch for the VM, and the VM merges
 it (`SystemReceiver`) -- the portable Settings that changed set and re-applied,
 the badges a union. A board's pin, update channel and UNKNOWN SOURCES are
-never sent to a page and never taken from one.
+never sent to a page and never taken from one. A fourth root, the apps'
+private folders (`apps/<id>/<key>`, what a compiled cart wrote: `APPS_ROOT`),
+crosses between a board and the page it serves, every file as bytes.
 
 One body, three consumers, so the two sides cannot disagree about the wire:
 
@@ -118,7 +120,8 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6,
     BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
     `*.moygfx` (BINARY_SUFFIXES; docs/history/theming_2026-09.md §9 phase 6 step 2):
-    as base64, `"b"` where text rides as `"t"`.
+    as base64, `"b"` where text rides as `"t"`. The apps root is the one
+    root whose every file crosses so (`Root.binary`).
 
 Wire shape (one POST per batch, bounded so it fits the transport's 64KB
 request cap; the client sends ONE batch at a time and waits for the answer,
@@ -167,6 +170,16 @@ pull's shape. Both are the VM's: a board without them (firmware before this
 root) answers the batch 400 and the pull 404, and the page then builds no
 system watcher and keeps its Settings and badges in the tab.
 
+An apps batch names the fourth root, every write a `"b"`:
+
+    {"v": 2, "root": "apps", "ops": [
+      {"p": "pong/hiscore", "b": "<base64>"},
+      {"p": "tetris", "dc": 1}]}                             # an app's folder
+
+Its pull is GET /apps.json, every value `{"b": ...}`. A name holding '~' (a
+write staged on its way to its key) never crosses, and a board without the
+root answers the batch 400 and the pull 404.
+
 A chunked file spans REQUESTS when it must (a 200KB main.lua cannot fit one
 64KB POST): parts accumulate in `<path>.tmp` on the receiver and only `pub`
 publishes, atomically, so a dropped connection mid-file leaves the previous
@@ -193,9 +206,10 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.net_binding import (encode_batch, sync_batch,
                                      sync_apply)
 try:
-    from moy_store_base import cart_path, store_path, USER_NS_KEY
+    from moy_store_base import apps_root, cart_path, store_path, USER_NS_KEY
 except ImportError:  # host / CPython: the runtime package
-    from runtime.moy_store_base import cart_path, store_path, USER_NS_KEY
+    from runtime.moy_store_base import (apps_root, cart_path, store_path,
+                                        USER_NS_KEY)
 
 try:
     import binascii as _binascii
@@ -212,6 +226,7 @@ PROTOCOL_V = 1
 PROTOCOL_V_ROOTED = 2
 CARTS_ROOT_ID = "carts"
 FILES_ROOT_ID = "files"
+APPS_ROOT_ID = "apps"
 # ROOT_IDS is derived from the registry (below files_root, which a Root needs to
 # name its path); it stays importable under this name for callers that had it.
 
@@ -377,8 +392,9 @@ def files_root(carts_root):
 # branch scattered through the wire parser, the apply, the webhost endpoints,
 # the browser watchers and the OPFS store. Every per-root behaviour that used to
 # be such a branch is a field on its Root, so ADDING A STORE is one entry and
-# nothing else moves. Three ship: carts, the #108 user files, and the console's
-# own documents beside them (`SYSTEM_ROOT`, whose board half is the VM's).
+# nothing else moves. Four ship: carts, the #108 user files, the console's
+# own documents beside them (`SYSTEM_ROOT`, whose board half is the VM's) and
+# the apps' private folders (`APPS_ROOT`).
 #
 # The JS side mirrors this list (firmware/web_runner/moy_store.mjs ROOTS), pinned
 # by tests/test_web_store.py, because a STATIC host has no server to ask for it --
@@ -412,6 +428,12 @@ class Root:
       wire_top
                None, or the files of `top` a BOARD-mode batch may carry (the
                rest stay on each console): `SYSTEM_WIRE_FILES`.
+      binary   every file crosses as bytes, whatever its name (the apps root).
+      site     False: a SITE-mode page neither seeds nor watches this root,
+               because another keeper is its one writer there (the apps
+               root's: moy_store.commitWritten). A board-served page does both.
+      skip     None, or the name predicate this root's watcher sweeps with
+               in either mode, in place of the wire's `_skip`.
 
     What a receiver does per root -- the carts root journals and dirties the
     shelf, a whole-cart delete is one segment, the files root is made on its
@@ -420,7 +442,8 @@ class Root:
     """
 
     def __init__(self, id, wire, path, endpoint, kinds=False,
-                 site_keep_journal=False, top=None, wire_top=None):
+                 site_keep_journal=False, top=None, wire_top=None,
+                 binary=False, site=True, skip=None):
         self.id = id
         self.wire = wire
         self._path = path
@@ -429,6 +452,9 @@ class Root:
         self.site_keep_journal = site_keep_journal
         self.top = top
         self.wire_top = wire_top
+        self.binary = binary
+        self.site = site
+        self._skip = skip
 
     def path(self, carts_root):
         return self._path(carts_root)
@@ -437,7 +463,14 @@ class Root:
         """What a watcher over this root will NOT sweep -- the wire's `_skip` by
         default (None lets StoreWatcher supply it), relaxed to keep the journal
         only for the one root+mode that is of record in the browser."""
+        if self._skip is not None:
+            return self._skip
         return skip_keep_journal if (site and self.site_keep_journal) else None
+
+    def watch_read(self):
+        """How a watcher over this root reads a file: as bytes for a `binary`
+        root, None (the name's own rule, `_read_payload`) for every other."""
+        return _read_bytes if self.binary else None
 
     def watch_top(self, site):
         """The top-level files a watcher over this root sweeps: all of `top` in
@@ -465,9 +498,9 @@ FILES_ROOT = Root(
 # card, and a reload comes back on the same theme, Settings and badges.
 # Left out on purpose: wifi.json (a browser has no radio, and it is a secret),
 # system/sources (the serving host's, written at boot), pkg/ (the cached
-# indexes), installed.json and apps/
-# (each has its own crash-safe keeper, moy_store.commitInstall /
-# commitWritten), and install/ (staging).
+# indexes), installed.json (its own crash-safe keeper,
+# moy_store.commitInstall), apps/ (a root of its own, below) and install/
+# (staging).
 SYSTEM_ROOT_ID = "system"
 SYSTEM_SETTINGS = "system/settings"
 SYSTEM_FILES = (SYSTEM_SETTINGS, "achievements.json", "shared.moygfx")
@@ -493,7 +526,27 @@ SYSTEM_ROOT = Root(
     SYSTEM_ROOT_ID, PROTOCOL_V_ROOTED, system_root, SYSTEM_PULL,
     top=SYSTEM_FILES, wire_top=SYSTEM_WIRE_FILES)
 
-SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT, SYSTEM_ROOT)
+
+
+def skip_staged(name):
+    """`_skip`, and a name holding '~': an app's write staged on its way to
+    its key (cart_files' "~part"/"~done"), which no key ever holds."""
+    return "~" in name or _skip(name)
+
+
+# The apps' private folders (docs/os_2026-11/between_apps.md section 2):
+# `apps/<id>/<key>`, the files a compiled cart wrote (runtime/carts/cart_files.py).
+# Every file crosses as bytes, a write staged on its way to its key stays home,
+# and a whole-folder delete is one app. ONE WRITER PER MODE: on a board-served
+# page the board is of record -- the page pulls `/apps.json` and its watcher
+# pushes what a cart wrote in the tab -- and in SITE mode the browser's keeper
+# (moy_store.commitWritten, whole or nothing per SPEC.md 16.12) is the only
+# thing that writes OPFS apps/, so this root is neither seeded nor swept there.
+APPS_ROOT = Root(
+    APPS_ROOT_ID, PROTOCOL_V_ROOTED, apps_root, "/apps.json",
+    binary=True, site=False, skip=skip_staged)
+
+SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT, SYSTEM_ROOT, APPS_ROOT)
 ROOT_IDS = tuple(r.id for r in SYNC_ROOTS)
 _ROOT_BY_ID = {r.id: r for r in SYNC_ROOTS}
 
@@ -592,16 +645,19 @@ def _read_text(path):
     return _retry_io(_open, None)
 
 
-def _read_payload(path):
-    """What a watcher ships of the file at `path`: its text, its BYTES for a
-    BINARY_FILES name, or None (skip it). Retried on OSError like `_read_text`."""
-    if not is_binary(path):
-        return _read_text(path)
-
+def _read_bytes(path):
+    """The file at `path` as bytes, every file of a `binary` root. Retried on
+    OSError like `_read_text`."""
     def _open():
         with open(path, "rb") as f:
             return f.read()
     return _retry_io(_open, None)
+
+
+def _read_payload(path):
+    """What a watcher ships of the file at `path`: its text, its BYTES for a
+    BINARY_FILES name, or None (skip it). Retried on OSError like `_read_text`."""
+    return _read_bytes(path) if is_binary(path) else _read_text(path)
 
 
 def _stat_file(path):
@@ -637,7 +693,7 @@ def parse_batch(body):
 
 def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
     """Apply one batch's `ops` into the store at path `root`, whose SHAPE is
-    `root_id` ("carts" or "files", what parse_batch returned).
+    `root_id` (what parse_batch returned).
 
     Returns (applied, errors, shelf_dirty): how many ops landed, [(index,
     reason)] for the first eight that did not (a bad op skips, it never aborts
@@ -655,7 +711,7 @@ def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
     applied, errors, shelf, _refused = sync_apply(
         root, root if root_id == FILES_ROOT_ID else None,
         None if kinds is None else tuple(kinds), root_id, _json.dumps(ops),
-        journal)
+        journal, root if root_id == APPS_ROOT_ID else None)
     return applied, errors, shelf
 
 

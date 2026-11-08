@@ -353,7 +353,7 @@ host's and the wasm's the same release vendored (`native/moy_net/mbedtls/README.
   Terminal's WebSocket frames are sealed each way, counted from 0, and a frame
   that does not open closes the socket 1008 "seal".
 - **Sealed routes**: the store's pulls (`GET /carts.json`, `GET
-  /files.json`, `GET /console.json`) and `POST /sync`, `/gpio`, `/term`, and
+  /files.json`, `GET /apps.json`, `GET /console.json`) and `POST /sync`, `/gpio`, `/term`, and
   `/run` and `/update`, which the VM answers and the C seals. All of them read or change a person's work or the firmware, so none
   is left open; the bundle is the same bytes for everybody and the marker
   says only that a board lives here.

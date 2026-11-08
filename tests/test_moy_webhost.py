@@ -823,6 +823,73 @@ def test_the_files_apply_drains_the_feeder_too(tmp_path):
     assert nb._drains() == before + 1
 
 
+def _apps(tmp_path):
+    """The apps' private folders beside the carts root: one app's key, the
+    staged half of a write in flight beside it, and a text-looking key."""
+    root = Path(wh.moy_sync.apps_root(str(tmp_path / "carts")))
+    (root / "pong").mkdir(parents=True)
+    (root / "pong" / "hiscore").write_bytes(b"\x00\xff7")
+    (root / "pong" / "notes.txt").write_bytes(b"plain")
+    (root / "pong" / "save~part").write_bytes(b"half")
+    return root
+
+
+def test_apps_json_serves_every_file_as_bytes_and_no_staged_write(tmp_path):
+    """Every file of the apps root crosses as bytes, whatever its name, and a
+    write staged on its way to its key stays home."""
+    _apps(tmp_path)
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/apps.json", b"")
+    assert "application/json" in _head(r)
+    assert _json(r) == {"pong/hiscore": {"b": "AP83"},
+                        "pong/notes.txt": {"b": "cGxhaW4="}}
+
+
+def test_sync_routes_an_apps_batch_into_the_apps_root(tmp_path):
+    root = _store(tmp_path)
+    apps = _apps(tmp_path)
+    h = wh.WebHost(str(root))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "pong/hiscore", "b": "AQI="}, {"p": "tetris/lines", "b": "Kg=="},
+        root="apps"))
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"ok": 2, "err": []}
+    assert (apps / "pong" / "hiscore").read_bytes() == b"\x01\x02"
+    assert (apps / "tetris" / "lines").read_bytes() == b"*"
+    assert not (root / "pong").exists(), "it must not land among the carts"
+    r = h.handle_http("POST", "/sync", _batch({"p": "tetris", "dc": 1},
+                                              root="apps"))
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1])["ok"] == 1
+    assert not (apps / "tetris").exists()
+
+
+def test_sync_refuses_an_apps_op_that_is_not_one_apps_bytes(tmp_path):
+    """Text, a staged name, a path deeper than an app's flat folder and a
+    whole-folder delete of anything but one app are each refused."""
+    root = _store(tmp_path)
+    apps = _apps(tmp_path)
+    h = wh.WebHost(str(root))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "pong/hiscore", "t": "text"}, {"p": "pong/save~part", "b": "AA=="},
+        {"p": "pong/deep/key", "b": "AA=="}, {"p": "pong/hiscore", "dc": 1},
+        root="apps"))
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body["ok"] == 0 and len(body["err"]) == 4
+    assert (apps / "pong" / "hiscore").read_bytes() == b"\x00\xff7"
+    assert (apps / "pong" / "save~part").read_bytes() == b"half"
+
+
+def test_a_host_with_no_apps_root_404s_its_pull_and_refuses_its_batch(
+        tmp_path, monkeypatch):
+    """A board flashed before the apps root answers so: the page then builds
+    no apps watcher, and a batch that reaches it anyway is refused whole."""
+    monkeypatch.setattr(wh.moy_sync, "apps_root", lambda root: None)
+    h = wh.WebHost(str(_store(tmp_path)))
+    assert b"404" in h_status(h.handle_http("GET", "/apps.json", b""))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "pong/hiscore", "b": "AA=="}, root="apps"))
+    assert b"400" in h_status(r)
+
+
 def test_an_unknown_root_is_a_bad_batch_not_a_guess(tmp_path):
     root = _store(tmp_path)
     h = wh.WebHost(str(root))

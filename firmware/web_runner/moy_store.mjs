@@ -110,6 +110,9 @@ export function skipLocal(name) {
 // below it; null: no folder delete at all), and for the console's own documents the
 // named files the store IS, each a path in it (`top`, moy_sync.SYSTEM_FILES), which a
 // board serves through its VM (`console.json`) when its firmware has the root.
+// The apps' private folders (`apps/<id>/<key>`) are `binary` (every file is
+// bytes) and `site: false`: in site mode the keeper below (commitWritten) is
+// their one writer, so initStore neither seeds nor watches them there.
 // Kinds are not validated here -- these ops are the browser's own
 // sweep of its own store, and `.history`/`.Trash` persisting to a SITE-mode OPFS
 // is the kid's own undo/recovery surviving the tab, which is correct.
@@ -118,6 +121,8 @@ export const ROOTS = [
     { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
     { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
       top: ["system/settings", "achievements.json", "shared.moygfx"] },
+    { id: "apps", vfs: "/moy/apps", endpoint: "apps.json", dcMin: 1, dcMax: 1,
+      binary: true, site: false },
 ];
 
 export function rootById(id) {

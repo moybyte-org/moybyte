@@ -48,13 +48,13 @@ except ImportError:  # pragma: no cover
     os = None
 
 try:
-    from moy_store_base import _sibling_path, _is_dir
+    from moy_store_base import APPS_DIR, _sibling_path, _is_dir
     from moy_fs import _mkdir, _remove
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import _sibling_path, _is_dir
+    from runtime.moy_store_base import APPS_DIR, _sibling_path, _is_dir
     from runtime.moy_fs import _mkdir, _remove
 
-WRITTEN_DIR = "apps"
+WRITTEN_DIR = APPS_DIR
 NO_ROOM, FAILED = -2, -3              # SPEC.md 16.12's write answers
 PART, DONE = "~part", "~done"
 ENOSPC = 28

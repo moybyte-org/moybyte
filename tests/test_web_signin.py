@@ -492,7 +492,8 @@ def test_a_tampered_request_is_refused_before_its_body_is_read(tmp_path):
 def test_a_request_with_no_session_and_an_old_pin_url_are_refused(tmp_path):
     h = _host(tmp_path)
     before = nb._drains()
-    for path in ("/carts.json", "/files.json", "/carts.json?pin=4321", "/gpio", "/term"):
+    for path in ("/carts.json", "/files.json", "/apps.json", "/carts.json?pin=4321",
+                 "/gpio", "/term"):
         r = h.handle_http("GET", path, b"")
         assert (status(r), doc(r)) == (401, {"error": "session"}), path
     r = h.handle_http("POST", "/sync", json.dumps(

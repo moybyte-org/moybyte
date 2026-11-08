@@ -3,7 +3,7 @@
 //   GET  /, /index.html, the bundle's assets   open: the page must load to sign in
 //   GET  /sync                                 open: {"sync":1}, "a board lives here"
 //   POST /auth                                 open: the sign-in (moy_seal.h, moy_webauth.c)
-//   GET  /carts.json, /files.json              sealed: the store, streamed
+//   GET  /carts.json, /files.json, /apps.json  sealed: the store, streamed
 //   GET  /media                                sealed: the music folder's songs, the
 //                                              bytes a browser's Music plays (below)
 //   POST /sync                                 sealed: a batch applied
@@ -61,7 +61,8 @@
 // THE BUNDLE is the image's own (native/moy_web, pre-gzipped), sent from flash
 // with nothing resident in between; there is no copy on storage to shadow it.
 // THE PULLS stream the store as one JSON object, {"<top>/<rel>": text} and
-// {"<top>/<rel>": {"b": base64}} for a cover, in chunks through one 8 KB
+// {"<top>/<rel>": {"b": base64}} for a cover and for every file of the apps
+// root (the apps' private folders, all bytes), in chunks through one 8 KB
 // buffer, a file read in 4 KB pieces, so a pull's cost never scales with the
 // biggest file. What the wire skips (moy_store_skip) stays home, a files root
 // is walked through its kinds alone (which keeps .history and trash home), a
@@ -156,6 +157,8 @@ typedef struct {
     char carts[MOY_WEB_PATH_MAX];
     char files[MOY_WEB_PATH_MAX];
     uint8_t has_files;
+    char apps[MOY_WEB_PATH_MAX];
+    uint8_t has_apps;
     char kinds[96];
     char defer[96];
     char shelf[MOY_WEB_SHELF_BYTES];   // the changed cart folders (moy_web_shelf)
@@ -240,6 +243,8 @@ static void config(const moy_web_cfg_t *cfg) {
     copy_str(W->carts, sizeof(W->carts), cfg->carts);
     W->has_files = cfg->files != NULL;
     copy_str(W->files, sizeof(W->files), cfg->files);
+    W->has_apps = cfg->apps != NULL;
+    copy_str(W->apps, sizeof(W->apps), cfg->apps);
     copy_list(W->kinds, sizeof(W->kinds), cfg->kinds);
     copy_list(W->defer, sizeof(W->defer), cfg->defer);
     moy_wa_config(cfg->system);
@@ -923,6 +928,7 @@ static int is_binary(const char *name) {
 typedef struct {
     char path[MOY_WEB_PATH_MAX + 512];
     char rel[512];
+    int bytes;                      // every file as bytes (the apps root)
 } walk_t;
 
 static void walk(out_t *o, walk_t *w, size_t pn, size_t rn, int depth,
@@ -938,8 +944,8 @@ static void walk(out_t *o, walk_t *w, size_t pn, size_t rn, int depth,
     for (size_t i = 0; i < l.count && !o->err; i++) {
         const char *name = ix[i];
         size_t len = strlen(name);
-        if (moy_store_skip(name, len, 0)) {
-            continue;
+        if (moy_store_skip(name, len, 0) || (w->bytes && memchr(name, '~', len))) {
+            continue;                   // an app's write in flight stays home
         }
         if (pn + 1u + len >= sizeof(w->path) || rn + 1u + len >= sizeof(w->rel)) {
             continue;
@@ -950,7 +956,7 @@ static void walk(out_t *o, walk_t *w, size_t pn, size_t rn, int depth,
         memcpy(w->rel + rn + 1u, name, len + 1u);
         if (is_dir_of(name)) {
             walk(o, w, pn + 1u + len, rn + 1u + len, depth + 1, first);
-        } else if (is_binary(name)) {
+        } else if (w->bytes || is_binary(name)) {
             binary_value(o, w->path, w->rel, first);
         } else {
             text_value(o, w->path, w->rel, first);
@@ -972,10 +978,13 @@ static int in_list(const char *list, const char *s, size_t n) {
     return 0;
 }
 
-static void pack(out_t *o, const char *root, const char *kinds) {
+static void pack(out_t *o, const char *root, const char *kinds, int bytes) {
     body(o, "{", 1);
     int first = 1;
     walk_t *w = moy_store_alloc(sizeof(walk_t));
+    if (w != NULL) {
+        w->bytes = bytes;
+    }
     names_t l;
     const char **ix;
     size_t rn = strlen(root);
@@ -1081,6 +1090,7 @@ static int sync_post(out_t *o, const char *b, size_t n) {
         return 0;
     }
     if ((batch.root == MOY_SYNC_FILES && !W->has_files)
+        || (batch.root == MOY_SYNC_APPS && !W->has_apps)
         || batch.root == MOY_SYNC_SYSTEM) {
         json(o, 400, "{\"error\":\"no such store\"}");
         return 1;
@@ -1093,6 +1103,7 @@ static int sync_post(out_t *o, const char *b, size_t n) {
         .ts = moy_net_time(),
         .shelf = W->shelf,
         .shelf_cap = sizeof(W->shelf),
+        .apps = W->has_apps ? W->apps : NULL,
     };
     moy_sync_result_t r;
     store_gate();
@@ -1121,10 +1132,10 @@ static int sync_post(out_t *o, const char *b, size_t n) {
     return 1;
 }
 
-static void pull(out_t *o, const char *root, const char *kinds) {
+static void pull(out_t *o, const char *root, const char *kinds, int bytes) {
     store_gate();
     chunked_head(o);
-    pack(o, root, kinds);
+    pack(o, root, kinds, bytes);
     chunked_end(o);
 }
 
@@ -1290,7 +1301,8 @@ static int gated(int post, int get, const char *p, size_t pn) {
     return (post && path_is(p, pn, "/sync"))
            || (get && (path_is(p, pn, "/carts.json") || path_is(p, pn, "/term")
                        || ((path_is(p, pn, "/files.json") || path_is(p, pn, "/media"))
-                           && W->has_files)))
+                           && W->has_files)
+                       || (path_is(p, pn, "/apps.json") && W->has_apps)))
            || ((post || get) && path_is(p, pn, "/gpio"));
 }
 
@@ -1377,7 +1389,11 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
     }
     int carts = path_is(t, pn, "/carts.json");
     if (carts || (path_is(t, pn, "/files.json") && W->has_files)) {
-        pull(o, carts ? W->carts : W->files, carts ? NULL : W->kinds);
+        pull(o, carts ? W->carts : W->files, carts ? NULL : W->kinds, 0);
+        return ROUTE_DONE;
+    }
+    if (path_is(t, pn, "/apps.json") && W->has_apps) {
+        pull(o, W->apps, NULL, 1);
         return ROUTE_DONE;
     }
     simple(o, 404, "text/plain; charset=utf-8", "not found");
@@ -1720,7 +1736,7 @@ int moy_web_handle_answer(const char *resp, size_t n, char **out, size_t *out_n)
     return o.err ? MOY_ENOMEM : 0;
 }
 
-int moy_web_pack(const char *root, const char *kinds, char **out,
+int moy_web_pack(const char *root, const char *kinds, int bytes, char **out,
                  size_t *out_n) {
     *out = NULL;
     *out_n = 0;
@@ -1728,7 +1744,7 @@ int moy_web_pack(const char *root, const char *kinds, char **out,
         return MOY_ENOMEM;
     }
     out_t o = {.fd = -1};
-    pack(&o, root, kinds);
+    pack(&o, root, kinds, bytes);
     *out = o.buf;
     *out_n = o.n;
     return o.err ? MOY_ENOMEM : 0;

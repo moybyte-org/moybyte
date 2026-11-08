@@ -87,6 +87,8 @@ int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b) {
             b->root = MOY_SYNC_FILES;
         } else if (str && moy_json_str_is(e.root, e.root_end, "system", 6)) {
             b->root = MOY_SYNC_SYSTEM;
+        } else if (str && moy_json_str_is(e.root, e.root_end, "apps", 4)) {
+            b->root = MOY_SYNC_APPS;
         } else {
             return MOY_SYNC_BAD;
         }

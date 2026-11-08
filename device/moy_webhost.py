@@ -13,7 +13,7 @@
 
 The server is the kernel's (native/moy_net/moy_webhost.c, whose header is the
 authority on the routes and the sign-in): its listener, the baked bundle, the
-capability marker, the store's two pulls and the sync apply are C, polled once
+capability marker, the store's pulls and the sync apply are C, polled once
 a frame and calling no Python, and it outlives a soft reset -- a Ctrl-D leaves
 it serving and the next VM adopts it. What stays here is what needs the
 console behind it:
@@ -83,12 +83,13 @@ def _kinds():
     return None if kinds is None else tuple(kinds)
 
 
-def pack_store(carts_root, tops=None):
+def pack_store(carts_root, tops=None, binary=False):
     """The store under `carts_root` as the page's bundle: {"<top>/<rel>":
-    text}, and {"<top>/<rel>": {"b": base64}} for a cover -- the kernel's pull,
-    parsed. `tops` restricts the top-level folders walked (the files root's
-    kinds); the dev server (firmware/web_runner/serve.py) serves this."""
-    return _json.loads(moy_net.web_pack(carts_root, tops))
+    text}, and {"<top>/<rel>": {"b": base64}} for a cover, or for every file
+    where `binary` (the apps root) -- the kernel's pull, parsed. `tops`
+    restricts the top-level folders walked (the files root's kinds); the dev
+    server (firmware/web_runner/serve.py) serves this."""
+    return _json.loads(moy_net.web_pack(carts_root, tops, binary))
 
 
 def baked_stamp():
@@ -299,12 +300,14 @@ class WebHost:
                  ensure_online=None, auth=None, on_sync=None, auth_source=None,
                  on_run=None, update=None, on_stop=None, files_root=None,
                  kinds=None, dial=None, on_serving=None, on_failed=None,
-                 system=None, on_paired=None):
+                 system=None, on_paired=None, apps_root=None):
         self.port = DEFAULT_PORT if port is None else port
         self.carts_root = carts_root
         self.files_root = (moy_sync.files_root(carts_root)
                            if files_root is None else files_root)
         self.kinds = _kinds() if kinds is None else tuple(kinds)
+        self.apps_root = (moy_sync.apps_root(carts_root)
+                          if apps_root is None else apps_root)
         self.auth = auth
         self._auth_source = auth_source
         self.on_paired = on_paired
@@ -363,7 +366,7 @@ class WebHost:
     def _configure(self, port):
         moy_net.web_start(port, self.carts_root, self.files_root,
                           self.kinds if self.files_root else None,
-                          self.auth or None, self._defer())
+                          self.auth or None, self._defer(), self.apps_root)
 
     def _read_auth(self):
         if self._auth_source is not None:
@@ -386,7 +389,7 @@ class WebHost:
         self._with_sd(lambda: None)          # the store's volume is up
         moy_net.wc_on(self.port, self.carts_root, self.files_root,
                       self.kinds if self.files_root else None,
-                      self.auth or None, self._defer(), ip)
+                      self.auth or None, self._defer(), ip, self.apps_root)
         st = moy_net.wc_state()
         if st[0] == self.JOINING and not st[2] and self._dial is not None:
             try:

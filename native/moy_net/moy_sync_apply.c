@@ -9,7 +9,9 @@
 // rename rotation that leaves the previous file as an unstamped `.bak`. On the
 // carts root of a store of record, every text file that lands is a journal
 // commit (moy_journal_append), after the file is durable: a journal that
-// cannot be written costs a history entry, never the write.
+// cannot be written costs a history entry, never the write. On the apps root
+// a file is `<id>/<key>` of one app's flat folder and lands as bytes alone
+// (moy_net.h's moy_sync_store_t), with no `.bak` left beside it.
 
 #include <stdio.h>
 #include <string.h>
@@ -164,7 +166,7 @@ static int path_of(const op_t *o, int k, const char *suffix, char *out,
 
 static void mkdirs(op_t *o) {
     char *path = o->a;
-    if (o->root == MOY_SYNC_FILES) {
+    if (o->root == MOY_SYNC_FILES || o->root == MOY_SYNC_APPS) {
         moy_fs_mkdir(o->dir);
     }
     for (int k = 1; k < o->nseg; k++) {
@@ -450,6 +452,18 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
             return 1;
         }
     }
+    if (o->root == MOY_SYNC_APPS) {
+        // `<id>/<key>`, one file of one app's flat folder (dc: `<id>`), and
+        // never a write's staging name.
+        if (o->nseg != (dc ? 1 : 2)) {
+            why(out, dc ? "dc wants an app" : "not an app file");
+            return 1;
+        }
+        if (memchr(o->rel, '~', o->rel_n) != NULL) {
+            why(out, "a staging name");
+            return 1;
+        }
+    }
     char *full = o->full;
     if (!path_of(o, o->nseg, ".tmp", full, PATH_CAP)
         || !path_of(o, o->nseg, "", full, PATH_CAP)) {
@@ -457,7 +471,8 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
         return 1;
     }
     if (dc) {
-        if (o->root == MOY_SYNC_CARTS ? o->nseg != 1 : o->nseg < 2) {
+        if (o->root == MOY_SYNC_CARTS || o->root == MOY_SYNC_APPS ? o->nseg != 1
+            : o->nseg < 2) {
             why(out, "bad dc target");
             return 1;
         }
@@ -468,6 +483,12 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
     }
     if (o->nseg < 2) {
         why(out, "not a store file");
+        return 1;
+    }
+    const char *bx, *bxe;
+    if (o->root == MOY_SYNC_APPS && !has(op, op_end, "b", &bx, &bxe)
+        && !truthy(op, op_end, "pub") && !truthy(op, op_end, "d")) {
+        why(out, "not bytes");          // an app's file crosses as bytes alone
         return 1;
     }
     int new_item = 0;
@@ -491,6 +512,12 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
             oserr(out, rc);
             return 1;
         }
+        if (o->root == MOY_SYNC_APPS) {
+            // An app's folder holds its keys and nothing else: the rotated
+            // previous file would read as a key of its own.
+            path_of(o, o->nseg, ".bak", o->b, PATH_CAP);
+            moy_fs_remove(o->b);
+        }
         journal(o, NULL, 0);
         *shelf = shelf_dirty(o, new_item);
         return 0;
@@ -498,7 +525,7 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
     int part = part_of(op, op_end);
     const char *bv, *bve;
     if (has(op, op_end, "b", &bv, &bve)) {
-        if (!is_binary(last)) {
+        if (o->root != MOY_SYNC_APPS && !is_binary(last)) {
             why(out, "not a binary file");
             return 1;
         }
@@ -600,7 +627,8 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
     o->s = s;
     o->root = root;
     o->dir = root == MOY_SYNC_FILES ? s->files
-             : root == MOY_SYNC_CARTS ? s->carts : NULL;
+             : root == MOY_SYNC_CARTS ? s->carts
+             : root == MOY_SYNC_APPS ? s->apps : NULL;
     moy_json_iter_t it;
     moy_json_iter(&it, ops, ops_end);
     const char *k, *ke, *v, *ve;

@@ -609,14 +609,15 @@ static mp_obj_t mod_sync_batch(mp_obj_t body) {
     }
     mp_obj_t t[2] = {
         MP_OBJ_NEW_QSTR(bt.root == MOY_SYNC_FILES ? MP_QSTR_files
-                        : bt.root == MOY_SYNC_SYSTEM ? MP_QSTR_system : MP_QSTR_carts),
+                        : bt.root == MOY_SYNC_SYSTEM ? MP_QSTR_system
+                        : bt.root == MOY_SYNC_APPS ? MP_QSTR_apps : MP_QSTR_carts),
         mp_obj_new_str(bt.ops, (size_t)(bt.ops_end - bt.ops)),
     };
     return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_batch_obj, mod_sync_batch);
 
-// sync_apply(carts, files, kinds, root id, ops JSON, journal)
+// sync_apply(carts, files, kinds, root id, ops JSON, journal[, apps])
 //   -> (applied, [(index, reason)], shelf, refused)
 static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
     char kinds[96];
@@ -626,10 +627,12 @@ static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
         .kinds = names_of(args[2], kinds, sizeof(kinds)),
         .journal = mp_obj_is_true(args[5]),
         .ts = moy_net_time(),
+        .apps = n_args > 6 ? str_or_null(args[6]) : NULL,
     };
     const char *rid = mp_obj_str_get_str(args[3]);
     int root = strcmp(rid, "files") == 0 ? MOY_SYNC_FILES
-               : strcmp(rid, "carts") == 0 ? MOY_SYNC_CARTS : MOY_SYNC_SYSTEM;
+               : strcmp(rid, "carts") == 0 ? MOY_SYNC_CARTS
+               : strcmp(rid, "apps") == 0 ? MOY_SYNC_APPS : MOY_SYNC_SYSTEM;
     size_t on;
     const char *ops = mp_obj_str_get_data(args[4], &on);
     if (moy_json_valid(ops, on) != MOY_JSON_OK) {
@@ -650,11 +653,12 @@ static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
                      mp_obj_new_bool(r.shelf), mp_obj_new_int_from_uint(r.refused)};
     return mp_obj_new_tuple(4, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sync_apply_obj, 6, 6, mod_sync_apply);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sync_apply_obj, 6, 7, mod_sync_apply);
 
 #if MOY_NET_SERVE
 
-// web_start(port, carts, files, kinds, system, defer): raises OSError on a bind.
+// web_start(port, carts, files, kinds, system, defer[, apps]): raises OSError
+// on a bind.
 static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
     char kinds[96], defer[96];
     moy_web_cfg_t cfg = {
@@ -664,6 +668,7 @@ static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
         .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
+        .apps = n_args > 6 ? str_or_null(args[6]) : NULL,
     };
     int rc = moy_web_start(&cfg);
     if (rc != 0) {
@@ -671,12 +676,12 @@ static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 6, mod_web_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 7, mod_web_start);
 
 // -- the web-console switch -----------------------------------------------------
 
-// wc_on(port, carts, files, kinds, system, defer, ip): never waits; OSError when
-// the configuration itself is refused.
+// wc_on(port, carts, files, kinds, system, defer, ip[, apps]): never waits;
+// OSError when the configuration itself is refused.
 static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
     char kinds[96], defer[96];
     moy_web_cfg_t cfg = {
@@ -686,6 +691,7 @@ static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
         .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
+        .apps = n_args > 7 ? str_or_null(args[7]) : NULL,
     };
     int rc = moy_wc_on(&cfg, ip_of(args[6]));
     if (rc != 0) {
@@ -693,7 +699,7 @@ static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_on_obj, 7, 7, mod_wc_on);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_on_obj, 7, 8, mod_wc_on);
 
 static mp_obj_t mod_wc_off(size_t n_args, const mp_obj_t *args) {
     moy_wc_off(n_args ? str_or_null(args[0]) : NULL);
@@ -915,15 +921,18 @@ static mp_obj_t mod_web_answer(mp_obj_t resp) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_answer_obj, mod_web_answer);
 
-// web_pack(root, kinds) -> the store under `root` as the pull's JSON text.
-static mp_obj_t mod_web_pack(mp_obj_t root, mp_obj_t kinds_o) {
+// web_pack(root, kinds[, bytes]) -> the store under `root` as the pull's JSON
+// text, every file as bytes where `bytes` is true.
+static mp_obj_t mod_web_pack(size_t n_args, const mp_obj_t *args) {
     char kinds[96];
-    const char *k = names_of(kinds_o, kinds, sizeof(kinds));
+    mp_obj_t root = args[0];
+    const char *k = names_of(args[1], kinds, sizeof(kinds));
+    int bytes = n_args > 2 && mp_obj_is_true(args[2]);
     char *out = NULL;
     size_t n = 0;
     int rc = 0;
     WEB_GUARD_BEGIN
-    rc = moy_web_pack(mp_obj_str_get_str(root), k, &out, &n);
+    rc = moy_web_pack(mp_obj_str_get_str(root), k, bytes, &out, &n);
     WEB_GUARD_END
     if (rc != 0) {
         moy_net_free(out);
@@ -933,7 +942,7 @@ static mp_obj_t mod_web_pack(mp_obj_t root, mp_obj_t kinds_o) {
     moy_net_free(out);
     return s;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_web_pack_obj, mod_web_pack);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_pack_obj, 2, 3, mod_web_pack);
 
 static mp_obj_t mod_web_stamp(void) {
     const char *s = moy_web_stamp_text();

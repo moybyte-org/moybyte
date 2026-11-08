@@ -81,7 +81,7 @@ class _Batch(ctypes.Structure):
 class _Store(ctypes.Structure):
     _fields_ = [("carts", _P), ("files", _P), ("kinds", _P), ("journal", _I),
                 ("ts", ctypes.c_int64), ("shelf", ctypes.c_void_p),
-                ("shelf_cap", _Z)]
+                ("shelf_cap", _Z), ("apps", _P)]
 
 
 class _Err(ctypes.Structure):
@@ -95,7 +95,7 @@ class _Result(ctypes.Structure):
 
 class _WebCfg(ctypes.Structure):
     _fields_ = [("port", ctypes.c_uint16), ("carts", _P), ("files", _P),
-                ("kinds", _P), ("system", _P), ("defer", _P)]
+                ("kinds", _P), ("system", _P), ("defer", _P), ("apps", _P)]
 
 
 class _WebState(ctypes.Structure):
@@ -155,7 +155,7 @@ _SIGS = (
     ("moy_web_handle", [_P, _Z, _P, _Z, ctypes.c_void_p, _Z,
                         ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
     ("moy_web_handle_answer", [ctypes.c_void_p, _Z, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
-    ("moy_web_pack", [_P, _P, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
+    ("moy_web_pack", [_P, _P, _I, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
     ("moy_web_stamp_text", [], _P),
     ("moy_net_free", [ctypes.c_void_p], None),
     ("moy_net_host_bake", [ctypes.c_uint, _P, ctypes.c_void_p, ctypes.c_uint,
@@ -356,7 +356,7 @@ def decode_batch(body):
 
 
 # moy_net.h's MOY_SYNC_CARTS / _FILES / _SYSTEM, by value.
-_ROOT_NAMES = ("carts", "files", "system")
+_ROOT_NAMES = ("carts", "files", "system", "apps")
 
 
 def sync_batch(body):
@@ -378,16 +378,18 @@ def _names(names):
     return b"".join(_bytes(n) + b"\0" for n in names) + b"\0"
 
 
-def sync_apply(carts, files, kinds, root_id, ops, journal):
+def sync_apply(carts, files, kinds, root_id, ops, journal, apps=None):
     """(applied, [(index, reason)], shelf, refused) of the ops JSON text `ops`
-    applied into `root_id` of the store whose roots are `carts` and `files`."""
+    applied into `root_id` of the store whose roots are `carts`, `files` and
+    `apps`."""
     raw = _bytes(ops)
     buf = ctypes.create_string_buffer(raw, len(raw))
     if not raw.strip().startswith(b"["):
         raise ValueError("ops")
     import time
     st = _Store(_bytes(carts), None if files is None else _bytes(files),
-                _names(kinds), 1 if journal else 0, int(time.time()))
+                _names(kinds), 1 if journal else 0, int(time.time()),
+                None, 0, None if apps is None else _bytes(apps))
     r = _Result()
     base = ctypes.addressof(buf)
     lead = len(raw) - len(raw.lstrip())
@@ -400,11 +402,11 @@ def sync_apply(carts, files, kinds, root_id, ops, journal):
     return (r.applied, errs, bool(r.shelf), r.refused)
 
 
-def web_start(port, carts, files, kinds, system, defer):
+def web_start(port, carts, files, kinds, system, defer, apps=None):
     """Bind and serve; OSError on a bind failure. `system` None: the open host."""
     cfg = _WebCfg(port, _bytes(carts), None if files is None else _bytes(files),
                   _names(kinds), None if not system else _bytes(system),
-                  _names(defer))
+                  _names(defer), None if apps is None else _bytes(apps))
     rc = _lib().moy_web_start(ctypes.byref(cfg))
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -420,12 +422,12 @@ def _ip_of(ip):
     return parts[0] | parts[1] << 8 | parts[2] << 16 | parts[3] << 24
 
 
-def wc_on(port, carts, files, kinds, system, defer, ip):
+def wc_on(port, carts, files, kinds, system, defer, ip, apps=None):
     """The web-console switch on: never waits; OSError for a refused
     configuration."""
     cfg = _WebCfg(port, _bytes(carts), None if files is None else _bytes(files),
                   _names(kinds), None if not system else _bytes(system),
-                  _names(defer))
+                  _names(defer), None if apps is None else _bytes(apps))
     rc = _lib().moy_wc_on(ctypes.byref(cfg), _ip_of(ip))
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -635,12 +637,13 @@ def web_handle_answer(resp):
     return got
 
 
-def web_pack(root, kinds):
-    """The store under `root` as the pull's JSON text."""
+def web_pack(root, kinds, binary=False):
+    """The store under `root` as the pull's JSON text, every file as bytes
+    where `binary`."""
     out = ctypes.c_void_p()
     n = ctypes.c_size_t()
-    rc = _lib().moy_web_pack(_bytes(root), _names(kinds), ctypes.byref(out),
-                             ctypes.byref(n))
+    rc = _lib().moy_web_pack(_bytes(root), _names(kinds), 1 if binary else 0,
+                             ctypes.byref(out), ctypes.byref(n))
     raw = _taken(out, n)
     if rc:
         raise OSError(rc, os.strerror(rc))

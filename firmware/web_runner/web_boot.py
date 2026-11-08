@@ -542,6 +542,8 @@ def _build_watchers(carts_root, site, seeded=None):
     try:
         import moy_sync
         for root in moy_sync.SYNC_ROOTS:
+            if site and not root.site:
+                continue                 # another keeper writes it here
             if seeded is not None:
                 if root.id not in seeded:
                     continue             # the host does not serve it
@@ -556,7 +558,7 @@ def _build_watchers(carts_root, site, seeded=None):
                 continue                 # not seeded -> not watched
             out[root.id] = moy_sync.StoreWatcher(
                 path, root_id=root.id, skip=root.watch_skip(site),
-                top=root.watch_top(site))
+                top=root.watch_top(site), read=root.watch_read())
     except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
         print("sync watcher unavailable:", exc)
         return {}

@@ -77,7 +77,8 @@ def test_the_sync_root_registry_agrees_across_languages():
     a root whose dc arity or vfs path drifts would persist a kid's drawing into
     the wrong place or reject a legal delete -- so pin id, endpoint, vfs, the
     whole-folder-delete arity and the named top-level files against the
-    Python registry, in order."""
+    Python registry, in order -- and which roots cross every file as bytes
+    and which a site-mode page leaves to another keeper."""
     from runtime import moy_sync
 
     js = _read("firmware", "web_runner", "moy_store.mjs")
@@ -89,12 +90,12 @@ def test_the_sync_root_registry_agrees_across_languages():
             len(entries), len(moy_sync.SYNC_ROOTS))
 
     def field(entry, name):
-        m = re.search(r'%s:\s*("([^"]*)"|null|true|\d+)' % name, entry)
+        m = re.search(r'%s:\s*("([^"]*)"|null|true|false|\d+)' % name, entry)
         if m is None:
             return None
         v = m.group(1)
-        if v in ("null", "true"):
-            return {"null": None, "true": True}[v]
+        if v in ("null", "true", "false"):
+            return {"null": None, "true": True, "false": False}[v]
         return m.group(2) if v.startswith('"') else int(v)
 
     for entry, root in zip(entries, moy_sync.SYNC_ROOTS):
@@ -105,6 +106,8 @@ def test_the_sync_root_registry_agrees_across_languages():
         top = re.search(r"top:\s*\[([^\]]*)\]", entry)
         assert (tuple(re.findall(r'"([^"]*)"', top.group(1))) if top else None) \
             == root.top, entry
+        assert bool(field(entry, "binary")) == root.binary, entry
+        assert (field(entry, "site") is not False) == root.site, entry
         lo, hi = field(entry, "dcMin"), field(entry, "dcMax")
         assert [n for n in (1, 2, 3, 4) if lo is not None and n >= lo
                 and (hi is None or n <= hi)] == _dc_depths(root), entry
@@ -213,7 +216,7 @@ def test_the_mode_reaches_web_boot_before_the_watcher_is_built():
     # own predicate (None), so a mode that fails to arrive never starts shipping
     # journals at a board.
     sync = runtime_file("moy_sync.py").read_text(encoding="utf-8")
-    skip = sync[sync.index("def watch_skip("):sync.index("def watch_skip(") + 400]
+    skip = sync[sync.index("def watch_skip("):sync.index("def watch_read(")]
     assert "skip_keep_journal" in skip and "site_keep_journal" in skip, skip
     assert "else None" in skip, skip
 

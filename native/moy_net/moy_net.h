@@ -173,19 +173,22 @@ size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
 
 // The store a batch speaks for, off its `v` and `root`: v1 is the carts root
 // by definition (a `root` other than "carts" is refused, never read as
-// carts); v2 names a root whose wire is 2, "files" or "system". A system
+// carts); v2 names a root whose wire is 2, "files", "apps" or "system". A system
 // batch (the console's own documents, runtime/carts/moy_sync.py's SYSTEM_ROOT) is
 // never applied here: the webhost parks it for the VM, whose Settings decide
 // which of its keys a browser may change (moy_sync.merge_system), and
 // moy_sync_apply refuses every op of one.
+// An apps batch is the apps' private folders (`apps/<id>/<key>`,
+// runtime/carts/cart_files.py): every file of it crosses as bytes.
 enum {
     MOY_SYNC_CARTS = 0,
     MOY_SYNC_FILES = 1,
     MOY_SYNC_SYSTEM = 2,
+    MOY_SYNC_APPS = 3,
 };
 
 typedef struct {
-    int root;                       // MOY_SYNC_CARTS, _FILES or _SYSTEM
+    int root;                       // MOY_SYNC_CARTS, _FILES, _SYSTEM or _APPS
     const char *ops, *ops_end;      // the ops array
 } moy_sync_batch_t;
 
@@ -205,7 +208,11 @@ int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b);
 // when the receiver has no files layer, which refuses every files op.
 // `shelf`, when not NULL, is where the apply notes each cart folder whose
 // change reached the shelf: the names NUL-terminated, an empty one last, each
-// once, added to what it already holds (`shelf[0]` is 0 for none).
+// once, added to what it already holds (`shelf[0]` is 0 for none). `apps` is
+// the apps root, NULL when the receiver has none, which refuses every apps
+// op. An apps op names `<id>/<key>`, one file of one app's folder, as bytes
+// ("b"), never text; its dc names `<id>`, the folder whole; a name holding
+// '~' (a write's staging, moy_files.h) is refused.
 typedef struct {
     const char *carts;
     const char *files;              // NULL: no files layer
@@ -214,6 +221,7 @@ typedef struct {
     int64_t ts;                     // what that commit records as its time
     char *shelf;                    // NULL: the folders are not noted
     size_t shelf_cap;
+    const char *apps;               // NULL: no apps root
 } moy_sync_store_t;
 
 typedef struct {
@@ -282,6 +290,7 @@ typedef struct {
     const char *system;             // the system folder (webkeys, password); NULL: open,
                                     // which only a host may be (a board refuses then)
     const char *defer;              // the paths the VM answers, NUL-separated, "" last
+    const char *apps;               // the apps root, NULL when there is none
 } moy_web_cfg_t;
 
 typedef struct {
@@ -351,8 +360,10 @@ int moy_web_handle(const char *method, size_t method_n, const char *target,
 int moy_web_handle_answer(const char *resp, size_t n, char **out, size_t *out_n);
 
 // A store root as the pull's JSON object, into `out` as moy_web_handle's.
-// `kinds` restricts the top-level folders walked (NULL: every one).
-int moy_web_pack(const char *root, const char *kinds, char **out,
+// `kinds` restricts the top-level folders walked (NULL: every one); `bytes`
+// carries every file as {"b": base64} (the apps root), else a file the wire
+// carries as bytes by its name alone.
+int moy_web_pack(const char *root, const char *kinds, int bytes, char **out,
                  size_t *out_n);
 
 // The image's bundle: "<count> <bytes> <digest>", or NULL with none baked.
