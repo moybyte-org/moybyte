@@ -7,7 +7,7 @@
 #   -- what NOT to register on top of libmoy's table  put_scenes, install_handles
 #   put_scenes                        hand the cart's scene texts to the run
 #   install_handles                   register the int-handle half of the prelude
-#   PRELUDE_MOYBYTE                   a run's `moybyte` table: send, award, progress
+#   _install_moybyte                  a run's `moybyte` table: send, award, progress
 """What both Lua tiers share -- the object-verb glue, and the frame seam.
 
 Several families of the moybyte cart API return objects: `make_layer` (a
