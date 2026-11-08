@@ -79,6 +79,11 @@ int moy_sh_path(const char *path, char *out, size_t cap);
 // The store path a shell path names, or NULL for a virtual one.
 const char *moy_sh_store_path(const char *abs, char *out, size_t cap);
 
+// The store's change `op` on shell path `path` (and `to`), where the store
+// may be touched: 0 or an errno (moy_sh_cmds.c).
+enum { MOY_SH_V_MKDIR, MOY_SH_V_RMDIR, MOY_SH_V_REMOVE, MOY_SH_V_RENAME };
+int moy_sh_vol_op(int op, const char *path, const char *to);
+
 // The C core built-ins (moy_sh_cmds.c) and their lookup.
 const struct builtincmd *moy_sh_core_builtin(const char *name);
 int moy_sh_core_names(moy_sh_ent_fn fn, void *arg, const char *prefix);

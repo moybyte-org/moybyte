@@ -58,7 +58,13 @@ holding the permissions its consent grants, its `print` and `input` the
 session's streams over the door, its exit code `main`'s answer, under the
 scheduler's guard for 30 s at most. A command run with `&` runs to its end
 before the prompt returns, its output into the log under its pid, and `wait`
-reads its code. `python` with the terminal for its stdin is the
+reads its code. A compiled (`"runtime": "wasm"`) command is its module's
+WASI `_start` (`native/moy_wasm/moy_wasi.h`), crossing the same door and
+holding the same process row and guard: its stdio the session's own
+descriptors, its args and exported variables the shell's, its files the
+folders its `files` permissions grant, its exit code `proc_exit`'s (134 for
+a trap, as SIGABRT's), and Ctrl-C reaching it at its next import.
+`python` with the terminal for its stdin is the
 interactive REPL in front of the face (below); with a pipe or a
 here-document it reads that as a REPL (an expression's value printed), and
 it runs `-c CODE`.
@@ -189,7 +195,10 @@ ANSI inks are the theme's tones and whose RGB inks and grounds are the
 nearest of the sixteen base colours, exactly; the half and whole blocks
 (▀ ▄ █) are fills, so a program draws pixel art two pixels a cell, as
 `neofetch` draws Moy. The keys below are what the text apps read (`moy_sh_app.h`); a
-line program's stdin, the resize event and the size call are still a sketch:
+line program's stdin from the terminal and the resize event are still a
+sketch, and the size call is built for a compiled command alone
+(`term_size(cols*, rows*)` from `moybyte.term`, 0 rows where the face has
+no height):
 
 ```
 ESC[row;colH  ESC[K  ESC[2J  ESC[3xm/4xm  ESC[?25l/h   cursor, erase, 16 colours as theme tokens, cursor show/hide
@@ -306,8 +315,8 @@ spike the owner approved on 2026-11-06):
 RAM per session, and internal SRAM on the S3 with WiFi up. Terminal-only
 apps are **the app model for the headless Zero**
 (`firmware/seeed_xiao_esp32s3_zero/README.md`): `ssh` in from a laptop and
-run a command. The Zero runs the C built-ins until WASI commands arrive
-(the WASI spike, or P5.5); installable commands reach it with WASI.
+run a command. The Zero runs the C built-ins; WASI commands (P5.5) reach
+it once it takes the wasm engine, which its board.toml denies.
 
 **The browser sign-in** (owner, 2026-11-07: a device key and sealed
 sessions, the crypto in the wasm; it replaced the 4-digit pin of 2026-08-25).

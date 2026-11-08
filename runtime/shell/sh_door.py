@@ -22,6 +22,13 @@ a line of fd 0. It runs under the guard for COMMAND_MS at most, and its end
 sweeps what it held (`moybyte.WAKES.end`). A command run with `&` runs to its
 end before the door answers, its output into the OS log under its pid; the
 pid answers, and `wait` reads its exit code (`status`).
+
+A COMPILED COMMAND (`"runtime": "wasm"`) is a WASI program: the same process
+row and consent, its module's `_start` run by the wasm runtime's `command`
+(native/moy_wasm/moy_wasi.h) over the session's own descriptors, with the
+folders its `files` permissions name (`wasi_roots`) as its only files and
+COMMAND_MS as its budget; a trap's exit code is TRAPPED, a module that will
+not run NOT_RUN.
 """
 
 import gc
@@ -64,6 +71,8 @@ COMMAND_MS = 30000              # a command's or a REPL's run, at most
 STEP_MS = 8                     # a role command's steps in one crossing, at most this long
 NOT_RUN = 126                   # the exit code of a command refused its start
 KILLED = 137
+TRAPPED = 134                   # a compiled command that trapped, as SIGABRT's
+WASI_TRAPPED = -1               # the wasm runtime's `command` answer for a trap
 EXITS = 8                       # background commands' exit codes kept for `wait`
 LINE = 256                      # what a stdin read takes at a time
 
@@ -298,6 +307,19 @@ def commands(ws):
     return sorted(seen.items())
 
 
+def wasi_roots(granted):
+    """The folders a compiled command's granted permissions name, relative
+    to the store: `files` the user's files folder, `files:<kind>` that
+    kind's (native/moy_store/moy_ufiles.h)."""
+    out = []
+    for perm in granted:
+        if perm == "files":
+            out.append("files")
+        elif perm.startswith("files:"):
+            out.append("files/" + perm[6:])
+    return out
+
+
 def find_command(ws, name):
     if "/" in name:
         cid, _, n = name.partition("/")
@@ -441,6 +463,8 @@ class ShellDoor:
             import app_perms
         except ImportError:  # host: the runtime package
             from runtime import app_perms
+        if app_perms.tier_of(cart) == "wasm":
+            return self.run_wasi(cart, name, argv, bg)
         got = _sched.prepared(self.ws, cart)
         if got is None:
             self.err(name, "no source")
@@ -477,6 +501,58 @@ class ShellDoor:
             stderr.flush()
             _moybyte.WAKES.end(pid)
             S.procs.pop(pid, None)
+        if _L is not None:
+            _L.write(_L.INFO, pid, "exit %d" % code)
+        if not bg:
+            return code
+        self.exits = ([(pid, code)] + self.exits)[:EXITS]
+        return pid
+
+    def run_wasi(self, cart, name, argv, bg):
+        """Compiled command `cart` run as `argv`: its module's WASI `_start`
+        through the wasm runtime's `command` (native/moy_wasm/moy_wasi.h),
+        a process of its own holding what its consent grants, the folders
+        its `files` permissions name its only files. Its exit code, or in
+        the background its pid (the code kept for `status`)."""
+        try:
+            import app_perms
+        except ImportError:  # host: the runtime package
+            from runtime import app_perms
+        rt = (getattr(self.ws, "runtimes", None) or {}).get("wasm")
+        if rt is None or not hasattr(rt, "command"):
+            self.err(name, "needs the compiled tier, which this console lacks")
+            return NOT_RUN
+        carts = getattr(self.ws, "carts", None)
+        run = carts.rehydrate(cart) if carts is not None else cart
+        consent = getattr(self.ws, "consent", None)
+        rec = consent.get(app_perms.app_id(run)) if consent is not None else None
+        have = app_perms.services(self.ws) if consent is not None else ()
+        granted, _absent, refusal = app_perms.check(run, rec, have)
+        if refusal is not None:
+            self.err(name, refusal)
+            return NOT_RUN
+        S = _sched.SCHED
+        pid = _L.spawn(name) if _L is not None else S._next_pid()
+        p = S.procs[pid] = _sched.Proc(pid, _sched.COMMAND, name, run)
+        p.granted = tuple(granted)
+        was = _L.current() if _L is not None else None
+        if _L is not None:
+            _L.current(pid)
+        try:
+            code, why = rt.command(run, argv, wasi_roots(granted), pid if bg else 0,
+                                   COMMAND_MS)
+        finally:
+            if _L is not None:
+                _L.current(was)
+            _moybyte.WAKES.end(pid)
+            S.procs.pop(pid, None)
+        if why is not None:
+            text = "%s: %s" % (name, why)
+            if bg and _L is not None:
+                _L.write(_L.ERR, pid, text)
+            else:
+                self.err(name, why)
+            code = TRAPPED if code == WASI_TRAPPED else NOT_RUN
         if _L is not None:
             _L.write(_L.INFO, pid, "exit %d" % code)
         if not bg:

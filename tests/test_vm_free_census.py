@@ -70,6 +70,10 @@ def test_the_compiled_carts_run_with_no_vm(tmp_path):
         if (man.get("moybyte") or {}).get("type") == "app":
             continue        # a compiled app's verdict reads its module: test_wasm_app.py
         d = _cart(tmp_path, "c%d.moy" % i, man, main=man.get("main", "main.wasm"))
+        if (man.get("moybyte") or {}).get("type") == "command":
+            # a command runs in the shell, never as the Player's run
+            assert moy_play.census(d)[1:] == (False, "type"), path
+            continue
         assert moy_play.census(d) == ("wasm", True, "free"), path
         assert moy_play.census(d, wasm=False) == ("wasm", False, "absent"), path
 

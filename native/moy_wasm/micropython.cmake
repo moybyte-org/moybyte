@@ -71,8 +71,8 @@ if(NOT DEFINED MOY_WASM_FAST_INTERP)
     set(MOY_WASM_FAST_INTERP 0)
 endif()
 
-# The runtime's feature set: AOT plus the interpreter (no JIT), no WASI, no
-# builtin libc, no multi-module, no thread manager or shared memory (a cart's
+# The runtime's feature set: AOT plus the interpreter (no JIT), no libc-wasi
+# (a command's WASI is moy_wasi.c's table, README.md), no builtin libc, no multi-module, no thread manager or shared memory (a cart's
 # par lanes are sibling instances, README.md); bulk memory and reference types
 # because clang emits both by default; custom sections kept, because the
 # provenance key is one. The quick AOT entry stays off: it only speeds a call
@@ -174,6 +174,7 @@ add_library(usermod_moy_wasm INTERFACE)
 target_sources(usermod_moy_wasm INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_wasm.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_wasm_tlane.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_wasi.c
 )
 
 target_include_directories(usermod_moy_wasm INTERFACE

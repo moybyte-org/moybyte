@@ -2539,3 +2539,67 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_pa
         assert cf.take() is None
     finally:
         world.close()
+
+
+# -- a WASI command (native/moy_wasm/moy_wasi.h) -----------------------------------
+
+
+def _command_world(tmp_path, chips, answers):
+    """A compiled command's cart and a glue whose moy_wasm.command answers
+    `answers` in turn, logging each call's arguments."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cart, _main = _compiled(tmp_path, chips=chips)
+    world = _wasm_world()
+    calls = []
+
+    def command(*a):
+        calls.append(a)
+        return answers.pop(0)
+    sys.modules["moy_wasm"].command = command
+    world.mod._moy_wasm = sys.modules["moy_wasm"]
+    return world, cart, calls
+
+
+def test_a_command_runs_its_module_for_this_console_with_its_folders(tmp_path):
+    import hashlib
+    world, cart, calls = _command_world(tmp_path, ("esp32s3",), [(0, None)])
+    try:
+        rt = world.mod.WasmRuntime(FakeWs())
+        assert rt.command(cart, ["cat", "x"], ["files", "files/docs"], 0, 30000) == (0, None)
+        (path, sha, interp, unsigned_ok, argv, roots, bg, budget), = calls
+        assert path == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
+        main = open(cart["path"] + "/main.wasm", "rb").read()
+        assert sha == hashlib.sha256(main).hexdigest() and interp is False
+        assert unsigned_ok is False and argv == ("cat", "x")
+        assert roots == "files\0files/docs\0" and (bg, budget) == (0, 30000)
+    finally:
+        world.close()
+
+
+def test_a_command_with_no_module_or_a_refused_one_runs_on_the_interpreter(tmp_path):
+    world, cart, calls = _command_world(tmp_path, (), [(3, None)])
+    try:
+        rt = world.mod.WasmRuntime(FakeWs())
+        assert rt.command(cart, ["probe"], ()) == (3, None)
+        assert calls[0][:3] == (cart["path"] + "/main.wasm", None, True)
+        assert calls[0][5] is None                  # no files at all
+    finally:
+        world.close()
+    world, cart, calls = _command_world(
+        tmp_path / "b", ("esp32s3",), [(-3, "refused: unsigned module"), (0, None)])
+    try:
+        assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == (0, None)
+        assert [c[2] for c in calls] == [False, True]
+    finally:
+        world.close()
+
+
+def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
+    for answer in ((-3, "refused: bad signature"), (-1, "unreachable")):
+        world, cart, calls = _command_world(tmp_path / answer[1][:3], ("esp32s3",),
+                                            [answer])
+        try:
+            assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == answer
+            assert len(calls) == 1
+        finally:
+            world.close()

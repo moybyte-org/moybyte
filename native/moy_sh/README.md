@@ -7,7 +7,7 @@ a host spawn, the built-ins — is `moy_sh.h`'s header.
 
 | file | what it is |
 |---|---|
-| `moy_sh.h` | the public interface: a session, its host table, feeding it text |
+| `moy_sh.h` | the public interface: a session, its host table, feeding it text, and a spawned program's streams and files (a WASI command's, `native/moy_wasm/moy_wasi.h`) |
 | `moy_sh.c` | the session: dash's state set up, a run, the fork, the wait, the exec, the role commands, `sh` |
 | `moy_sh_sys.c` | the OS dash sees: descriptors over pipe buffers and whole-file objects, paths, the store through `moy_vol`, `/dev` `/proc` `/bin`, signals |
 | `moy_sh_cmds.c` | the C core built-ins (file commands, `ps`, `free`, `df`, `log`/`dmesg`, `reboot`, `date`, `sleep`, `clear`, `help`, `neofetch`), sorted |

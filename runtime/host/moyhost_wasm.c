@@ -45,6 +45,8 @@
 #include "moy_ui_wasm.h"
 #include "moy_app_run.h"
 #include "moy_proc.h"
+#include "moy_sh.h"
+#include "moy_wasi.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
@@ -660,4 +662,80 @@ void hw_free(host_wasm *r)
     free(r->pcm_deep);
     if (r->files) moy_files_close(r->files);
     free(r);
+}
+
+/* A WASI command (native/moy_wasm/moy_wasi.h) in the shell session running on
+ * this thread, the module `path`'s own main.wasm on the interpreter, as a
+ * board's interpreted session runs it: its exit status; MOY_WASI_TRAPPED or
+ * MOY_WASI_NOT_COMMAND with the reason in `err`, or -3 for a module that
+ * would not load or run here. The natives are registered once, beside the
+ * cart table, and stay. */
+static NativeSymbol *g_wasi;
+
+int hw_wasi_run(const char *path, int argc, const char **argv, const char *roots,
+                uint32_t bg_pid, uint32_t budget_ms, char *err, int errlen)
+{
+    moy_sh_t *s = moy_sh_running();
+    FILE *f;
+    long n;
+    uint8_t *bytes = NULL;
+    wasm_module_t module = NULL;
+    wasm_module_inst_t inst = NULL;
+    wasm_exec_env_t env = NULL;
+    moy_wasi_t *w = NULL;
+    char msg[160];
+    int code = -3;
+    if (!s) {
+        put_err(err, errlen, "needs a shell session", NULL);
+        return -3;
+    }
+    if (!hw_runtime()) {
+        put_err(err, errlen, "the runtime would not start", NULL);
+        return -3;
+    }
+    if (!g_wasi) {
+        uint32_t term = 0, k = moy_wasi_count(&term);
+        g_wasi = (NativeSymbol *)malloc((k + term) * sizeof *g_wasi);
+        if (!g_wasi || moy_wasi_register(g_wasi) != 0) {
+            free(g_wasi);
+            g_wasi = NULL;
+            put_err(err, errlen, "the WASI table would not register", NULL);
+            return -3;
+        }
+    }
+    if (!(f = fopen(path, "rb"))) {
+        put_err(err, errlen, "no module", path);
+        return -3;
+    }
+    if (fseek(f, 0, SEEK_END) == 0 && (n = ftell(f)) > 0 && fseek(f, 0, SEEK_SET) == 0
+        && (bytes = (uint8_t *)malloc((size_t)n))
+        && fread(bytes, 1, (size_t)n, f) != (size_t)n) {
+        free(bytes);
+        bytes = NULL;
+    }
+    fclose(f);
+    if (!bytes) {
+        put_err(err, errlen, "the module would not read", path);
+        return -3;
+    }
+    msg[0] = 0;
+    if (!(module = wasm_runtime_load(bytes, (uint32_t)n, msg, sizeof msg))) {
+        put_err(err, errlen, "load", msg);
+    } else if (moy_wasi_check(module, msg, sizeof msg) != 0) {
+        put_err(err, errlen, "refused", msg);
+    } else if (!(inst = wasm_runtime_instantiate(module, MOY_WASI_STACK, 0, msg, sizeof msg))) {
+        put_err(err, errlen, or_oom(msg, "instantiate"), msg);
+    } else if (!(env = wasm_runtime_create_exec_env(inst, MOY_WASI_STACK))) {
+        put_err(err, errlen, "out of memory", "no exec env");
+    } else if (!(w = moy_wasi_new(s, argc, argv, roots, bg_pid, budget_ms, NULL))) {
+        put_err(err, errlen, "out of memory", "no record for the command");
+    } else {
+        code = moy_wasi_main(w, env, err, (size_t)errlen);
+    }
+    moy_wasi_free(w);
+    if (env) wasm_runtime_destroy_exec_env(env);
+    if (inst) wasm_runtime_deinstantiate(inst);
+    if (module) wasm_runtime_unload(module);
+    free(bytes);
+    return code;
 }

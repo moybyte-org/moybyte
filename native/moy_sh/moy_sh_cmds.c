@@ -37,9 +37,6 @@ static int resolve(const char *path, char *abs, size_t cap) {
     return 0;
 }
 
-// The store op `op` on `path` (and `to`): 0 or an errno.
-enum { V_MKDIR, V_RMDIR, V_REMOVE, V_RENAME };
-
 typedef struct {
     int op;
     const char *p, *q;
@@ -48,7 +45,7 @@ typedef struct {
 
 static void vol_here(void *arg);
 
-static int vol_op(int op, const char *path, const char *to) {
+int moy_sh_vol_op(int op, const char *path, const char *to) {
     char abs[MOY_SH_PATH_MAX], sp[MOY_SH_PATH_MAX], abs2[MOY_SH_PATH_MAX], sp2[MOY_SH_PATH_MAX];
     if (moy_sh_path(path, abs, sizeof abs) != 0) {
         return ENAMETOOLONG;
@@ -58,7 +55,7 @@ static int vol_op(int op, const char *path, const char *to) {
         return EROFS;
     }
     const char *q = NULL;
-    if (op == V_RENAME && moy_sh_path(to, abs2, sizeof abs2) == 0) {
+    if (op == MOY_SH_V_RENAME && moy_sh_path(to, abs2, sizeof abs2) == 0) {
         q = moy_sh_store_path(abs2, sp2, sizeof sp2);
     }
     vol_call_t c = { op, p, q, 0 };
@@ -77,14 +74,14 @@ static void vol_here(void *arg) {
     int r = moy_vol_at(p, &v, &rest);
     if (r == 0) {
         switch (op) {
-            case V_MKDIR:
+            case MOY_SH_V_MKDIR:
                 r = moy_vol_mkdir(&v, rest);
                 break;
-            case V_RMDIR:
-            case V_REMOVE:
+            case MOY_SH_V_RMDIR:
+            case MOY_SH_V_REMOVE:
                 r = moy_vol_remove(&v, rest);
                 break;
-            case V_RENAME: {
+            case MOY_SH_V_RENAME: {
                 if (q == NULL) {
                     r = EROFS;
                     break;
@@ -364,9 +361,9 @@ static int mvcmd(int argc, char **argv) {
             snprintf(dest, sizeof dest, "%s/%s", to, base_name(args[i]));
             to = dest;
         }
-        int r = vol_op(V_RENAME, args[i], to);
+        int r = moy_sh_vol_op(MOY_SH_V_RENAME, args[i], to);
         if (r == EXDEV && !is_dir(args[i])) {
-            r = copy_file(args[i], to) ? EIO : vol_op(V_REMOVE, args[i], NULL);
+            r = copy_file(args[i], to) ? EIO : moy_sh_vol_op(MOY_SH_V_REMOVE, args[i], NULL);
         }
         if (r != 0) {
             status |= moy_sh_fail("mv: %s: %s", args[i], strerror(r));
@@ -405,9 +402,9 @@ static int remove_tree(const char *path) {
                 return r;
             }
         }
-        return vol_op(V_RMDIR, path, NULL);
+        return moy_sh_vol_op(MOY_SH_V_RMDIR, path, NULL);
     }
-    return vol_op(V_REMOVE, path, NULL);
+    return moy_sh_vol_op(MOY_SH_V_REMOVE, path, NULL);
 }
 
 static int rmcmd(int argc, char **argv) {
@@ -429,7 +426,7 @@ static int rmcmd(int argc, char **argv) {
             status |= moy_sh_fail("rm: %s: is a folder", *args);
             continue;
         }
-        int r = rec ? remove_tree(*args) : vol_op(V_REMOVE, *args, NULL);
+        int r = rec ? remove_tree(*args) : moy_sh_vol_op(MOY_SH_V_REMOVE, *args, NULL);
         if (r != 0) {
             status |= moy_sh_fail("rm: %s: %s", *args, strerror(r));
         }
@@ -447,7 +444,7 @@ static int mkdirs(const char *path) {
             char was = *p;
             *p = 0;
             if (!is_dir(abs)) {
-                int r = vol_op(V_MKDIR, abs, NULL);
+                int r = moy_sh_vol_op(MOY_SH_V_MKDIR, abs, NULL);
                 if (r != 0) {
                     return r;
                 }
@@ -472,7 +469,7 @@ static int mkdircmd(int argc, char **argv) {
             r = mkdirs(*args);
         } else {
             struct stat st;
-            r = stat(*args, &st) == 0 ? EEXIST : vol_op(V_MKDIR, *args, NULL);
+            r = stat(*args, &st) == 0 ? EEXIST : moy_sh_vol_op(MOY_SH_V_MKDIR, *args, NULL);
         }
         if (r != 0) {
             status |= moy_sh_fail("mkdir: %s: %s", *args, strerror(r));
@@ -487,7 +484,7 @@ static int rmdircmd(int argc, char **argv) {
     while (nextopt("") != '\0') {
     }
     for (char **args = argptr; *args; args++) {
-        int r = is_dir(*args) ? vol_op(V_RMDIR, *args, NULL) : ENOTDIR;
+        int r = is_dir(*args) ? moy_sh_vol_op(MOY_SH_V_RMDIR, *args, NULL) : ENOTDIR;
         if (r != 0) {
             status |= moy_sh_fail("rmdir: %s: %s", *args, strerror(r));
         }

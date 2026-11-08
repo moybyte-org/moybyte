@@ -65,6 +65,8 @@ void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 #include "moy_wasm_key.h"
 #include "moy_wasm_session.h"
 #include "moy_wasm_thread.h"
+#include "moy_wasi.h"
+#include "moy_sh.h"
 #include "../moy_store/moy_vol.h"
 
 // A VM runs (native/moy_kernel's loop): weak, so an image without the kernel
@@ -1523,6 +1525,152 @@ static MP_DEFINE_STR_OBJ(mod_format_obj, MOY_WASM_FORMAT_VERSION);
 static MP_DEFINE_STR_OBJ(mod_fork_obj, MOY_WASM_FORK_COMMIT);
 static MP_DEFINE_STR_OBJ(mod_chip_obj, KEY_CHIP);
 
+// -- a WASI command (moy_wasi.h) ----------------------------------------------------
+//
+// command(path, want_sha, interp, allow_unsigned, argv, roots, bg_pid,
+// budget_ms) -> (status, err): the module `path` run as a command in the shell
+// session the door's crossing runs in (moy_sh_running), a session of its own
+// opened and closed around it, whichever session was current made current
+// again after. The natives' bodies hop to this task (moy_wasm_on_vm), which
+// waits in the session's calls. `roots` is NUL-separated; `status` is the
+// exit status, or -1 with the trap in `err`, or -3 with the reason the module
+// did not run.
+
+typedef struct {
+    moy_wasi_t *w;
+    NativeSymbol *store;
+    wasm_exec_env_t env;
+    int status;
+    char err[ERR_MAX];
+} cmd_t;
+
+static cmd_t *g_cmd;
+
+static int cmd_up(void *user, char *err, size_t errlen)
+{
+    cmd_t *c = user;
+    uint32_t term = 0, n = moy_wasi_count(&term);
+    c->store = wasm_runtime_malloc((n + term) * sizeof(NativeSymbol));
+    if (c->store == NULL || moy_wasi_register(c->store) != 0) {
+        snprintf(err, errlen, OUT_OF_MEMORY ": the WASI table would not register");
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_loaded(void *user, moy_wasm_module module, char *err, size_t errlen)
+{
+    (void)user;
+    return moy_wasi_check(module, err, errlen);
+}
+
+static int cmd_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
+{
+    cmd_t *c = user;
+    (void)err;
+    (void)errlen;
+    c->env = env;
+    return 0;
+}
+
+static int cmd_call(void *user, int what, float dt, char *err, size_t errlen)
+{
+    cmd_t *c = user;
+    (void)what;
+    (void)dt;
+    (void)err;
+    (void)errlen;
+    c->status = moy_wasi_main(c->w, c->env, c->err, sizeof(c->err));
+    return 0;
+}
+
+static void cmd_unbound(void *user)
+{
+    cmd_t *c = user;
+    if (c->store != NULL) {
+        moy_wasi_unregister(c->store);
+        wasm_runtime_free(c->store);
+        c->store = NULL;
+    }
+    c->env = NULL;
+}
+
+static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args)
+{
+    const char *path = mp_obj_str_get_str(args[0]);
+    const char *sha = args[1] == mp_const_none ? NULL : mp_obj_str_get_str(args[1]);
+    int interp = mp_obj_is_true(args[2]);
+    int unsigned_ok = mp_obj_is_true(args[3]);
+    size_t argc;
+    mp_obj_t *items;
+    mp_obj_get_array(args[4], &argc, &items);
+    size_t roots_n = 0;
+    const char *roots = args[5] == mp_const_none ? NULL : mp_obj_str_get_data(args[5], &roots_n);
+    uint32_t bg_pid = (uint32_t)mp_obj_get_int(args[6]);
+    uint32_t budget = (uint32_t)mp_obj_get_int(args[7]);
+    (void)n_args;
+    (void)roots_n;
+    moy_sh_t *s = moy_sh_running();
+    if (s == NULL) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("no shell session is running"));
+    }
+    if (g_cmd != NULL) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a command is running"));
+    }
+    const char **argv = m_new(const char *, argc ? argc : 1);
+    for (size_t i = 0; i < argc; i++) {
+        argv[i] = mp_obj_str_get_str(items[i]);
+    }
+    cmd_t *c = heap_caps_calloc(1, sizeof(cmd_t), PSRAM_CAPS);
+    if (c == NULL) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    c->status = -3;
+    c->w = moy_wasi_new(s, (int)argc, argv, roots, bg_pid, budget, moy_wasm_on_vm);
+    m_del(const char *, argv, argc ? argc : 1);
+    if (c->w == NULL) {
+        heap_caps_free(c);
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    moy_wasm_ops ops = {
+        .user = c, .runtime_up = cmd_up, .loaded = cmd_loaded, .bound = cmd_bound,
+        .call = cmd_call, .unbound = cmd_unbound,
+    };
+    void *was = moy_wasm_session_current();
+    g_cmd = c;
+    char err[ERR_MAX];
+    err[0] = 0;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        if (moy_wasm_session_open(path, sha, 0, unsigned_ok, interp, &ops, err, sizeof(err)) == 0) {
+            if (moy_wasm_session_call(0, 0.0f, err, sizeof(err)) == 0 && c->status < 0) {
+                snprintf(err, sizeof(err), "%s", c->err);
+            }
+            moy_wasm_session_close();
+        } else {
+            c->status = -3;
+        }
+        nlr_pop();
+    } else {
+        g_cmd = NULL;
+        moy_wasm_session_use(was);
+        moy_wasi_free(c->w);
+        heap_caps_free(c);
+        nlr_jump(nlr.ret_val);
+    }
+    g_cmd = NULL;
+    moy_wasm_session_use(was);
+    int status = c->status == MOY_WASI_TRAPPED ? -1 : c->status < 0 ? -3 : c->status;
+    moy_wasi_free(c->w);
+    heap_caps_free(c);
+    mp_obj_t out[2] = {
+        mp_obj_new_int(status),
+        status < 0 ? mp_obj_new_str(err, strlen(err)) : mp_const_none,
+    };
+    return mp_obj_new_tuple(2, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_obj, 8, 8, mod_command);
+
 static const mp_rom_obj_tuple_t mod_stack_obj = {
     {&mp_type_tuple}, 2,
     { MP_ROM_INT(MOY_WASM_STACK_BYTES), MOY_WASM_STACK_PSRAM ? MP_ROM_TRUE : MP_ROM_FALSE }
@@ -1539,6 +1687,7 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tlanes), MP_ROM_PTR(&mod_tlanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     { MP_ROM_QSTR(MP_QSTR_interp_footprint), MP_ROM_PTR(&mod_interp_footprint_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command), MP_ROM_PTR(&mod_command_obj) },
     // The key tail this build wants (after the wasm line), the compiled-code
     // format version and the fork commit the engine was vendored from
     // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP

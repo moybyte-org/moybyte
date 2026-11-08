@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Probe Wasi",
+  "id": "wasi.probe",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "moybyte": {"type": "command", "permissions": ["files"]}
+}

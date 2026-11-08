@@ -377,7 +377,8 @@ scp file moybyte-zero.local:/moy/ # scp -s before OpenSSH 9.0
   changed with `passwd NEW` in the shell. With none set no browser pairs, so
   there is no Terminal, and there is no SSH.
   `ssh-copy-id` keys go to `/etc` (`/moy/system/authorized_keys`).
-- **The C built-ins only**, until WASI commands arrive. `zero_shell.py` is the
+- **The C built-ins only**: a WASI command needs the wasm engine, which
+  this board denies (board.toml says why). `zero_shell.py` is the
   door into Python: `passwd` (its `-l` and `-r` over this board's webhost),
   `df`, `mem` and `ps`. What only a console answers (its processes, `/proc`'s
   and `/dev`'s rows, the other role commands, `python`) says "needs the

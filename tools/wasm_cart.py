@@ -11,7 +11,9 @@ A compiled cart's portable artifact is its `main.wasm` (moy-spec SPEC.md
 16.1), and no module is ever committed here: a cart in
 this tree carries its SOURCE -- `src/main.wat` -- and this assembles it with the
 vendored `tools/wat.py` (pure Python: no wabt, no wasm-ld, no network) into the
-manifest's `main`. Everything else in the folder, `src/` included, is copied as
+manifest's `main`. A WASI command may carry `src/main.c` or `src/main.rs`
+instead, built by wasi-sdk or rustc's `wasm32-wasip1` as any program is
+(`assemble`). Everything else in the folder, `src/` included, is copied as
 it is, so the Code tab has the source to show.
 
 `--chip` adds the per-chip AOT module a board loads, built by
@@ -67,6 +69,87 @@ def manifest(cart):
         return json.load(f)
 
 
+class ToolchainMissing(RuntimeError):
+    """The cart's source needs a compiler this machine lacks."""
+
+
+def assemble(src):
+    """The module the cart at `src` builds from its source: `src/main.wat`
+    by the vendored assembler; a WASI command's `src/main.c` by wasi-sdk's
+    clang (`tools/jet_cart.py` finds or fetches it) or `src/main.rs` by
+    rustc for `wasm32-wasip1`, each as the toolchain builds any program,
+    with no flag of ours, and its DWARF stripped (`strip_debug`)."""
+    wat_src = os.path.join(src, SOURCE)
+    if os.path.isfile(wat_src):
+        with open(wat_src, encoding="utf-8") as f:
+            return wat.assemble(f.read())
+    import subprocess
+    import tempfile
+    c_src = os.path.join(src, "src", "main.c")
+    rs_src = os.path.join(src, "src", "main.rs")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "main.wasm")
+        if os.path.isfile(c_src):
+            from tools import jet_cart
+            sdk = jet_cart.wasi_sdk()
+            if sdk is None:
+                raise ToolchainMissing("no wasi-sdk")
+            cmd = [os.path.join(sdk, "bin", "clang"), "--target=wasm32-wasip1",
+                   "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"), "-O2",
+                   "-o", out, c_src]
+        elif os.path.isfile(rs_src):
+            rustc = shutil.which("rustc")
+            if rustc is None or not rust_wasip1():
+                raise ToolchainMissing("no rustc with the wasm32-wasip1 target")
+            cmd = [rustc, "--target", "wasm32-wasip1", "-O", "--edition", "2021",
+                   "-o", out, rs_src]
+        else:
+            raise FileNotFoundError("%s has no src/main.wat, main.c or main.rs" % src)
+        # a sanitizer the caller's process preloads (tools/asan_pytest.sh) is not the compiler's
+        env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
+        with open(out, "rb") as f:
+            return strip_debug(f.read())
+
+
+def strip_debug(blob):
+    """`blob` less its DWARF (the `.debug_*` custom sections a toolchain's
+    libraries carry in), as a release build's strip leaves it: the code, the
+    data and every other section byte for byte."""
+    out = bytearray(blob[:8])
+    i = 8
+    while i < len(blob):
+        start = i
+        sid = blob[i]
+        i += 1
+        n = shift = 0
+        while True:
+            b = blob[i]
+            i += 1
+            n |= (b & 0x7F) << shift
+            shift += 7
+            if b < 0x80:
+                break
+        body = blob[i:i + n]
+        i += n
+        if sid == 0 and body[1:1 + body[0]].startswith(b".debug_"):
+            continue
+        out += blob[start:i]
+    return bytes(out)
+
+
+def rust_wasip1():
+    """Whether rustc here has the wasm32-wasip1 standard library."""
+    import subprocess
+    rustc = shutil.which("rustc")
+    if rustc is None:
+        return False
+    got = subprocess.run([rustc, "--print", "target-libdir", "--target", "wasm32-wasip1"],
+                         capture_output=True, text=True,
+                         env={k: v for k, v in os.environ.items() if k != "LD_PRELOAD"})
+    return got.returncode == 0 and os.path.isdir(got.stdout.strip())
+
+
 def build(src, dst, chips=(), signed=True):
     """Copy the cart at `src` to `dst`, assemble its source into its `main`,
     and compile a module per chip, signed unless `signed` is False. Returns
@@ -79,8 +162,7 @@ def build(src, dst, chips=(), signed=True):
     if os.path.isdir(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
-    with open(os.path.join(src, SOURCE), encoding="utf-8") as f:
-        blob = wat.assemble(f.read())
+    blob = assemble(src)
     out = {"main": os.path.join(dst, main)}
     with open(out["main"], "wb") as f:
         f.write(blob)

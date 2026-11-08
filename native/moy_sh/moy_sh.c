@@ -972,6 +972,89 @@ long moy_sh_fd_write(moy_sh_t *s, int fd, const void *buf, size_t n) {
     return r;
 }
 
+int moy_sh_fd_open(moy_sh_t *s, const char *path, int flags) {
+    int f = (flags & MOY_SH_O_WRITE) ? ((flags & MOY_SH_O_READ) ? O_RDWR : O_WRONLY) : O_RDONLY;
+    f |= (flags & MOY_SH_O_CREAT ? O_CREAT : 0) | (flags & MOY_SH_O_TRUNC ? O_TRUNC : 0) |
+         (flags & MOY_SH_O_EXCL ? O_EXCL : 0) | (flags & MOY_SH_O_APPEND ? O_APPEND : 0);
+    struct moy_sh_globals *was = enter(s);
+    errno = 0;
+    int r = open(path, f, 0644);
+    if (r < 0) {
+        r = -(errno ? errno : EIO);
+    }
+    leave(was);
+    return r;
+}
+
+int moy_sh_fd_close(moy_sh_t *s, int fd) {
+    struct moy_sh_globals *was = enter(s);
+    int r = close(fd) == 0 ? 0 : -(errno ? errno : EBADF);
+    leave(was);
+    return r;
+}
+
+int64_t moy_sh_fd_seek(moy_sh_t *s, int fd, int64_t at, int whence) {
+    struct moy_sh_globals *was = enter(s);
+    off_t r = lseek(fd, (off_t)at, whence == 1 ? SEEK_CUR : whence == 2 ? SEEK_END : SEEK_SET);
+    int64_t out = r < 0 ? -(int64_t)(errno ? errno : EINVAL) : (int64_t)r;
+    leave(was);
+    return out;
+}
+
+int moy_sh_fd_what(moy_sh_t *s, int fd, uint32_t *size) {
+    struct moy_sh_globals *was = enter(s);
+    struct stat st;
+    int r = fstat(fd, &st) != 0 ? -(errno ? errno : EBADF) :
+            S_ISFIFO(st.st_mode) ? MOY_SH_FD_PIPE :
+            S_ISCHR(st.st_mode) ? MOY_SH_FD_TERM : MOY_SH_FD_FILE;
+    if (r > 0 && size != NULL) {
+        *size = (uint32_t)st.st_size;
+    }
+    leave(was);
+    return r;
+}
+
+static int vol_at(moy_sh_t *s, int op, const char *path, const char *to) {
+    struct moy_sh_globals *was = enter(s);
+    int r = moy_sh_vol_op(op, path, to);
+    leave(was);
+    return r;
+}
+
+int moy_sh_mkdir_at(moy_sh_t *s, const char *path) {
+    return vol_at(s, MOY_SH_V_MKDIR, path, NULL);
+}
+
+int moy_sh_remove_at(moy_sh_t *s, const char *path) {
+    return vol_at(s, MOY_SH_V_REMOVE, path, NULL);
+}
+
+int moy_sh_rename_at(moy_sh_t *s, const char *from, const char *to) {
+    return vol_at(s, MOY_SH_V_RENAME, from, to);
+}
+
+int moy_sh_environ(moy_sh_t *s, int (*fn)(void *arg, const char *kv), void *arg) {
+    struct moy_sh_globals *was = enter(s);
+    struct stackmark mark;
+    struct jmploc jl;
+    struct jmploc *saved = handler;
+    setstackmark(&mark);
+    int r = 0;
+    if (!setjmp(jl.loc)) {
+        handler = &jl;
+        for (char **ep = listvars(VEXPORT, VUNSET, 0); *ep != NULL && r == 0; ep++) {
+            r = fn(arg, *ep);
+        }
+    } else {
+        reset_after_error();
+        r = ENOMEM;
+    }
+    handler = saved;
+    popstackmark(&mark);
+    leave(was);
+    return r;
+}
+
 // The aggregates dash defined as globals, allocated in the arena. Last in the
 // file: their names are dash's macros everywhere above.
 #undef yylval

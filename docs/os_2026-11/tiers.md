@@ -141,18 +141,23 @@ grant ends, so a file it left open is saved. A runaway export
 calling no import cannot be stopped mid-loop, so a service's exports are
 OS-called and return; a callback that overruns strikes. **The wasm tier's
 OS interface is WASI preview1** (owner, 2026-11-03): files over the tree
-under the app's permissions, clocks, args and env, stdio, random. WAMR
-ships libc-wasi and the fork builds with it off
-(`native/moy_wasm/micropython.cmake`, `WASM_ENABLE_LIBC_WASI=0`); turning
-it on is a build flag and a key-format bump. Any WASI program built with
-wasi-sdk, Rust `wasm32-wasip1` or Zig then runs as a command unchanged;
-drawing stays moy-spec's imports. The WASI imports keep WASI's names, so
-they are not rows of the ordinal source (§1) but adapters over the same
-C functions (the files tree, the clock, the pipes); `moybyte.term` keeps
-only what WASI lacks (the terminal's size, `system.md` §1). Phase 5 with the
-tier, unless the WASI spike (phase 3: the image cost on the Guition S3, the
-key bump) fits the headroom floor, in which case WASI commands land with
-the phase-3 terminal (owner, 2026-11-03).
+under the app's permissions, clocks, args and env, stdio, random. Any WASI
+program built with wasi-sdk, Rust `wasm32-wasip1` or Zig runs as a command
+unchanged (P5.5); drawing stays moy-spec's imports. The WASI imports keep
+WASI's names, so they are not rows of the ordinal source (§1) but adapters
+over the same C functions (`native/moy_wasm/moy_wasi.h`): stdio is the shell
+session's descriptors (the terminal, a pipe's buffer, a redirected file),
+a file a descriptor of its files tree reaching only the folders the
+command's `files` permissions grant, args the spawn's argv, env the
+session's exported variables, the clocks the kernel's. `moybyte.term` keeps
+only what WASI lacks (`term_size`, `system.md` §1). **The adapter is ours,
+not WAMR's libc-wasi** (2026-11-08): libc-wasi reaches the IDF's own POSIX
+and VFS, past the session's pipes and the permissions, and carries a
+socket and thread layer; ours is a table of natives registered like any
+other, so the runtime and the AOT format are untouched and the fork still
+builds with libc-wasi off (`native/moy_wasm/micropython.cmake`,
+`WASM_ENABLE_LIBC_WASI=0`). Its image cost is the build's to print and
+#158's to record.
 
 A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`

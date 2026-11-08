@@ -108,13 +108,14 @@ PART = native_build.Part("lua", list(_RASTER) + [
 # ...and the compiled-cart run's, where WAMR builds for the host
 # (runtime/wasm_binding.wamr): runtime/host/moyhost_wasm.c over libmoy's wasm
 # binding, the cart's `snd` stream (libmoy's synth at the boards' float) and
-# its written files.
+# its written files, and a WASI command's table (native/moy_wasm/moy_wasi.c).
 WASM_PART = native_build.Part("wasm", (
     "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
-    "moy_ui_wasm.h", "moy.h", "moy_pixel.h", "moy_app_run.h", "moy_proc.h"),
+    "moy_ui_wasm.h", "moy.h", "moy_pixel.h", "moy_app_run.h", "moy_proc.h",
+    "moy_wasi.c", "moy_wasi.h", "moy_sh.h", "moy_sh_board.h", "moy_log.h"),
     (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI, _KERNEL,
-     os.path.join(_NATIVE, "moy_wasm"), os.path.join(_AUDIO, "libmoy"),
+     os.path.join(_NATIVE, "moy_wasm"), os.path.join(_NATIVE, "moy_sh"), os.path.join(_AUDIO, "libmoy"),
      os.path.join(_NATIVE, "moy_app")))
 
 

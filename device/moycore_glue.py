@@ -1245,6 +1245,36 @@ class WasmRuntime:
         m = _moy_wasm.mem()
         return m[3], m[4]
 
+    def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0):
+        """A WASI command cart run as `argv` in the shell session the door's
+        crossing runs in (runtime/shell/sh_door.py, native/moy_wasm/moy_wasi.h):
+        (exit status, None), or -1 (a trap) or -3 (it did not run) and the
+        reason. Its module for this console runs where the cart carries one,
+        as a cart's does, and main.wasm on the interpreter where it carries
+        none or that one is refused for anything but tamper evidence."""
+        command = getattr(_moy_wasm, "command", None)
+        if command is None:
+            return -3, "this firmware runs no commands"
+        path = cart["path"]
+        main = cart.get("main", "main.wasm")
+        joined = "".join(r + "\0" for r in roots) or None
+        unknown_sources = bool(getattr(self.ws, "unknown_sources", False))
+        argv = tuple(argv)
+        if _moy_wasm.CHIP is not None:
+            module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
+            try:
+                open(module, "rb").close()
+            except OSError:
+                module = None
+            if module is not None:
+                sha = _sha256_file(path + "/" + main)
+                code, err = command(module, sha, False, unknown_sources, argv, joined,
+                                    bg_pid, budget_ms)
+                if code != -3 or err.startswith(_AOT_TAMPER_EVIDENCE):
+                    return code, err
+        return command(path + "/" + main, None, True, unknown_sources, argv, joined,
+                       bg_pid, budget_ms)
+
 
 def make_wasm_runtime(ws):
     """The compiled-cart runtime, or None when this build has no engine

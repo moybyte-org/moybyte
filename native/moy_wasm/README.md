@@ -12,12 +12,13 @@ moycore drives (see "A cart's session").
 | piece | where |
 |---|---|
 | the runtime | `wamr/`: the AOT-plus-interpreter subset of Moybyte's WAMR fork ("Decisions" above), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
-| the build | `micropython.cmake`: the runtime as its own static library -- AOT plus WAMR's classic interpreter (no JIT, no WASI, no builtin libc); `MOY_WASM_FAST_INTERP` picks the fast interpreter instead, unset on every console board (#158: classic costs less flash for a fallback tier that is never the speed path) |
+| the build | `micropython.cmake`: the runtime as its own static library -- AOT plus WAMR's classic interpreter (no JIT, no libc-wasi, no builtin libc); `MOY_WASM_FAST_INTERP` picks the fast interpreter instead, unset on every console board (#158: classic costs less flash for a fallback tier that is never the speed path) |
 | the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session, AOT or interpreted |
 | the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through -- the browser's engine (`native/moy_wasm_web`) implements it too |
 | the key | `moy_wasm_key.h`: the provenance key an AOT module must carry, per chip, its compiled-code FORMAT VERSION, and the layout of its signature -- main.wasm on the interpreter carries none and needs none |
 | the footprint | `moy_wasm_footprint.h`: what a load takes -- the pool, the block a module file is read into, the run stack -- stated once for the engine, the Player's fit check and the host twin |
 | the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board; a cart's par lanes are made the same way |
+| WASI | `moy_wasi.c`, `moy_wasi.h`: WASI preview1's imports for a compiled command, adapters over the shell's C; `modmoy_wasm.c`'s `command()` runs one in a session of its own ("A command") |
 
 Which boards take it is `board.toml` data: each console board's
 `[[native.shared.take]]` and the headless Zero's denial, each with its reason;
@@ -90,6 +91,15 @@ product), with the owner's later calls dated where they land.
   `writable` paths, kept beside the carts store in `written/<cart>/`
   (`runtime/cart_files.py`) on every tier, untouched by an install, an update
   or a push. A user's own files are a separate capability (#231).
+- **WASI preview1 is an adapter of ours, not WAMR's libc-wasi
+  (2026-11-08).** A command's imports are a table of natives registered
+  under WASI's module name (`moy_wasi.h`), each over the C a shell built-in
+  calls: the session's descriptors, its files tree under the command's
+  permissions, its variables. libc-wasi would reach the IDF's POSIX and VFS
+  past the session's pipes and the permissions, and brings a socket and
+  thread layer; the table leaves the vendored runtime and the compiler as
+  they are, so `MOY_WASM_FORMAT_VERSION` did not move and no installed
+  module went stale. The build keeps `WASM_ENABLE_LIBC_WASI=0`.
 - **Doom lives in moybyte-org/carts, never in the firmware** (GPL glue,
   2026-09-26; the WAD given away unmodified from that site, owner, 2026-10-03;
   `THIRD_PARTY.md`). Which boards fit it is #158's.
@@ -241,6 +251,27 @@ Waveshare P4 at its 60 cap. A frame on this tier costs what the CART's raster
 costs; the resolve is a few milliseconds. Each suite pins a floor for that
 fixture and for the hello cart (`tests/test_*_on_glass.py`), measured with WiFi
 off, the state a cart plays in.
+
+## A command
+
+A cart whose manifest says `"type": "command"` and `"runtime": "wasm"` is a
+WASI program: its module's `_start` run in the shell's session when the
+shell spawns its name (`runtime/shell/sh_door.py`, `docs/os_2026-11/system.md`
+section 1). `command()` opens a session of its own for it, as the Player's
+glue opens a cart's (its module for this console where the cart carries one,
+`main.wasm` on the interpreter otherwise or when that one is refused for
+anything but tamper evidence, `device/moycore_glue.py`'s
+`WasmRuntime.command`), registers the WASI table when the runtime is up,
+refuses a module importing anything but WASI and `moybyte.term` or
+exporting no `_start` once it is loaded, calls `_start` once and closes the
+session, making whichever session was current current again. The natives
+run on the session's thread and hop their bodies to the MicroPython task
+(`moy_wasm_on_vm`), which waits in the call inside the door's crossing with
+the shell's session entered, so a body reaches the session's descriptors and
+files as a built-in does. A command's exit status is `proc_exit`'s, 0 when
+`_start` returns; a trap answers -1 with its message, a module that would
+not run -3. The host runs the same table over its WAMR on the calling thread
+(`runtime/host/moyhost_wasm.c`'s `hw_wasi_run`).
 
 ## Where the memory goes
 
@@ -631,9 +662,21 @@ board restarting. `tests/on_glass.py`'s `wasm_runaway_runs_to_its_end` pins the
 current answer. A cart's session is ended the same way
 (`moy_wasm_session_terminate`), by the Player's runaway watch
 (`native/moy_play/moy_play.h`). A `par` item is no different: the call that handed it over
-waits for it, so an item that never returns holds the cart where it is.
+waits for it, so an item that never returns holds the cart where it is. A
+command stops at its next import: each WASI call checks the shell's Ctrl-C
+and the door's budget first (`moy_wasi.h`), and a loop calling none holds
+the console's task until it returns.
 
 ## Testing
+
+- `tests/test_wasi_commands.py`: WASI commands built unchanged by wasi-sdk
+  and rustc's `wasm32-wasip1` (`tools/wasm_cart.py`), run in the Terminal's
+  session on the host's WAMR: args, env, stdio through pipes and
+  redirections, exit codes, files under the `files` permission and none
+  without it, the clocks, random, `term_size`, Ctrl-C, the budget, a trap,
+  a module a command cannot run, the background; on glass,
+  `tests/on_glass.py`'s `wasi_commands_run` (cat and the Rust hello on their
+  modules, the probe on the interpreter) over the serial face.
 
 - `tests/test_wamr_vendor.py`: the copy is the fork at the pinned commit (read
   from the clone's git objects when `experiments/wasm_aot/wamr` has it), the

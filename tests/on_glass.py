@@ -5,6 +5,7 @@
 #   -- the windowed tier's three PERF columns  wm_meters_answer_for_the_frame_they_measured
 #   -- the WebAssembly engine         wasm_modules, wasm_push
 #   -- the Player path                wasm_carts_push, wasm_cart_fps
+#   -- WASI commands in the shell     wasi_commands_run
 #   -- Settings -> UNKNOWN SOURCES    unknown_sources
 #   -- a cart too big for the board   wasm_fit, wasm_too_big_cart_opens_the_notice
 #   -- Doom, built by the recipe      doom_push, doom_frames_match_the_host
@@ -3563,6 +3564,52 @@ def wasm_carts_push(board, board_dir):
     for title in WASM_CARTS.values():
         assert title in titles, "%s is not on the shelf after the push" % title
     return dict(WASM_CARTS)
+
+
+# -- WASI commands in the shell (native/moy_wasm/moy_wasi.h) ---------------------------
+
+
+def wasi_commands_run(board, board_dir):
+    """WASI commands (native/moy_wasm/moy_wasi.h) through the serial face's
+    shell: wasi-sdk's cat and Rust's wasm32-wasip1 hello, each built unchanged
+    by its toolchain and carrying this chip's module, signed, and the probe
+    with none, on the interpreter. Args, env, a pipe in and out, files in
+    the user's folder, the exit code and a trap; the Rust hello last, skipped
+    where this machine has no rustc for wasm32-wasip1."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_wasi_")
+    rust = wasm_cart.rust_wasip1()
+    for name, chips in (("wasi_cat", (chip,)), ("wasi_probe", ()), ("wasi_hello", (chip,))):
+        if name == "wasi_hello" and not rust:
+            continue
+        out = os.path.join(tmp, name + ".moy")
+        wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / (name + ".moy")), out,
+                        chips=chips)
+        _push_folder(board, board_dir, out, root + "/" + name + ".moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    assert _sh(board, "cd; printf 'one\\ntwo\\n' > wasi.txt; wasi.cat/cat wasi.txt",
+               timeout=60) == (0, ["one", "two"])
+    assert _sh(board, "wasi.probe/probe args a b | wasi.cat/cat", timeout=60) == (
+        0, ["0=probe", "1=args", "2=a", "3=b"])
+    assert _sh(board, "wasi.cat/cat < wasi.txt | wasi.probe/probe stdin", timeout=60) == (
+        0, ["8 bytes 2 lines"])
+    assert _sh(board, "export WASI_ON=glass; wasi.probe/probe env WASI_ON",
+               timeout=60) == (0, ["glass"])
+    assert _sh(board, "wasi.probe/probe files", timeout=60) == (
+        0, ["size 14", "entry b.txt", "read two", "read three", "gone yes"])
+    assert _sh(board, "wasi.probe/probe clock", timeout=60) == (0, ["since 2000 yes, slept yes"])
+    assert _sh(board, "wasi.probe/probe exit 3", timeout=60) == (3, ["leaving with 3"])
+    st, out = _sh(board, "wasi.probe/probe trap", timeout=60)
+    assert st == 134 and "unreachable" in " ".join(out), out
+    assert _sh(board, "rm wasi.txt")[0] == 0
+    if not rust:
+        pytest.skip("no rustc with the wasm32-wasip1 target for the Rust hello")
+    assert _sh(board, "wasi.hello/hello on glass", timeout=60) == (
+        0, ["hello from rust, 3 args", "on", "glass"])
 
 
 APP_ROLES = ("app_roles", "App Roles Wasm")

@@ -131,6 +131,16 @@ class WasmHostRuntime:
     def memory(self):
         return MEMORY_LIMIT, MEMORY_LIMIT
 
+    def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0):
+        """A WASI command cart run as `argv` in the shell session running on
+        this thread (runtime/shell/sh_door.py): (exit status, None), or a
+        negative kind and the reason (`wasm_binding.TRAPPED`, `REFUSED`).
+        The host interprets the cart's own main.wasm, as it does a cart."""
+        import os
+        from runtime import wasm_binding
+        path = os.path.join(cart["path"], cart.get("main", "main.wasm"))
+        return wasm_binding.run_command(path, argv, roots, bg_pid, budget_ms)
+
 
 class WasmHostRun:
     """A compiled cart run on the host: the shape every runtime exposes --

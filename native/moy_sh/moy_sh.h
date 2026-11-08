@@ -179,6 +179,34 @@ size_t moy_sh_prompt(moy_sh_t *s, int more, char *out, size_t cap);
 long moy_sh_fd_read(moy_sh_t *s, int fd, void *buf, size_t n);
 long moy_sh_fd_write(moy_sh_t *s, int fd, const void *buf, size_t n);
 
+// A spawned program's files (a WASI command's, native/moy_wasm/moy_wasi.h),
+// while `spawn` runs: the session's descriptors and its files tree as a C
+// built-in reaches them, each call entering the session. A path is a shell
+// path, absolute or against the session's folder. An answer below 0 is minus
+// an errno value; a descriptor the program opens is its until it closes it.
+#define MOY_SH_O_READ 1
+#define MOY_SH_O_WRITE 2
+#define MOY_SH_O_CREAT 4
+#define MOY_SH_O_TRUNC 8
+#define MOY_SH_O_EXCL 16
+#define MOY_SH_O_APPEND 32
+int moy_sh_fd_open(moy_sh_t *s, const char *path, int flags);
+int moy_sh_fd_close(moy_sh_t *s, int fd);
+// The new offset; `whence` 0 from the start, 1 from here, 2 from the end.
+int64_t moy_sh_fd_seek(moy_sh_t *s, int fd, int64_t at, int whence);
+// What `fd` is (*size a file's bytes): a terminal or /dev/null, a pipe's end,
+// a file.
+#define MOY_SH_FD_TERM 1
+#define MOY_SH_FD_PIPE 2
+#define MOY_SH_FD_FILE 3
+int moy_sh_fd_what(moy_sh_t *s, int fd, uint32_t *size);
+// A folder made, a file or an empty folder removed, a name moved: 0 or an errno.
+int moy_sh_mkdir_at(moy_sh_t *s, const char *path);
+int moy_sh_remove_at(moy_sh_t *s, const char *path);
+int moy_sh_rename_at(moy_sh_t *s, const char *from, const char *to);
+// The exported variables, `NAME=value` each, until fn answers nonzero: 0 or fn's answer.
+int moy_sh_environ(moy_sh_t *s, int (*fn)(void *arg, const char *kv), void *arg);
+
 // A variable's value (NULL unset) and setting one.
 const char *moy_sh_getvar(moy_sh_t *s, const char *name);
 void moy_sh_setvar(moy_sh_t *s, const char *name, const char *value);

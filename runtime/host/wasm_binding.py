@@ -14,7 +14,7 @@ ESP-IDF subset of it (`native/moy_wasm/wamr/`), and a Linux build needs the
 interpreter and the Linux platform layer, which that subset leaves behind on
 purpose. So the first build fetches the fork AT THE PIN into
 `.build/host_wamr/` (gitignored; `fetch_sources` says from where) and builds
-its interpreter with no WASI and no builtin libc -- exactly what moy-spec's
+its interpreter with no libc-wasi and no builtin libc -- exactly what moy-spec's
 `make wasm-test` does -- and every later build reuses it. The pin is the
 boards' own, so a host and a board can never run different runtimes.
 
@@ -48,7 +48,7 @@ _PIN_H = os.path.join(_ENGINE_DIR, "wamr_pin.h")
 WAMR_DIR = os.path.join(_ROOT, ".build", "host_wamr")
 WAMR_REPO = "https://github.com/moybyte-org/wasm-micro-runtime.git"
 
-# The interpreter with nothing a cart may not import: no WASI, no builtin libc
+# The interpreter with nothing a cart may not import: no libc-wasi, no builtin libc
 # (moy-spec's wasm-test build); software bounds checks, so no SIGSEGV handler
 # lands in the Python process; and the Python process's GS register left alone.
 WAMR_CMAKE = (
@@ -267,6 +267,9 @@ def _lib():
             d.hw_footprint.restype = None
             d.hw_interp_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
             d.hw_interp_footprint.restype = None
+            d.hw_wasi_run.argtypes = [_C, _I, ctypes.POINTER(_C), _C, ctypes.c_uint32,
+                                      ctypes.c_uint32, _P, _I]
+            d.hw_wasi_run.restype = _I
             d.moy_wasm_natives.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
             d.moy_wasm_natives.restype = ctypes.POINTER(_NativeSymbol)
             if not d.hw_runtime():
@@ -315,6 +318,28 @@ def table():
     n = ctypes.c_uint32(0)
     rows = d.moy_wasm_natives(ctypes.byref(n))
     return tuple(rows[i].symbol.decode("utf-8") for i in range(n.value))
+
+
+def run_command(path, argv, roots=(), bg_pid=0, budget_ms=0):
+    """A WASI command (native/moy_wasm/moy_wasi.h): the module at `path` run
+    as `argv` in the shell session running on this thread, reaching the
+    `roots` (folders relative to the store) its permissions grant. (its exit
+    status, None), or (TRAPPED, why) when it trapped and (REFUSED, why) when
+    it would not run."""
+    d = _lib()
+    if d is None:
+        return REFUSED, "no host wasm binding (%s)" % (why_unavailable() or "?")
+    args = (_C * max(1, len(argv)))(*[a.encode() for a in argv])
+    joined = b"".join(r.encode() + b"\0" for r in roots) + b"\0"
+    err = ctypes.create_string_buffer(256)
+    code = d.hw_wasi_run(path.encode(), len(argv), args, joined, int(bg_pid),
+                         int(budget_ms), err, len(err))
+    if code < 0:
+        return (TRAPPED if code == TRAPPED else REFUSED), err.value.decode("utf-8", "replace")
+    return code, None
+
+
+TRAPPED, REFUSED = -1, -3                # run_command's: moy_wasi.h's MOY_WASI_TRAPPED, and the rest
 
 
 SNAP_LEN = 15

@@ -335,6 +335,10 @@ def test_the_shell_answers_over_serial(board):
     on_glass.the_shell_answers_over_serial(board)
 
 
+def test_wasi_commands_run_in_the_shell(board):
+    on_glass.wasi_commands_run(board, WASM_BOARD_DIR)
+
+
 def test_pkg_installs_a_cart_from_the_carts_repo(board):
     on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
 
