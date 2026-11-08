@@ -424,14 +424,15 @@ class BarLayer:
         Guition S3's 480x320) showed the app's bar band empty and had no
         context-X under the finger."""
         ws = self.ws
-        if where != "tool" or getattr(ws, "app_full_canvas", False):
+        run = ws.run
+        if where != "tool" or run.app_full_canvas:
             return False
         # A tool's strip is the look's bar on the system canvas: the one
         # every app shows where that canvas is the game's
         # (docs/history/look_2026-10.md step 27a), else the compact band over the
         # game's top rows (`tool_band`, step 33); in a desk window, the
         # game canvas's.
-        return ws.sys_canvas is not ws.canvas and self.tool_band() is None
+        return ws.sys_canvas is not run.canvas and self.tool_band() is None
 
     def tool_band(self):
         """Where a running tool cart's compact bar sits on the system
@@ -441,8 +442,9 @@ class BarLayer:
         too, so the chevron and the title are a tap. The console draws it
         after the composite (`Workstation._draw_tool_band`)."""
         ws = self.ws
-        gc = ws.canvas
-        if gc is ws.sys_canvas or getattr(ws, "app_full_canvas", False):
+        run = ws.run
+        gc = run.canvas
+        if gc is ws.sys_canvas or run.app_full_canvas:
             return None
         wm = ws.wm
         if wm is not self._band_wm:           # cached by WM identity: a bound
@@ -489,7 +491,7 @@ class BarLayer:
             game = self._zone_is_game(where)
         # an "app" strip on the game canvas: that canvas IS the system one
         if game:
-            return self.ws.canvas
+            return self.ws.run.canvas
         return self.ws.sys_canvas
 
     def _bar_h(self, where):
@@ -535,7 +537,7 @@ class BarLayer:
                 return self._tool_pack(band)
         if game:
             of = bars_in_force()
-            cv = self.ws.canvas
+            cv = self.ws.run.canvas
             gs = self._game_size
             if (self._game_of is not of or gs is None
                     or gs[0] != cv.w or gs[1] != cv.h):
@@ -606,7 +608,7 @@ class BarLayer:
         """`where`'s canvas less its bars: what the surface under them lays
         out in, (x, y, w, h)."""
         cv = self._bar_canvas(where)
-        if where == "tool" and self.ws.app_window_canvas:
+        if where == "tool" and self.ws.run.app_window_canvas:
             wh = self.ws.app_window_size()       # a window's: its title strip is the bar
             return self._kept_rect(0, 0, wh[0], wh[1])
         if self._zone_is_game(where):
@@ -1283,7 +1285,7 @@ class BarLayer:
         cart's ("tool"), the registered app's on top ("app"), else None."""
         ws = self.ws
         if where == "tool":
-            ui = getattr(getattr(ws, "player", None), "_ui", None)
+            ui = getattr(ws.run.player, "_ui", None)
             return ui[0] if ui else None
         if where == "app":
             app = ws._apps_by_id.get(ws.wm.top_kind())

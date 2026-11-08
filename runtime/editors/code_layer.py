@@ -380,7 +380,7 @@ class CodeLayer:
         """The open project's cart language (#67 Phase 5): drives the symbol
         palette + the highlighter's comment/keyword rules. Asked of the mode
         table, which is where the shell's other text surfaces ask too."""
-        proj = self.ws.project
+        proj = self.ws.run.project
         cart = proj.cart if proj is not None else None
         return cart is not None and _modes.cart_lang(cart) == "lua"
 
@@ -1087,7 +1087,7 @@ class CodeLayer:
 
     def can_add_script(self):
         """Whether the open cart may gain a script (Make it mine's rule)."""
-        proj = self.ws.project
+        proj = self.ws.run.project
         cart = proj.cart if proj is not None else None
         return cart is not None and self.ws.cards_layer._can_add_source(cart)
 

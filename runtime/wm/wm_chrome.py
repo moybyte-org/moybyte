@@ -140,7 +140,7 @@ class WindowChrome:
         """Whether `win` is a game's window: the player's, running a game.
         The player's window running a window-bound app cart (Notes) is an
         app window, full screen as every app's is: its row, its title."""
-        return win.kind == "desktop" and not self.ws.app_window_canvas
+        return win.kind == "desktop" and not self.ws.run.app_window_canvas
 
     def _full_chrome(self, win, focused, quiet):
         """A full-screen window's row on the root canvas: the band's ground
@@ -244,7 +244,7 @@ class WindowChrome:
         ws = self.ws
         if self._theme_doc(win) is not None:
             return "palette"
-        if win.kind == "desktop" and ws.app_window_canvas and ws.cart:
+        if win.kind == "desktop" and ws.run.app_window_canvas and ws.cart:
             name = str(ws.cart.get("id") or "")
             name = name[name.rfind(".") + 1:]
             if name in _iconsets.SLOT:
@@ -442,7 +442,7 @@ class WindowChrome:
             t = str((ws.cart.get("title") if ws.cart else "") or "GAME")
             if getattr(self, "_play_intent", None) == "dev":
                 return _PLAY + _title_sep() + t       # a playtest from the Editor
-            lent = ws.bar_layer._lent("tool") if ws.app_window_canvas else None
+            lent = ws.bar_layer._lent("tool") if ws.run.app_window_canvas else None
             if lent is not None and lent[0]:
                 return t + _title_sep() + lent[0]     # the page an app lent ("Notes · Story ideas")
             return t
@@ -476,7 +476,7 @@ class WindowChrome:
             t = self.ws.app_title(win.kind) or t  # the chip names the app
         for sep in (_SEP_DOT, _SEP_ASCII):
             at = t.find(sep)
-            if at > 0 and win.kind == "desktop" and self.ws.app_window_canvas:
+            if at > 0 and win.kind == "desktop" and self.ws.run.app_window_canvas:
                 return t[:at]                     # an app's chip names the app
             if at > 0 and win.kind == "desktop":
                 return t[at + len(sep):]          # a playtest's chip names the cart

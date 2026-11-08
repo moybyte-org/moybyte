@@ -294,7 +294,7 @@ def test_the_system_canvas_is_landscape_on_portrait_glass(board):
     panel that scans PORTRAIT (800x1280) -- the rotated compositor paints one
     landscape buffer and rotates it onto the glass -- over the same 320x240
     game canvas."""
-    line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.canvas.w, ws.canvas.h)",
+    line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.run.canvas.w, ws.run.canvas.h)",
                      wait_for="PY ")
     assert line == "PY (1280, 800, 320, 240)", line
     line = board.cmd("py (comp.rotated, comp.angle, comp._pw, comp._ph, ws.sys_canvas.RETAINED_FRAMES)",

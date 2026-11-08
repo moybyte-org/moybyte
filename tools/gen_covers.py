@@ -192,7 +192,7 @@ def silence(ws, names):
     a Python cart's namespace entry becomes a no-op, a Lua cart's global is
     rebound in its own state. The cart's code looks each name up when it calls
     it, so nothing else about the cart changes."""
-    p = ws.player
+    p = ws.run.player
     if getattr(p, "_lua", None) is not None:
         from runtime import moycore      # the host's binding of the Lua engine
         err = moycore.exec("".join("%s = function() end\n" % n for n in names),
@@ -277,7 +277,7 @@ def capture(slug):
         if ws.cart_error:
             print("skip (crashed during capture):", slug, ws.cart_error)
             return None
-        cv = ws.canvas                   # the cart's GAME canvas
+        cv = ws.run.canvas                   # the cart's GAME canvas
         # indices_of is the exact reduction of the RGB565 canvas back to MOY64
         # indices -- see runtime/host/host_canvas.py.
         return cv.w, cv.h, host_canvas.indices_of(cv), crop

@@ -805,9 +805,9 @@ def _surface_plan(ws, cfg):
             enter = _notes_vault(ws, enter)
         plan.append(("app_" + surface, enter))
     # Notes with a note open: its page of tools, the note in the look
-    plan.append(("app_notes_note", lambda: ws.player.ns["_open"](NOTES_VAULT[0][0])))
+    plan.append(("app_notes_note", lambda: ws.run.player.ns["_open"](NOTES_VAULT[0][0])))
     # ...and a program open: the same tools and Run
-    plan.append(("app_notes_script", lambda: ws.player.ns["_open"](NOTES_VAULT[1][0])))
+    plan.append(("app_notes_script", lambda: ws.run.player.ns["_open"](NOTES_VAULT[1][0])))
 
     def park():
         if ws.webhost is None:
@@ -883,7 +883,7 @@ def _pick(ws, home):
     _pin_file_times(ws)
     ws.open(_cart_by_title(ws, "Jot"))
     intents.INTENTS.reset()
-    assert intents.INTENTS.pick(ws.player.pid, "image/*")
+    assert intents.INTENTS.pick(ws.run.player.pid, "image/*")
 
 
 def _files_document(ws):
@@ -1123,7 +1123,7 @@ def _menus_plan(ws, cfg):
                 ws.open_library()
             random.seed(25)
             ws._open_workspace(_cart_by_title(ws, _PAUSE_CART))
-            ws.run(ws.project, ws.launcher_layer)
+            ws.play(ws.launcher_layer)
             for _ in range(_PAUSE_FRAMES):
                 _quiesce(ws)
                 ws.frame(_DT)
@@ -1154,7 +1154,7 @@ def _procs_plan(ws):
             cart = _cart_by_title(ws, title)
             assert ws.procs.launch(cart)       # the first game joins the running set
             ws._open_workspace(cart)
-            ws.run(ws.project, ws.launcher_layer)
+            ws.play(ws.launcher_layer)
             ws.frame(_DT)
             win = ws.wm._wins["desktop"]
             if win.saved is not None:
@@ -1166,7 +1166,7 @@ def _procs_plan(ws):
                 ws.frame(_DT)
         assert [p.title() for p in ws.procs.list] == [_PROCS_CARTS[0]]
         assert ws.wm._focus == "desktop" and ws.procs.list[0].state == "throttled"
-        ws.player._paused_at = 1               # both held where they are
+        ws.run.player._paused_at = 1               # both held where they are
         ws.procs.list[0].player._paused_at = 1
 
     def refusal():
@@ -1280,7 +1280,7 @@ def _status_plan(ws, cfg):
         for _ in range(3):
             ws.frame(_DT)
         ws.pause.show()
-        ws.player._paused_at = 1
+        ws.run.player._paused_at = 1
 
     def low():
         ws.pause.close()
@@ -1501,7 +1501,7 @@ def _tasks_plan(ws, cfg):
             if windowed:
                 assert ws.procs.launch(cart)
             ws._open_workspace(cart)
-            ws.run(ws.project, ws.launcher_layer)
+            ws.play(ws.launcher_layer)
             ws.frame(_DT)
             if windowed:
                 win = ws.wm._wins["desktop"]
@@ -1516,13 +1516,13 @@ def _tasks_plan(ws, cfg):
                 ws.system_key()
                 ws.pause.choose(ws.pause.rows.index(ws.pause.MINIMISE))
         assert [p.title() for p in ws.procs.list] == [_PROCS_CARTS[0]]
-        for pl, cpu, mem in ((ws.player, 412, 431 << 10),
+        for pl, cpu, mem in ((ws.run.player, 412, 431 << 10),
                              (ws.procs.list[0].player, 38, 287 << 10)):
             pl.cpu, pl.mem = cpu, mem
         ws.procs.gen += 1
         ws.open_tasks()
         if windowed:
-            ws.player._paused_at = 1           # the games held where they are
+            ws.run.player._paused_at = 1           # the games held where they are
             ws.procs.list[0].player._paused_at = 1
             ws.wm._sync_windows()
             win = ws.wm._wins["tasks"]
@@ -1545,8 +1545,8 @@ def _tasks_plan(ws, cfg):
         ws.close_tasks()
         # The game in front draws every frame and moves nothing: the banner
         # over it is over a frame drawn anew, as a playing game's is.
-        ws.player._paused_at = 0
-        ws.player._update = lambda *a: None
+        ws.run.player._paused_at = 0
+        ws.run.player._update = lambda *a: None
         N.NOTES.reset()
         pid = S.SCHED.start({"id": "moybyte.mesh", "title": "Mesh",
                              "permissions": ["notifications"],
@@ -1579,7 +1579,7 @@ def _tasks_plan(ws, cfg):
         ws.close_tasks()
         if windowed:
             ws.wm.bring_forward("desktop")
-        devices.MIC[0] = ws.player.pid or 2
+        devices.MIC[0] = ws.run.player.pid or 2
 
     return [("tasks_empty", empty), ("tasks_two_games", two),
             ("tasks_crashed_service", crashed), ("note_banner", banner),
@@ -1975,7 +1975,7 @@ def test_every_axis_is_actually_exercised():
 
 
 # A running APP CART on the fixed 320x240 GAME raster would draw its minimal
-# bar there too -- `bar_layer._bar_canvas("tool")` IS `ws.canvas` and its
+# bar there too -- `bar_layer._bar_canvas("tool")` IS `ws.run.canvas` and its
 # height the flat `_STATUS_H` -- and hash the same on both sides of the
 # declared diagonal, #203 working rather than missing. No golden surface does
 # since Notes, the one app cart here, became responsive (it takes the whole

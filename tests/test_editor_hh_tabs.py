@@ -143,7 +143,7 @@ def _view_cell(mu, cx, cy):
 def test_a_tap_in_the_view_paints_and_a_brush_tap_picks(hh):
     ws, drv, mu, page = _map(hh)
     lay = mu.layout
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     drv.click(lay.tp_x0 + 22 + 5, lay.tp_y0 + 5)     # the second brush
     drv.frame(DT)
     assert mu.mapedit.n == mu._map_palette_ids()[1]
@@ -157,7 +157,7 @@ def test_a_tap_in_the_view_paints_and_a_brush_tap_picks(hh):
 
 def test_a_still_hold_in_the_view_picks_the_cells_tile(hh):
     ws, drv, mu, page = _map(hh)
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     tm.mset(4, 4, 7)
     mu.mapedit.n = 2
     x, y = _view_cell(mu, 4, 4)
@@ -195,7 +195,7 @@ def test_the_foot_picks_the_tools_the_size_and_the_zoom(hh):
 
 def test_resize_grows_the_map_from_its_popover(hh):
     ws, drv, mu, page = _map(hh)
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     w = tm.w
     _tap(drv, page.host.box("Resize"))
     assert page.pop == "resize"

@@ -348,7 +348,7 @@ class WindowPaint:
     def _view_src(self):
         """A window-bound app cart's window shows its canvas's top left, its
         content rect's size; else the cart view rule (wm.py)."""
-        if self.ws.app_window_canvas and self.mode == "desktop":
+        if self.ws.run.app_window_canvas and self.mode == "desktop":
             w, h = self.app_window_content()
             v = self._app_src
             if v is None or v[2] != w or v[3] != h:
@@ -362,10 +362,10 @@ class WindowPaint:
         h)`) scales ITS region here exactly like the fullscreen composite, so
         celeste's 128x128 fills the window at 4x instead of the container's 2x.
         A window-bound app cart's canvas lies at the content's top left, 1x."""
-        if self.ws.app_window_canvas:
+        if self.ws.run.app_window_canvas:
             cx, cy, _cw, _ch = win.content_rect()
             return (cx, cy, 1)
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         view = self._view_src()
         gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
         cx, cy, cw, ch = win.content_rect()
@@ -408,7 +408,7 @@ class WindowPaint:
         ox, oy, scale = FullscreenStackWM.viewport(self)
         src = self._view_src()
         self._play_bezel(sc, ox, oy, scale, src)
-        return pf(cf, view, ws.canvas, ox, oy, scale, src)
+        return pf(cf, view, ws.run.canvas, ox, oy, scale, src)
 
     def _window_frame(self, gc, ox, oy, scale, defer, src):
         """The player window's composite of a compiled cart's frame: shown
@@ -417,7 +417,7 @@ class WindowPaint:
         canvas took it; otherwise the frame is settled into the game canvas,
         which the window composites as ever (Workstation._composite_game's
         rule)."""
-        cf = self.ws.cart_frame
+        cf = self.ws.run.cart_frame
         if cf is None:
             return False
         view = cf.take()
@@ -443,7 +443,7 @@ class WindowPaint:
         if self.mode == "desktop":
             return
         ws = self.ws
-        gc = ws.canvas
+        gc = ws.run.canvas
         sc = ws.sys_canvas
         if gc is not self._fb_for:     # the parent's cached flush_batch probe
             self._fb_for = gc
@@ -480,7 +480,7 @@ class WindowPaint:
             return None if self._order else FullscreenStackWM.viewport(self)
         win = self._wins.get("desktop")
         order = self._order
-        if (win is None or self.ws.app_window_canvas or not self.game_full()
+        if (win is None or self.ws.run.app_window_canvas or not self.game_full()
                 or not order or order[-1] != "desktop"):
             self._pv_since = -1
             return None
@@ -1493,12 +1493,12 @@ class WindowPaint:
         show_fps AND the player is the process on top (a game under Settings
         keeps its chip hidden, as before)."""
         return (self.ws.show_fps and self.stack.top() == "desktop"
-                and not self.ws.app_window_canvas)
+                and not self.ws.run.app_window_canvas)
 
     def _draw_player_window(self, win, running, focused, dt, full=True,
                             defer=None):
         ws = self.ws
-        gc = ws.canvas
+        gc = ws.run.canvas
         # Geometry FIRST (it does not depend on the cart's draw): on a recording
         # target with a command-only game canvas we place the cart's draw span with
         # a WM view bracket (#175) instead of compositing its pixels afterwards --
@@ -1513,7 +1513,7 @@ class WindowPaint:
         # first cut of this shipped.) `scale` is the same integer magnification the
         # pixel path would have used, so the game FILLS its window.
         use_view = _view is not None and getattr(gc, "buf", None) is None
-        if full and not ws.app_window_canvas:
+        if full and not ws.run.app_window_canvas:
             self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
         if running:
             # The Player ticks while it's the STACK top (the running process),
@@ -1547,7 +1547,7 @@ class WindowPaint:
         src = self._view_src()
         if defer is None:
             defer = not full
-        if (ws.app_window_canvas and running and ws.cart_frame is None
+        if (ws.run.app_window_canvas and running and ws.run.cart_frame is None
                 and self._player_rows(win, gc, ox, oy, scale)):
             if full and win.docked is None:
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
@@ -1568,7 +1568,7 @@ class WindowPaint:
         at 1:1 (`blit_game` crops the canvas first). Records the frame's change either way; whether
         it composited."""
         ws = self.ws
-        p = ws.player
+        p = ws.run.player
         ch = p.change
         f = ws.frame_state.frames_drawn
         own = self._own

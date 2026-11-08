@@ -285,7 +285,7 @@ class HomeVerbs:
         self._project_return = None    # the project-file edit it guarded is over too
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
-        # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches
+        # torn down (self.editor/self.run.project etc.) -- a HOME-key tap reaches
         # here directly, bypassing any per-app CLOSE affordance, and must never
         # drop an edit still sitting in its idle-debounce window.
         #
@@ -302,7 +302,7 @@ class HomeVerbs:
             if _close is not None:
                 _close()
         _editor_app = getattr(self, "editor_app", None)
-        if _editor_app is not None and _editor_app.project is self.project:
+        if _editor_app is not None and _editor_app.project is self.run.project:
             _editor_app.save_current()
         if self._editing_icons:
             self.look.save_icons()     # the theme mode's tabs
@@ -314,7 +314,7 @@ class HomeVerbs:
         # to it, so neither it nor the run state it holds is torn down.
         keep = self.wm.is_parked("menu") and (
             self._editing_icons or (_editor_app is not None
-                                    and _editor_app.project is self.project))
+                                    and _editor_app.project is self.run.project))
         if not keep:
             self.editor = None
             self.paint = None
@@ -329,21 +329,21 @@ class HomeVerbs:
             self.cart = None
             # #66 fragmentation fix: ns = None alone kept the world alive through
             # player._update's closure; release clears the dict in place + collects.
-            self.player.release_world()
+            self.run.player.release_world()
             # #66 pin-field fix (the repeat-run CLIFF's other half): going HOME drops
             # the whole workspace. The fat cart re-slims NOW (not at the next open --
             # reopening the SAME cart otherwise stays fat forever, and its rehydrated
             # src/sprites strings are mid-heap pins that fragment every later run's
             # churn arena; reopen costs one SD read) and a FRESH empty Project
-            # replaces the old one's sheet/tilemap/images/pmem (ws.project is
+            # replaces the old one's sheet/tilemap/images/pmem (ws.run.project is
             # never-None by design, so surfaces keep their invariant). The EDITOR
             # return path (\_exit_to_caller -> menu) keeps both -- that's live
             # editing state, not a corpse.
-            _fat = getattr(self, "_fat_cart", None)
+            _fat = self.run.fat_cart
             if _fat is not None:
                 self.carts.reslim(_fat)
-                self._fat_cart = None
-            self.project = Project(self)
+                self.run.fat_cart = None
+            self.run.project = Project(self)
         self.cart_error = None
         self.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
         self.ach_ui._clock_taps = 0

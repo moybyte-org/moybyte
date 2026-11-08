@@ -375,8 +375,8 @@ def test_the_on_glass_fixture_cart_runs_under_the_real_player(tmp_path):
     shutil.copytree(fixture, str(root / "placement_lua.moy"))
     ws = build_ws(tmp_path)
     open_cart(ws, "Placement Lua")
-    assert ws.player.cart_error is None
-    run = ws.player._lua
+    assert ws.run.player.cart_error is None
+    run = ws.run.player._lua
     assert run is not None, "the fixture did not start on the Lua runtime"
     assert run.get_global("N") == 4                  # scene() saw four rows
     assert run.get_global("PLAYERS") == 1 and run.get_global("COINS") == 3
@@ -386,7 +386,7 @@ def test_the_on_glass_fixture_cart_runs_under_the_real_player(tmp_path):
     for _ in range(60):
         ws.input.begin_frame()
         ws.frame(1 / 30)
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     assert run.get_global("score") == 1
 
 

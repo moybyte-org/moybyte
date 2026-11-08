@@ -152,7 +152,7 @@ class MapPage:
         ui.page("")
         me = mu.mapedit
         ws = mu.ws
-        if me is None or ws.project.sheet is None or ws.project.tilemap is None:
+        if me is None or ws.run.project.sheet is None or ws.run.project.tilemap is None:
             ui.at(*rect)
             ui.empty("map", "No map", ("This cart has no sprites to paint with",))
             ui.end()
@@ -167,12 +167,12 @@ class MapPage:
             self._brushes(cv, th, me, px, y + 6)
         self._foot(me, x, y + h - 26, w)
         if self.pop == "resize":
-            self._resize(ws.project.tilemap)
+            self._resize(ws.run.project.tilemap)
         ui.end()
 
     def _brushes(self, cv, th, me, px, y):
         mu = self.mu
-        sheet = mu.ws.project.sheet
+        sheet = mu.ws.run.project.sheet
         ids = mu._map_palette_ids()
         dark, light = self._greys()
         for k in range(len(ids)):

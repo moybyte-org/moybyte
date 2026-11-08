@@ -177,9 +177,9 @@ class WasmHostRun:
         del src                          # a compiled cart has no source text
         from runtime import wasm_binding
         from runtime.wasm_binding import HostWasmRun
-        project = getattr(ws, "project", None)
+        project = ws.run.project
         cart = getattr(project, "cart", None) or ws.cart or {}
-        canvas = ws.canvas
+        canvas = ws.run.canvas
         buf = getattr(canvas, "_buf", None)
         if buf is None:
             raise RuntimeError("a compiled cart needs an RGB565 canvas")
@@ -223,7 +223,7 @@ class WasmHostRun:
     def _update(self, dt):
         # A tier that swaps framebuffers under the canvas re-points the run,
         # as the Lua glue's retarget does.
-        buf = self._ws.canvas._buf
+        buf = self._ws.run.canvas._buf
         if buf is not self._buf:
             self._run.retarget(buf)
             self._buf = buf
@@ -245,7 +245,8 @@ class WasmHostRun:
                 except Exception:  # noqa: BLE001
                     pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms,
+        snap_shared(s, inp, self._ws.run.cart_start_ms, self._I_SNAP, pointer_state,
+                    self._touch_out, _since_ms,
                     getattr(self._ws, "windowed_chrome", False))
         err = self._run.tick(dt, self.draw_next)
         # quit() sets SNAP_QUIT; the Player honours cart_quit after the tick.
@@ -253,7 +254,7 @@ class WasmHostRun:
             s[SNAP_QUIT] = 0
             inp.cart_quit = True
         self._sync_view()
-        drain_audio(getattr(self._ws, "audio", None), self._aq_ops,
+        drain_audio(self._ws.run.audio, self._aq_ops,
                     self._run.audio())
         if err:
             raise RuntimeError(err)
@@ -275,7 +276,7 @@ class WasmHostRun:
         from runtime import moy_play
         self._prun = run
         try:
-            au = getattr(self._ws, "audio", None)
+            au = self._ws.run.audio
             moy_play.bind(run, self._ws.input, int(getattr(au, "h", 0) or 0), tick)
             moy_play.open(run)
         except (RuntimeError, TypeError) as exc:
@@ -288,7 +289,7 @@ class WasmHostRun:
         from runtime import moy_play
         ws = self._ws
         inp = ws.input
-        buf = ws.canvas._buf
+        buf = ws.run.canvas._buf
         if buf is not self._buf:
             self._run.retarget(buf)
             self._buf = buf

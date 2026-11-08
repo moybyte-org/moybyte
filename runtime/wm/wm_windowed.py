@@ -636,7 +636,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._parked = None
         kinds = list(p.kinds)
         if ("menu" in kinds and not ws._editing_icons
-                and ws.editor_app.project is not ws.project):
+                and ws.editor_app.project is not ws.run.project):
             kinds.remove("menu")
             win = p.wins.pop("menu", None)
             if win is not None:
@@ -813,7 +813,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             n = _layout_base.chrome_size(fs)
             r = _layout_base.render_scale()
             return (DESK_SIZES[key][0] * n // r, DESK_SIZES[key][1] * n // r)
-        if key == "desktop" and self.ws.app_window_canvas:
+        if key == "desktop" and self.ws.run.app_window_canvas:
             # a window-bound app cart (Notes): its designed size, by the
             # last part of its id, else the default panel below
             cid = str((self.ws.cart or {}).get("id") or "")
@@ -834,12 +834,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             foot = (_ui_draw.frame_geom(full.w, full.h, th)[1]
                     if _ui_draw.depth()[12] else 0)
             e = max(foot, self._frame_edge())
-            fit = max(1, min((full.w - 24 - 2 * e) // self.ws.canvas.w,
+            fit = max(1, min((full.w - 24 - 2 * e) // self.ws.run.canvas.w,
                              (self._desk_rect()[3] - 24 - th - e)
-                             // self.ws.canvas.h))
+                             // self.ws.run.canvas.h))
             s = min(fit, _DEV_SCALE) if self._play_intent == "dev" else fit
-            return (self.ws.canvas.w * s + 2 + 2 * e,
-                    self.ws.canvas.h * s + 2 + th + e)
+            return (self.ws.run.canvas.w * s + 2 + 2 * e,
+                    self.ws.run.canvas.h * s + 2 + th + e)
         if key in ("menu", "projects"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key in ("artwork", "appearance"):
@@ -912,7 +912,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         along its foot. Clamped to the desk."""
         dx, dy, dw, dh = self._desk_rect()
         ed = self._wins.get("menu")
-        native = w < 2 * self.ws.canvas.w
+        native = w < 2 * self.ws.run.canvas.w
         if ed is None or getattr(ed, "minimized", False):
             ex, ey, ew, eh = dx, dy, dw, dh
         else:
@@ -1072,7 +1072,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if win.kind == "desktop":
             win.buf = None
             win.ctx = None
-            if self.ws.app_window_canvas:
+            if self.ws.run.app_window_canvas:
                 self.ws._surface_write()  # the app's content rect is its window's
             return
         full = self._root_canvas
@@ -1282,7 +1282,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             # Play is full screen on the desk (owner, 2026-10-31): a desk
             # play opens so, with no buttons; an Editor's playtest and a
             # window-bound app cart open as windows.
-            return self._play_intent == "play" and not self.ws.app_window_canvas
+            return self._play_intent == "play" and not self.ws.run.app_window_canvas
         if _layout_base.metric_class() != _layout_base.DESK:
             return False
         got = self.ws.system.get("win_full", None)
@@ -1383,8 +1383,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         ws = self.ws
         if self.mode == "console":
             return (self.stack.depth() == 2 and self.stack.top() == "desktop"
-                    and not ws.app_window_canvas and ws.cart_error is None
-                    and not ws.player._is_tool)
+                    and not ws.run.app_window_canvas and ws.cart_error is None
+                    and not ws.run.player._is_tool)
         win = self._wins.get("desktop")
         return (win is not None and self._is_game(win)
                 and (win.saved is not None or win.docked is not None))
@@ -1541,7 +1541,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         its run held by the Editor while hidden unless something already
         holds it (the pause menu), which stays its holder's."""
         self._minimize(win, on)
-        player = self.ws.player
+        player = self.ws.run.player
         if on:
             win.held = not player.paused
             if win.held:
@@ -1600,7 +1600,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         return self._order.index(key) >= self.full_cover()
 
     def _proc_paint(self, win, key, focused, dt, full=True):
-        """A running set's game window: its world installed, its canvas's
+        """A running set's game window: its run served, its canvas's
         last frame composited and its chrome drawn, the cart not run (its
         frames are `Procs.frame`'s)."""
         procs = self.ws.procs
@@ -1754,10 +1754,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if "tasks" in self._wins and ws.tasks_layer.moved():
             return True                 # the task manager's rows moved
         return (self.stack.has("desktop") and ws.cart_error is None
-                and not ws.player.paused
+                and not ws.run.player.paused
                 and (ws._update is not None or ws._draw is not None)
-                and (pages or not ws.player._on_change)
-                and ws.player.animates())
+                and (pages or not ws.run.player._on_change)
+                and ws.run.player.animates())
 
     def _content_for(self, kind):
         """The content Layer a window presents (the router's registry lookup,
@@ -1858,7 +1858,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             # held.
             game = self._wins.get("desktop")
             return (not m.open and game is not None and not game.minimized
-                    and ws.canvas is not ws.sys_canvas and self._game_held()
+                    and ws.run.canvas is not ws.sys_canvas and self._game_held()
                     and (win is None or win is game))
         if not (m.open and m.comp is None and "desktop" not in self._wins):
             return False
@@ -1870,7 +1870,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """The playtest's game holds its frame: paused, or a stopped run
         under its card."""
         ws = self.ws
-        return ws.player.paused or (ws.pause.open and ws.pause.stopped)
+        return ws.run.player.paused or (ws.pause.open and ws.pause.stopped)
 
     def _pop_live(self):
         """True while a popover is open or owed to a retained buffer."""

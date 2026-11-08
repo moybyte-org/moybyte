@@ -302,15 +302,15 @@ def canvas(**kw):
 
 def test_draw2_is_cart_gated_and_needs_a_canvas(dd):
     diag = FakeDiag()
-    dd._diag_draw2(diag, Obj(canvas=None, perf_sample=lambda: ("c",)))
-    dd._diag_draw2(diag, Obj(canvas=canvas(), perf_sample=lambda: None))
-    dd._diag_draw2(None, Obj(canvas=canvas(), perf_sample=lambda: ("c",)))
+    dd._diag_draw2(diag, Obj(run=Obj(canvas=None), perf_sample=lambda: ("c",)))
+    dd._diag_draw2(diag, Obj(run=Obj(canvas=canvas()), perf_sample=lambda: None))
+    dd._diag_draw2(None, Obj(run=Obj(canvas=canvas()), perf_sample=lambda: ("c",)))
     assert diag.lines == []
 
 
 def test_draw2_reports_each_native_op_in_milliseconds(dd):
     diag = FakeDiag()
-    dd._diag_draw2(diag, Obj(canvas=canvas(), perf_sample=lambda: ("c",)))
+    dd._diag_draw2(diag, Obj(run=Obj(canvas=canvas()), perf_sample=lambda: ("c",)))
     f = diag.one("DRAW2")
     assert (f["layer"], f["batch"], f["map"]) == ("1.00ms", "2.00ms", "3.00ms")
     assert (f["text"], f["fill"]) == ("4.00ms", "5.00ms")
@@ -326,7 +326,7 @@ def test_the_gated_microseconds_are_FOLDED_into_the_bucket_they_belong_to(dd):
     # as agreement.
     cv = canvas(gate_counts=lambda: (17, 23, 6000, 9000))
     diag = FakeDiag()
-    dd._diag_draw2(diag, Obj(canvas=cv, perf_sample=lambda: ("c",)))
+    dd._diag_draw2(diag, Obj(run=Obj(canvas=cv), perf_sample=lambda: ("c",)))
     f = diag.one("DRAW2")
     assert f["fill"] == "11.00ms"                  # 5000 + 6000 us
     assert f["text"] == "13.00ms"                  # 4000 + 9000 us
@@ -335,7 +335,7 @@ def test_the_gated_microseconds_are_FOLDED_into_the_bucket_they_belong_to(dd):
 
 def test_a_canvas_with_no_gates_still_prints_the_whole_line(dd):
     diag = FakeDiag()
-    dd._diag_draw2(diag, Obj(canvas=canvas(), perf_sample=lambda: ("c",)))
+    dd._diag_draw2(diag, Obj(run=Obj(canvas=canvas()), perf_sample=lambda: ("c",)))
     assert diag.one("DRAW2")["gated"] == {"_bare": [], "fill": "0", "text": "0"}
 
 
@@ -515,7 +515,7 @@ def test_no_diag_line_can_break_the_frame_it_is_measuring(dd):
         ("DRAWBRK", lambda: dd._diag_drawbrk(
             diag, Obj(perf_breakdown=raises, **running))),
         ("DRAW2", lambda: dd._diag_draw2(
-            diag, Obj(canvas=Obj(gate_counts=raises), **running))),
+            diag, Obj(run=Obj(canvas=Obj(gate_counts=raises)), **running))),
         ("WEBHOST", lambda: dd._diag_webhost(diag, Obj(webhost=Exploding()))),
         ("I2CSTAT", lambda: dd._diag_i2cstat(diag, Exploding(), Exploding())),
     )

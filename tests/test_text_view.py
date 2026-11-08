@@ -649,7 +649,7 @@ def test_a_line_added_below_the_view_draws_no_history(th):
 
 
 def _cart_pixels(ws):
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     cv = ns["screen"]()
     x, y, w, h = ns["content_rect"]()
     buf = cv._buf
@@ -660,7 +660,7 @@ def _cart_pixels(ws):
 
 
 def _cart_pmem(ws):
-    lua = getattr(ws.player, "_lua", None)
+    lua = getattr(ws.run.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:3]
     if lua is not None:
@@ -669,7 +669,7 @@ def _cart_pmem(ws):
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
         return list(img)[:3]
-    pm = ws.player.ns["pmem"]
+    pm = ws.run.player.ns["pmem"]
     return [pm(i) for i in range(3)]
 
 
@@ -704,7 +704,7 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
             quiesce(ws)
             ws._dirty = True
             drv.frame(1 / 30)
-            assert ws.player.cart_error is None, (name, ws.player.cart_error)
+            assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
             shots.append((_cart_pixels(ws), _cart_pmem(ws)))
         runs[name] = shots
         ws.exit()

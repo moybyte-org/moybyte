@@ -160,9 +160,16 @@ class _Layer:
             setattr(self, k, ns[k])
 
 
+class _NoRun:
+    """The run a namespace with none is handed (a live wallpaper, a bare
+    namespace): its own view and a clock from 0."""
+    view = None
+    cart_start_ms = None
+
+
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None,
-             net=None, gpio=None, flags=None, owner="cart"):
+             net=None, gpio=None, flags=None, owner="cart", run=None):
     """The cartridge global namespace: the frozen TIC-80-style kid API
     (cls/pix/rect/circ/spr/map/print/btn/touch/... -- docs/moy_cart_api.md)
     bound to a canvas + InputState + the injected audio/wifi backends.
@@ -184,8 +191,11 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     cart that would not start that it fixes). It rides on BOTH ways a cart gets
     a paint image, the loaded one (image()) and the built one (`Image`), because
     the bake that fails does not care which constructor made the picture. A
-    gc-heap canvas ignores it.
+    gc-heap canvas ignores it. `run` is the Run it plays in (procs.Run): its
+    view() and its clock are that run's.
     """
+    if run is None:
+        run = _NoRun()
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
                            # repeated image(name) returns the SAME Image (#63) and its
                            # RGB565 bake cache survives across frames.
@@ -408,7 +418,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         mc = getattr(input, "match_clock", None)
         if mc is not None:
             return mc.ms(mc.frame)
-        return _since_ms(getattr(input, "cart_start_ms", 0))
+        return _since_ms(run.cart_start_ms or 0)
 
     def key(code=None):
         # key([code]) -> is that ASCII key held this frame (key(ord("a"))). The
@@ -444,8 +454,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # this centered w x h region of the 320x240 canvas to the glass at the
         # biggest integer scale that fits (celeste's 128x128 -> 4x on the P4).
         # view() / view(0, 0) restores the full canvas. ADDITIVE like
-        # textmode/quit; rides InputState, cleared by Player.start each run.
-        input.game_view = (int(w), int(h)) if w and h else None
+        # textmode/quit; the run's (`Run.view`), cleared by Player.start each run.
+        run.view = (int(w), int(h)) if w and h else None
 
     def _quit():
         # quit() -> END this cart and return to whoever launched it (the launcher, or
@@ -471,7 +481,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
         lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
-                       flags=tile_flags, owner=owner)
+                       flags=tile_flags, owner=owner, run=run)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):

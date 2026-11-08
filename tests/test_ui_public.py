@@ -66,9 +66,9 @@ def page_runs(request, tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _script(ws)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         if name == "wasm":
             from runtime import moy_play
             _CENSUS[:] = [tuple(moy_play.info()[5]),
@@ -89,7 +89,7 @@ def _frame(drv):
 def _pixels(ws):
     """The cart's canvas below the host's strip (the bar contract's content
     rect), where the three draw alike."""
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     cv = ns["screen"]()
     x, y, w, h = ns["content_rect"]()
     buf = cv._buf
@@ -100,7 +100,7 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.player, "_lua", None)
+    lua = getattr(ws.run.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:15]
     if lua is not None:
@@ -108,7 +108,7 @@ def _pmem(ws):
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
         return list(img)[:15]
-    pm = ws.player.ns["pmem"]
+    pm = ws.run.player.ns["pmem"]
     return [pm(i) for i in range(15)]
 
 
@@ -748,7 +748,7 @@ def _first_page(root, title, theme, variant=None):
     open_cart(ws, title)
     drv = make_drv(ws)
     drv.frame(_DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(3):
         _frame(drv)
     px = _pixels(ws)
@@ -830,13 +830,13 @@ def test_an_app_cart_draws_on_change_unless_it_animates(tmp_path, ven, every):
     for _ in range(10):
         quiesce(ws)
         drv.frame(_DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player.animates() == every
-    n = ws.player.ns["frames"]
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player.animates() == every
+    n = ws.run.player.ns["frames"]
     for _ in range(20):
         quiesce(ws)
         drv.frame(_DT)
-    assert ws.player.ns["frames"] - n == (20 if every else 0)
+    assert ws.run.player.ns["frames"] - n == (20 if every else 0)
     ws.exit()
 
 

@@ -190,7 +190,7 @@ class Notices:
             _ch._moy_play().chrome_toast_arm(
                 _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE, t[1], t[2], bool(t[3]),
                 self._toast_until)
-        au = self.audio
+        au = self.run.audio
         if au is not None:
             try:
                 au.beep(880, 0.08)
@@ -306,7 +306,7 @@ class Notices:
     def _front_pid(self):
         """The pid of the run the user is in: the front run while its
         window holds the input, else None (the shell's)."""
-        pl = self.player
+        pl = self.run.player
         if pl is None or pl.pid is None or self.cart is None:
             return None
         return pl.pid if self.wm.input_holder() == _FRONT_KEY else None
@@ -365,7 +365,7 @@ class Notices:
     def _intent_hand(self, pid, g):
         """A pick to the running app that asked: its `moy_open(h)`, True where
         it took it (None, a cancel, reaches it too)."""
-        pl = self.player
+        pl = self.run.player
         if pid is None or pl is None or pl.pid != pid or pl.cart_error is not None:
             return False
         if (pl.ns or {}).get("moy_open") is None:
@@ -433,7 +433,7 @@ class Notices:
         if app is not None:
             return None
         self.open(cart)
-        pl = self.player
+        pl = self.run.player
         if pl is None or self.cart is None or pl.cart_error is not None \
                 or self.app_cart_id(self.cart) != self.app_cart_id(cart):
             return None
@@ -531,7 +531,7 @@ class Notices:
         brought = self._bring(n.pid)
         if brought is not None:
             if brought:
-                self.player.window_event("moy_action", n.id, key)
+                self.run.player.window_event("moy_action", n.id, key)
             return
         try:
             import scheduler as _sched
@@ -552,7 +552,7 @@ class Notices:
         if pid is None:
             return None
         procs = self.procs
-        pl = self.player
+        pl = self.run.player
         if pl is not None and pl.pid == pid:
             if not procs.handheld():
                 self.wm.bring_forward("desktop")
@@ -562,7 +562,7 @@ class Notices:
         for p in procs.list:
             if p.player.pid == pid:
                 self.tasks_switch(p.key)
-                return self.player.pid == pid
+                return self.run.player.pid == pid
         return None
 
     def _note_top(self):
@@ -695,7 +695,7 @@ class PauseMenu:
         The first, or None elsewhere or with no room."""
         ws = self.ws
         cv = ws.sys_canvas
-        if ws.canvas is not cv:
+        if ws.run.canvas is not cv:
             return None
         lay = _ui_draw.held_layer(ws, cv, 2)
         if lay is not None:
@@ -707,7 +707,7 @@ class PauseMenu:
         if ws.cart_error is not None:
             self.stop()
             return
-        ws.player.pause()
+        ws.run.player.pause()
         self.stopped = False
         offers = getattr(ws.wm, "offers_window", None)
         if offers is not None and offers():
@@ -722,12 +722,12 @@ class PauseMenu:
         """Open the stop card over the run that stopped (its error, or its
         notice, is the Player's), its rows by the run's kind."""
         ws = self.ws
-        player = ws.player
+        player = ws.run.player
         self.stopped = True
         cart = ws.cart or {}
         if player.notice is not None:
             rows = (self.UPDATES, self.HOME) if player.newer else (self.HOME,)
-        elif ws.project is None or cart.get("runtime") == "wasm" or ws.web.parked:
+        elif ws.run.project is None or cart.get("runtime") == "wasm" or ws.web.parked:
             rows = (self.RESTART, self.HOME)
         else:
             rows = (self.SEE_WHY, self.RESTART, self.HOME)
@@ -761,7 +761,7 @@ class PauseMenu:
         self._hold.unsnap(self.ws, self.ws.sys_canvas)   # the frame as the game left it
         self._hold.drop()
         self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
-        self.ws.player.resume()
+        self.ws.run.player.resume()
         self.ws.pause_touch()
 
     def back(self):
@@ -823,7 +823,7 @@ class PauseMenu:
         elif row == self.MINIMISE:
             self._shut()                  # the run stays held: it joins the running set
             if not ws.procs.minimise():
-                ws.player.resume()
+                ws.run.player.resume()
         elif row == "Restart":
             self.close()
             ws._reset_canvas_state()
@@ -975,7 +975,7 @@ class PauseMenu:
         # the paused game dims under the card (D-01): over the frame just
         # put back, or the composite just made, never over the last scrim;
         # the whole glass, or on the desk the content under its bar
-        if hold.snapped or ws.canvas is not cv or not top:
+        if hold.snapped or ws.run.canvas is not cv or not top:
             _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
             if hold.snapped and top:
                 hold.keep(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv), True)
@@ -1078,7 +1078,7 @@ class PauseMenu:
         """The stop card's body under its icon: the cart and its state, what
         happened, the rows and the keys."""
         ws = self.ws
-        player = ws.player
+        player = ws.run.player
         title = str((cart.get("title") if cart else "") or "Game")
         if player.notice is not None:
             _ui.info(title, "")

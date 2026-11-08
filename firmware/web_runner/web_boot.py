@@ -920,7 +920,7 @@ def state_json():
     # The running cart's first pmem slots, where a fixture reports its checks:
     # the run's flush, which hands a moved image to the console's pmem to be
     # kept at the next boundary as the periodic flush does, then its image.
-    run = getattr(getattr(_S["ws"], "player", None), "_lua", None)
+    run = getattr(_S["ws"].run.player, "_lua", None)
     flush = getattr(run, "flush_pmem", None)
     if flush is not None:
         flush()

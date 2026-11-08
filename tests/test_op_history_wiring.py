@@ -455,7 +455,7 @@ def test_graduated_blocks_tab_has_no_history(tmp_path):
     # Graduated: the Blocks tab is a frozen read-only render, so its History is
     # ABSENT -- the registry returns None and the bar never routes into it.
     ws.block_ui.blk_graduated = True
-    assert ws.project.history_for("blocks") is None
+    assert ws.run.project.history_for("blocks") is None
     assert ws.history.active_history() is None
     # can_undo now consults only the journal (no in-RAM block history to report).
     assert ws.history.can_undo() is False
@@ -548,7 +548,7 @@ def test_config_commit_embeds_ops_in_journal(tmp_path):
     assert ops, "the config commit line must carry the op batch"
     for op in ops:
         assert op["k"] == "spd"
-    assert ws.project.config_hist.peek() == []   # the batch drained
+    assert ws.run.project.config_hist.peek() == []   # the batch drained
 
 
 # -- the bar's cached strip must un-dim UNDO on the very next frame ----------
@@ -663,7 +663,7 @@ def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
     # Open the (now frozen, History-less) Blocks tab and press the bar UNDO ONCE.
     ws._open_blocks()
     assert ws.menu_view == "blocks"
-    assert ws.project.history_for("blocks") is None       # no in-RAM history: journal walk
+    assert ws.run.project.history_for("blocks") is None       # no in-RAM history: journal walk
     assert ws.history.undo() is True
     assert "score = 999" not in (Path(path) / "main.py").read_text()
     assert ws.cart["graduated"] is False                  # un-graduated in ONE press

@@ -53,7 +53,7 @@ class SaveVerbs:
             return True
         # The store-write half moved to Project.commit_code (Stage 1b); the compile-
         # check + code-UI half above stays here (the code surface).
-        return self.project.commit_code(src, force=force, name=name)
+        return self.run.project.commit_code(src, force=force, name=name)
 
     def _set_code_error(self, msg, move=True):
         """Record a syntax error so the code view can mark the offending line
@@ -100,11 +100,11 @@ class SaveVerbs:
             self._set_text_mode(False)
             # PLAY from the code tab (Stage 3b): caller = the Editor, so the cart's
             # exit returns to the code tab (not the launcher home).
-            self.run(self.project, self.editor_app)
+            self.play(self.editor_app)
         else:
             # Compiled but raised at exec/_init: show the error panel on the desktop
             # (still reachable -> the kid can reopen the editor to fix it).
-            self.run(self.project, self.editor_app)
+            self.play(self.editor_app)
 
     # (The #111 bar UNDO/REDO pair, the code typing burst, the tab-scoped
     # journal walk and the post-walk workspace reload all live on
@@ -113,12 +113,12 @@ class SaveVerbs:
     def save_sprites(self):
         # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
         # tested ws. entry point PaintLayer's SAVE dispatches to.
-        self.project.commit_sprites()
+        self.run.project.commit_sprites()
 
     def save_map(self):
         # Store-write moved to Project.commit_map (Stage 1b); this stays as the tested
         # ws. entry point MapEditorUI's SAVE dispatches to.
-        self.project.commit_map()
+        self.run.project.commit_map()
 
     def save_scene(self):
         # The scene tab's persist verb (#85 Stage 2): the editor serializes its
@@ -132,7 +132,7 @@ class SaveVerbs:
     def save_sounds(self):
         # Store-write moved to Project.commit_sounds (Stage 1b); this stays as the
         # tested ws. entry point MusicEditorUI's SAVE dispatches to.
-        self.project.commit_sounds()
+        self.run.project.commit_sounds()
 
     # -- cross-cart sprite reuse (#18) ---------------------------------------
     #
@@ -216,7 +216,7 @@ class SaveVerbs:
         (sheet_1, ...) and browsable in the Files app; from there it re-imports
         into any project through the file picker (the #18 cross-cart reuse hub).
         Returns the stored file name, or None. Surfaces a paint status."""
-        sheet = self.project.sheet if self.project is not None else None
+        sheet = self.run.project.sheet if self.run.project is not None else None
         if sheet is None or not (self.carts_root and self.can_manage):
             self.paint_status = None       # writes deferred -- nothing to persist
             return None
@@ -241,7 +241,7 @@ class SaveVerbs:
         # reachable). PLAY from the Config tab (Stage 3b): caller = the Editor, so the
         # cart's exit returns to the Config cards, not the launcher home.
         ok = self._start()
-        self.run(self.project, self.editor_app)
+        self.play(self.editor_app)
         if ok:
             self.ach.note("run")                # "Lift Off!": GO re-ran the cart (#21)
             self._save_config()
@@ -249,4 +249,4 @@ class SaveVerbs:
     def _save_config(self):
         # Moved to Project.commit_config (Stage 1b); this stays as the tested ws. name
         # apply() dispatches to.
-        self.project.commit_config()
+        self.run.project.commit_config()

@@ -232,7 +232,7 @@ class MapEditorUI:
             return False
         self._hold = -1
         cell = self._map_cell_at(*self._map_press)
-        tm = self.ws.project.tilemap
+        tm = self.ws.run.project.tilemap
         if cell is None or tm is None:
             return False
         self._map_revert_paint()
@@ -265,8 +265,8 @@ class MapEditorUI:
         run copies at its start and at Play (`ProjectStore.play_world`, E-02). Called from
         Workstation.set_menu_view("map")."""
         ws = self.ws
-        if self.mapedit is None and ws.project.tilemap is not None and ws.project.sheet is not None:
-            self.mapedit = MapEditor(ws.project.tilemap, ws.project.sheet)
+        if self.mapedit is None and ws.run.project.tilemap is not None and ws.run.project.sheet is not None:
+            self.mapedit = MapEditor(ws.run.project.tilemap, ws.run.project.sheet)
 
     def reset(self):
         """Drop the active editor (a stale one must never leak into an unrelated
@@ -349,7 +349,7 @@ class MapEditorUI:
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,
         clamped so the last page never runs past the sheet's tile count)."""
-        sheet = self.ws.project.sheet
+        sheet = self.ws.run.project.sheet
         if sheet is None:
             return []
         count = sheet.count
@@ -381,7 +381,7 @@ class MapEditorUI:
     def _mv_overview_cell(self):
         """The OVERVIEW rung's cell size for the map that is open."""
         lay = self.layout
-        tm = self.ws.project.tilemap
+        tm = self.ws.run.project.tilemap
         if tm is None:
             return _MV_FIT_MAX
         return _mv_fit_cell(lay.mv_avail_w, lay.mv_avail_h, tm.w, tm.h)
@@ -408,7 +408,7 @@ class MapEditorUI:
         current zoom: the top-left visible cell stays in [0, max(0, dim - visible)],
         so a map smaller than the view always pins to (0, 0) (no panning needed)."""
         me = self.mapedit
-        tm = self.ws.project.tilemap
+        tm = self.ws.run.project.tilemap
         if me is None or tm is None:
             return
         x0, y0, cell, cols, rows = self._mv_metrics()
@@ -488,7 +488,7 @@ class MapEditorUI:
         visible cell then clamped to the map bounds (#91). Used by the RECT drag so
         a rubber-band that leaves the view still tracks a valid opposite corner."""
         me = self.mapedit
-        tm = self.ws.project.tilemap
+        tm = self.ws.run.project.tilemap
         if me is None or tm is None:
             return None
         x0, y0, cell, cols, rows = self._mv_metrics()
@@ -517,7 +517,7 @@ class MapEditorUI:
         clamped to [_MAP_MIN_DIM, _MAP_MAX_DIM]; content is preserved (top-left
         anchored). A structural change, so it drops the in-editor undo history and
         re-clamps the camera to the new bounds."""
-        tm = self.ws.project.tilemap
+        tm = self.ws.run.project.tilemap
         me = self.mapedit
         if tm is None:
             return
@@ -572,7 +572,7 @@ class MapEditorUI:
         brush (#57) an s x s block (erase always the full square, a stamp the
         sheet-clamped stamp_span)."""
         me = self.mapedit
-        tm = self.ws.project.tilemap
+        tm = self.ws.run.project.tilemap
         if self.map_erase or me.n < 0:
             tw = th = me.size
         else:
@@ -643,7 +643,7 @@ class MapEditorUI:
         spurious cache rebuild in a running cart). The snapshot's cells were
         validated in-map when _map_stamp_cells built it."""
         u = self._map_paint_undo
-        tm = self.ws.project.tilemap
+        tm = self.ws.run.project.tilemap
         if u is not None and tm is not None:
             cells, dirty, gen = u
             for cx, cy, prev in cells:
@@ -699,7 +699,7 @@ class MapEditorUI:
             self._map_press = (px, py)         # gesture; the tool decides what it does.
             self._map_panning = False
             self._map_drag = None
-            tm = ws.project.tilemap
+            tm = ws.run.project.tilemap
             if tm is None:
                 return
             tool = self.map_tool
@@ -750,8 +750,8 @@ class MapEditorUI:
         bx, by, bw, bh = lay.body_fill
         col = th["surface"]
         me = self.mapedit
-        tm = ws.project.tilemap
-        if me is None or ws.project.sheet is None or tm is None:
+        tm = ws.run.project.tilemap
+        if me is None or ws.run.project.sheet is None or tm is None:
             cv.rect(bx, by, bw, bh, col)
             return
         # The view fills its own rect first (its cells' backgrounds): the
@@ -774,9 +774,9 @@ class MapEditorUI:
         ws = self.ws
         NAMES = self._NAMES
         me = self.mapedit
-        sheet = ws.project.sheet
+        sheet = ws.run.project.sheet
         x0, y0, cell, cols, rows = self._mv_metrics()
-        tm = ws.project.tilemap
+        tm = ws.run.project.tilemap
         # Visible map region: each cell is the sprite tile placed there, UPSCALED to
         # fill the cell (scale = cell // TILE, crisp pixel-art) and centered, with grid
         # lines so empty cells read as empty. Tile images are cached by id within the

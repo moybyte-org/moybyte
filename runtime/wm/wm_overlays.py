@@ -36,8 +36,8 @@ class WindowOverlays:
     def _game_rect(self, win):
         """The rect a quiet frame composites the game into, on the glass."""
         ox, oy, scale = self._player_view(win)
-        gc = self.ws.canvas
-        view = None if self.ws.app_window_canvas else self._view_src()
+        gc = self.ws.run.canvas
+        view = None if self.ws.run.app_window_canvas else self._view_src()
         gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
         return (ox, oy, gw * scale, gh * scale)
 

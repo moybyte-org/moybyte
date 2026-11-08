@@ -219,8 +219,8 @@ def test_commit_scene_journals_and_undo_restores(tmp_path):
     ws = _open_scene_cart(tmp_path)
     path = ws.cart["path"]
 
-    ws.project.commit_scene("main", MAIN_SCENE)
-    ws.project.commit_scene("main", LEVEL2_SCENE)
+    ws.run.project.commit_scene("main", MAIN_SCENE)
+    ws.run.project.commit_scene("main", LEVEL2_SCENE)
 
     ents = [e for e in _entries(path) if e["file"] == "scenes/main.moyscene"]
     assert len(ents) == 2                        # two durable steps
@@ -263,7 +263,7 @@ def test_running_cart_reads_scene_into_init(tmp_path):
     assert ns["ppos"] == (5, 6, 1, 3)                    # x/y/flip/flags read through
     assert ns["named2"] == 1                             # scene('level2') peeked
     assert ns["switched"] == 1                           # load_scene switched + returned
-    assert ws.project.play_scenes.active == "level2"     # the switch stuck for this run
+    assert ws.run.project.play_scenes.active == "level2"     # the switch stuck for this run
     assert ws.scenes.active == "main"                    # the Editor's are not the run's
 
 
@@ -283,9 +283,9 @@ def test_active_scene_resets_on_rerun(tmp_path):
     ws = _open_scene_cart(tmp_path, src=COUNT_SRC,
                           scenes={"main": MAIN_SCENE, "level2": LEVEL2_SCENE})
     assert ws.ns["n"] == 3                               # active == main (3 actors)
-    ws.project.play_scenes.load_scene("level2")          # a leftover switch (1 actor)
+    ws.run.project.play_scenes.load_scene("level2")          # a leftover switch (1 actor)
     ws._start()                                          # re-run the SAME project
-    assert ws.project.play_scenes.active == "main"       # a fresh copy, at its default...
+    assert ws.run.project.play_scenes.active == "main"       # a fresh copy, at its default...
     assert ws.ns["n"] == 3                               # ...so _init saw main again
 
 

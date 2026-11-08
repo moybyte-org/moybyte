@@ -102,12 +102,12 @@ def test_project_commit_manifest_persists_and_syncs_ram(tmp_path):
     assert ws.menu_view == "cards"
 
     titled = ws.carts.titled
-    ok = ws.project.commit_manifest(title="Renamed", author="Kid Coder")
+    ok = ws.run.project.commit_manifest(title="Renamed", author="Kid Coder")
     assert ok is True
-    assert ws.project.cart["title"] == "Renamed"       # in-RAM sync
+    assert ws.run.project.cart["title"] == "Renamed"       # in-RAM sync
     assert ws.carts.titled == titled + 1               # what a title reader keys on
-    assert ws.project.cart["author"] == "Kid Coder"
-    reloaded = moy_carts.load(ws.project.cart["path"])
+    assert ws.run.project.cart["author"] == "Kid Coder"
+    reloaded = moy_carts.load(ws.run.project.cart["path"])
     assert reloaded["title"] == "Renamed"
     assert reloaded["author"] == "Kid Coder"
 
@@ -126,21 +126,21 @@ def test_project_commit_manifest_rejects_blank_title(tmp_path):
     select_on_home(ws, "Tune Me")
     ws.open_in_editor()
 
-    assert ws.project.commit_manifest(title="   ", author="Someone") is True
-    assert ws.project.cart["title"] == "Tune Me"        # title left alone in RAM
-    assert ws.project.cart["author"] == "Someone"       # author still applied
+    assert ws.run.project.commit_manifest(title="   ", author="Someone") is True
+    assert ws.run.project.cart["title"] == "Tune Me"        # title left alone in RAM
+    assert ws.run.project.cart["author"] == "Someone"       # author still applied
     reloaded = moy_carts.load(cart["path"])
     assert reloaded["title"] == "Tune Me"               # title left alone on disk
     assert reloaded["author"] == "Someone"
 
     # blank BOTH -> nothing to do, a clean no-op False
-    assert ws.project.commit_manifest(title="  ", author=None) is False
+    assert ws.run.project.commit_manifest(title="  ", author=None) is False
 
 
 def test_project_commit_manifest_noop_without_a_real_cart():
     ws = host_app.build_workstation(None)
-    ws.project.cart = None
-    assert ws.project.commit_manifest(title="X") is False
+    ws.run.project.cart = None
+    assert ws.run.project.commit_manifest(title="X") is False
 
 
 # ----------------------------------------------------------------------------
@@ -205,8 +205,8 @@ def test_meta_modal_edits_title_and_author_and_commits(tmp_path):
 
     assert cl.prompt is None                               # dialog closed
     assert ws.input.text_mode is False                     # keyboard restored
-    assert ws.project.cart["title"] == "Star Racer"
-    assert ws.project.cart["author"] == "Ada"
+    assert ws.run.project.cart["title"] == "Star Racer"
+    assert ws.run.project.cart["author"] == "Ada"
     reloaded = moy_carts.load(cart["path"])
     assert reloaded["title"] == "Star Racer"
     assert reloaded["author"] == "Ada"
@@ -229,7 +229,7 @@ def test_meta_modal_blank_title_stays_open_with_message(tmp_path):
 
     assert cl.prompt is not None                            # stayed open
     assert cl.prompt.msg == "Give it a title."
-    assert ws.project.cart["title"] == "Tune Me"             # unchanged
+    assert ws.run.project.cart["title"] == "Tune Me"             # unchanged
 
 
 def test_meta_modal_cancel_discards_edits(tmp_path):
@@ -247,7 +247,7 @@ def test_meta_modal_cancel_discards_edits(tmp_path):
 
     assert cl.prompt is None
     assert ws.input.text_mode is False
-    assert ws.project.cart["title"] == "Tune Me"             # discarded
+    assert ws.run.project.cart["title"] == "Tune Me"             # discarded
     reloaded = moy_carts.load(cart["path"])
     assert reloaded["title"] == "Tune Me"
 
@@ -264,7 +264,7 @@ def test_meta_modal_draws_without_crashing_and_reset_closes_it(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)                                        # draws the modal, must not raise
     assert ws.cart_error is None
-    assert probe.drew_something(ws.canvas)
+    assert probe.drew_something(ws.run.canvas)
 
     ws.cards_layer.reset()                                  # switching cart must not leak it
     assert ws.cards_layer.prompt is None

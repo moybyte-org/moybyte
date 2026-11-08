@@ -487,7 +487,7 @@ def cmd_perf(b, a):
 
 PMEM = ("(lambda p: (getattr(getattr(p, '_lua', None), 'flush_pmem', "
         "lambda: 0)(), list(ws.pmem.cells) if getattr(ws, 'pmem', None) "
-        "is not None else None)[1])(getattr(ws, 'player', None))")
+        "is not None else None)[1])(getattr(ws.run, 'player', None))")
 
 
 def pmem_text(cells):
@@ -594,7 +594,7 @@ def _shot_open(comp, src, z, band):
     ox = 0
     oy = 0
     if src == 'game':
-        c = ws.canvas
+        c = ws.run.canvas
         buf = c._buf
         stride = getattr(c, '_stride', None) or c.w
         ox = getattr(c, '_ox', 0)

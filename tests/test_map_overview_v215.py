@@ -271,7 +271,7 @@ def _cell_px(ws, cx, cy):
 def test_overview_shows_a_fitting_map_whole_and_pins_the_camera(tmp_path):
     # Hop Quest's 40x26 pans at every detail rung and fits whole at the 4px floor.
     ws, _drv = _open_map(tmp_path, "Hop Quest")
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert cols < tm.w                                   # ...it pans at the default
     _to_overview(ws)
@@ -288,7 +288,7 @@ def test_overview_pans_and_clamps_a_map_too_wide_for_the_floor(tmp_path):
     # (owner call, 2026-09-06: most of a level at 4px beats all of it at 1px).
     from runtime import map_editor_ui as M
     ws, _drv = _open_map(tmp_path, "Sky Run")
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     _to_overview(ws)
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     me = ws.map_ui.mapedit
@@ -309,7 +309,7 @@ def test_overview_hit_tests_through_the_pan_offset(tmp_path):
     # The far edge of a panning map is only reachable after a pan, and the cell
     # under the pointer has to account for the camera at a 4px cell too.
     ws, drv = _open_map(tmp_path, "Sky Run")
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     _to_overview(ws)
     ws.map_ui._map_pan(tm.w, 0)                          # clamp to the right edge
     target = (tm.w - 1, tm.h - 1)
@@ -344,8 +344,8 @@ def test_zoom_button_and_title_name_the_overview_rung(tmp_path):
 
 def test_overview_paints_each_cell_its_tiles_dominant_colour(tmp_path):
     ws, drv = _open_map(tmp_path)            # Hop Quest, 40x26 -> a 4px cell
-    tm = ws.project.tilemap
-    sheet = ws.project.sheet
+    tm = ws.run.project.tilemap
+    sheet = ws.run.project.sheet
     _to_overview(ws)
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert cell >= 2                         # enough to sample a block's middle
@@ -366,7 +366,7 @@ def test_overview_paints_each_cell_its_tiles_dominant_colour(tmp_path):
 def test_overview_leaves_empty_cells_as_the_map_field(tmp_path):
     from runtime.chrome import NAMES
     ws, drv = _open_map(tmp_path)
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     _to_overview(ws)
     _paint(ws, drv)
     cv = ws.sys_canvas
@@ -390,8 +390,8 @@ def test_overview_paints_the_view_as_blocks_and_field_and_no_lattice(tmp_path):
     _to_overview(ws)
     _paint(ws, drv)
     cv = ws.sys_canvas
-    sheet = ws.project.sheet
-    tm = ws.project.tilemap
+    sheet = ws.run.project.sheet
+    tm = ws.run.project.tilemap
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     # Counted over the WHOLE view rectangle, not just the map: a block that runs
     # one pixel wide spills into the out-of-bounds black, and a map-sized window
@@ -417,8 +417,8 @@ def test_overview_splits_a_colour_run_at_every_boundary(tmp_path):
     # The row runs are an optimisation, so the shape they collapse to has to be
     # pinned: alternating colours must produce one block PER CELL, edge to edge.
     ws, drv = _open_map(tmp_path)
-    tm = ws.project.tilemap
-    sheet = ws.project.sheet
+    tm = ws.run.project.tilemap
+    sheet = ws.run.project.sheet
     for n, c in ((1, 8), (2, 11)):           # two solid, distinguishable tiles
         for ly in range(8):
             for lx in range(8):
@@ -437,7 +437,7 @@ def test_overview_splits_a_colour_run_at_every_boundary(tmp_path):
 
 def test_overview_hit_tests_and_paints_the_cell_under_the_pointer(tmp_path):
     ws, drv = _open_map(tmp_path)
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     _to_overview(ws)
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     target = (tm.w - 1, tm.h - 1)            # the far corner, only reachable here
@@ -455,7 +455,7 @@ def test_overview_marquee_selects_the_dragged_cells(tmp_path):
     me = ws.map_ui.mapedit
     _to_overview(ws)
     ws.map_ui.map_tool = "select"
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     far = (tm.w - 1, tm.h - 1)
     sx, sy = _cell_px(ws, 0, 0)
     ex, ey = _cell_px(ws, *far)
@@ -469,7 +469,7 @@ def test_overview_ignores_a_tap_past_the_map_edge(tmp_path):
     # A small map leaves the rest of the view rectangle out of bounds; a tap there
     # hit-tests to a cell off the map and must stamp nothing.
     ws, drv = _open_map(tmp_path, "Brick Siege")
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     _to_overview(ws)
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert cols > tm.w                        # there IS an out-of-bounds strip
@@ -526,7 +526,7 @@ def test_a_map_resize_refits_the_overview_cell(tmp_path):
     # The rung holds no fitted state: the cell is computed from the live map, so
     # growing the map through the DIM panel re-fits on the next frame.
     ws, _drv = _open_map(tmp_path, "Brick Siege")
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     _to_overview(ws)
     from runtime import map_editor_ui as M
     small = ws.map_ui._mv_metrics()[2]
@@ -562,7 +562,7 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
         ws._open_map()
         drv = host_app.ConsoleDriver(ws)
         _to_overview(ws)
-        tm = ws.project.tilemap
+        tm = ws.run.project.tilemap
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
         where = "%dx%d fs%d" % (w, h, fs)
         assert M._MV_FIT_MIN <= cell <= M._MV_FIT_MAX, where

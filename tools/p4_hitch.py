@@ -72,7 +72,7 @@ ws._wrapm(ws.wm, '_win_chrome', 'wm.chrome')
 ws._wrapm(ws.wm, '_blit_backdrop_cache', 'desk.cache')
 ws._wrapm(ws, '_composite_game', 'composite')
 ws._wrapm(ws.history, 'idle_tick', 'journal')
-_c = ws.canvas._comp
+_c = ws.run.canvas._comp
 for _m in ('flush', 'present_pending'):
     ws._wrapm(_c, _m, 'comp.' + _m)
 for _l in ws.wm.visible_stack_rev():

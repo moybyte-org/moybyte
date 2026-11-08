@@ -128,7 +128,7 @@ def _start(ws, cart, rec=None):
 def _app(ws, perms=("files", "prefs")):
     """The app's names, as a foreground run of the same app is handed them."""
     cart = {"id": APP, "title": "Pair", "type": "app", "permissions": list(perms)}
-    return system_api.make_system_api(ws.app_context, cart, ws.canvas)
+    return system_api.make_system_api(ws.app_context, cart, ws.run.canvas)
 
 
 def _log(pid):
@@ -200,13 +200,13 @@ def test_an_app_and_its_service_round_trip_a_message(tier, tmp_path):
     pid = _start(ws, _service(tier))
     assert select_on_home(ws, "Pair") is not None
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     drv = make_drv(ws)
     for _ in range(4):
         drv.frame(1 / 30)
         S.SCHED.poll()
-    assert ws.player.ns["prefs"].get("heard") == [7]
-    assert ws.player.ns["got"] == [(APP, 7)]
+    assert ws.run.player.ns["prefs"].get("heard") == [7]
+    assert ws.run.player.ns["got"] == [(APP, 7)]
     assert S.SCHED.procs[pid].state == S.BACKGROUND
     S.SCHED.stop(pid)
 

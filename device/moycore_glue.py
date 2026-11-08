@@ -217,8 +217,8 @@ class MoycoreRun:
         self.ws = ws
         self.ns = ns
         self._dt = 0.0
-        canvas = ws.canvas
-        project = getattr(ws, "project", None)
+        canvas = ws.run.canvas
+        project = ws.run.project
         sheet = getattr(project, "sheet", None) if project is not None else None
         # the run's own map (`ProjectStore.play_world`); a harness's bare
         # project carries only `tilemap`
@@ -407,7 +407,8 @@ class MoycoreRun:
             held, pressed = inp.button_masks(MOY_BUTTONS, None, self._masks)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms,
+        snap_shared(s, inp, self.ws.run.cart_start_ms, self._I_SNAP, pointer_state,
+                    self._touch_out, _since_ms,
                     getattr(self.ws, "windowed_chrome", False))
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
@@ -426,7 +427,7 @@ class MoycoreRun:
     def _drain_queued(self, n):
         aq = self.aq
         slots = _moycore.AQ_SLOTS
-        drain_audio(getattr(self.ws, "audio", None), self._aq_ops,
+        drain_audio(self.ws.run.audio, self._aq_ops,
                     ((aq[1 + i * slots], aq[2 + i * slots], aq[3 + i * slots])
                      for i in range(n)))
 
@@ -470,7 +471,7 @@ class MoycoreRun:
         # A tier that swaps framebuffers per frame (the P4's ping-pong, the
         # T-Deck's bounce) must re-point the canvas, exactly as
         # DeviceCanvas.sync_back does for the Python lanes.
-        buf = self.ws.canvas._buf
+        buf = self.ws.run.canvas._buf
         if buf is not self._last_buf():
             _moycore.retarget(buf)
             self._buf = buf
@@ -524,7 +525,7 @@ class MoycoreRun:
             return None
         self._run = run
         try:
-            au = getattr(self.ws, "audio", None)
+            au = self.ws.run.audio
             _moy_play.bind(run, self.ws.input, int(getattr(au, "h", 0) or 0), tick)
             _moy_play.open(run)
         except (RuntimeError, TypeError) as exc:
@@ -541,7 +542,7 @@ class MoycoreRun:
         composites from."""
         ws = self.ws
         inp = ws.input
-        buf = ws.canvas._buf
+        buf = ws.run.canvas._buf
         _moycore.use(self._h)
         if buf is not self._buf:
             _moycore.retarget(buf)
@@ -630,7 +631,7 @@ class MoycoreRun:
             if _moycore is not None and _moycore.use(self._h):
                 _moycore.close()
             self._h = 0
-            layer_restore_end(self.ws.canvas, self)
+            layer_restore_end(self.ws.run.canvas, self)
             # After the runtime's close: the run's end returns whatever of its
             # loans the close left (native/moy_play).
             if self._run:
@@ -966,7 +967,7 @@ class WasmRun(MoycoreRun):
         if (_moycore is None or not getattr(_moycore, "WASM", 0)
                 or _moy_wasm is None):
             raise RuntimeError("moycore has no wasm engine in this build")
-        project = getattr(ws, "project", None)
+        project = ws.run.project
         cart = getattr(project, "cart", None) or ws.cart or {}
         path = cart["path"]
         main = cart.get("main", "main.wasm")
@@ -1011,7 +1012,7 @@ class WasmRun(MoycoreRun):
         self.ws = ws
         self.ns = ns
         self._dt = 0.0
-        canvas = ws.canvas
+        canvas = ws.run.canvas
         sheet = getattr(project, "sheet", None) if project is not None else None
         # the run's own map (`ProjectStore.play_world`); a harness's bare
         # project carries only `tilemap`
@@ -1117,7 +1118,7 @@ class WasmRun(MoycoreRun):
         self._palette = bool(getattr(sc, "presents_palette_frames", True))
         if getattr(sc, "presents_frames", False):
             self.frame = CartFrame(canvas.w, canvas.h)
-            ws.cart_frame = self.frame
+            ws.run.cart_frame = self.frame
             _moycore.take_frames(True, self._palette)
 
     def mute(self, on):
@@ -1138,8 +1139,8 @@ class WasmRun(MoycoreRun):
         f = self.frame
         if f is not None:
             self.frame = None
-            if getattr(self.ws, "cart_frame", None) is f:
-                self.ws.cart_frame = None
+            if self.ws.run.cart_frame is f:
+                self.ws.run.cart_frame = None
             f.close(getattr(self.ws, "comp", None))
         MoycoreRun.close(self)
 

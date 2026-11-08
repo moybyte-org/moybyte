@@ -103,7 +103,7 @@ def test_python_cart_writes_what_the_tool_reads(tmp_path):
         raise AssertionError("Bench not seeded")
     ws.open()
     assert ws.cart_error is None, ws.cart_error
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     ns["state"]["micro"] = [("cls", 4, 27, 27, 30), ("spr", 500, 31, 32, 40)]
     ns["state"]["stats"] = {"draw": {"n": 195, "p50": 16.04, "p90": 17.0,
                                      "p99": 18.19, "worst": 25.0,

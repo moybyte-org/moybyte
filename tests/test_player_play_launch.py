@@ -49,12 +49,12 @@ def test_the_run_is_launched_before_its_runtime_loads(tmp_path, monkeypatch):
     log = []
     ws = _ws(tmp_path, monkeypatch, log)
     open_cart(ws, "Placement Lua")
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     assert log[0] == ("launch", "placement_lua.moy", True)
     assert log[1] == ("load",)
     # The runtime offers the C frame (play_begin), so the run is the
     # runtime's from here, ended at its close.
-    assert ws.player._lua._run == 0x15A
+    assert ws.run.player._lua._run == 0x15A
     assert len(log) == 2
 
 
@@ -66,7 +66,7 @@ def test_a_runtime_that_will_not_load_ends_its_run_as_a_crash(tmp_path, monkeypa
 
     ws = _ws(tmp_path, monkeypatch, log, broken)
     open_cart(ws, "Placement Lua")
-    assert ws.player.cart_error
+    assert ws.run.player.cart_error
     assert log == [("launch", "placement_lua.moy", True), ("load",),
                    ("end", 0x15A, FakePlay.END_CRASH)]
 

@@ -42,7 +42,7 @@ def _board_factory(ws):
     from runtime.host_canvas import install
     install()
     from device_canvas import DeviceCanvas, _LayerComp
-    gfx = ws.canvas._gfx
+    gfx = ws.run.canvas._gfx
     assert gfx is not None, "no native kernel: the board factory returns None"
     return lambda w, h: DeviceCanvas(_LayerComp(int(w), int(h), gfx))
 
@@ -202,7 +202,7 @@ def test_the_rendered_frame_persists_as_a_valid_mct_sidecar(tmp_path):
     cart = ws.wallpaper._wp_cart
     sig = ws.wallpaper._src_sig(cart)
     _x, _y, w, h = PREVIEW_RECT
-    gw, gh = ws.canvas.w, ws.canvas.h
+    gw, gh = ws.run.canvas.w, ws.run.canvas.h
     vw, vh = (w, max(1, gh * w // gw)) if gw * h >= gh * w else \
              (max(1, gw * h // gh), h)
     pix = moy_image.load_wallpaper_preview(cart["path"], vw, vh, sig)
@@ -238,21 +238,21 @@ def test_a_sidecar_written_by_one_tier_is_read_by_a_tier_that_cannot_render(
 def test_a_bound_run_canvas_never_becomes_the_preview_surface(tmp_path):
     """draw_preview brackets to the STOCK canvas like draw() and compile(). On
     the windowed tier the Appearance window is drawn beside a live game, and a
-    cart with a small raster (SPEC.md 3.1) has ws.canvas bound to ITS size --
+    cart with a small raster (SPEC.md 3.1) has ws.run.canvas bound to ITS size --
     which would otherwise key the sidecar and shape the render to that cart."""
     ws = _ws(tmp_path, sys_size=(1024, 600))
     assert ws.bind_run_canvas(128, 120)
-    assert (ws.canvas.w, ws.canvas.h) == (128, 120)
-    before = bytes(ws.canvas._buf)
+    assert (ws.run.canvas.w, ws.run.canvas.h) == (128, 120)
+    before = bytes(ws.run.canvas._buf)
 
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
 
-    assert bytes(ws.canvas._buf) == before         # the run's frame is untouched
+    assert bytes(ws.run.canvas._buf) == before         # the run's frame is untouched
     # the preview is the glass's frame (Moy's night draws per glass), fit
     _x, _y, w, _h = PREVIEW_RECT
     assert (ws.wallpaper._wp_cart["path"], w, 600 * w // 1024) \
         in ws.wallpaper._static_cache
-    assert ws.canvas is ws._run_canvas             # ...and the bind survived
+    assert ws.run.canvas is ws.run.bound             # ...and the bind survived
 
 
 # -- a wallpaper per glass (docs/history/look_2026-10.md step 28) ---------------------

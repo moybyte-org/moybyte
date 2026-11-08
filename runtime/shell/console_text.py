@@ -179,7 +179,7 @@ class TextVerbs:
             k = getattr(self.input, "last_key", 0) or 0
             self._ekey_prev = k
             self.code_layer.seed_key(k)
-            self.player.seed_cart_key(k)   # a cart's editor handle, same rule
+            self.run.player.seed_cart_key(k)   # a cart's editor handle, same rule
         self.input.text_mode = bool(on)
         kb = self.keyboard
         if kb is not None:
@@ -190,7 +190,7 @@ class TextVerbs:
     # player pause-B + tests call them). _open_menu is the Config-first landing --
     # EditorApp.open(project) -- so it forwards the open workspace.
     def _open_menu(self):
-        self.editor_app.open(self.project)
+        self.editor_app.open(self.run.project)
 
     def _open_paint(self):
         self.editor_app.open_paint()
@@ -307,7 +307,7 @@ class TextVerbs:
             return False
         if name == self.code_file_name():
             return True
-        if self.editor is not None and self.project is self.editor_app.project:
+        if self.editor is not None and self.run.project is self.editor_app.project:
             self.editor_app.save_current()
         self.code_file = name
         self.editor = None            # set_menu_view rebuilds it over the new file

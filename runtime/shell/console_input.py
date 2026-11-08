@@ -67,7 +67,7 @@ class InputVerbs:
         # the keys (moy_input.h's CART KEYS; an app's or a tool's are keys);
         # a producer reads it next frame.
         kc = self.wm.keys_to_cart()
-        ck = kc and not self.player._is_tool
+        ck = kc and not self.run.player._is_tool
         if ck != self._cart_keys:
             self._cart_keys = ck
             i.cart_keys = ck
@@ -228,12 +228,13 @@ class InputVerbs:
             # WM's game_xy consumes; its memo checks the same key, but through
             # two calls and a property (~0.2 ms a loop on the S3).
             k = self._gp_key
-            gc = self.canvas
+            run = self.run
+            gc = run.canvas
             sc = self._sys_canvas
             if sc is None:
                 sc = gc
             if (gc is k[1] and sc is k[2]
-                    and getattr(self.input, "game_view", None) is k[0]
+                    and run.view is k[0]
                     and gc.w == k[3] and gc.h == k[4]
                     and sc.w == k[5] and sc.h == k[6]):
                 if self.wm.top_is_player():
@@ -251,11 +252,12 @@ class InputVerbs:
             else:
                 self._gp_idle = gp
                 k = self._gp_key
-                gc = self.canvas
+                run = self.run
+                gc = run.canvas
                 sc = self._sys_canvas
                 if sc is None:
                     sc = gc
-                k[0] = getattr(self.input, "game_view", None)
+                k[0] = run.view
                 k[1] = gc
                 k[2] = sc
                 k[3] = gc.w
@@ -697,4 +699,4 @@ class InputVerbs:
 
     def focused_cart_editor(self):
         """The cart editor handle holding the keyboard, or None."""
-        return self.player.focused_editor()
+        return self.run.player.focused_editor()

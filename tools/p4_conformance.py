@@ -24,7 +24,7 @@ the web player -- the console API's 8-argument cap and print losing a frame on
 any byte past ASCII -- were both in shared code, so both were on the boards
 too. They were simply never run.
 
-HOW IT GETS PIXELS. ws.canvas is the DeviceCanvas the cart draws into, and its
+HOW IT GETS PIXELS. ws.run.canvas is the DeviceCanvas the cart draws into, and its
 _buf is the live RGB565 framebuffer. DeviceCanvas hands moy_gfx colours straight
 out of PAL565_WIRE, so a buffer halfword IS a wire palette entry and maps back
 to an index by reverse lookup -- no conversion, no tolerance, and a pixel that
@@ -184,7 +184,7 @@ def _order(b):
     return 'little' if lo >= hi else 'big'
 
 def _grab():
-    b = ws.canvas._buf
+    b = ws.run.canvas._buf
     n = len(b) // 2
     little = _order(b) == 'little'
     enc = bytearray()
@@ -231,7 +231,7 @@ def _capture_raw(board, log):
     host_canvas.install()
     import device_canvas as _dc
     import array as _array
-    n = board.pyval("len(ws.canvas._buf)", timeout=10.0)
+    n = board.pyval("len(ws.run.canvas._buf)", timeout=10.0)
     swapped = board.pyval(
         "int(__import__('device_canvas').PAL565_WIRE is not "
         "__import__('device_canvas').PAL565)", timeout=10.0)
@@ -239,7 +239,7 @@ def _capture_raw(board, log):
     step = 1536
     while len(raw) < n:
         piece = board.pyval(
-            "__import__('binascii').b2a_base64(ws.canvas._buf[%d:%d])"
+            "__import__('binascii').b2a_base64(ws.run.canvas._buf[%d:%d])"
             % (len(raw), len(raw) + step), timeout=30.0)
         if not piece:
             raise RuntimeError("raw frame read stalled at byte %d of %d" % (len(raw), n))

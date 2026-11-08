@@ -217,7 +217,7 @@ def _paintpick():
 def _content():
     # What is actually ON the surface. An empty editor is not a fast editor, it
     # is a DIFFERENT screen -- the surface sweep learned that the expensive way.
-    p = ws.project
+    p = ws.run.project
     be = getattr(ws.block_ui, 'blocks_ed', None)
     se = getattr(ws.scene_ui, 'sceneedit', None)
     tm = getattr(p, 'tilemap', None)

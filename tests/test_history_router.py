@@ -369,8 +369,8 @@ def test_the_idle_tick_disarms_when_the_edit_was_saved_elsewhere(tmp_path):
     assert ed.dirty is False
     ws.history.edit_ms = C._ticks_ms() - 5000
     calls = []
-    real = ws.project.commit_code
-    ws.project.commit_code = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    real = ws.run.project.commit_code
+    ws.run.project.commit_code = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
     ws.history.idle_tick()
     assert ws.history.edit_ms is None
     assert calls == []
@@ -498,8 +498,8 @@ def test_a_commit_with_no_editor_open_still_journals(tmp_path):
     """A commit from the dev channel or a hard-exit path can run with no Code
     tab open: the write and its journal line must not hang on the editor."""
     ws = _cart_ws(tmp_path)
-    cart_dir = ws.project.cart["path"]
+    cart_dir = ws.run.project.cart["path"]
     before = len(history_router.moy_catalogue.moy_journal.journal_list(cart_dir))
     ws.editor = None
-    assert ws.project.commit_code(SRC + "# headless\n") is True
+    assert ws.run.project.commit_code(SRC + "# headless\n") is True
     assert len(history_router.moy_catalogue.moy_journal.journal_list(cart_dir)) == before + 1

@@ -740,7 +740,6 @@ def _device_ws(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     inp = DeviceInputState()
-    inp.cart_start_ms = 0
     ws.input = inp
     ws.launcher.sel = 0
     ws.open()

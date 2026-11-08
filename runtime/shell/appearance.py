@@ -76,8 +76,8 @@ are the shared DRAW TOOLKIT (doc 4 keeps that on the kernel by decision), and
 bar_layer's own header already says so. `set_icon_sheet` clears it, the one
 kernel field this object writes besides the tokens.
 
-`_fat_cart` is the OPEN WORKSPACE's cart, not a look setting; `_show_wallpaper`
-reads it through `ws` to decide whether a compiled wallpaper cart may be
+`ws.run.fat_cart` is the OPEN WORKSPACE's cart, not a look setting; `_show_wallpaper`
+reads it to decide whether a compiled wallpaper cart may be
 re-slimmed.
 
 ## Reading late-injected things through `ws`, per call
@@ -561,7 +561,7 @@ class Appearance:
                 # re-slims -- unless it IS the open project's cart (stays fat).
                 ws.carts.rehydrate(cart)
                 ws.wallpaper.compile(cart)   # compile into the backdrop component (#28)
-                if cart is not getattr(ws, "_fat_cart", None):
+                if cart is not ws.run.fat_cart:
                     ws.carts.reslim(cart)
         ws._dirty = True
 
@@ -1939,7 +1939,7 @@ class Appearance:
         if moved and getattr(self.ws, "bar_layer", None) is not None:
             self.ws.bar_layer.invalidate()
             self._bars_moved = True
-        put = getattr(getattr(self.ws, "canvas", None), "theme_block", None)
+        put = getattr(self.ws.run.canvas, "theme_block", None)
         if put is not None:
             put(live.block)
         _ui_draw._C.theme_block(live.block, live.used)

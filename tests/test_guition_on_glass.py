@@ -311,7 +311,7 @@ def test_the_system_canvas_is_the_landscape_glass(board):
     console whose system canvas (480x320 landscape, rotated in moy_axs's band
     copy) is not its game canvas (320x240). Assert both sizes and the
     viewport seam through the live console."""
-    line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.canvas.w, ws.canvas.h)",
+    line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.run.canvas.w, ws.run.canvas.h)",
                      wait_for="PY ")
     assert line == "PY (480, 320, 320, 240)", line
     # composite_game's placement: 1:1, centred both ways.

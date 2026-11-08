@@ -58,7 +58,7 @@ class SettingsToggles:
         and persist it: how long the draw divisor remembers before it decides
         again. Relayed live into the running cart's scheduler."""
         self._set_toggle("steady", bool(on), persist)
-        pl = getattr(self, "player", None)
+        pl = self.run.player
         if pl is not None:
             pl.steady_mode(on)
 

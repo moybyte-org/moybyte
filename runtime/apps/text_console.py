@@ -439,7 +439,7 @@ class TextConsole:
         self.ws._dirty = True
 
     def _fs(self):
-        return max(1, int(getattr(self.ws.canvas, "font_scale", 1) or 1))
+        return max(1, int(getattr(self.ws.run.canvas, "font_scale", 1) or 1))
 
     def draw(self):
         """The run's draw hook: the whole console, on whatever surface the
@@ -456,8 +456,8 @@ class TextConsole:
         # alone draws (`Player.holds`): it holds the page as the last frame
         # left it, but for the FPS chip, which names where it drew
         # (`overdrew`), so the log's view may move or keep its rows there.
-        pl = self.ws.player
-        own = pl is not None and pl.holds(self.ws.canvas)
+        pl = self.ws.run.player
+        own = pl is not None and pl.holds(self.ws.run.canvas)
         if own:
             _ui_draw.window_frame(2)
         try:
@@ -468,7 +468,7 @@ class TextConsole:
             _ui_draw.cart_text(was)
 
     def _draw(self):
-        cv = self.ws.canvas
+        cv = self.ws.run.canvas
         th = self.ws.theme_colors
         fs = self._fs()
         fid, cell, line, _asc = _ui_draw.font("mono")

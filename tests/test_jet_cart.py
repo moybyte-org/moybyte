@@ -100,9 +100,9 @@ def _ws(tmp_path, jet, cart="teapot", title=TITLE, **config):
     ws = host_app.build_workstation(root)
     ws.look.set_theme_variant("dark", persist=False)
     open_cart(ws, title)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert type(ws.player._lua).__name__ == "WasmHostRun"
-    ws.player.uncap_mode(True)           # every frame draws: one tick, one frame
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert type(ws.run.player._lua).__name__ == "WasmHostRun"
+    ws.run.player.uncap_mode(True)           # every frame draws: one tick, one frame
     return ws
 
 
@@ -117,7 +117,7 @@ def _frames(ws, n, hold=(), dt=DT):
         ws.input.begin_frame()
         ws._dirty = True
         ws.frame(dt)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
 
 def _rgb565(ws, x, y):
@@ -132,7 +132,7 @@ def _rgb565(ws, x, y):
 
 
 def _pmem(ws):
-    return ws.player._lua._run.pmem()[1]
+    return ws.run.player._lua._run.pmem()[1]
 
 
 # -- the module ------------------------------------------------------------------

@@ -891,7 +891,7 @@ def _wasm_or_skip():
 
 
 def _pixels(ws):
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     cv = ns["screen"]()
     x, y, w, h = ns["content_rect"]()
     buf = cv._buf
@@ -902,7 +902,7 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.player, "_lua", None)
+    lua = getattr(ws.run.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:N_PMEM]
     if lua is not None:
@@ -910,7 +910,7 @@ def _pmem(ws):
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
         return list(img)[:N_PMEM]
-    pm = ws.player.ns["pmem"]
+    pm = ws.run.player.ns["pmem"]
     return [pm(i) for i in range(N_PMEM)]
 
 
@@ -970,9 +970,9 @@ def parts_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _script(ws)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -1711,9 +1711,9 @@ def files_runs(request, tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _files_script(ws)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -1816,7 +1816,7 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
         ws = host_app.build_workstation(root, **kw)
         ws.pointer.visible = False
         open_cart(ws, title)
-        host = ws.player._uh
+        host = ws.run.player._uh
         if host is not None:
             real = host.run
 
@@ -1826,12 +1826,12 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
             host.run = spy
         for _ in range(2):
             make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         assert ws.windowed_chrome is desk
         if name == "python":
             assert seen and set(seen) == {desk}, seen
         else:
-            run = ws.player._lua
+            run = ws.run.player._lua
             snap = getattr(run, "snap", None)
             if snap is None:
                 snap = run._run.snap
@@ -2005,7 +2005,7 @@ def look_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2017,7 +2017,7 @@ def look_runs(tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -2170,7 +2170,7 @@ def pop_runs(request, tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2182,7 +2182,7 @@ def pop_runs(request, tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -2389,7 +2389,7 @@ def menu_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2401,7 +2401,7 @@ def menu_runs(tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -2628,7 +2628,7 @@ def restyle_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2640,7 +2640,7 @@ def restyle_runs(tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 

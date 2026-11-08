@@ -478,9 +478,9 @@ def test_dev_playtest_is_2x_where_it_fits_else_native(tmp_path):
         ws.wm.set_play_intent("play")
         play = ws.wm._win_size("desktop", full, 1)
         assert play[0] >= dev[0]
-        s = (dev[0] - 2) // ws.canvas.w
+        s = (dev[0] - 2) // ws.run.canvas.w
         assert s == (wm_windowed._DEV_SCALE if sys_size != (640, 480) else 1), sys_size
-        assert dev == (ws.canvas.w * s + 2, ws.canvas.h * s + 2 + 18)
+        assert dev == (ws.run.canvas.w * s + 2, ws.run.canvas.h * s + 2 + 18)
 
 
 def test_a_native_playtest_opens_clear_of_the_editors_symbol_keys(tmp_path):
@@ -523,7 +523,7 @@ def test_a_game_window_holds_its_game_whole_over_rounded_corners(tmp_path, dev):
     ox, oy, s = wm._player_view(win)
     assert s >= 1
     assert (ox, oy) == (cx, cy)
-    assert (cw, ch) == (ws.canvas.w * s, ws.canvas.h * s)
+    assert (cw, ch) == (ws.run.canvas.w * s, ws.run.canvas.h * s)
 
 
 _TRIM_CART = {
@@ -565,8 +565,8 @@ def _nothing_beneath_shows(ws, win):
     sc = wm._root_canvas
     cx, cy, cw, ch = win.content_rect()
     ox, oy, s = wm._player_view(win)
-    view = wm._view_src() or (0, 0, ws.canvas.w, ws.canvas.h)
-    game = _px(ws.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
+    view = wm._view_src() or (0, 0, ws.run.canvas.w, ws.run.canvas.h)
+    game = _px(ws.run.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
     body = _px(sc, win.x + win.w // 2, cy + ch + max(1, win.foot // 2))
     bezel = _px(sc, cx, cy) if (ox, oy) != (cx, cy) else game
     e = wm._frame_edge()
@@ -623,8 +623,8 @@ def test_a_trimmed_game_fullscreen_covers_its_rect(tmp_path):
     assert wm.mode == "console" and not wm._wins
     sc = wm._root_canvas
     ox, oy, s = wm.viewport()
-    view = wm._view_src() or (0, 0, ws.canvas.w, ws.canvas.h)
-    game = _px(ws.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
+    view = wm._view_src() or (0, 0, ws.run.canvas.w, ws.run.canvas.h)
+    game = _px(ws.run.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
     bezel = _px(sc, 0, 0)
     assert bezel != game
     gw, gh = view[2] * s, view[3] * s
@@ -855,13 +855,13 @@ def test_player_keeps_ticking_while_editor_is_focused(tmp_path):
     drv.frame(1 / 30)
     ws.wm._focus = "menu"                  # focus the editor beside it
     ws._dirty = True
-    before = ws.player.frames if hasattr(ws.player, "frames") else None
+    before = ws.run.player.frames if hasattr(ws.run.player, "frames") else None
     ticks = [0]
-    real_tick = ws.player.tick
+    real_tick = ws.run.player.tick
     def counting_tick(dt):
         ticks[0] += 1
         return real_tick(dt)
-    ws.player.tick = counting_tick
+    ws.run.player.tick = counting_tick
     for _ in range(3):
         drv.frame(1 / 30)
     assert ticks[0] >= 3, "the playtest froze when it lost focus"
@@ -936,7 +936,7 @@ def test_a_minimised_game_is_held_draws_nothing_and_hears_it(tmp_path):
     ws.wm.play_in_window()
     drv.frame(1 / 30)
     heard, ups, draws = [], [], [0]
-    p = ws.player
+    p = ws.run.player
     p.ns["_minimise"] = lambda: heard.append("min")
     p.ns["_restore"] = lambda: heard.append("res")
     upd, drw = p._update, p._draw
@@ -947,13 +947,13 @@ def test_a_minimised_game_is_held_draws_nothing_and_hears_it(tmp_path):
     drv.touch(mn[0] + 2, mn[1] + 2)
     for _ in range(12):
         drv.frame(1 / 20)
-    assert win.minimized and ws.player.paused
+    assert win.minimized and ws.run.player.paused
     assert heard == ["min"]
     assert draws[0] == 0 and ups == []
     ws.wm._minimize(win, False)
     for _ in range(3):
         drv.frame(1 / 30)
-    assert heard == ["min", "res"] and not ws.pause.open and not ws.player.paused
+    assert heard == ["min", "res"] and not ws.pause.open and not ws.run.player.paused
     assert draws[0] >= 1 and ups
 
 
@@ -973,7 +973,7 @@ def test_the_game_window_fits_the_game_and_its_pause_card_centres_on_it(tmp_path
     win = ws.wm._wins["desktop"]
     cx, cy, cw, ch = win.content_rect()
     ox, oy, scale = ws.wm._player_view(win)
-    gw, gh = ws.canvas.w * scale, ws.canvas.h * scale
+    gw, gh = ws.run.canvas.w * scale, ws.run.canvas.h * scale
     assert (cx, cy, cw, ch) == (ox, oy, gw, gh), "the content rect is the game's"
     left = cx - win.x
     right = win.x + win.w - (cx + cw)
@@ -1300,8 +1300,8 @@ def test_game_keeps_running_under_settings_window(tmp_path):
     assert ws.wm.stack.kinds() == ["launcher", "desk", "desktop", "settings"]
     assert ws.wm.keeps_animating(1 / 30)       # the redraw gate stays live
     ticks = [0]
-    real_tick = ws.player.tick
-    ws.player.tick = lambda dt: (ticks.__setitem__(0, ticks[0] + 1), real_tick(dt))
+    real_tick = ws.run.player.tick
+    ws.run.player.tick = lambda dt: (ticks.__setitem__(0, ticks[0] + 1), real_tick(dt))
     for _ in range(3):
         drv.frame(1 / 30)
     assert ticks[0] >= 3, "the game paused under the Settings window"
@@ -2347,7 +2347,7 @@ def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
 def test_view_verb_scales_the_fullscreen_composite(tmp_path):
     ws = _ws(tmp_path)
     _drv(ws)
-    ws.input.game_view = (128, 128)
+    ws.run.view = (128, 128)
     assert ws.game_view == (96, 56, 128, 128)      # centered source rect
     assert ws.wm._wins.get("desktop") is None      # fullscreen (no player window)
     ox, oy, scale = ws.wm.viewport()
@@ -2356,7 +2356,7 @@ def test_view_verb_scales_the_fullscreen_composite(tmp_path):
     # Tap mapping: the composite's top-left is the view's source origin.
     assert ws.wm.game_xy(ox, oy) == (96, 56)
     assert ws.wm.game_xy(ox + 511, oy + 511) == (96 + 127, 56 + 127)
-    ws.input.game_view = None
+    ws.run.view = None
     assert ws.game_view is None
     assert ws.wm.viewport()[2] == 2                # back to the container scale
 
@@ -2365,7 +2365,7 @@ def test_view_full_canvas_and_zero_are_identity(tmp_path):
     ws = _ws(tmp_path)
     _drv(ws)
     for v in (None, (0, 0), (320, 240)):
-        ws.input.game_view = v
+        ws.run.view = v
         assert ws.game_view is None
 
 
@@ -2383,7 +2383,7 @@ def test_view_scales_the_windowed_player_too(tmp_path):
     win = ws.wm._wins.get("desktop")
     if win is None:
         return                                     # tier launched fullscreen
-    ws.input.game_view = (128, 128)
+    ws.run.view = (128, 128)
     cx, cy, cw, ch = win.content_rect()
     ox, oy, scale = ws.wm.viewport()
     assert scale == max(1, min(cw // 128, ch // 128))
@@ -2753,8 +2753,8 @@ def test_play_ends_a_running_playtest(tmp_path):
     drv.frame(1 / 30)
     assert "desktop" in ws.wm._wins
     released = []
-    orig = ws.player.release_world
-    ws.player.release_world = lambda: (released.append(1), orig())[1]
+    orig = ws.run.player.release_world
+    ws.run.player.release_world = lambda: (released.append(1), orig())[1]
     ws.open_library()
     assert not ws.wm.stack.has("desktop") and released
     assert "desktop" not in ws.wm._parked.kinds
@@ -2837,13 +2837,13 @@ def test_branch_go_home_in_console_mode_touches_no_parked_window(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     _desk_with_three(ws, drv)
-    project, cart = ws.project, ws.cart
+    project, cart = ws.run.project, ws.cart
     assert ws.editor_app.project is project
     ws.open_library()
     ws.open_settings()
     ws.go_home()                                 # HOME from a console surface
     assert ws.wm.stack.kinds() == ["launcher"] and ws.wm.mode == "console"
-    assert ws.project is project and ws.cart is cart
+    assert ws.run.project is project and ws.cart is cart
     assert ws.editor_app.project is project
     ws.open_desk()
     assert ws.wm._wins["menu"].kind == "menu"
@@ -3396,8 +3396,8 @@ def test_the_system_menu_over_a_playtest_keeps_the_quiet_stack(tmp_path):
 
     def still_game(dt):                  # the same frame every tick
         ticks[0] += 1
-        ws.canvas.cls(8)
-        ws.canvas.rect(10, 10, 40, 30, 12)
+        ws.run.canvas.cls(8)
+        ws.run.canvas.rect(10, 10, 40, 30, 12)
 
     player.draw = still_game
     ring = _Ring(ws, 3)
@@ -3430,8 +3430,8 @@ def test_a_playtests_debt_frames_copy_the_last_frame(tmp_path):
     player = ws._content_layers["desktop"]
 
     def still_game(dt):
-        ws.canvas.cls(8)
-        ws.canvas.rect(10, 10, 40, 30, 12)
+        ws.run.canvas.cls(8)
+        ws.run.canvas.rect(10, 10, 40, 30, 12)
 
     player.draw = still_game
     ring = _Ring(ws, 3)
@@ -4442,8 +4442,8 @@ def _pause_desk(tmp_path, ride=True, window=True):
     player = ws._content_layers["desktop"]
 
     def still_game(dt):
-        ws.canvas.cls(8)
-        ws.canvas.rect(10, 10, 40, 30, 12)
+        ws.run.canvas.cls(8)
+        ws.run.canvas.rect(10, 10, 40, 30, 12)
     player.draw = still_game
     for _ in range(20):
         _quiesce(ws)
@@ -4654,7 +4654,7 @@ def test_projects_play_runs_a_make_card_in_a_window(tmp_path):
     lay._do_verb("window")
     for _ in range(4):
         drv.frame(1 / 30)
-    assert ws.cart.get("title") == "Star Catcher" and not ws.player.paused
+    assert ws.cart.get("title") == "Star Catcher" and not ws.run.player.paused
     win = ws.wm._wins["desktop"]
     assert not win.full() and win.own
     assert [n for n, _r in ws.wm._strip_buttons(win)] == ["close", "max", "min"]

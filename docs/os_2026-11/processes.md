@@ -39,14 +39,17 @@ Focus and running are separate properties. **Focus** is the window manager's
 (`docs/shell_ux_v1.md` §3): the focused window alone gets input and names
 the audible audio session (`native/moy_audio/moy_aud.h`). **Running** is the
 running set's (`runtime/shell/procs.py`, built 2026-11-03 for Python games
-on the desk): the FRONT run is the game whose world the Workstation holds,
-in the WM's `desktop` window, and every other running game is a Proc with
-its world held aside -- its Player, Project, audio session, owner tag and
-game canvas -- in a window keyed `run:<n>`. Running one is installing its
-world (an exchange of those fields, done twice to put the front back), so
-the Player and the cart API run whichever world is installed. Focusing a
-Proc's window PROMOTES it: the two worlds trade places and the two windows
-their keys, so the focused game is always the front one and gets the keys,
+on the desk): a run's state is ONE object, its `Run` -- its Player,
+Project, audio session, owner tag, game canvas and the binding over it, its
+view and its clock -- and none of it lives on the Workstation (owner,
+2026-11-08, #246 decision 6). The FRONT run is the one `ws.run` names, in
+the WM's `desktop` window, and every other running game is a Proc holding
+its own Run, in a window keyed `run:<n>`. Stepping a Proc points `ws.run`
+at its Run for that step, so the Player and the cart API act on that run
+alone (`tests/test_run_object.py` fails code that reaches a run's field on
+the Workstation). Focusing a Proc's window PROMOTES it: the two Runs trade
+places and the two windows their keys, so the focused game is always the
+front one and gets the keys,
 the pointer, the audible session and the pause menu. A Proc reads no input
 (its input verbs answer nothing), keeps no edges and pulls no mix. A game
 window is in one of three states:
@@ -78,8 +81,8 @@ owns every draw. The pause card's Minimise (`Procs.minimise`) holds the
 front game in the running set and goes home (a launch while a run plays
 replaces it, as before); launching a running cart again, or the task
 manager's Switch to, brings it back (`Procs.switch`), the run that played
-joining the set. Every world there
-draws on the one glass, so a handheld's worlds share the system canvas
+joining the set. Every run there
+draws on the one glass, so a handheld's runs share the system canvas
 rather than each making one. Admission is the desk's, over the S3s' 4 MiB
 share.
 

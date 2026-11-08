@@ -410,7 +410,7 @@ instead of the frozen 320-wide cluster. A cart that ALSO declares a small
 `canvas` (that has a SPEC contract behind it) keeps the fixed raster and is
 told so through `_layout`'s own arguments, which is the whole reason it takes
 them. In the windowed DESK world the screen is never bound -- a cart lives in a
-window whose blit source is `ws.canvas`, and binding the screen there makes the
+window whose blit source is `ws.run.canvas`, and binding the screen there makes the
 desktop blit itself -- so the cart gets a window surface of its own
 (`Workstation.app_window_canvas`): a canvas the desk's work area large, of which
 its window shows its content rect, with no strip inside the window, its title

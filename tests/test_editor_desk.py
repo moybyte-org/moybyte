@@ -548,8 +548,8 @@ def test_closing_the_editor_ends_its_playtest(desk):
         drv.frame(DT)
     assert ws.wm._wins["desktop"].docked
     released = []
-    orig = ws.player.release_world
-    ws.player.release_world = lambda: (released.append(1), orig())[1]
+    orig = ws.run.player.release_world
+    ws.run.player.release_world = lambda: (released.append(1), orig())[1]
     ws.wm.close_window_kind("menu")
     for _ in range(3):
         drv.frame(DT)
@@ -574,7 +574,7 @@ def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
     ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
     for _ in range(3):
         drv.frame(DT)
-    assert game.docked is None and not game.minimized and not ws.player.paused
+    assert game.docked is None and not game.minimized and not ws.run.player.paused
     assert game.content_rect() != (game.x, game.y, game.w, game.h)   # framed
     assert not ws.editor_app.playing(), "the Editor's Play is Play again"
     ws.wm.close_window_kind("menu")
@@ -582,7 +582,7 @@ def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
         drv.frame(DT)
     assert ws.wm.window_kinds() == ["desktop"] and ws.wm._wins["desktop"] is game
     assert game.docked is None and not game.minimized
-    assert ws.wm._focus == "desktop" and not ws.player.paused
+    assert ws.wm._focus == "desktop" and not ws.run.player.paused
 
 
 def _contents(d):
@@ -1056,8 +1056,8 @@ def test_a_reference_map_pick_inserts_its_mget_call(desk):
 
 def test_the_log_names_an_error_and_takes_the_caret_to_its_line(desk):
     ws, drv, d = _reference(desk, "log")
-    ws.player.cart_error = "NameError: foo"
-    ws.player.crash_line = 12
+    ws.run.player.cart_error = "NameError: foo"
+    ws.run.player.crash_line = 12
     ws._dirty = True
     drv.frame(DT)
     bx, by, bw, bh = d._host.box("log")
@@ -1296,11 +1296,11 @@ def test_the_playtest_runs_on_its_own_map_and_scenes(desk):
     ws, drv = desk
     _tap(drv, ord("4"), 1)                       # World: the Scene beside the Run slot
     _play(drv)
-    pr = ws.project
+    pr = ws.run.project
     assert ws.editor_app.playing()
     assert pr.play_map is not pr.tilemap and pr.play_map.cells == pr.tilemap.cells
     assert pr.play_scenes is not pr.scenes
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     assert ns["_moy_scenes"] is pr.play_scenes
     was, mine = pr.play_map.mget(0, 0), pr.tilemap.mget(1, 0)
     pr.tilemap.mset(0, 0, was + 1)               # an edit in the Editor's map
@@ -1316,7 +1316,7 @@ def test_a_scene_edit_during_the_playtest_waits_for_restart_and_wears_the_dot(de
     app = ws.editor_app
     _tap(drv, ord("4"), 1)
     _play(drv)
-    pr = ws.project
+    pr = ws.run.project
     name = ws.scene_ui.scene_name
     se = ws.scene_ui.sceneedit
     se.sel = 0
@@ -1331,7 +1331,7 @@ def test_a_scene_edit_during_the_playtest_waits_for_restart_and_wears_the_dot(de
 
 def test_play_takes_an_edited_map_in_place_and_keeps_an_unedited_runs_msets(desk):
     ws, _drv = desk
-    pr = ws.project
+    pr = ws.run.project
     pr.play_world(True)
     pm = pr.play_map
     pm.mset(2, 0, 9)                             # the run's own change
@@ -1353,7 +1353,7 @@ def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
     win = ws.wm._wins["desktop"]
     _press(drv, d, "pane 1 pause")
     drv.frame(DT)
-    assert d.paused and ws.player.paused and win.minimized
+    assert d.paused and ws.run.player.paused and win.minimized
     assert d._still is not None                  # the still, dimmed under Play
     ws.pointer.visible = False
     settle_badges(ws)
@@ -1367,7 +1367,7 @@ def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
     gx, gy, gw, gh = d._still
     _click(drv, gx + gw // 2, gy + gh // 2)      # the still's Play goes on
     drv.frame(DT)
-    assert not d.paused and not ws.player.paused and not win.minimized
+    assert not d.paused and not ws.run.player.paused and not win.minimized
     assert win.docked and ws.wm._order[-1] == "desktop"
 
 
@@ -1379,7 +1379,7 @@ def test_restart_and_stop_end_the_pause(desk):
     d.pause(True)
     drv.frame(DT)
     _play(drv)                                   # Ctrl+Enter: Restart
-    assert not d.paused and not ws.player.paused and ws.wm._wins["desktop"].docked
+    assert not d.paused and not ws.run.player.paused and ws.wm._wins["desktop"].docked
     d.pause(True)
     drv.frame(DT)
     _tap(drv, ord("."), 1)                       # Stop

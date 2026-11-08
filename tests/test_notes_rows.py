@@ -86,7 +86,7 @@ def _console(tmp_path, name, ships, desk):
     _pin_clock()
     if not ships:
         # the run's host plans nothing: every frame draws whole
-        h = ws.player._uh
+        h = ws.run.player._uh
         run = h.run
 
         def whole(*a, **k):
@@ -114,7 +114,7 @@ class Pair:
         for _ in range(4):
             self.frame(check=False)
         for ws in (self.a, self.b):
-            ns = ws.player.ns
+            ns = ws.run.player.ns
             if ns["ed"] is None:
                 ns["_open"]("alpha")
         if desk:
@@ -211,12 +211,12 @@ def test_two_consoles_runs_are_two_lifetimes(tmp_path):
     memory."""
     from runtime import glass_binding
     a = _console(tmp_path, "ships", True, True)
-    cva = a._run_canvas
-    assert cva is not None and a.canvas is cva, "Notes on the desk draws its own canvas"
+    cva = a.run.bound
+    assert cva is not None and a.run.canvas is cva, "Notes on the desk draws its own canvas"
     ha = cva._comp.buf_h
     b = _console(tmp_path, "whole", False, True)
     assert cva._comp._b.live, "the second console's run returned the first's canvas"
-    hb = b._run_canvas._comp.buf_h
+    hb = b.run.bound._comp.buf_h
     assert hb != ha
     assert glass_binding.row(ha)[3] != glass_binding.row(hb)[3], \
         "two consoles' runs share one owner"
@@ -231,12 +231,12 @@ def test_a_consoles_lifetimes_end_with_it(tmp_path):
     import gc
     from runtime import glass_binding
     a = _console(tmp_path, "ships", True, True)
-    h = a._run_canvas._comp.buf_h
+    h = a.run.bound._comp.buf_h
     owner = glass_binding.row(h)[3]
     del a
     b = _console(tmp_path, "whole", False, True)
     gc.collect()
-    assert b._run_canvas._comp._b.live
+    assert b.run.bound._comp._b.live
     with pytest.raises(ValueError):
         glass_binding.row(h)
     with pytest.raises(ValueError):
@@ -277,7 +277,7 @@ def test_a_cart_that_clears_draws_whole(tmp_path):
     rows."""
     p = Pair(tmp_path, 1)
     for ws in (p.a, p.b):
-        pl = ws.player
+        pl = ws.run.player
         draw, cls = pl._draw, pl.ns["cls"]
 
         def cleared(draw=draw, cls=cls):
@@ -295,7 +295,7 @@ def test_an_app_that_draws_its_note_alone_draws_rows(tmp_path):
     as any: the rows the note changed, drawn alone."""
     p = Pair(tmp_path, 1, desk=True)
     for ws in (p.a, p.b):
-        pl = ws.player
+        pl = ws.run.player
         ed = pl.ns["ed"]
         sheet = tuple(pl.ns["sheet"])
 
@@ -315,7 +315,7 @@ def test_an_app_that_draws_its_note_alone_draws_rows(tmp_path):
 
 def _at(p, desk, fx, fy):
     """The glass point a fraction (fx, fy) across the note's sheet."""
-    sx, sy, sw, sh = p.a.player.ns["sheet"]
+    sx, sy, sw, sh = p.a.run.player.ns["sheet"]
     ox = oy = 0
     if desk:
         ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
@@ -327,8 +327,8 @@ def _drag(p, rows, steps, desk):
     over `steps` frames, then lifted: the view follows it."""
     for ws in (p.a, p.b):
         ws.pointer.hovers = False       # a finger, which pans; a mouse selects
-    lh = p.a.player.ns["ed"]._lh()
-    sh = p.a.player.ns["sheet"][3]
+    lh = p.a.run.player.ns["ed"]._lh()
+    sh = p.a.run.player.ns["sheet"][3]
     d = rows * lh
     d = max(-sh * 7 // 10, min(sh * 7 // 10, d))     # the finger stays on the note
     x, y0 = _at(p, desk, 0.5, 0.85 if rows > 0 else 0.15)
@@ -401,7 +401,7 @@ def _moves(p):
     """Every region a shift frame moves by a row's worth or less (x, y,
     w, h, dy): the last of the moves its host made (the view's, inside the
     page R that holds it), kept as the session runs."""
-    pl = p.a.player
+    pl = p.a.run.player
     h = pl._uh
     run = h.run
     got = []
@@ -419,13 +419,13 @@ def _moves(p):
 
 
 def _check(p, moves):
-    assert p.a.player.cart_error is None, p.a.player.cart_error
+    assert p.a.run.player.cart_error is None, p.a.run.player.cart_error
     shifts = p.kinds.count("shift")
     assert shifts > len(p.kinds) // 4, "Notes shifted %d of %d painted frames: %r" % (
         shifts, len(p.kinds), p.kinds)
     assert p.kinds.count(None) < len(p.kinds) // 8, p.kinds
-    ed = p.a.player.ns["ed"]
-    sx, sy, sw, sh = p.a.player.ns["sheet"]
+    ed = p.a.run.player.ns["ed"]
+    sx, sy, sw, sh = p.a.run.player.ns["sheet"]
     for mx, my, mw, mh, dy in moves:
         # the region moved is the view, inside the paper's straight sides
         assert (mx, my, mw, mh) == tuple(ed._vr) and dy and mh > abs(dy), (moves, ed._vr)
@@ -459,9 +459,9 @@ def test_a_drag_on_the_note_scrolls_it_and_coasts(tmp_path):
     """A press on the note and a drag from it scroll the view by the rows
     the finger moved, and its release coasts on."""
     p = Pair(tmp_path, 1)
-    ed = p.a.player.ns["ed"]
+    ed = p.a.run.player.ns["ed"]
     _drag(p, 4, 4, False)
-    assert p.a.player.cart_error is None, p.a.player.cart_error
+    assert p.a.run.player.cart_error is None, p.a.run.player.cart_error
     assert ed.ed.top > 4
 
 
@@ -491,7 +491,7 @@ def test_the_fps_chip_keeps_the_rows(tmp_path, bufs, desk):
     del p.kinds[:]
     _session(p)
     _scrolled(p, desk)
-    assert p.a.player.cart_error is None
+    assert p.a.run.player.cart_error is None
     moved = p.kinds.count("rows") + p.kinds.count("shift")
     assert moved > len(p.kinds) * 2 // 3, p.kinds
 
@@ -503,10 +503,10 @@ def test_a_second_note_keeps_the_rows(tmp_path, bufs):
     p = Pair(tmp_path, bufs)
     for ws in (p.a, p.b):
         moy_carts.save_file("docs", "beta", _BODY, ws.carts_root)
-        ws.player.ns["_open"]("beta")
+        ws.run.player.ns["_open"]("beta")
     p.settle(3)
     del p.kinds[:]
     _session(p)
-    assert [e.live for e in p.a.player._editors] == [False, True]
+    assert [e.live for e in p.a.run.player._editors] == [False, True]
     moved = p.kinds.count("rows") + p.kinds.count("shift")
     assert moved > len(p.kinds) * 2 // 3, p.kinds

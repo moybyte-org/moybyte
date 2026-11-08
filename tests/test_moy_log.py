@@ -305,15 +305,15 @@ def _open(tmp_path, name, src):
 
 def test_a_crash_is_its_runs_crit_record_with_the_traceback(tmp_path):
     ws, drv = _open(tmp_path, "crashy", CRASH_SRC)
-    pid = ws.player.pid
+    pid = ws.run.player.pid
     assert L.name(pid) == "test.crashy" and L.current() == pid
     for _ in range(3):
         drv.frame(DT)
     assert ws.cart_error is not None
     seq, text = os_log.crash_of(pid)
-    assert seq == ws.player.crash_seq
+    assert seq == ws.run.player.crash_seq
     assert text.startswith("Traceback") and "boom" in text and '"<cart>"' in text
-    ws.player.release_world()
+    ws.run.player.release_world()
     recs = [(r[2], r[4].split("\n")[0]) for r in L.read(0, 100) if r[3] == pid]
     assert recs[0] == (L.INFO, "start test.crashy")
     assert recs[-1] == (L.INFO, "exit")

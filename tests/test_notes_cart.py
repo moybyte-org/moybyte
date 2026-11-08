@@ -39,7 +39,7 @@ def _open(ws):
     ws.open()
     drv = host_app.ConsoleDriver(ws)
     _frames(drv)
-    return ws.player.ns, drv
+    return ws.run.player.ns, drv
 
 
 def _press(drv, *keys):
@@ -56,14 +56,14 @@ def _type(drv, text):
 
 def _box(ws, id):
     """Where stop `id` drew in the Notes page's last frame."""
-    got = ui_draw._C.api_box(ws.player._ui[0], id)
+    got = ui_draw._C.api_box(ws.run.player._ui[0], id)
     assert got is not None, "Notes drew no %r" % id
     return got
 
 
 def _tap(drv, box, dx=None, dy=None):
     x, y, w, h = box
-    gx, gy = drv.ws.wm.viewport()[:2] if drv.ws.app_window_canvas else (0, 0)
+    gx, gy = drv.ws.wm.viewport()[:2] if drv.ws.run.app_window_canvas else (0, 0)
     drv.click(gx + x + (w // 2 if dx is None else dx), gy + y + (h // 2 if dy is None else dy))
     _frames(drv)
 
@@ -75,7 +75,7 @@ def _seed(ws, *names):
 
 def _row(ws, ns, i):
     """The box of the vault's row i (0: New note)."""
-    y0, rh, view, _px, _side = ui_draw._C.api_table_rows(ws.player._ui[0])
+    y0, rh, view, _px, _side = ui_draw._C.api_table_rows(ws.run.player._ui[0])
     return (view[0], y0 + i * rh, view[2], rh)
 
 
@@ -114,7 +114,7 @@ def test_the_page_holds_only_a_handle_and_names_no_engine(tmp_path):
         assert name not in ns
     _press(drv, "down", "a")
     assert isinstance(ns["ed"], EditorHandle)
-    assert ns["ed"] in ws.player._editors, "the run PINS what it opened"
+    assert ns["ed"] in ws.run.player._editors, "the run PINS what it opened"
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ def test_the_list_is_new_note_then_the_vault_newest_first(tmp_path):
     ns, _drv = _open(ws)
     assert ns["ed"] is None, "a fresh console lands on the list"
     assert ns["names"] == moy_carts.list_files("docs", ws.carts_root)
-    assert ui_draw._C.api_focus(ws.player._ui[0]) == "vault"
+    assert ui_draw._C.api_focus(ws.run.player._ui[0]) == "vault"
     assert ns["cur"] == 0, "New note is the first row"
 
 
@@ -174,7 +174,7 @@ def test_the_dialog_cancels_by_esc_by_its_button_and_backspace_past_the_start(tm
     _type(drv, [ESC])
     assert ns["asking"] is None
     _type(drv, "n")
-    _tap(drv, ui_draw._C.api_box(ws.player._ui[0], "Cancel"))
+    _tap(drv, ui_draw._C.api_box(ws.run.player._ui[0], "Cancel"))
     assert ns["asking"] is None and ns["ed"] is None
     _type(drv, "n")
     _type(drv, "a")
@@ -255,7 +255,7 @@ def test_an_empty_vault_is_an_empty_page_whose_verb_makes_a_note(tmp_path):
             moy_carts.delete_file("docs", n, ws.carts_root)
         ns["_refresh"]()
         _frames(drv)
-    assert ui_draw._C.api_focus(ws.player._ui[0]) == "New note"
+    assert ui_draw._C.api_focus(ws.run.player._ui[0]) == "New note"
     _press(drv, "a")
     assert ns["asking"] == "new"
 
@@ -270,7 +270,7 @@ def test_the_note_lends_the_bar_its_title_undo_and_redo(tmp_path):
     ns, drv = _open(ws)
     _press(drv, "down", "a")
     ed = ns["ed"]
-    lent = ui_draw.bar_lent(ws.player._ui[0])
+    lent = ui_draw.bar_lent(ws.run.player._ui[0])
     assert lent[0] == "U" and lent[3] is True, "the title, and the way back is the app's"
     assert [iconsets.SLOTS[s] for s in lent[1]] == ["undo", "redo"]
     assert lent[2] == 0b11, "nothing to undo or redo yet: both at half strength"
@@ -278,13 +278,13 @@ def test_the_note_lends_the_bar_its_title_undo_and_redo(tmp_path):
     for ch in "ab":
         ed.key(ord(ch))
     _frames(drv)
-    ui_draw.bar_tap(ws.player._ui[0], 0)        # the bar's undo
+    ui_draw.bar_tap(ws.run.player._ui[0], 0)        # the bar's undo
     _frames(drv)
     assert ed.text() == "start"
-    ui_draw.bar_tap(ws.player._ui[0], 1)        # ...and redo
+    ui_draw.bar_tap(ws.run.player._ui[0], 1)        # ...and redo
     _frames(drv)
     assert ed.text().startswith("ab")
-    ui_draw.bar_tap(ws.player._ui[0], -2)       # the bar's way back
+    ui_draw.bar_tap(ws.run.player._ui[0], -2)       # the bar's way back
     _frames(drv)
     assert ns["ed"] is None and ws.wm.top_is_player(), "back to the list, Notes open"
 
@@ -336,9 +336,9 @@ def test_a_tool_with_nothing_to_do_is_no_stop(tmp_path):
     moy_carts.save_file("docs", "plain", "x", ws.carts_root)
     ns, drv = _open(ws)
     _press(drv, "down", "a")
-    assert ui_draw._C.api_box(ws.player._ui[0], "Copy") is None
-    assert ui_draw._C.api_box(ws.player._ui[0], "Cut") is None
-    assert ui_draw._C.api_box(ws.player._ui[0], "Select") is not None
+    assert ui_draw._C.api_box(ws.run.player._ui[0], "Copy") is None
+    assert ui_draw._C.api_box(ws.run.player._ui[0], "Cut") is None
+    assert ui_draw._C.api_box(ws.run.player._ui[0], "Select") is not None
 
 
 def test_no_tool_holds_focus_while_the_note_has_the_keys(tmp_path):
@@ -347,7 +347,7 @@ def test_no_tool_holds_focus_while_the_note_has_the_keys(tmp_path):
     ns, drv = _open(ws)
     _press(drv, "down", "a")
     assert ws.focused_cart_editor() is ns["ed"]
-    assert ui_draw._C.api_focus(ws.player._ui[0]) is None
+    assert ui_draw._C.api_focus(ws.run.player._ui[0]) is None
 
 
 def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
@@ -364,7 +364,7 @@ def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
     _x, top, _w, h = ns["content_rect"]()
 
     def shown():
-        y0, rh, _view, _px, _side = ui_draw._C.api_table_rows(ws.player._ui[0])
+        y0, rh, _view, _px, _side = ui_draw._C.api_table_rows(ws.run.player._ui[0])
         y = y0 + ns["cur"] * rh
         return top <= y and y + rh <= top + h
 
@@ -376,7 +376,7 @@ def test_closing_a_note_brings_the_list_back_on_its_row(tmp_path):
     _frames(drv, 1)
     assert ns["ed"] is None and ns["cur"] == 30
     assert shown(), "the first frame showed the list's top: the row came a frame late"
-    assert ui_draw._C.api_focus(ws.player._ui[0], None) == "vault"
+    assert ui_draw._C.api_focus(ws.run.player._ui[0], None) == "vault"
     assert ui_draw.marks()[1] == 1, \
         "the keys the note let go were the list's that frame: its row wears the mark"
     _frames(drv)
@@ -442,7 +442,7 @@ def test_files_opens_a_note_in_notes_and_x_returns_to_files(tmp_path):
     app._act("OPEN", "letter")
     _frames(host_app.ConsoleDriver(ws))
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
-    ed = ws.player.ns["ed"]
+    ed = ws.run.player.ns["ed"]
     assert (ed.name(), ed.text()) == ("letter", "dear you")
     ws._exit_to_caller()
     assert ws.wm.top_kind() == "files", "X returns to whoever asked"
@@ -457,9 +457,9 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_list(tmp_path):
     _frames(host_app.ConsoleDriver(ws))
     assert ws._text_request is None
     ws.system.delete("moybyte.notes_last")
-    ws.player.start(ws.project)
+    ws.run.player.start(ws.run.project)
     _frames(host_app.ConsoleDriver(ws))
-    assert ws.player.ns["ed"] is None
+    assert ws.run.player.ns["ed"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +467,7 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_list(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _no_box(ws, id):
-    return ui_draw._C.api_box(ws.player._ui[0], id) is None
+    return ui_draw._C.api_box(ws.run.player._ui[0], id) is None
 
 
 def test_a_program_shows_run_and_a_note_does_not(tmp_path):
@@ -498,7 +498,7 @@ def test_run_saves_the_program_runs_it_and_comes_back_to_it(tmp_path):
     app._act("OPEN", "hi.py")
     drv = host_app.ConsoleDriver(ws)
     _frames(drv)
-    ed = ws.player.ns["ed"]
+    ed = ws.run.player.ns["ed"]
     ed.nav(0, 1)
     _type(drv, "print('again')")
     caret = ed.caret()
@@ -511,7 +511,7 @@ def test_run_saves_the_program_runs_it_and_comes_back_to_it(tmp_path):
     ws._exit_to_caller()
     _frames(drv)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
-    back = ws.player.ns["ed"]
+    back = ws.run.player.ns["ed"]
     assert back is not ed and back.name() == "hi.py"
     assert back.caret() == caret and back.focused()
     ws._exit_to_caller()
@@ -537,7 +537,7 @@ def test_the_program_comes_back_scrolled_where_it_was(tmp_path):
     _tap(drv, _box(ws, "Run"))
     ws._exit_to_caller()
     _frames(drv)
-    back = ws.player.ns["ed"]
+    back = ws.run.player.ns["ed"]
     assert back._where() == where
     assert back._top == top, "the view shows the line it showed"
 
@@ -553,15 +553,15 @@ def test_on_the_desk_the_vault_comes_back_on_the_programs_row(tmp_path):
     assert ns["ed"].name() == "zz.py" and ns["cur"] == 41
 
     def shown():
-        y0, rh, view, _px, _side = ui_draw._C.api_table_rows(ws.player._ui[0])
-        y = y0 + ws.player.ns["cur"] * rh
+        y0, rh, view, _px, _side = ui_draw._C.api_table_rows(ws.run.player._ui[0])
+        y = y0 + ws.run.player.ns["cur"] * rh
         return view[1] <= y and y + rh // 2 <= view[1] + view[3]
 
     assert shown()
     _tap(drv, _box(ws, "Run"))
     ws._exit_to_caller()
     _frames(drv)
-    assert ws.player.ns["cur"] == 41
+    assert ws.run.player.ns["cur"] == 41
     assert shown(), "the vault shows the program's row, not its top"
 
 
@@ -579,7 +579,7 @@ def test_a_program_that_does_not_parse_says_so_in_the_console(tmp_path):
     ws._exit_to_caller()
     _frames(drv)
     assert ws.cart.get("title") == "Notes"
-    assert ws.player.ns["ed"].name() == "bad.py"
+    assert ws.run.player.ns["ed"].name() == "bad.py"
 
 
 def test_a_run_that_cannot_start_badges_the_program_and_stays(tmp_path, monkeypatch):
@@ -624,13 +624,13 @@ def _desk(tmp_path):
 
 def test_on_the_desk_the_window_is_the_page_with_no_bar_inside_it(tmp_path):
     ws, ns, drv = _desk(tmp_path)
-    assert ws.app_window_canvas and ws.app_full_canvas
+    assert ws.run.app_window_canvas and ws.run.app_full_canvas
     win = ws.wm._wins["desktop"]
     assert (win.w, win.h) == (900, 536), "it opens at its designed size"
     cx, cy, cw, ch = win.content_rect()
     assert ns["content_rect"]() == (0, 0, cw, ch), "the page begins under the title strip"
     assert ws.wm.viewport() == (cx, cy, 1)
-    assert ws.canvas.w >= cw and ws.canvas.h >= ch
+    assert ws.run.canvas.w >= cw and ws.run.canvas.h >= ch
 
 
 def test_the_desk_shows_the_vault_beside_the_note(tmp_path):
@@ -693,11 +693,11 @@ def test_cancel_and_esc_over_an_open_note_give_it_the_keys_back(tmp_path):
 
 def test_a_resized_window_moves_the_page_not_its_pixels(tmp_path):
     ws, ns, drv = _desk(tmp_path)
-    cv = ws.canvas
+    cv = ws.run.canvas
     win = ws.wm._wins["desktop"]
     ws.wm._resize_window(win, win.w - 100, win.h - 60)
     _frames(drv)
-    assert ws.canvas is cv, "the same canvas: a resize allocates nothing"
+    assert ws.run.canvas is cv, "the same canvas: a resize allocates nothing"
     assert ns["content_rect"]()[2:] == win.content_rect()[2:]
 
 
@@ -705,7 +705,7 @@ def test_the_canvas_goes_back_when_notes_closes(tmp_path):
     ws, ns, drv = _desk(tmp_path)
     ws._exit_to_caller()
     _frames(drv)
-    assert not ws.app_window_canvas and not ws.app_full_canvas
+    assert not ws.run.app_window_canvas and not ws.run.app_full_canvas
 
 
 def test_on_the_desk_run_comes_back_to_the_notes_window(tmp_path):
@@ -721,5 +721,5 @@ def test_on_the_desk_run_comes_back_to_the_notes_window(tmp_path):
     ws._exit_to_caller()
     _frames(drv)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
-    assert ws.player.ns["ed"].name() == "hi.py"
-    assert ws.app_window_canvas, "back in its window"
+    assert ws.run.player.ns["ed"].name() == "hi.py"
+    assert ws.run.app_window_canvas, "back in its window"

@@ -1271,7 +1271,7 @@ class EditorDesk(Layer):
             win = ws.wm._wins.get("desktop")
             if win is not None:
                 win.held = False            # the restore lands on the run, not its menu
-            ws.player.resume()
+            ws.run.player.resume()
             if "desktop" in ws.wm._wins:
                 ws.wm._move_focus("desktop")
         ws._dirty = True
@@ -1423,7 +1423,7 @@ class EditorDesk(Layer):
         holds, centred; a still frame, dimmed under the Play glyph, while no
         game runs."""
         ws = self.ws
-        gc = ws.canvas
+        gc = ws.run.canvas
         x, y, w, h = r
         pad = 4 * u
         s = max(1, min((w - 2 * pad) // gc.w, (h - 2 * pad) // gc.h))

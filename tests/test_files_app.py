@@ -456,14 +456,14 @@ def test_docs_and_tables_kinds_get_the_open_action(tmp_path):
 def test_send_sprites_to_files_producer(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
-    # Open a project so ws.project.sheet is a real sprite sheet.
+    # Open a project so ws.run.project.sheet is a real sprite sheet.
     ws.carts_store.create("Doodle", carts, type="game")
     ws.carts.apply(shelf(carts))
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Doodle"))
-    ws.project.sheet.pset(0, 0, 9)
+    ws.run.project.sheet.pset(0, 0, 9)
     name = ws.send_sprites_to_files()
     assert name in moy_carts.list_files("sprites", carts)
-    assert moy_carts.load_file("sprites", name, carts) == ws.project.sheet.to_hex()
+    assert moy_carts.load_file("sprites", name, carts) == ws.run.project.sheet.to_hex()
 
 
 # -- painting ----------------------------------------------------------------------

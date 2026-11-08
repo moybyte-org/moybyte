@@ -719,7 +719,8 @@ def _remote_state(ws):
         st["cart"] = (getattr(ws, "cart", None) or {}).get("title")
         # A fit notice is a panel too, and not an error: a compiled cart this
         # console cannot hold, refused before it loaded (Player.notice).
-        notice = getattr(getattr(ws, "player", None), "notice", None)
+        notice = getattr(getattr(getattr(ws, "run", None), "player", None),
+                         "notice", None)
         st["notice"] = notice
         st["cart_error"] = None if notice else getattr(ws, "cart_error", None)
         st["diag"] = bool(getattr(ws, "diag_live", False))
@@ -904,7 +905,7 @@ def _remote_state(ws):
         # The tick model (#217): [rate, divisor, misses, steady] while a game
         # is paced, else None -- the on-glass suites read "did the cart hold
         # its tick" from here rather than from pixels.
-        pl = ws.player
+        pl = ws.run.player
         st["tick"] = ([pl.sched.rate, pl.sched.div, pl.sched.misses,
                        bool(pl.sched.steady)] if pl.tick_ms else None)
         st["uncap"] = bool(pl.sched.uncapped) if pl.tick_ms else None
@@ -948,7 +949,7 @@ def _remote_state(ws):
         # cart and for a tier whose allocator has one region: the moment a cart
         # tips into the ~2x-slower PSRAM regime has to be distinguishable from
         # the board that cannot tip at all.
-        st["sram"] = ws.player.sram_report()
+        st["sram"] = ws.run.player.sram_report()
     except Exception as exc:  # noqa: BLE001
         st["sram_err"] = str(exc)
     return st
@@ -1895,7 +1896,7 @@ class DevChannel:
         if cmd == "uncap":
             on = not (len(parts) == 2 and parts[1] == "0")
             ws._uncap = on                    # the next run starts uncapped
-            pl = getattr(ws, "player", None)
+            pl = getattr(getattr(ws, "run", None), "player", None)
             if pl is not None and getattr(pl, "tick_ms", 0):
                 pl.uncap_mode(on)             # ...and the running one flips now
             print("REMOTE uncap %s" % ("on" if on else "off"))

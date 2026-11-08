@@ -463,7 +463,7 @@ class UpdateUI:
         not strand a board whose bootloader already points at the new slot."""
         ws = self.ws
         app = getattr(ws, "editor_app", None)
-        if app is None or app.project is not ws.project:
+        if app is None or app.project is not ws.run.project:
             return
         try:
             app.save_current()

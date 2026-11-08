@@ -295,7 +295,7 @@ def test_a_workspace_swap_pays_the_outgoing_project_s_debt(tmp_path):
     carts = [c for c in ws.launcher.items if c.get("path")]
     first, second = carts[0], carts[1]
     ws._open_workspace(first)
-    ws.editor_app.open(ws.project)
+    ws.editor_app.open(ws.run.project)
     ws.editor_app.set_tab("paint")
     ws.frame(1 / 30)
     ws.sheet.pset(0, 0, 7)

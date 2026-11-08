@@ -158,7 +158,7 @@ class Saver:
             return False
         self._next = now + self.PERIOD_MS
         carts = [c for c in ws.carts.all if c.get("type") == "game"] or ws.carts.all
-        cv = ws.sys_canvas or ws.canvas
+        cv = ws.sys_canvas or ws.run.canvas
         cv.cls(0)
         if carts:
             self._i = (self._i + 1) % len(carts)

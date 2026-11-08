@@ -126,10 +126,10 @@ def test_small_canvas_run_binds_and_composites(tmp_path):
     assert ws.cart_error is None
     # The run plays on a REAL 128x128 canvas; the boot canvas was promoted to
     # system canvas so the composite runs (sc is no longer gc).
-    assert (ws.canvas.w, ws.canvas.h) == (128, 128)
+    assert (ws.run.canvas.w, ws.run.canvas.h) == (128, 128)
     stock = ws.sys_canvas
     assert (stock.w, stock.h) == (320, 240)
-    assert stock is not ws.canvas
+    assert stock is not ws.run.canvas
     # No view: 128x128 on 320x240 composites at 1x, centered (96, 56).
     assert ws.wm.viewport() == (96, 56, 1)
     settle_badges(ws)
@@ -141,8 +141,8 @@ def test_small_canvas_run_binds_and_composites(tmp_path):
     assert stock.pix(96, 56) == 60                    # cart (0, 0)
     assert stock.pix(96 + 127, 56 + 127) == 61        # cart (127, 127)
     # Run death restores the boot raster and the shared-canvas degradation.
-    ws.player.release_world()
-    assert ws.canvas is stock
+    ws.run.player.release_world()
+    assert ws.run.canvas is stock
     assert ws._sys_canvas is None
 
 
@@ -170,7 +170,7 @@ def test_out_of_set_canvas_is_refused_by_name(tmp_path):
     assert ws.cart_error is not None
     assert "256x192" in ws.cart_error
     # Refused BEFORE any bind: the boot raster never changed hands.
-    assert (ws.canvas.w, ws.canvas.h) == (320, 240)
+    assert (ws.run.canvas.w, ws.run.canvas.h) == (320, 240)
     assert ws._sys_canvas is None
     drv.frame(DT)                                     # the error panel draws
 
@@ -180,8 +180,8 @@ def test_crash_on_small_canvas_survives(tmp_path):
     for _ in range(3):
         drv.frame(DT)                # the crash panel must fit the 128px raster
     assert ws.cart_error is not None
-    ws.player.release_world()
-    assert (ws.canvas.w, ws.canvas.h) == (320, 240)
+    ws.run.player.release_world()
+    assert (ws.run.canvas.w, ws.run.canvas.h) == (320, 240)
 
 
 def test_the_run_canvas_goes_with_its_run(tmp_path):
@@ -189,13 +189,13 @@ def test_the_run_canvas_goes_with_its_run(tmp_path):
     with the run's layers (a 128x128 buffer back to the pool), and the next
     run gets a canvas of its own."""
     ws, drv = _open(tmp_path, "tiny", PLAIN_SRC)
-    small = ws.canvas
+    small = ws.run.canvas
     buf = small._comp._b
     assert buf.live and buf.nbytes == 128 * 128 * 2
-    ws.player.release_world()
+    ws.run.player.release_world()
     assert not buf.live
     ws.open()
-    assert ws.canvas is not small and ws.canvas._comp._b.live
+    assert ws.run.canvas is not small and ws.run.canvas._comp._b.live
 
 BAD_SRC = "def _draw(:\n    pass\n"     # a cart that never loads
 
@@ -203,7 +203,7 @@ BAD_SRC = "def _draw(:\n    pass\n"     # a cart that never loads
 def test_failed_load_restores_the_palette_on_the_swapped_canvas(tmp_path):
     """A cart palette is applied to the RUN canvas after the bind; a load
     failure releases that canvas before the exit path restores, and a restore
-    aimed at whatever ws.canvas is by then left the run canvas -- and the native
+    aimed at whatever ws.run.canvas is by then left the run canvas -- and the native
     kernels' gate it owns -- on the cart's table. On the T-Deck that made every
     native cart after a failed p8 load draw in PICO-8 colours."""
     carts_dir = str(tmp_path / "carts")
@@ -211,13 +211,13 @@ def test_failed_load_restores_the_palette_on_the_swapped_canvas(tmp_path):
     _write_cart(carts_dir, "badpal", BAD_SRC, extra={"palette": table})
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
-    default = list(ws.canvas.palette)
+    default = list(ws.run.canvas.palette)
     select_on_home(ws, "badpal")
     ws.open()
     for _ in range(2):
         drv.frame(DT)
     assert ws.cart_error is not None
-    ws.player.release_world()
-    assert list(ws.canvas.palette) == default
-    assert ws.player._cart_palette is None
+    ws.run.player.release_world()
+    assert list(ws.run.canvas.palette) == default
+    assert ws.run.player._cart_palette is None
 

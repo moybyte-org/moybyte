@@ -129,8 +129,8 @@ def front(tmp_path):
 
 def _start(ws, title):
     open_cart(ws, title)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player._front is True, "the Player did not take the front"
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player._front is True, "the Player did not take the front"
     mp.wasm_take(1)                   # blit565's frames, as a P4's glue asks
 
 
@@ -171,10 +171,10 @@ def test_super_leaves_the_last_frame_in_the_canvas_and_resume_takes_the_front(fr
     src.set_button("start", False)
     inp.begin_frame()
     ws.handle_input()
-    assert ws.pause.open and ws.player.paused
+    assert ws.pause.open and ws.run.player.paused
     ws.frame(1 / 30)
     ws.pause.close()
-    assert ws.player._front is True and mp.front_live(), "Resume gives the front back"
+    assert ws.run.player._front is True and mp.front_live(), "Resume gives the front back"
 
 
 def test_the_dev_channels_end_fences_and_ends_the_run(front):
@@ -208,8 +208,8 @@ def test_a_trap_hands_the_run_back_and_the_console_reports_it(front):
     assert -1 in rc, rc
     assert not mp.front_live()
     ws.frame(1 / 30)
-    assert ws.player._front is False
-    assert ws.player.cart_error is not None, "the console did not report the trap"
+    assert ws.run.player._front is False
+    assert ws.run.player.cart_error is not None, "the console did not report the trap"
 
 
 def test_a_palette_frame_the_board_does_not_show_goes_through_the_canvas(front):
@@ -227,8 +227,8 @@ def test_a_board_without_a_frame_op_keeps_a_compiled_run_with_the_console(front)
     ws, buf, presents, frames = front
     ws.front_bind = lambda: mp.front_ops(buf, W, H, presents)
     open_cart(ws, "Front Wasm")
-    assert ws.player.cart_error is None
-    assert ws.player._front is False and not mp.front_live()
+    assert ws.run.player.cart_error is None
+    assert ws.run.player._front is False and not mp.front_live()
 
 
 def test_a_game_full_screen_on_the_desk_takes_the_front_once_the_glass_is_still(tmp_path):
@@ -260,13 +260,13 @@ def test_a_game_full_screen_on_the_desk_takes_the_front_once_the_glass_is_still(
         assert "settings" in ws.wm._order
         open_cart(ws, "Front Wasm")
         wm = ws.wm
-        assert ws.player._front is False, "taken before the glass around it was drawn"
+        assert ws.run.player._front is False, "taken before the glass around it was drawn"
         n = 0
-        while not ws.player._front and n < 20:
+        while not ws.run.player._front and n < 20:
             drv.frame(1 / 30)
             n += 1
             assert wm.mode == "desktop" and wm.game_full()
-        assert ws.player._front and mp.front_live(), "the desk's full-screen game kept the console"
+        assert ws.run.player._front and mp.front_live(), "the desk's full-screen game kept the console"
         assert n > wm._retained_n(), n
         mp.front_end(mp.END_MENU)
         drv.frame(1 / 30)
@@ -278,7 +278,7 @@ def test_a_game_full_screen_on_the_desk_takes_the_front_once_the_glass_is_still(
         for _ in range(12):
             drv.frame(1 / 30)
         assert win.saved is None and not wm.game_full()
-        assert ws.player._front is False and not mp.front_live()
+        assert ws.run.player._front is False and not mp.front_live()
     finally:
         if mp.front_live():
             mp.front_end(mp.END_MENU)

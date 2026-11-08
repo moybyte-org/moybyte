@@ -81,7 +81,7 @@ def _menu(ws, drv):
 
 def _jot_ns(ws):
     assert ws.cart is not None and ws.cart.get("title") == "Jot"
-    return ws.player.ns
+    return ws.run.player.ns
 
 
 # -- the table ------------------------------------------------------------------
@@ -331,7 +331,7 @@ def _picker(tmp_path, n=9):
     ws.carts_store.save_file("sprites", "hero", "0,", root)
     ws.open(next(c for c in ws.carts.all if c.get("title") == "Jot"))
     _frames(drv)
-    return ws, drv, ws.player.pid
+    return ws, drv, ws.run.player.pid
 
 
 def _picker_up(ws, drv, title="Choose a picture"):

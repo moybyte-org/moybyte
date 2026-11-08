@@ -109,7 +109,7 @@ if not hasattr(ws, '_type_installed'):
         if ws._tn > 0:
             ws._tc += 1
             if ws._tc % 4 == 0:
-                fe = ws.player._focus_editor
+                fe = ws.run.player._focus_editor
                 if fe is not None:
                     fe.key(ord(ws._ts[ws._tn % len(ws._ts)]))
                     ws._tn -= 1
@@ -441,7 +441,7 @@ class Run:
             for cx, cy in steps:
                 sx, sy = cart_xy(cx, cy)
                 b.tap(sx, sy, settle=1.5)
-            if pb.pyval(b, "ws.player._focus_editor is not None"):
+            if pb.pyval(b, "ws.run.player._focus_editor is not None"):
                 got = True
                 break
         self.rows.append({"name": "notes: editor focused", "ok": got})

@@ -26,9 +26,9 @@ are GRID PRESENTATION, not roster: each is keyed on kernel state this object has
 no business knowing -- `can_manage`, `wm.has_desk`, the registered-app list, the
 search query, the pinned pseudo tiles. They read `carts.all` like every other
 consumer, and keeping them out means a future cart SOURCE plugs into the roster
-without also having to know what a shelf card looks like. `_fat_cart` stays
-kernel too: it is the OPEN WORKSPACE's cart, written by `_open_workspace`, not a
-property of the roster.
+without also having to know what a shelf card looks like. The fat cart stays
+the run's (`ws.run.fat_cart`): it is the OPEN WORKSPACE's cart, written by
+`_open_workspace`, not a property of the roster.
 
 ## Reading the store through `ws`, per call
 

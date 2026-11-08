@@ -73,9 +73,9 @@ def test_run_refuses_a_cart_whose_source_will_not_read(tmp_path, monkeypatch):
     ws.open()
     assert ws.cart is None, "ws.cart was left on a dict with no source"
     assert "src" not in cart
-    assert ws.player.cart_error is not None
-    assert "Couldn't open" in ws.player.cart_error, ws.player.cart_error
-    assert "Mossmoss" in ws.player.cart_error, ws.player.cart_error
+    assert ws.run.player.cart_error is not None
+    assert "Couldn't open" in ws.run.player.cart_error, ws.run.player.cart_error
+    assert "Mossmoss" in ws.run.player.cart_error, ws.run.player.cart_error
     assert ws.screen == "desktop", "the kid was stranded, not shown the panel"
     ws.pointer.visible = False
     ws.frame(0.016)                     # the panel paints over a cart-less desktop
@@ -90,9 +90,9 @@ def test_open_in_editor_refuses_a_cart_whose_source_will_not_read(tmp_path,
     _deny_source(monkeypatch, cart, 99)
     ws.open_in_editor(cart)
     assert ws.cart is None
-    assert ws.project.cart is None
-    assert ws.editor_app.project is not ws.project
-    assert "Couldn't open" in (ws.player.cart_error or ""), ws.player.cart_error
+    assert ws.run.project.cart is None
+    assert ws.editor_app.project is not ws.run.project
+    assert "Couldn't open" in (ws.run.player.cart_error or ""), ws.run.player.cart_error
     assert ws.screen == "desktop"
 
 
@@ -107,11 +107,11 @@ def test_the_launcher_survives_a_refused_cart(tmp_path, monkeypatch):
     ws.open()
     ws.go_home()
     assert ws.screen == "launcher"
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     _select(ws, good)
     ws.open()
     assert ws.cart is good
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
 
 def test_a_refused_open_leaves_no_open_cart_behind(tmp_path, monkeypatch):
@@ -120,12 +120,12 @@ def test_a_refused_open_leaves_no_open_cart_behind(tmp_path, monkeypatch):
     ws = _ws(tmp_path)
     bad = _mk(ws, "Mossmoss")
     open_cart(ws, "Star Catcher")
-    assert ws.player.ns is not None
+    assert ws.run.player.ns is not None
     _deny_source(monkeypatch, bad, 99)
     ws.open_in_editor(bad)
     assert ws.cart is None
-    assert ws.player.ns is None, "the dead run's world outlived the refusal"
-    assert ws._fat_cart is None
+    assert ws.run.player.ns is None, "the dead run's world outlived the refusal"
+    assert ws.run.fat_cart is None
 
 
 def test_the_source_read_retries_once_after_a_collect(tmp_path, monkeypatch):
@@ -139,7 +139,7 @@ def test_the_source_read_retries_once_after_a_collect(tmp_path, monkeypatch):
     assert left[0] == 0, "the read was never retried"
     assert ws.cart is cart
     assert cart["src"] == GOOD_SRC
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
 
 def test_the_retry_is_once_not_a_loop(tmp_path, monkeypatch):
@@ -159,4 +159,4 @@ def test_a_cart_with_no_folder_at_all_is_refused(tmp_path):
     shutil.rmtree(cart["path"])         # its handle still names the folder
     ws.open_in_editor(cart)
     assert ws.cart is None
-    assert "Couldn't open" in (ws.player.cart_error or "")
+    assert "Couldn't open" in (ws.run.player.cart_error or "")

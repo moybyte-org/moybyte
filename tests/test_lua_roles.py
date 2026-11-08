@@ -45,8 +45,8 @@ def _run(tmp_path, src, perms, off=(), frames=2):
     for _ in range(frames):
         ws.input.begin_frame()
         ws.frame(DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    return ws, ws.player._lua
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    return ws, ws.run.player._lua
 
 
 NAMES_LUA = """
@@ -107,8 +107,8 @@ def test_a_lua_game_has_no_app_names(tmp_path):
     ws.open()
     ws.input.begin_frame()
     ws.frame(DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player._lua.get_global("SEEN") == (
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player._lua.get_global("SEEN") == (
         "files=nil prefs=nil set_theme=nil themes=nil open_app=nil io=nil "
         "os=nil clipboard=nil")
 

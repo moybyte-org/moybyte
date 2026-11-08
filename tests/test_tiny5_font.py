@@ -281,12 +281,12 @@ def test_a_python_cart_prints_and_measures_in_petme128(tmp_path, kind):
     ws = build_ws_with_cart(tmp_path, "import ui_draw\n" + _PY, type=kind)
     assert ui_draw.font("ui")[0] != 0               # the shell's theme names Tiny5
     _frame(ws)
-    ns = ws.player.ns
-    assert ws.player.cart_error is None, ws.player.cart_error
+    ns = ws.run.player.ns
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert ns["seen"] and set(ns["seen"]) == {(0, 0)}
-    got = _box(ws.canvas)
+    got = _box(ws.run.canvas)
     assert ui_draw.font("ui")[0] != 0 and ui_draw.print_font() != 0   # and back after
-    assert got == _petme_hello(ws.canvas)
+    assert got == _petme_hello(ws.run.canvas)
 
 
 def test_a_lua_cart_prints_in_petme128(tmp_path):
@@ -305,9 +305,9 @@ def test_a_lua_cart_prints_in_petme128(tmp_path):
     from ws_helpers import open_cart
     open_cart(ws, "Hello Lua")
     _frame(ws)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    got = _box(ws.canvas)
-    assert got == _petme_hello(ws.canvas)
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    got = _box(ws.run.canvas)
+    assert got == _petme_hello(ws.run.canvas)
 
 
 def test_a_full_set_of_slots_is_taken_back(tmp_path):

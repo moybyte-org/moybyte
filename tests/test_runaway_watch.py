@@ -54,7 +54,7 @@ def _lua_ws(tmp_path, title, src):
     cart = moy_carts.create(title, str(tmp_path / "carts"), src=src, runtime="lua",
                             main="main.lua")
     _open(ws, cart)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     return ws
 
 
@@ -77,9 +77,9 @@ def test_a_lua_loop_that_never_ends_is_ended_on_its_line(tmp_path, watch):
     for _ in range(3):
         ws.frame(1 / 30)
     took = time.monotonic() - t0
-    err = ws.player.cart_error
+    err = ws.run.player.cart_error
     assert err is not None and "stuck: one frame ran over 1 s" in err, err
-    assert ws.player.crash_line == 5, (ws.player.crash_line, err)
+    assert ws.run.player.crash_line == 5, (ws.run.player.crash_line, err)
     assert BUDGET_MS / 1000.0 <= took < 5.0, took
     info = watch.info()
     assert info[14] is True and err.endswith(info[7]), info
@@ -95,7 +95,7 @@ def test_pcall_does_not_keep_a_stuck_lua_frame_alive(tmp_path, watch):
 end
 """)
     ws.frame(1 / 30)
-    err = ws.player.cart_error
+    err = ws.run.player.cart_error
     assert err is not None and "stuck:" in err, err
     assert watch.info()[14] is True
 
@@ -111,7 +111,7 @@ function _draw() cls(n % 16) end
     for _ in range(3):
         ws.frame(1 / 30)
         time.sleep(BUDGET_MS * 1.5 / 1000.0)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert watch.info()[14] is False
 
 
@@ -120,7 +120,7 @@ def test_an_ordinary_raise_keeps_the_crash_title(tmp_path, watch):
     from runtime import chrome_ops
     ws = _lua_ws(tmp_path, "Boom Lua", "function _update()\n  error('boom')\nend\n")
     ws.frame(1 / 30)
-    err = ws.player.cart_error
+    err = ws.run.player.cart_error
     assert "boom" in err and watch.info()[14] is False
     assert chrome_ops.crash_title(err, 2) == "Your game stopped on line 2."
     assert chrome_ops.crash_title(err, None) == "Your game stopped."
@@ -158,10 +158,10 @@ def test_a_compiled_loop_that_calls_an_import_is_terminated_there(tmp_path, watc
         if c["title"] == cart["title"]:
             ws.launcher.sel = i
             ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(3):
         ws.frame(1 / 30)
-    err = ws.player.cart_error
+    err = ws.run.player.cart_error
     assert err is not None and "stuck: one frame ran over 1 s" in err, err
     assert watch.info()[14] is True
 
@@ -211,7 +211,7 @@ def test_a_stuck_compiled_run_paints_its_stop_card_on_the_next_frame(tmp_path, w
         ws.frame(1 / 30)
         if ws.pause.open:
             break
-    assert ws.pause.open and ws.pause.stopped, ws.player.cart_error
+    assert ws.pause.open and ws.pause.stopped, ws.run.player.cart_error
     assert ws._dirty, "the frame that opened the stop card owes the next one"
     ws.frame(1 / 30)
     assert painted, "the next frame paints the stop card"

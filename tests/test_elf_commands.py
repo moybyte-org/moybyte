@@ -414,7 +414,7 @@ def test_the_player_opens_no_native_app(term):
     assert player_fit._compiled(cart)
     from ws_helpers import open_cart
     open_cart(ws, "Hello Native")
-    assert "runs as a command in the Terminal" in (ws.player.cart_error or "")
+    assert "runs as a command in the Terminal" in (ws.run.player.cart_error or "")
 
 
 def test_a_signature_that_is_present_must_verify(built, tmp_path):

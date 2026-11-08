@@ -32,7 +32,6 @@ def _device_ws(tmp_path):
 
     ws = _ws(tmp_path)
     inp = DeviceInputState()
-    inp.cart_start_ms = 0
     ws.input = inp
     return ws, inp.source("kbd")
 
@@ -227,8 +226,8 @@ def test_a_python_script_runs_through_the_real_player(tmp_path):
     assert ws.cart["runtime"] == "python"
     assert ws.cart["permissions"] == ["files", "prefs", "console"]
     assert ws.cart["title"] == "hi"
-    assert ws.player._script and ws.player._is_tool
-    assert ws.player.tick_ms == 0, "a script is unpaced: one tick per loop frame"
+    assert ws.run.player._script and ws.run.player._is_tool
+    assert ws.run.player.tick_ms == 0, "a script is unpaced: one tick per loop frame"
 
 
 def test_a_lua_script_runs_the_same_way(tmp_path):
@@ -273,7 +272,7 @@ def test_the_capability_gate_refuses_carts_and_the_network(tmp_path):
         text = con.text()
         assert "NameError" in text
         assert "a script can't use " + said in text.replace("\n", "")
-        assert ws.player.cart_error is None, "the console IS the error surface"
+        assert ws.run.player.cart_error is None, "the console IS the error surface"
     # ...and the three it DOES get are real
     con = _run(ws, "ok.py",
                "prefs.set('n', 7)\nprint(prefs.get('n'))\nprint(len(files.list()))\n")
@@ -287,7 +286,7 @@ def test_a_script_error_lands_in_the_console(tmp_path):
     con = _run(ws, "boom.py", "def _update(dt):\n    1 / 0\n")
     _frame(ws, 2)
     assert "ZeroDivisionError" in con.text()
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     assert ws.wm.top_is_player(), "the console stays up, and exitable"
     # and it stops running: one traceback, not one per frame
     once = con.text()
@@ -299,7 +298,7 @@ def test_a_script_body_that_does_not_parse_lands_there_too(tmp_path):
     ws = _ws(tmp_path)
     con = _run(ws, "bad.py", "def (\n")
     assert "SyntaxError" in con.text() or "invalid syntax" in con.text()
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
 
 
 def test_a_generator_update_is_driven_one_step_per_frame(tmp_path):

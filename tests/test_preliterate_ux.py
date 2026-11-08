@@ -88,7 +88,7 @@ def test_all_display_types_render_without_error():
     ws = _ws_with_cart(edit, cfg, sheet)
     _draw_once(ws)                          # must not raise
     assert ws.cart_error is None
-    assert probe.drew_something(ws.canvas)  # something was drawn
+    assert probe.drew_something(ws.run.canvas)  # something was drawn
     # every card is on the page: the meters as sliders, the pickers as tiles
     for key in ("n", "spd", "pick", "who"):
         assert _box(ws, key) is not None, key
@@ -201,7 +201,7 @@ def _open(ws, title):
     if cart is None:
         raise AssertionError("cart not found: " + title)
     ws._open_workspace(cart)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
 
 
 def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):
@@ -283,7 +283,7 @@ def test_existing_seed_carts_still_render_their_cards(tmp_path):
         assert ws.menu_view == "cards"
         ws.input.begin_frame()
         ws.frame(1 / 30)                                # draws cards, no error
-        assert probe.drew_something(ws.canvas)
+        assert probe.drew_something(ws.run.canvas)
         ws.go_home()
 
 
@@ -332,7 +332,7 @@ def test_bad_edit_field_stays_off_the_page_others_still_work():
     _draw_once(ws)                                    # must not raise / no error panel
     assert ws.cart_error is None
     assert _box(ws, "ok") is not None and _box(ws, "bad") is None
-    assert probe.drew_something(ws.canvas)
+    assert probe.drew_something(ws.run.canvas)
 
 
 def test_validate_field_catches_the_known_bad_shapes():

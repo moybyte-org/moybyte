@@ -215,7 +215,7 @@ def _host_frame(tmp_path, arrangement, src):
     exec(src, {"_ws": ws})
     ws._dirty = True
     device_frames(ws, 20)
-    cv = ws.glass if ws.glass is not None else ws.canvas
+    cv = ws.glass if ws.glass is not None else ws.run.canvas
     assert (cv.w, cv.h) == (w, h)
     stride = getattr(cv, "_stride", 0) or cv.w
     buf = bytes(cv._buf)

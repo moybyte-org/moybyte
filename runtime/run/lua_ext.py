@@ -114,7 +114,7 @@ def audio_ops(mod):
     return tuple(getattr(mod, name) for name in AQ_OPS)
 
 
-def snap_shared(s, inp, idx, pointer_state, out, since_ms, window=False):
+def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False):
     """PLAYER TWO, THE POINTER, THE CLOCK and THE WINDOW, into the snapshot the
     tick will read.
 
@@ -134,10 +134,10 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms, window=False):
     answer "is there one", "is it down" and "did it go down this frame" out of
     it. 0 is no pointer, which is what SPEC.md 7.3 means by nil.
 
-    THE CLOCK: milliseconds since the Player stamped `cart_start_ms`
-    (`ticks._since_ms`), the base libmoy's time() adds the milliseconds inside
-    the tick to -- the same clock a Python cart's time() reads. An input with
-    no stamp leaves the slot as it was.
+    THE CLOCK: milliseconds since `start`, the run's `cart_start_ms` the
+    Player stamped (`ticks._since_ms`), the base libmoy's time() adds the
+    milliseconds inside the tick to -- the same clock a Python cart's time()
+    reads. A None `start` leaves the slot as it was.
 
     THE WINDOW: whether the run's surface is a window's body (the desk's
     `windowed_chrome`), which the public UI API's page lies on: its ground is
@@ -160,7 +160,6 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms, window=False):
         s[idx[6]] = int(ms)
     except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
         s[idx[5]] = 0
-    start = getattr(inp, "cart_start_ms", None)
     if start is not None:
         s[idx[7]] = since_ms(start)
     s[idx[8]] = 1 if window else 0
@@ -191,7 +190,7 @@ def sync_view(ws, view, last):
     """Apply the cart's view() to the console; returns the view now in force.
 
     libmoy owns the verb (SPEC.md 6 core) and records the declaration; the
-    console still has to ACT on it -- ws.input.game_view is what the WM
+    console still has to ACT on it -- the run's `view` is what the WM
     composites from. So this reads the recording instead of the cart crossing
     into Python to set it, which is the whole point of the verb moving into
     core. Checked per frame because the spec allows a cart to change its region
@@ -201,7 +200,7 @@ def sync_view(ws, view, last):
     if view == last:
         return last
     try:
-        ws.input.game_view = view
+        ws.run.view = view
     except Exception:  # noqa: BLE001 -- a console without the field is fine
         pass
     return view

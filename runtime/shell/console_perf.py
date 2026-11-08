@@ -283,7 +283,7 @@ class PerfMeters:
         loop.perf("home", getattr(ws, "_pf_home", None))
         loop.perf("net", self.perf_net())
         loop.perf("lock", self.perf_lock())
-        pl = self.player
+        pl = self.run.player
         if pl is None or not pl.tick_ms:
             self._perf_sched = None
             self._perf_miss = 0
@@ -373,7 +373,7 @@ class PerfMeters:
         read flushes=N / maxrun=1 -- so this PROVES the batch stayed intact at runtime,
         which pixel-parity can't. Counters reset per frame in frame() when perf capture is
         on; a lone item still counts as a (flushes=1, maxrun=1) direct blit."""
-        cv = self.canvas
+        cv = self.run.canvas
         return (getattr(cv, "_batch_flushes", 0),
                 getattr(cv, "_batch_sprites", 0),
                 getattr(cv, "_batch_maxrun", 0))

@@ -187,17 +187,17 @@ class SpineVerbs:
                                       persist=False)
         self._dirty = True
 
-    def run(self, project, caller):
-        """Show `project`'s running cart on the desktop, recording `caller` so the exit
+    def play(self, caller):
+        """Show the front run's cart on the desktop, recording `caller` so the exit
         gesture knows where to return (spec Section 2's run/return -- a stack discipline,
         not a blocking call, since the frame loop can't block). The cart itself is started
         by the explicit _start() at each call site (open/apply/run_code/_leave_menu);
-        run() makes the desktop layer active + records the caller. The launcher home root
+        play() makes the desktop layer active + records the caller. The launcher home root
         is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
         returns to the same tab -- proving the Player is caller-agnostic."""
         if self.cart_error is not None and self.web.parked and self._crash_to_code():
             return                     # a parked console goes home; else the stop card
-        if self.player.notice is not None:
+        if self.run.player.notice is not None:
             self.pause.stop()          # a cart this console cannot run: its card over
             return                     # the screen it was opened from
         self.crash_popup = None        # a clean launch retires any stale popup
@@ -241,7 +241,7 @@ class SpineVerbs:
         # Drop the dead run's world NOW (#66 repeat-run fragmentation fix): the
         # next cart must build into a compact heap, not around this one's corpse
         # (see Player.release_world's docstring for the measured mechanism).
-        self.player.release_world()
+        self.run.player.release_world()
         self.pause.dismiss()           # a stop card goes with its run
         ran = self._script_return
         if ran is not None:

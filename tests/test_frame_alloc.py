@@ -390,7 +390,7 @@ def measure(loop):
     for _ in range(60):
         loop.step()
     info = {"title": title, "error": str(ws.cart_error),
-            "frame": getattr(ws, "cart_frame", None) is not None,
+            "frame": ws.run.cart_frame is not None,
             "top": ws.wm.top_kind()}
     # A first run unlocks an achievement, and its toast paints over the game
     # for a few seconds: an event, not the steady frame. Let it end.
@@ -608,7 +608,7 @@ def _typing(loop, ms, least=0):
     over `ms` and at least `least` frames."""
     from gc import mem_alloc
     keys = b"the quick brown fox jumps over the lazy dog "
-    fed = loop.ws.player._focus_editor
+    fed = loop.ws.run.player._focus_editor
     out = []
     n = 0
     t0 = time.ticks_ms()
@@ -632,17 +632,17 @@ def notes(loop, info):
     info["notes_title"] = ws.launch_named("Notes")
     for _ in range(30):
         loop.step()
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     got, err = ns["files"].new_name("probe")
     ns["_open"](got)
     for _ in range(60):
         loop.step()
     info["notes_error"] = str(ws.cart_error)
-    info["notes_focused"] = ws.player._focus_editor is not None
+    info["notes_focused"] = ws.run.player._focus_editor is not None
     _typing(loop, 1500)                  # the first keys' edges, settled
     # ...and the idle save they owe (EditorHandle.AUTOSAVE_MS), an event of
     # its own: idle is what comes after it.
-    fed = ws.player._focus_editor
+    fed = ws.run.player._focus_editor
     t0 = time.ticks_ms()
     while fed.dirty() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
         loop.step()
@@ -654,11 +654,11 @@ def notes(loop, info):
     d0 = ws.frame_state.frames_drawn
     info["notes_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     d1 = ws.frame_state.frames_drawn
-    info["notes_text0"] = len(ws.player._focus_editor.text())
+    info["notes_text0"] = len(ws.run.player._focus_editor.text())
     info["notes_typing"] = _typing(loop, @WINDOW_MS@, @MIN_FRAMES@)
     info["notes_idle_drawn"] = d1 - d0
     info["notes_typing_drawn"] = ws.frame_state.frames_drawn - d1
-    info["notes_text"] = len(ws.player._focus_editor.text())
+    info["notes_text"] = len(ws.run.player._focus_editor.text())
     gc.enable()
     notes_swiped(loop, info)
 
@@ -670,13 +670,13 @@ def notes_swiped(loop, info):
     import moy_loop
     from gc import mem_alloc
     ws = loop.ws
-    fed = ws.player._focus_editor
+    fed = ws.run.player._focus_editor
     fed.set_text("\n".join("Line %d of a long note, with words enough to wrap past the "
                            "edge of the paper" % i for i in range(120)))
     fed.save()
     for _ in range(60):
         loop.step()
-    x, y, w, h = ws.player.ns["sheet"]
+    x, y, w, h = ws.run.player.ns["sheet"]
     out = []
     for rep in range(4):
         y0, y1 = (y + h * 3 // 4, y + h // 4) if rep % 2 == 0 else (y + h // 4, y + h * 3 // 4)
@@ -1732,8 +1732,13 @@ from editors_code import CodeEditor
 from history_router import HistoryRouter
 
 
+class _Run:
+    project = None
+
+
 class _Ws:
     menu_view = "code"
+    run = _Run()
 
 
 class _Project:
@@ -1744,7 +1749,7 @@ class _Project:
 ws = _Ws()
 ws.editor = CodeEditor("\n".join("x = %d  # a line of a long cart" % i
                                  for i in range(1500)))
-ws.project = _Project()
+ws.run.project = _Project()
 router = HistoryRouter(ws, None)
 idle = router.bar_undo_bits()
 router.code_burst_open()

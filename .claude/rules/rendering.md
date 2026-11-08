@@ -149,7 +149,7 @@ left:
   stubbed** (`system_carts/moybyte.notes.moy` is the proof). Storybook/Files/Paint
   STAY shell code; Calc is portable today.
 - **The windowed DESK world must NOT bind the system canvas** — a cart there lives
-  in a window whose blit source IS `ws.canvas`, so binding makes the desktop blit
+  in a window whose blit source IS `ws.run.canvas`, so binding makes the desktop blit
   itself. Found only by rendering it.
 - **`crash_guard` disables a type:"app" cart after three crashed opens**, and
   committing fixed CODE forgives the strikes (`Project.commit_code` →

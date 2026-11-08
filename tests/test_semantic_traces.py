@@ -508,18 +508,22 @@ def run_side(kind):
         class Proj:
             pass
 
+        class Run:
+            cart_frame = view = cart_start_ms = None
+
         class Ws:
-            pass
+            def __init__(self):
+                self.run = Run()
 
         ws = Ws()
-        ws.canvas = canvas
+        ws.run.canvas = canvas
         proj = Proj()
         proj.sheet = sheet
         proj.tilemap = tilemap
-        ws.project = proj
+        ws.run.project = proj
         ws.input = inp
         ws.pmem = pmem
-        ws.audio = audio                    # the run's session: the drain's target
+        ws.run.audio = audio                    # the run's session: the drain's target
         run = MoycoreRun(ws, ns, LUA_CART)
         inp.set_frame(0)
         # _init ran inside run_begin (libmoy's moy_lua_init), so there is no
@@ -2727,9 +2731,9 @@ def _app_roles_trace(tmp_path, lua):
     for _ in range(3):
         ws.input.begin_frame()
         ws.frame(1.0 / 30.0)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    trace = (ws.player._lua.get_global("TRACE") if lua
-             else ws.player.ns["TRACE"])
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    trace = (ws.run.player._lua.get_global("TRACE") if lua
+             else ws.run.player.ns["TRACE"])
     return trace.split("\n"), ws.look.theme_name
 
 
@@ -2754,10 +2758,10 @@ def roles_trace(ws):
     ws.open()
     for _ in range(6):
         moy_loop.step()
-    if ws.player.cart_error is not None:
-        print("T ERROR " + str(ws.player.cart_error))
+    if ws.run.player.cart_error is not None:
+        print("T ERROR " + str(ws.run.player.cart_error))
         return
-    for line in ws.player._lua.get_global("TRACE").split("\n"):
+    for line in ws.run.player._lua.get_global("TRACE").split("\n"):
         print("T " + line)
     print("T theme " + ws.look.theme_name)
 '''

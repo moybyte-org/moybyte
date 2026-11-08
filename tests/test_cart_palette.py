@@ -1,11 +1,11 @@
 """A cart's own palette (SPEC.md 3.1), on the raster every tier draws with.
 
 This was host-only and nobody knew. `runtime/run/player.py` assigns
-`ws.canvas.palette = table` when a cart ships one and restores it on exit, and
+`ws.run.canvas.palette = table` when a cart ships one and restores it on exit, and
 player.py is STAGED TO BOTH BOARDS -- but `DeviceCanvas` had no `palette` at
 all, so on device the assignment set an attribute nothing read.
 
-VERIFIED ON P4 GLASS 2026-08-15, before the fix: `hasattr(ws.canvas, "palette")`
+VERIFIED ON P4 GLASS 2026-08-15, before the fix: `hasattr(ws.run.canvas, "palette")`
 was False, assigning one was accepted, and `PAL565[8]` stayed `0xf809`. A cart
 palette worked in the simulator and was inert on the hardware it shipped to --
 the same shape as the T-Deck's missing web console and the wallpaper preview

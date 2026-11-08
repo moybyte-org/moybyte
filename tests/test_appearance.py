@@ -306,7 +306,7 @@ def test_select_wallpaper_leaves_the_open_projects_cart_fat(tmp_path):
     cart = next(c for c in ws.look.wallpaper_carts()
                 if c.get("path") and ws.look.wp_id_for(c) != ws.look.PICTURE)
     ws._open_workspace(cart)
-    assert ws._fat_cart is cart
+    assert ws.run.fat_cart is cart
     ws.look.select_wallpaper(ws.look.wp_id_for(cart), persist=False)
     assert cart.get("lazy") is not True and "src" in cart
 

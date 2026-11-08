@@ -246,7 +246,7 @@ class Wallpaper:
         self._pv_restore = None
         self._pv_for = None
         # #63 leak fix: return the dead wallpaper's pooled layer buffers for reuse.
-        rl = getattr(self.ws.canvas, "reclaim_layers", None)
+        rl = getattr(self.ws.run.canvas, "reclaim_layers", None)
         if rl is not None:
             rl("wallpaper")
         # #186: and the picture's bake, which is a loan of the same kind on
@@ -409,22 +409,22 @@ class Wallpaper:
 
     def _stock_bracket(self):
         """The backdrop never follows a cart's private raster: while a per-run
-        cart canvas (SPEC.md 1/3.1) is bound, every live ws.canvas read in this
+        cart canvas (SPEC.md 1/3.1) is bound, every live ws.run.canvas read in this
         component must see the STOCK canvas the wallpaper world lives on. This
-        returns (restore_needed, previous) after pointing ws.canvas at stock --
+        returns (restore_needed, previous) after pointing ws.run.canvas at stock --
         pair with _stock_unbracket in a finally."""
         ws = self.ws
-        stock = self._home or getattr(ws, "_run_canvas_stock", None)
-        if stock is None or ws.canvas is stock:
+        stock = self._home or ws.run.stock
+        if stock is None or ws.run.canvas is stock:
             return (False, None)
-        prev = ws.canvas
-        ws.canvas = stock
+        prev = ws.run.canvas
+        ws.run.canvas = stock
         return (True, prev)
 
     def _stock_unbracket(self, bracket):
         restore, prev = bracket
         if restore:
-            self.ws.canvas = prev
+            self.ws.run.canvas = prev
 
     def rehome(self):
         """Move the wallpaper world off the stock game canvas, onto one of
@@ -438,7 +438,7 @@ class Wallpaper:
         mk = getattr(ws, "make_game_canvas", None)
         if mk is None:
             return
-        stock = getattr(ws, "_run_canvas_stock", None) or ws.canvas
+        stock = ws.run.stock or ws.run.canvas
         try:
             cv = mk(stock.w, stock.h, "wallpaper.home")
         except Exception:  # noqa: BLE001 -- no room: the backdrop stays where it is
@@ -479,7 +479,7 @@ class Wallpaper:
             glass = bool(cart.get("glass"))
             sheet = ws._build_sheet(cart)
             tilemap = ws._build_tilemap(cart)
-            ns = ws.make_api(ws.sys_canvas if glass else ws.canvas, ws.input,
+            ns = ws.make_api(ws.sys_canvas if glass else ws.run.canvas, ws.input,
                              dict(cart.get("cfg", {})),
                              # A wallpaper is silent: it holds no audio session.
                              sheet, None,
@@ -795,13 +795,13 @@ class Wallpaper:
                 # at font 2) -- shifting 240 game rows by that cut the scene's bottom
                 # clean off (glass-found on the P4). The cover-crop composite + the
                 # bar drawn OVER the backdrop make the safe area moot there anyway.
-                if ws.sys_canvas is not ws.canvas:
+                if ws.sys_canvas is not ws.run.canvas:
                     safe = False
                 if safe:
                     # camera(-cx, -cy): a draw at world (x, y) lands at screen
                     # (x + cx, y + cy); clip keeps the art inside the content rect.
-                    ws.canvas.camera(-lay.cx, -lay.cy)
-                    ws.canvas.clip(lay.cx, lay.cy, lay.cw, lay.ch)
+                    ws.run.canvas.camera(-lay.cx, -lay.cy)
+                    ws.run.canvas.clip(lay.cx, lay.cy, lay.cw, lay.ch)
                 # COMMAND-ONLY GAME CANVAS (#175, web/wasm): there are no pixels to
                 # composite afterwards -- _backdrop_blit needs gc.buf and returns
                 # early -- so the cart's commands ARE the backdrop and must be
@@ -830,8 +830,8 @@ class Wallpaper:
                 # left on the system canvas (the windowed WM exposed it as stale
                 # pixels). One object on the 320x240 tiers -> this never runs there.
                 sc = ws.sys_canvas
-                if sc is not ws.canvas:
-                    self._backdrop_blit(sc, ws.canvas)
+                if sc is not ws.run.canvas:
+                    self._backdrop_blit(sc, ws.run.canvas)
                 self._painted(self._wp_live and self._wp_update is not None)
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
@@ -874,7 +874,7 @@ class Wallpaper:
         p = getattr(ws, "pointer", None)
         if p is None:
             return False
-        sc, gc = ws.sys_canvas, ws.canvas
+        sc, gc = ws.sys_canvas, ws.run.canvas
         if glass:                   # a per-glass wallpaper: the glass's own pixels
             gw, gh, scale, ox, oy = sc.w, sc.h, 1, 0, 0
         else:
@@ -932,10 +932,10 @@ class Wallpaper:
         holds it to once -- every later open reads the file and never builds a
         runner at all."""
         # Bracket to the STOCK canvas, like draw() and compile(): a per-run cart
-        # canvas (SPEC.md 3.1) can be bound over ws.canvas while the Appearance
+        # canvas (SPEC.md 3.1) can be bound over ws.run.canvas while the Appearance
         # window is on screen (the windowed tier draws apps beside a live game),
         # and the preview sizes both its render surface and its sidecar key off
-        # ws.canvas -- so without this a preview computed during a 128x120 run
+        # ws.run.canvas -- so without this a preview computed during a 128x120 run
         # would be keyed and shaped to that cart's raster, not the wallpaper's.
         _b = self._stock_bracket()
         try:
@@ -1048,7 +1048,7 @@ class Wallpaper:
                 if cart.get("glass"):
                     ns["QUIET"] = self._preview_quiet()
             finally:
-                if cart is not getattr(ws, "_fat_cart", None):
+                if cart is not ws.run.fat_cart:
                     ws.carts.reslim(cart)
             if ns.get("_init"):
                 ns["_init"]()
@@ -1068,7 +1068,7 @@ class Wallpaper:
         """(w, h) of the frame `cart` draws: the glass's for a per-glass
         wallpaper, else the game canvas's."""
         ws = self.ws
-        cv = ws.sys_canvas if cart.get("glass") else ws.canvas
+        cv = ws.sys_canvas if cart.get("glass") else ws.run.canvas
         return cv.w, cv.h
 
     def _preview_quiet(self):
@@ -1089,7 +1089,7 @@ class Wallpaper:
                 ws.carts.rehydrate(cart)
                 src = cart.get("src")
             finally:
-                if cart is not getattr(ws, "_fat_cart", None):
+                if cart is not ws.run.fat_cart:
                     ws.carts.reslim(cart)
         if src and cart.get("glass"):
             src = src + repr(self._preview_quiet())
@@ -1301,7 +1301,7 @@ class Wallpaper:
         which every tier's canvas is since runtime/canvas.py was deleted) -- ask
         for BOTH, or a 565 canvas reads as command-only and gets bracketed."""
         sc = ws.sys_canvas
-        gc = ws.canvas
+        gc = ws.run.canvas
         if sc is gc or getattr(gc, "buf", None) is not None \
                 or getattr(gc, "_buf", None) is not None:
             return False

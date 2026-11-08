@@ -16,7 +16,7 @@ through the injected store (`ws.carts_store`) inside the SD session
 (`ws._with_sd`) and journal what landed (the durable undo journal,
 `moy_journal`). It keeps a `ws` back-reference for the Workstation-owned deps
 the builders and commits need: the SD-session wrapper `ws._with_sd`, the cart
-store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.audio`,
+store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.run.audio`,
 the save-failure UI field `ws.cart_error` and
 the achievements tracker `ws.ach`.
 
@@ -263,9 +263,9 @@ class ProjectStore:
         ws = self.ws
         data = self.cart.get("sounds") if self.cart else None
         bank = AudioBank.from_dict(data) if data else AudioBank.default()
-        if ws.audio is not None:
-            ws.audio.close()
-        ws.audio = AudioSession(bank, ws.player.owner)
+        if ws.run.audio is not None:
+            ws.run.audio.close()
+        ws.run.audio = AudioSession(bank, ws.run.player.owner)
 
     # -- the undo journal (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) -------
     #
@@ -612,7 +612,7 @@ class ProjectStore:
 
     def commit_sounds(self):
         """Persist the cart's AudioBank to sounds.json (#50). The MusicEditor
-        edits the LIVE bank (ws.audio.bank), so a save just serializes
+        edits the LIVE bank (ws.run.audio.bank), so a save just serializes
         what the cart already plays through."""
         ws = self.ws
         me = ws.music_ui.musicedit

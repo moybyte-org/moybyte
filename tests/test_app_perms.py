@@ -245,7 +245,7 @@ def _write_cart(carts_dir, name, perms, required=(), src=APP_SRC):
 def _start(ws, title):
     cart = next(c for c in ws.carts.all if c["title"] == title)
     ws._open_workspace(cart)
-    ok = ws.player.start(ws.project)
+    ok = ws.run.player.start(ws.run.project)
     return ok, cart
 
 
@@ -256,10 +256,10 @@ def test_every_granted_permissions_names_are_in_the_namespace(tmp_path):
     _write_cart(str(tmp_path / "carts"), "Holder", ROLE_PERMS)
     ws = build_ws(tmp_path)
     ok, _cart = _start(ws, "Holder")
-    assert ok, ws.player.cart_error
+    assert ok, ws.run.player.cart_error
     for p in ROLE_PERMS:
         for name in P.row(p)[P.NAMES]:
-            assert ws.player.ns.get(name) is not None, (p, name)
+            assert ws.run.player.ns.get(name) is not None, (p, name)
 
 
 def test_a_turned_off_permission_reads_none_from_the_next_launch(tmp_path):
@@ -270,24 +270,24 @@ def test_a_turned_off_permission_reads_none_from_the_next_launch(tmp_path):
     for p in ROLE_PERMS:
         ws.consent.turn(aid, p, False)
     ok, _cart = _start(ws, "Holder")
-    assert ok, ws.player.cart_error
-    ns = ws.player.ns
+    assert ok, ws.run.player.cart_error
+    ns = ws.run.player.ns
     for p in ROLE_PERMS:
         for name in P.row(p)[P.NAMES]:
             assert name in ns and ns[name] is None, (p, name)
-    assert ws.player.absent == tuple(ROLE_PERMS)
+    assert ws.run.player.absent == tuple(ROLE_PERMS)
     # the grant holds none of the roles they map to
-    assert ws.player.granted == ()
+    assert ws.run.player.granted == ()
 
 
 def test_a_turned_off_device_api_reads_none(tmp_path):
     _write_cart(str(tmp_path / "carts"), "Linked", ["multiplayer"])
     ws = build_ws(tmp_path)
     ok, cart = _start(ws, "Linked")
-    assert ok and ws.player.ns["net"] is not None
+    assert ok and ws.run.player.ns["net"] is not None
     ws.consent.turn(P.app_id(cart), "multiplayer", False)
     ok, _cart = _start(ws, "Linked")
-    assert ok and ws.player.ns["net"] is None and ws.player.ns["on_net"] is None
+    assert ok and ws.run.player.ns["net"] is None and ws.run.player.ns["on_net"] is None
 
 
 def test_a_turned_off_required_permission_refuses_the_launch(tmp_path):
@@ -298,11 +298,11 @@ def test_a_turned_off_required_permission_refuses_the_launch(tmp_path):
     ws.consent.turn(P.app_id(cart), "prefs", False)
     ok, _cart = _start(ws, "Needy")
     assert ok is False
-    assert ws.player.cart_error == 'needs "prefs" - turned off in Settings'
+    assert ws.run.player.cart_error == 'needs "prefs" - turned off in Settings'
     assert ws.app_guard.strikes(P.app_id(cart)) == 0     # a refusal is no crash
     ws.consent.turn(P.app_id(cart), "prefs", True)
     ok, _cart = _start(ws, "Needy")
-    assert ok, ws.player.cart_error
+    assert ok, ws.run.player.cart_error
 
 
 def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
@@ -310,7 +310,7 @@ def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
     them, with no prompt and no consent record."""
     ws = build_ws(tmp_path)
     ws.new_cart_and_edit()
-    new = ws.project.cart
+    new = ws.run.project.cart
     man_path = Path(new["path"]) / "manifest.json"
     man = json.loads(man_path.read_text())
     man.setdefault("moybyte", {}).update({"type": "app", "permissions": ["prefs"]})
@@ -319,8 +319,8 @@ def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
     ws.carts.rescan()
     cart = next(c for c in ws.carts.all if c["path"] == new["path"])
     ws._open_workspace(cart)
-    assert ws.player.start(ws.project), ws.player.cart_error
-    assert ws.player.ns["prefs"] is not None
+    assert ws.run.player.start(ws.run.project), ws.run.player.cart_error
+    assert ws.run.player.ns["prefs"] is not None
     assert ws.consent.get(P.app_id(cart)) is None
     assert ws.consent.ids() == []
 

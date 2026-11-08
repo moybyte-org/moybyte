@@ -148,7 +148,7 @@ def open_cart(ws, title):
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
     assert cart is not None, "seed cart not found: " + title
     ws._open_workspace(cart)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
 
 
 def make_drv(ws):

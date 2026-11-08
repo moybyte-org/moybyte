@@ -35,7 +35,7 @@ def test_default_build_shares_one_canvas(tmp_path):
     IS the game canvas (one object), so the composite step is a no-op and the
     desktop is exactly today."""
     ws = _ws(tmp_path)
-    assert ws.sys_canvas is ws.canvas
+    assert ws.sys_canvas is ws.run.canvas
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (320, 240)
     assert ws.look.font_scale == 1
     assert ws._viewport() == (0, 0, 1)            # no letterbox / scaling
@@ -59,7 +59,7 @@ def test_distinct_320x240_system_canvas_renders(tmp_path):
     scaling/letterbox; the launcher draws on it without error."""
     from runtime import host_app
     ws = _ws_distinct_320(tmp_path)
-    assert ws.sys_canvas is not ws.canvas          # a DISTINCT system canvas
+    assert ws.sys_canvas is not ws.run.canvas          # a DISTINCT system canvas
     assert ws._viewport() == (0, 0, 1)             # no letterbox / scaling
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
@@ -83,7 +83,7 @@ def test_running_cart_composite_is_the_identity_at_320x240(tmp_path):
     settle_badges(ws)
     ws._toast_until = 0
     ws.frame(1 / 30)
-    assert bytes(ws.sys_canvas._buf) == bytes(ws.canvas._buf)
+    assert bytes(ws.sys_canvas._buf) == bytes(ws.run.canvas._buf)
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     rendering without error and filling the full system buffer."""
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(640, 480))
-    assert ws.sys_canvas is not ws.canvas
+    assert ws.sys_canvas is not ws.run.canvas
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (640, 480)
     # The Library shelf reflows to the canvas (the one tall featured slot at the
     # head of a continuously left-right SCROLLING card list). Columns are
@@ -307,7 +307,7 @@ def test_a_larger_system_canvas_draws_and_composites_a_cart(tmp_path):
     ws.open()
     for _ in range(3):
         ws.frame(1 / 60.0)
-    assert (ws.canvas.w, ws.canvas.h) == (320, 240)        # the cart's own surface
+    assert (ws.run.canvas.w, ws.run.canvas.h) == (320, 240)        # the cart's own surface
     assert probe.distinct_pixels(ws.sys_canvas) > 4        # composited in
 
 
@@ -315,7 +315,7 @@ def test_carts_api_unchanged_game_canvas_stays_320x240(tmp_path):
     """The cart side of the seam is untouched: the canvas a cart draws on is always
     the fixed 320x240 game canvas, regardless of the system canvas size."""
     ws = _ws(tmp_path, sys_size=(960, 600))
-    assert (ws.canvas.w, ws.canvas.h) == (320, 240)
+    assert (ws.run.canvas.w, ws.run.canvas.h) == (320, 240)
     # make_api binds to the game canvas (W/H = 320/240 in the cart namespace).
-    ns = ws.make_api(ws.canvas, ws.input, {}, None, None, None, None, None)
+    ns = ws.make_api(ws.run.canvas, ws.input, {}, None, None, None, None, None)
     assert ns["W"] == 320 and ns["H"] == 240

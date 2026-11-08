@@ -183,7 +183,7 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
     frame_scratch = getattr(sys_canvas, "frame_scratch", None)
 
     def frames():
-        cf = ws.cart_frame
+        cf = ws.run.cart_frame
         if cf is None or frame_scratch is None:
             return None
         return frame_scratch(cf, game.w, game.h)
@@ -504,7 +504,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     if returning:
         # The stopped run ended in the kernel: its radio leases, which the
         # kernel's table kept through the stop, go as a plain exit's do.
-        ws.player.release_radio()
+        ws.run.player.release_radio()
         rec = kernel.resume()
         if rec:
             ws.resume_launcher(rec)

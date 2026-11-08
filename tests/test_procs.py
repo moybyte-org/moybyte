@@ -43,9 +43,9 @@ def test_a_second_game_joins_the_running_set_in_its_own_window(tmp_path):
     assert p.title() == "Star Catcher" and ws.cart["title"] == "Brick Siege"
     assert ws.wm.stack.kinds()[-2:] == ["run:1", "desktop"]
     # its own owner tag, canvas and audio session
-    assert p.player.owner != ws.player.owner
-    assert p.world.canvas is not ws.canvas
-    assert p.world.audio is not ws.audio
+    assert p.player.owner != ws.run.player.owner
+    assert p.run.canvas is not ws.run.canvas
+    assert p.run.audio is not ws.run.audio
     # a background game reads no input
     assert p.player.detached and p.player.ns["btn"]("left") is False
     assert ws.wm._win_title(wa) == "Star Catcher"
@@ -86,7 +86,7 @@ def test_a_hidden_game_is_held_and_hears_it(tmp_path):
 
 def _app_proc(ws, drv, p):
     """Make Proc `p` an app cart's run: its manifest says `"type": "app"`."""
-    p.world.project.cart = dict(p.world.project.cart, type="app")
+    p.run.project.cart = dict(p.run.project.cart, type="app")
     p.named()
     assert p.app
 
@@ -106,7 +106,7 @@ def test_a_hidden_app_updates_every_frame_and_never_draws(tmp_path):
 
 def test_the_front_minimised_holds_a_game_and_steps_an_app(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
-    pl = ws.player
+    pl = ws.run.player
     n = [0]
     pl._update = lambda dt: n.__setitem__(0, n[0] + 1)
     ws.wm._minimize(wb, True)
@@ -134,13 +134,13 @@ def test_focusing_a_background_game_promotes_it(tmp_path):
     assert (wa.x, wa.y) == rect_a and (wb.x, wb.y) == rect_b
     p = ws.procs.list[0]
     assert p.title() == "Brick Siege" and p.player.detached
-    assert not ws.player.detached and ws.player.ns["btn"] is not None
-    assert ws.player.ns["btn"].__name__ == "btn"
+    assert not ws.run.player.detached and ws.run.player.ns["btn"] is not None
+    assert ws.run.player.ns["btn"].__name__ == "btn"
     drv.frame(1 / 30)
     assert ws.procs.list == [p]
 
 
-def test_closing_a_background_game_releases_its_world(tmp_path):
+def test_closing_a_background_game_releases_its_run(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
     p = ws.procs.list[0]
     pl = p.player
@@ -148,7 +148,7 @@ def test_closing_a_background_game_releases_its_world(tmp_path):
     drv.frame(1 / 30)
     assert ws.procs.list == [] and "run:1" not in ws.wm._wins
     assert pl.ns is None and not pl.detached
-    assert ws.procs.spare is p.world          # kept for the next one
+    assert ws.procs.spare is p.run          # kept for the next one
     assert ws.cart["title"] == "Brick Siege"
     assert "run:1" not in ws.wm.stack.kinds()
 
@@ -242,7 +242,7 @@ def _n(pl):
 
 def test_a_lua_game_minimised_beside_a_python_game_keeps_its_state(tmp_path):
     """A Lua game joins the running set like a Python one: held while its
-    window is hidden, its world (its own Lua state) as it was, and it goes
+    window is hidden, its run (its own Lua state) as it was, and it goes
     on from there when it comes back."""
     ws, drv = _lua_desk(tmp_path, ("Lua Count", 8))
     open_cart(ws, "Lua Count")
@@ -261,7 +261,7 @@ def test_a_lua_game_minimised_beside_a_python_game_keeps_its_state(tmp_path):
         drv.frame(1 / 30)
     assert p.state == "minimised" and p.player.paused
     assert _n(p.player) == held, "a held Lua game ran"
-    assert ws.player._lua is None and ws.cart["title"] == "Star Catcher"
+    assert ws.run.player._lua is None and ws.cart["title"] == "Star Catcher"
     ws.wm._minimize(wl, False)
     for _ in range(4):
         drv.frame(1 / 30)
@@ -269,10 +269,10 @@ def test_a_lua_game_minimised_beside_a_python_game_keeps_its_state(tmp_path):
     assert _n(p.player) > held
     # brought to the front, it is the one that plays and reads the keys
     ws.wm._move_focus("run:1")
-    assert ws.cart["title"] == "Lua Count" and not ws.player.detached
-    n = _n(ws.player)
+    assert ws.cart["title"] == "Lua Count" and not ws.run.player.detached
+    n = _n(ws.run.player)
     drv.frame(1 / 30)
-    assert _n(ws.player) > n
+    assert _n(ws.run.player) > n
 
 
 def test_two_lua_games_are_two_task_manager_rows_with_their_own_heaps(tmp_path):
@@ -295,7 +295,7 @@ def test_two_lua_games_are_two_task_manager_rows_with_their_own_heaps(tmp_path):
     # game, running, its engine bound
     from runtime import moy_play
     rows = [moy_play.proc_row(p.player._run_handle) for p in ws.procs.list] + [
-        moy_play.proc_row(ws.player._run_handle)]
+        moy_play.proc_row(ws.run.player._run_handle)]
     assert [r[:4] for r in rows] == [(p, 2, 2, 1) for p in (a[6], b[6])], rows
     assert all(r[4] for r in rows)
 
@@ -305,11 +305,11 @@ def test_a_crash_in_one_lua_game_names_its_pid_and_leaves_the_other_running(tmp_
     ws, drv = _lua_desk(tmp_path, ("Lua Steady", 3), ("Lua Boom", 9, 6))
     open_cart(ws, "Lua Boom")
     _windowed(ws, drv)
-    boom = ws.player
+    boom = ws.run.player
     pid = boom.pid
     open_cart(ws, "Lua Steady")
     _windowed(ws, drv)
-    steady = ws.player
+    steady = ws.run.player
     assert [p.title() for p in ws.procs.list] == ["Lua Boom"]
     for _ in range(30):
         drv.frame(1 / 30)
@@ -319,7 +319,7 @@ def test_a_crash_in_one_lua_game_names_its_pid_and_leaves_the_other_running(tmp_
     from runtime import moy_play
     assert moy_play.proc_row(boom._run_handle) is None, "the crashed run kept its process row"
     assert moy_play.proc_row(steady._run_handle)[:4] == (steady.pid, 2, 2, 1)
-    assert steady.cart_error is None and ws.player is steady
+    assert steady.cart_error is None and ws.run.player is steady
     n = _n(steady)
     drv.frame(1 / 30)
     assert _n(steady) > n
@@ -367,7 +367,7 @@ def test_two_compiled_games_run_side_by_side_each_in_its_session(tmp_path):
     open_cart(ws, "Count Two")
     _windowed(ws, drv)
     assert [p.title() for p in ws.procs.list] == ["Count One"]
-    one, two = ws.procs.list[0].player, ws.player
+    one, two = ws.procs.list[0].player, ws.run.player
     assert ws.cart["title"] == "Count Two" and two.cart_error is None, two.cart_error
     rows = [moy_play.proc_row(pl._run_handle) for pl in (one, two)]
     assert [r[1:4] for r in rows] == [(3, 2, 1)] * 2 and rows[0][0] != rows[1][0], rows

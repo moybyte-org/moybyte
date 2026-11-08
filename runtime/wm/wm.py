@@ -288,7 +288,7 @@ class FullscreenStackWM:
         and the chrome around it is unchanged by cart-bound keys). On this
         fullscreen tier a running cart on top owns ALL input; the crash panel
         (cart_error) hands keys back to the system chrome."""
-        pl = self.ws.player
+        pl = self.ws.run.player
         return (self.stack.top() == "desktop" and pl.cart_error is None
                 and (pl._update is not None or pl._draw is not None))
 
@@ -486,7 +486,7 @@ class FullscreenStackWM:
         """The composited game viewport as (ox, oy, scale) -- the top-left of the
         320x240 game canvas inside the system canvas, and its integer scale. (0, 0,
         1) when the two canvases are the same object (degradation)."""
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         sc = self.ws.sys_canvas
         if sc is gc:
             return _VIEWPORT_IDENTITY
@@ -557,12 +557,12 @@ class FullscreenStackWM:
         Memoized on the declared view's identity + both canvases + their dims
         (see __init__): the SAME tuple comes back until one of those moves."""
         ws = self.ws
-        return self._view_src_for(ws.canvas, ws.sys_canvas)
+        return self._view_src_for(ws.run.canvas, ws.sys_canvas)
 
     def _view_src_for(self, gc, sc):
         """_view_src for canvases the caller already holds (one attribute walk
         per frame instead of one per asker)."""
-        gv = getattr(self.ws.input, "game_view", None)
+        gv = self.ws.run.view
         if not gv:
             return None                 # no declared view: nothing to crop, ever
         d = self._vs_dims
@@ -629,7 +629,7 @@ class FullscreenStackWM:
         the Player resets both after every cart frame."""
         ws = self.ws
         sc = ws.sys_canvas
-        gc = ws.canvas
+        gc = ws.run.canvas
         if sc is not gc:
             return                      # the composite will fill it, as it always has
         view = self._view_src_for(gc, sc)
@@ -651,7 +651,7 @@ class FullscreenStackWM:
         canvas: the system canvas snapshots it for its flush, black bezels and
         integer scale included, and the canvas is never written. True when it
         took the frame; False leaves the caller to settle it and composite."""
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         sc = self.ws.sys_canvas
         if sc is not self._pf_for:
             self._pf_for = sc
@@ -673,7 +673,7 @@ class FullscreenStackWM:
         degradation case: 320x240 system canvas == game canvas, pixel-identical to
         today). Index-only (host == device): reads game indices, writes them scaled
         into the system buffer, so no palette resolve is needed."""
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         sc = self.ws.sys_canvas
         # #63: complete any sprites still queued in the game canvas's auto-batch before
         # its buffer is read (usually already flushed by _reset_canvas_state; belt-and-

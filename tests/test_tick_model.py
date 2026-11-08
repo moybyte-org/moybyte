@@ -436,14 +436,14 @@ def test_switching_steady_live_keeps_n_and_the_costs():
 def _open(ws, title):
     if select_on_home(ws, title) is not None:
         ws.open()
-        assert ws.player.cart_error is None, ws.player.cart_error
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
         return
     raise AssertionError("no seed cart titled " + title)
 
 
 def _count(ws):
     calls = {"upd": 0, "draw": 0, "dts": []}
-    u0, d0 = ws.player._update, ws.player._draw
+    u0, d0 = ws.run.player._update, ws.run.player._draw
 
     def upd(dt):
         calls["upd"] += 1
@@ -456,8 +456,8 @@ def _count(ws):
         if d0:
             d0()
 
-    ws.player._update = upd
-    ws.player._draw = draw
+    ws.run.player._update = upd
+    ws.run.player._draw = draw
     return calls
 
 
@@ -476,7 +476,7 @@ def _frames(ws, n, dt):
 def test_a_game_holds_its_rate_on_a_faster_loop(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
-    assert ws.cart["type"] == "game" and ws.player.tick_ms == 33
+    assert ws.cart["type"] == "game" and ws.run.player.tick_ms == 33
     calls = _count(ws)
     drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 60, 1 / 60)
@@ -489,7 +489,7 @@ def test_a_game_holds_its_rate_on_a_faster_loop(tmp_path):
 def test_a_sixty_cart_runs_two_ticks_per_draw_on_a_thirty_loop(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, "Hop Quest")
-    assert ws.cart["fps"] == 60 and ws.player.tick_ms == 16
+    assert ws.cart["fps"] == 60 and ws.run.player.tick_ms == 16
     calls = _count(ws)
     _frames(ws, 30, 1 / 30)
     assert calls["upd"] == 60 and calls["draw"] == 30
@@ -512,7 +512,7 @@ def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
                 if c.get("type") in ("tool", "app")
                 and not ws.is_system_app(c))
     _open(ws, tool)
-    assert ws.player.tick_ms == 0
+    assert ws.run.player.tick_ms == 0
     calls = _count(ws)
     drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 20, 1 / 60)
@@ -528,10 +528,10 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
     def boom(dt):
         raise RuntimeError("kaboom")
 
-    ws.player._update = boom
+    ws.run.player._update = boom
     _frames(ws, 4, 1 / 60)
     assert ws.cart_error is not None
-    assert ws.player.tick_ms == 0 and not ws.input.kept_names()
+    assert ws.run.player.tick_ms == 0 and not ws.input.kept_names()
     drawn0 = ws.frame_state.frames_drawn
     ws._dirty = True
     ws.frame(1 / 60)
@@ -541,9 +541,9 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
 def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
-    assert ws.player.tick_ms == 33
+    assert ws.run.player.tick_ms == 33
     ws.go_home()
-    assert ws.player.tick_ms == 0 and not ws.input.kept_names()
+    assert ws.run.player.tick_ms == 0 and not ws.input.kept_names()
     ws._dirty = True
     drawn0 = ws.frame_state.frames_drawn
     ws.frame(1 / 60)
@@ -557,15 +557,15 @@ def test_a_press_between_ticks_reaches_the_next_tick_exactly_once(tmp_path):
     it (one tap moved two menu slots)."""
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
-    btnp = ws.player.ns["btnp"]
+    btnp = ws.run.player.ns["btnp"]
     seen = []
-    u0 = ws.player._update
+    u0 = ws.run.player._update
 
     def upd(dt):
         seen.append(bool(btnp("right")))
         u0(dt)
 
-    ws.player._update = upd
+    ws.run.player._update = upd
     _frames(ws, 2, 1 / 60)                        # frames 1-2: one tick, on frame 2
     ws.input.set_held("right", True)
     ws.input.begin_frame()
@@ -601,7 +601,7 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
     assert not ws.wm.top_is_player()
     ws.input.begin_frame()
     ws.frame(1 / 60)
-    assert not ws.input.kept_names() and ws.player._keyp_latch == 0
+    assert not ws.input.kept_names() and ws.run.player._keyp_latch == 0
     ws.input.begin_frame()
     assert not ws.input.pressed("a"), "the shell reads this frame's edges only"
 
@@ -609,15 +609,15 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
 def test_a_typed_key_edge_latches_to_the_tick(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
-    keyp = ws.player.ns["keyp"]
+    keyp = ws.run.player.ns["keyp"]
     seen = []
-    u0 = ws.player._update
+    u0 = ws.run.player._update
 
     def upd(dt):
         seen.append(keyp())
         u0(dt)
 
-    ws.player._update = upd
+    ws.run.player._update = upd
     _frames(ws, 2, 1 / 60)
     ws.input.last_key = ord("x")
     ws.input.begin_frame()
@@ -633,10 +633,10 @@ def test_steady_persists_and_reaches_the_running_cart(tmp_path):
     ws = _ws(tmp_path)
     assert ws.steady is True                      # the kid default
     _open(ws, PACED_GAME)
-    assert ws.player.sched.steady is True
+    assert ws.run.player.sched.steady is True
     ws.set_steady(False)
     assert ws.system.get("steady") is False
-    assert ws.player.sched.steady is False
+    assert ws.run.player.sched.steady is False
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
     assert "steady" in keys and "frameskip" not in keys
 
@@ -689,7 +689,7 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
     np = _FakeSession()
-    ws.player._netplay = np
+    ws.run.player._netplay = np
     calls = _count(ws)
     drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 5, 1 / 30)
@@ -700,8 +700,8 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
     assert calls["upd"] == 3 and np.advanced == 3
     assert ws.frame_state.frames_drawn - drawn0 == 3
     assert set(calls["dts"]) == {np.dt}
-    assert ws.player.sched.div == 1 and ws.player.sched.ticks == 0
-    ws.player._netplay = None
+    assert ws.run.player.sched.div == 1 and ws.run.player.sched.ticks == 0
+    ws.run.player._netplay = None
 
 
 # -- the loop and the wire ----------------------------------------------------
@@ -772,17 +772,17 @@ def test_an_imported_p8_cart_is_paced_by_the_host_now(tmp_path):
     ws.launcher.items.append(cart)
     ws.launcher.sel = len(ws.launcher.items) - 1
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player.tick_ms == 16
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player.tick_ms == 16
     _frames(ws, 30, 1 / 30)
-    assert ws.player._lua.get_global("ticks") == 60
-    assert ws.player.sched.misses == 0
+    assert ws.run.player._lua.get_global("ticks") == 60
+    assert ws.run.player.sched.misses == 0
 
 
 def test_the_rate_comes_from_the_manifest_and_junk_is_thirty(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
-    pl = ws.player
+    pl = ws.run.player
     for fps, rate in ((60, 60), (30, 30), (0, 30), (None, 30), ("junk", 30),
                       (45, 30)):
         pl._arm_pacing({"fps": fps})
@@ -818,7 +818,7 @@ def test_a_free_seed_game_runs_with_the_loop(tmp_path):
     AND draws, and dt is the loop's own -- the whole point of the opt-out."""
     ws = _ws(tmp_path)
     _open(ws, "Star Catcher")
-    assert ws.player.tick_ms == 0 and ws.player._free is True
+    assert ws.run.player.tick_ms == 0 and ws.run.player._free is True
     calls = _count(ws)
     drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 20, 1 / 45)

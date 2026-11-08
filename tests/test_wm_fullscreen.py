@@ -295,7 +295,7 @@ def test_a_desk_play_is_full_screen_the_game_alone(tmp_path, size, scale):
     ox, oy, s = wm._player_view(win)
     assert s == scale
     assert wm._strip_buttons(win) == []
-    gw, gh = ws.canvas.w * s, ws.canvas.h * s
+    gw, gh = ws.run.canvas.w * s, ws.run.canvas.h * s
     sc = wm._root_canvas
     for x, y in ((2, 2), (size[0] - 3, 2), (2, size[1] - 3),
                  (ox - 1 if ox else 0, size[1] // 2)):
@@ -315,7 +315,7 @@ def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
     _frames(ws)
     wm = ws.wm
     win = wm._wins["desktop"]
-    assert ws.app_window_canvas and not win.full()
+    assert ws.run.app_window_canvas and not win.full()
     drv = _drv(ws)
     _tap(ws, drv, *_centre(_btn(ws, win, "max")))
     assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)
@@ -347,7 +347,7 @@ def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path
     _frames(ws)
     wm._minimize(win, True)
     _frames(ws)
-    assert win.minimized and not ws.player.paused
+    assert win.minimized and not ws.run.player.paused
     wm._minimize(win, False)
     _frames(ws)
-    assert not ws.pause.open and not ws.player.paused and win.full()
+    assert not ws.pause.open and not ws.run.player.paused and win.full()

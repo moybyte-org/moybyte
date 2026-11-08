@@ -41,7 +41,7 @@ def _run_bench(tmp_path, title, frames):
 
 def test_bench_python_measures_the_verb_set(tmp_path):
     ws = _run_bench(tmp_path, "Bench", frames=120)
-    state = ws.player.ns["state"]
+    state = ws.run.player.ns["state"]
     # The micro phase is under way and recording (its list only grows once a
     # verb's 8 reps complete -- 120 frames is comfortably a few verbs in).
     assert state["micro"], "micro phase recorded nothing"
@@ -59,7 +59,7 @@ def test_bench_python_runs_every_folded_scene(tmp_path):
     ws = _run_bench(tmp_path, "Bench", frames=2)
     from runtime import host_app
     drv = host_app.ConsoleDriver(ws)
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     for phase, label in ((6, "ray"), (7, "tetra"), (8, "scroll"), (9, "layer"),
                          (10, "float"), (11, "table")):
         ns["state"]["phase"] = phase
@@ -80,7 +80,7 @@ def test_bench_python_reports_every_phase(tmp_path):
     # phase reaches serial and pmem -- a phase that measures and never prints is
     # the failure this whole cart exists to avoid.
     ws = _run_bench(tmp_path, "Bench", frames=2)
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     ns["state"]["stats"] = {p: {"n": 90, "p50": 20.0, "p90": 21.0, "p99": 22.0,
                                 "worst": 30.0, "best": 19.0, "fps": 50.0}
                             for p in PHASES}

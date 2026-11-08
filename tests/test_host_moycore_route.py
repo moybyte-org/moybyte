@@ -57,12 +57,12 @@ def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
     for title in titles:
         select_on_home(ws, title)
         ws.open()                       # the real launch path, so the project
-        assert ws.player.cart_error is None, title   # (and its sheet) is live
-        assert type(ws.player._lua).__name__ == "MoycoreRun", \
+        assert ws.run.player.cart_error is None, title   # (and its sheet) is live
+        assert type(ws.run.player._lua).__name__ == "MoycoreRun", \
             "%s fell back off moycore" % title
         for _ in range(5):
             ws.frame(1 / 60)
-            assert ws.player.cart_error is None, title
+            assert ws.run.player.cart_error is None, title
         ws._exit_to_caller()
 
 
@@ -104,7 +104,7 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert ws.runtimes.get("lua") is not None
-    ns = ws.make_api(ws.canvas, ws.input, {}, ws.sheet, ws.audio,
+    ns = ws.make_api(ws.run.canvas, ws.input, {}, ws.sheet, ws.run.audio,
                      ws.tilemap, ws.pmem, None, {})
     src = ("local n = 0\n"
            "function _update(dt) n = n + 1 end\n"
@@ -113,10 +113,10 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     try:
         assert type(run).__name__ == "MoycoreRun", \
             "the cart did not run on the boards' Lua"
-        before = probe.painted_pixels(ws.canvas)
+        before = probe.painted_pixels(ws.run.canvas)
         run.update(1 / 30.0)
         run.update(1 / 30.0)
-        after = probe.painted_pixels(ws.canvas)
+        after = probe.painted_pixels(ws.run.canvas)
         assert after > before, "the C loop drew nothing into the host canvas"
     finally:
         run.close()

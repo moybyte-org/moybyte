@@ -600,7 +600,7 @@ def bench_sprites(b, out_path):
 PAINTER_BENCH = """
 import time, ui, ui_draw, moy_ui, chrome
 def _pb(n, sheet):
-    cv = (ws.sys_canvas or ws.canvas).new_layer(240, 120)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(240, 120)
     try:
         assert moy_ui.theme_install(%r)[0] == 0
         ui_draw.use_shape('bench-spr')
@@ -636,7 +636,7 @@ def _pb(n, sheet):
 SHAPES_BENCH = """
 import time, ui, ui_draw
 def _ps(n):
-    cv = (ws.sys_canvas or ws.canvas).new_layer(320, 200)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(320, 200)
     th = ws.theme_colors
     try:
         ui_draw.use_shape('moy')
@@ -1241,7 +1241,7 @@ def _kb_med(f, n=15):
     return ts[len(ts) // 2]
 
 def _kb_run(scales):
-    cv = ws.sys_canvas            # the home's canvas; ws.canvas is the game's
+    cv = ws.sys_canvas            # the home's canvas; ws.run.canvas is the game's
     buf, W, H = cv._buf, cv._stride, cv.h
     lay = ws.launcher.layout
     fs = lay.fs

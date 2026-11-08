@@ -66,8 +66,14 @@ class _Project:
     pass
 
 
+class _WsRun:
+    audio = cart_frame = view = None
+    cart_start_ms = None        # no stamp: the time slot stays 0
+
+
 class _Ws:
-    pass
+    def __init__(self):
+        self.run = _WsRun()
 
 
 def _lua_frame(scene):
@@ -81,12 +87,12 @@ def _lua_frame(scene):
     inp = InputState()
     ns = make_api(canvas, inp, {}, sheet=sheet, tilemap=tilemap, flags=flags)
     ws = _Ws()
-    ws.canvas = canvas
+    ws.run.canvas = canvas
     ws.input = inp
-    ws.project = _Project()
-    ws.project.sheet = sheet
-    ws.project.tilemap = tilemap
-    ws.project.flags = flags
+    ws.run.project = _Project()
+    ws.run.project.sheet = sheet
+    ws.run.project.tilemap = tilemap
+    ws.run.project.flags = flags
     with open(os.path.join(spec.HERE, "carts", scene + ".moy",
                            "main.lua")) as fh:
         src = fh.read()

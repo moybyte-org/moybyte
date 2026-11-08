@@ -277,9 +277,9 @@ class WS:
         self._apps = ()
         self.carts = types.SimpleNamespace(
             all=[{"title": t} for t in titles])
-        self.player = Player()
+        self.run = types.SimpleNamespace(player=Player(), canvas=Canvas(8, 4),
+                                         cart_frame=None, view=None)
         self.pmem = None
-        self.canvas = Canvas(8, 4)
         self.homes = 0
         self.net_tps = None           # a lockstep rate, when a test sets one
 
@@ -582,7 +582,7 @@ def _perf_run(tmp_path, monkeypatch, uncap):
 
     moy_loop.register(ws.input.begin_frame, lambda: None, frame)
     moy_loop.capture(True)
-    moy_loop.tick(ws.player.tick_ms)
+    moy_loop.tick(ws.run.player.tick_ms)
     reads = []
     out = []
     for f in range(7 * 60):
@@ -620,11 +620,11 @@ def test_pmem_flushes_the_cart_before_reading(clock):
     text = b"zone 1 failed\0"
     cells = [int.from_bytes(text[i:i + 4].ljust(4, b"\0"), "little")
              for i in range(0, len(text), 4)]
-    ws.player._lua = Lua(ws, [7, -1] + [0] * 254)
+    ws.run.player._lua = Lua(ws, [7, -1] + [0] * 254)
     code, out = run(board.cmd_pmem, b, args(text=False, start=0))
-    assert ws.player._lua.flushed == 1
+    assert ws.run.player._lua.flushed == 1
     assert out.split()[:3] == ["0:", "7", "-1"]
-    ws.player._lua = Lua(ws, cells + [0] * (256 - len(cells)))
+    ws.run.player._lua = Lua(ws, cells + [0] * (256 - len(cells)))
     code, out = run(board.cmd_pmem, b, args(text=True, start=0))
     assert out.strip() == "zone 1 failed"
 
@@ -826,7 +826,7 @@ def test_shot_of_the_game_canvas_crops_its_view(clock, device_modules, tmp_path)
     stride, bh = 20, 10
     px, buf = frame(stride, bh, little_endian=False)
     ws, wire, b = console(clock, comp=BandedComp(4, 4, bytearray(32)))
-    ws.canvas = Canvas(6, 3, stride=stride, ox=4, oy=2, buf=buf)
+    ws.run.canvas = Canvas(6, 3, stride=stride, ox=4, oy=2, buf=buf)
     out = tmp_path / "g.png"
     run(board.cmd_shot, b, args(out=str(out), source="game", raw=False))
     w, h, rows = decode_png(out.read_bytes())

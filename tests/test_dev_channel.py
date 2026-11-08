@@ -172,7 +172,8 @@ def test_state_reports_the_sram_headroom_the_run_had_or_none():
     class PlayerWS(FakeWS):
         def __init__(self, report):
             FakeWS.__init__(self)
-            self.player = type("P", (), {"sram_report": lambda _s: report})()
+            self.run = type("R", (), {})()
+            self.run.player = type("P", (), {"sram_report": lambda _s: report})()
 
     tipped = {"sram_free_min": 21504, "psram_fallback": True, "floor": 24576}
     assert _remote_state(PlayerWS(tipped))["sram"] == tipped

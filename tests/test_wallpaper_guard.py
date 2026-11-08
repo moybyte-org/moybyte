@@ -353,6 +353,6 @@ def test_a_struck_out_wallpaper_stays_playable_and_editable(tmp_path):
     titles = [it.get("title") for it in ws._make_items(ws.carts.all)]
     assert "Boom" in titles
     open_cart(ws, "Boom")
-    assert ws.player.cart_error is not None
-    assert "wallpaper always broken" in ws.player.cart_error
-    assert "turned off" not in ws.player.cart_error
+    assert ws.run.player.cart_error is not None
+    assert "wallpaper always broken" in ws.run.player.cart_error
+    assert "turned off" not in ws.run.player.cart_error

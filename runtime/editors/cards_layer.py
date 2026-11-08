@@ -17,8 +17,8 @@ rect under the bar:
 - the project's files (Files, from either page): a placed `ui.table` that
   ROUTES each file to what opens it.
 
-CART STATE lives on the open Project: the tab reads `ws.project.config` /
-`ws.project.cart` / `ws.project.sheet`, mutates the config in place through
+CART STATE lives on the open Project: the tab reads `ws.run.project.config` /
+`ws.run.project.cart` / `ws.run.project.sheet`, mutates the config in place through
 the page (`Project.record_config` keeps the undo), and PLAY in the bar re-runs
 the cart. Two of the cards' helpers stay here for the page: `_validate_field`
 (a field that fails it stays off the page, #94) and `draw_choice` (a picker
@@ -422,7 +422,7 @@ class CardsLayer:
     def _broken(self):
         """The reason this cart's manifest would not parse, or "" -- what
         moy_carts.load left behind instead of dropping the project."""
-        cart = self.ws.project.cart
+        cart = self.ws.run.project.cart
         return (cart.get("broken") or "") if cart else ""
 
     def _draw_cards(self):
@@ -485,7 +485,7 @@ class CardsLayer:
         disp = f.get("display")
         if disp == "sprite-tiles":
             tiles = self._resolve_tiles(f)
-            sheet = ws.project.sheet
+            sheet = ws.run.project.sheet
             if sheet is None:
                 return
             img = sheet.tile_image(tiles[k] if k < len(tiles) else 0, 0)
@@ -540,7 +540,7 @@ class CardsLayer:
 
     def _open_files(self):
         ws = self.ws
-        cart = ws.project.cart
+        cart = ws.run.project.cart
         path = (cart or {}).get("path")
         if not path:
             return
@@ -563,7 +563,7 @@ class CardsLayer:
         rest), `cells` each one's icon, name and the tab it opens in, `cur`
         the current row, `msg` the line that says why a row did not open."""
         ws = self.ws
-        cart = ws.project.cart if ws.project is not None else None
+        cart = ws.run.project.cart if ws.run.project is not None else None
         sources = ws.carts_store.cart_sources(cart) if cart and ws.carts_store else ()
         code = [r for r in rows if r in sources or r == _NEW_ROW]
         names = tuple(code + [r for r in rows if r not in code])
@@ -608,7 +608,7 @@ class CardsLayer:
         PLAY, the journal and crash-to-code live); an asset is its own tab; a
         text file goes through the request door and comes BACK here."""
         ws = self.ws
-        cart = ws.project.cart
+        cart = ws.run.project.cart
         if cart is None:
             return
         if name == _NEW_ROW:
@@ -728,7 +728,7 @@ class CardsLayer:
         ws._dirty = True
 
     def _open_meta(self):
-        cart = self.ws.project.cart
+        cart = self.ws.run.project.cart
         if not cart:
             return
         self._open_prompt("meta", "Cart info",
@@ -737,7 +737,7 @@ class CardsLayer:
                            str(cart.get("author") or "")), None, "Save")
 
     def _open_newf(self):
-        cart = self.ws.project.cart or {}
+        cart = self.ws.run.project.cart or {}
         main = cart.get("main", "main.py")
         lang = "Lua" if main.endswith(".lua") else "Python"
         self._open_prompt("newf", "New script", (("Name", "helpers", 24),), ("",),
@@ -765,7 +765,7 @@ class CardsLayer:
             p.say("Give it a title.")
             ws._dirty = True
             return                          # stay open: never persist a blank title
-        if not ws.project.commit_manifest(title=title, author=author):
+        if not ws.run.project.commit_manifest(title=title, author=author):
             p.say("It didn't save. Try again.")
             ws._dirty = True
             return
@@ -777,7 +777,7 @@ class CardsLayer:
         rule for a project file is "keep it verbatim" (a FORMAT chose the name),
         which is right for manifest.json and wrong for something a person is
         typing now, so the slug is here."""
-        cart = self.ws.project.cart or {}
+        cart = self.ws.run.project.cart or {}
         mainf = cart.get("main", "main.py")
         cut = mainf.rfind(".")
         ext = mainf[cut:] if cut > 0 else ".lua"
@@ -799,7 +799,7 @@ class CardsLayer:
 
     def _commit_newf(self, p):
         ws = self.ws
-        cart = ws.project.cart
+        cart = ws.run.project.cart
         name = self._newf_filename(p.texts[0])
         if name is None:
             p.say("Start its name with a letter.")

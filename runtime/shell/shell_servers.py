@@ -304,7 +304,7 @@ class NavServer:
         def then():
             ws._note_app_caller()
             ws.open_in_editor(cart)
-            if ws.project is None or ws.project.cart is not cart:
+            if ws.run.project is None or ws.run.project.cart is not cart:
                 return False
             if tab:
                 ws.set_menu_view(tab)
@@ -347,7 +347,7 @@ class NavServer:
 
         def then():
             ws._open_workspace(cart)
-            ws.run(ws.project, caller)
+            ws.play(caller)
         self._go(g, "Wants to play " + str((cart or {}).get("title") or "a cart"), then)
 
     def run_script(self, g, kind, name):

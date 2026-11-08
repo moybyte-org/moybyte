@@ -91,11 +91,11 @@ def test_the_lua_twin_sheds_from_the_same_scene(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     open_cart(ws, "Sakura Lua")
-    assert ws.player.cart_error is None
-    assert ws.player._lua is not None
+    assert ws.run.player.cart_error is None
+    assert ws.run.player._lua is not None
     rows = json.loads(open(os.path.join(
         CARTS, "moybyte.sakura_lua.moy", "scenes", "blossoms.moyscene")).read())
-    assert ws.player._lua.get_global_len("EMIT") == len(rows)
+    assert ws.run.player._lua.get_global_len("EMIT") == len(rows)
     for _ in range(30):
         ws.frame(1 / 30)
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None

@@ -206,7 +206,7 @@ def _write_lua_app(carts, name, src, perms):
 def _frame(ws):
     ws.input.begin_frame()
     ws.frame(DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
 
 def test_a_lua_app_and_a_compiled_app_at_once_each_reach_only_their_own(tmp_path):
@@ -227,10 +227,10 @@ def test_a_lua_app_and_a_compiled_app_at_once_each_reach_only_their_own(tmp_path
             _frame(ws)
             assert calls.get("k") == "compiled"
             assert calls.put("k", "compiled") == 0
-        lua = ws.player._lua
+        lua = ws.run.player._lua
         lua.exec("OUT = table.concat(SEEN, ',')")
         assert lua.get_global("OUT") == "lua,lua,lua"
-        assert ws.player._app_ctx.grant != gc
+        assert ws.run.player._app_ctx.grant != gc
         assert moy_app.Prefs(app, gc).get("k") == "compiled"
     finally:
         c.close()
@@ -262,8 +262,8 @@ function _draw() cls(0) end
         ws.consent.turn(aid, "prefs", False)
         ws.open()
         _frame(ws)
-        assert ws.player._lua.get_global("NAME") == "nil"
-        assert ws.player._app_ctx.grant == g, "the app's grant is one row per app id"
+        assert ws.run.player._lua.get_global("NAME") == "nil"
+        assert ws.run.player._app_ctx.grant == g, "the app's grant is one row per app id"
         assert calls.get("k") == DENIED, "a run kept a role Settings turned off"
     finally:
         c.close()

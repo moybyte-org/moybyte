@@ -240,7 +240,7 @@ def _timed(o, slot, null=False):
 def _canvases():
     out = []
     wm = ws.wm
-    for c in (getattr(ws, 'canvas', None), getattr(ws, 'sys_canvas', None),
+    for c in (getattr(ws.run, 'canvas', None), getattr(ws, 'sys_canvas', None),
               getattr(wm, '_root_canvas', None)):
         if c is not None and hasattr(c, '_clip_x0') and not any(c is o for o in out):
             out.append(c)
@@ -277,7 +277,7 @@ def _wrap():
                 _timed(c, 0, True)
             except Exception:
                 pass
-    rc = getattr(wm, '_root_canvas', None) or getattr(ws, 'canvas', None)
+    rc = getattr(wm, '_root_canvas', None) or getattr(ws.run, 'canvas', None)
     if rc is not None and not getattr(rc, '_ib_d', False):
         for nm, slot in (('blit_strip', 1), ('blit_strip_rect', 1), ('copy_last', 6)):
             f = getattr(rc, nm, None)
@@ -510,7 +510,7 @@ def _ib_tail():
     return (ib.n, ib.bn, ib.p0, st[0], st[1])
 
 def _ib_speaks():
-    rc = getattr(ws.wm, '_root_canvas', None) or getattr(ws, 'canvas', None)
+    rc = getattr(ws.wm, '_root_canvas', None) or getattr(ws.run, 'canvas', None)
     return hasattr(ws, 'frame_change') or (rc is not None and hasattr(rc, 'shift_last'))
 
 def _ib_host(name):
@@ -1684,9 +1684,9 @@ _ib_own('Notes')
 """
 
 _NOTES = [(NOTES_OWN, 1.0), ("_ib_desk()", 1.0), ("@run Notes", 4.0),
-          ("ws._ib_last = ws.player.ns['prefs'].get('last')\n"
-           "ws.player.ns['_open'](ws._ib_note)\nws.mark_dirty()", 2.0)]
-_NOTES_OUT = ("_p = ws.player.ns['prefs']\n"
+          ("ws._ib_last = ws.run.player.ns['prefs'].get('last')\n"
+           "ws.run.player.ns['_open'](ws._ib_note)\nws.mark_dirty()", 2.0)]
+_NOTES_OUT = ("_p = ws.run.player.ns['prefs']\n"
               "(_p.set('last', ws._ib_last) if ws._ib_last is not None else _p.clear('last'))")
 
 
@@ -1785,7 +1785,7 @@ def surfaces():
     s.append(Surface("Map", _ed(SCRATCH, "map", "art"), rect=RIGHT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
     s.append(Surface("Notes", _NOTES, "(lambda h: h.ed.top * 100000 + h.ed.row * 1000 + "
-                     "h.ed.col if h else -1)(ws.player._focus_editor)",
+                     "h.ed.col if h else -1)(ws.run.player._focus_editor)",
                      inputs=("fling", "drag", "key_steps", "key_held", "type", "type_fast",
                              "type_line", "ball_slow"),
                      rect=(0.4, 0.2, 0.55, 0.6), teardown=_NOTES_OUT + "\nws.exit()"))

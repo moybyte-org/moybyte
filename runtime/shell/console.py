@@ -256,9 +256,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.notifications import NOTES as _NOTES
 try:
-    from procs import Procs
+    from procs import Procs, Run
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.procs import Procs
+    from runtime.procs import Procs, Run
 try:
     from console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -794,11 +794,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # When sys_canvas is None (or the same size, the T-Deck default) the system
         # canvas IS the game canvas -- one object, so everything is pixel-identical
         # to today (graceful degradation), and the composite step is a no-op.
-        self.canvas = canvas
+        # The game canvas is the run's (`self.run.canvas`, procs.Run): the run
+        # the shell serves holds everything the shell keeps of it.
+        self.run = Run(canvas)
         # A distinct SYSTEM canvas, or None for the degradation case where the system
         # canvas IS the game canvas. Kept as a separate field (not a hard reference to
-        # `canvas`) so the property tracks `self.canvas` even if a backend swap
-        # reassigns it later (the web console does `ws.canvas = CommandCanvas(...)`).
+        # `canvas`) so the property tracks `self.run.canvas` even if a backend swap
+        # reassigns it later (the web console does `ws.run.canvas = CommandCanvas(...)`).
         self._sys_canvas = sys_canvas if (sys_canvas is not None
                                           and sys_canvas is not canvas) else None
         # Per-run cart canvas (SPEC.md 1/3.1): a cart declaring a smaller raster
@@ -807,25 +809,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # backend attach point (like make_api): a factory (w, h) -> canvas, or
         # None on a tier that can't build one yet -- Player then refuses cleanly.
         self.make_game_canvas = None
-        # A compiled cart's frame that goes to the glass from the cart's own
-        # memory (device/moycore_glue.CartFrame), set by the run for its life
-        # on a system canvas that `presents_frames`; None everywhere else.
-        self.cart_frame = None
-        self._run_canvas = None            # the bound small canvas, while a run holds it
-        self._run_canvas_stock = None      # what self.canvas was before the bind
-        self._run_canvas_shared = False    # True when the bind promoted stock to system
-        # A RESPONSIVE app cart (#181) draws on the SYSTEM canvas instead of the
-        # fixed game one; a plain attribute (never a property -- the app-context
-        # perf convention) so the chrome can read it once per frame. False for
-        # every game, every fixed app cart, and every shipped system app, which
-        # is what keeps the pixel goldens where they are.
-        self.app_full_canvas = False
-        # ...and in the windowed desk its window is its surface: a canvas the
-        # desk's work area large, of which the window's content shows
-        # (`app_window_size`), so a resize moves its content rect and no
-        # pixels. No host strip is drawn on it; the window's title strip is
-        # the way out.
-        self.app_window_canvas = False
         # The LOOK (#209 landing D, appearance.py): theme + variant, the widget
         # skin, the requested system font scale, the theme's wallpaper and the
         # top-bar icon sheet. Built FIRST of the collaborators because the two
@@ -917,7 +900,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # apps register, and in a build that carries no Paint.
         self.artwork = None
         self.audio_out = None       # injected where no feeder task plays the mix: a PcmPump
-        self.audio = None           # the open cart's AudioSession (built on a run, #16)
         # WiFi (#38): a SYSTEM service shared across carts, not per-cart.
         # run_desktop/build_workstation injects the backend here; it's exposed
         # to a cart's namespace ONLY when the cart's manifest permissions
@@ -1033,7 +1015,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # `carts.all` is the single source both grids derive from and has no `ws`
         # mirror: a re-scan REBINDS the list, so an alias could not stay honest.
         self.carts = CartManager(self, self.store, carts)
-        self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
         # Launcher search (#105): plain-text substring filter over the run-grid,
         # entered via the sysmenu SEARCH item (mirrors the wifi-password typing
         # idiom -- _set_text_mode swaps the keyboard to clean ASCII while typing).
@@ -1061,11 +1042,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._splash_until = None     # boot logo deadline (_ticks_ms); None = no splash
         # The open cart's live WORKSPACE (Stage 1, project.py): the DATA of the cart
         # currently open -- cart/config/sheet/tilemap/images/pmem. Those six are
-        # forwarding properties (below) delegating to self.project, so every surface
+        # forwarding properties (below) delegating to self.run.project, so every surface
         # file + test that reads/writes ws.cart/ws.sheet/... is unchanged. Constructed
         # idle here (all fields None -> the boot launcher state) BEFORE anything can set
         # ws.cart, and rebuilt per open() when a cart is opened.
-        self.project = Project(self)
+        self.run.project = Project(self)
         # The cart PLAYER (Stage 2, player.py): the run-loop object. Built idle here
         # (BEFORE anything can set the forwarded cart-run fields below), reused across
         # runs (start() re-inits it). The fields it owns -- ns/_update/_draw,
@@ -1073,7 +1054,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # state -- live on it now and the cart-run ones are exposed back as forwarding
         # properties (below), so every surface file + test reading ws.cart_error/
         # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
-        self.player = Player(self, NAMES)
+        self.run.player = Player(self, NAMES, self.run)
         # The running set beyond the front run: the games stepped beside it
         # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
         self.procs = Procs(self)
@@ -1140,9 +1121,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # stores the keystroke tick straight onto it (doc 3e -- an attribute
         # store per keypress, never a call).
         self.history = HistoryRouter(self, self.store)
-        # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
+        # (cart/config/sheet/tilemap/images/pmem live on self.run.project now -- Stage 1;
         # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
-        # self.player now -- Stage 2; both exposed as forwarding properties, so
+        # self.run.player now -- Stage 2; both exposed as forwarding properties, so
         # ws.sheet/ws.cart_error/... are unchanged.)
         self.paint = None             # PaintEditor while menu_view == "paint"
         # The map (tilemap) editor's UI (#32, extracted from this class -- see
@@ -1239,7 +1220,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (Settings' focus and page scroll live in self.settings_layer's UI
         # context, built in _build_layers with the rest of the stack.)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
-        # (cart_error + crash_line live on self.player now -- Stage 2; forwarding
+        # (cart_error + crash_line live on self.run.player now -- Stage 2; forwarding
         # properties below, so ws.cart_error / ws.crash_line are unchanged.)
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
@@ -1387,7 +1368,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.projects_layer = HomeWindowLayer(self, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
         # surface is its own Layer/component -- the running-cart "desktop" is the
-        # _PlayerLayer adapter over ws.player; the only _LegacyLayer entries are the four draw-only overlays
+        # _PlayerLayer adapter over ws.run.player; the only _LegacyLayer entries are the four draw-only overlays
         # (splash / toast / notice / cursor, built by `L` above).
         # SYSTEM APPS (docs/app_api_v1.md) are NOT listed here -- register_app below
         # adds each one's kind to this table.
@@ -1398,7 +1379,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             "tasks": self.tasks_layer,
             "update": _UpdateLayer(self),
             "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
-            "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
+            "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.run.player
 
             "code": self.code_layer,
             "blocks": _BlocksLayer(self),
@@ -1508,9 +1489,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def sys_canvas(self):
         """The SYSTEM canvas the desktop chrome + overlays render on (#39). A distinct
         SystemCanvas when one was supplied, else the GAME canvas itself (degradation:
-        one surface, pixel-identical to today). Reading through `self.canvas` keeps it
+        one surface, pixel-identical to today). Reading through `self.run.canvas` keeps it
         correct even if a backend swaps the game canvas (e.g. the web CommandCanvas)."""
-        return self._sys_canvas if self._sys_canvas is not None else self.canvas
+        return self._sys_canvas if self._sys_canvas is not None else self.run.canvas
 
     @property
     def glass_canvas(self):
@@ -1586,7 +1567,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         gated APIs. One the run holds absent (runtime/shell/app_perms.py) is
         not held."""
         perms = self.cart.get("permissions") if self.cart else None
-        return bool(perms) and name in perms and name not in self.player.absent
+        return bool(perms) and name in perms and name not in self.run.player.absent
 
     def cart_editor_focus(self, handle):
         """A cart's editor handle takes (`handle`) or releases (None) the
@@ -1596,7 +1577,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         does two things no cart can: it puts the T-Deck keyboard into clean
         ASCII, and it seeds the typed-key edge with the byte already down, so
         the key that opened the note is not typed into it (`b2ff7de`)."""
-        self.player.set_editor_focus(handle)
+        self.run.player.set_editor_focus(handle)
         self._set_text_mode(handle is not None)
 
     def take_text_request(self):
@@ -1633,7 +1614,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if not self._open_workspace(cart):
             self._text_request = None
             return False
-        self.run(self.project, caller or self.launcher_layer)
+        self.play(caller or self.launcher_layer)
         return True
 
     def open_project_file(self, cart, name, mode=None):
@@ -1650,9 +1631,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         path = (cart or {}).get("path")
         if not path:
             return False
-        if self.project is None or self.project.cart is not cart:
+        if self.run.project is None or self.run.project.cart is not cart:
             self.open_in_editor(cart)
-            if self.project is None or self.project.cart is not cart:
+            if self.run.project is None or self.run.project.cart is not cart:
                 return False
         self.editor_app.set_tab("cards")     # the tab the return lands back on
         if not self.open_text_cart(name, self.carts_store.project_kind(path),
@@ -1671,7 +1652,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             _cp()
         self.carts.reload(cart)
         self.open_in_editor(cart)
-        if self.project is not None and self.project.cart is cart:
+        if self.run.project is not None and self.run.project.cart is cart:
             self.editor_app.set_tab("cards")
         self._dirty = True
 
@@ -1931,7 +1912,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 layer.open(note)
         else:
             layer.open(note)
-            pl = self.player
+            pl = self.run.player
             layer.held = False
             if self.procs.handheld():
                 self._tasks_return = self.wm.top_kind()
@@ -1958,7 +1939,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if layer.held:
             layer.held = False
             if back == "desktop" and not home:
-                self.player.resume()
+                self.run.player.resume()
         if home or back is None or back == "tasks" or not self.wm.stack.has(back):
             if self.wm.stack.has("desktop") and self.procs._detachable():
                 self.procs.detach()     # the run that played joins the running set
@@ -1978,7 +1959,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 return
             if layer.held:
                 layer.held = False
-                self.player.resume()
+                self.run.player.resume()
             self._tasks_return = None
             procs.switch(p)
             return
@@ -1999,7 +1980,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             return
         if procs.handheld():
             self.tasks_layer.held = False
-            self.player.release_world()
+            self.run.player.release_world()
             self.pause.dismiss()
             if self.wm.stack.remove("desktop"):
                 self.wm._on_nav()
@@ -2129,7 +2110,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """A game runs fullscreen, live: what Super pauses -- in console
         mode, or full screen on the desk (`WindowedWM.game_full`)."""
         return (self.wm.top_is_player() and self.cart_error is None
-                and not self.player._is_tool
+                and not self.run.player._is_tool
                 and (not self.wm.desk_open() or self.wm.game_full()))
 
     def _game_pauses(self):
@@ -2137,7 +2118,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         Editor's Run slot, holding the keys (`WindowedWM.game_pauses`)."""
         gp = getattr(self.wm, "game_pauses", None)
         return (gp is not None and self.wm.top_is_player() and self.cart_error is None
-                and not self.player._is_tool and gp())
+                and not self.run.player._is_tool and gp())
 
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
@@ -2295,11 +2276,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self.covers.diet:
             self.covers.diet_release()     # RAM-tight tier: the shelf's caches are
                                            # dead weight (and GC-pause fuel) mid-play
-        return self.player.start(self.project)
+        return self.run.player.start(self.run.project)
 
     # -- open-cart workspace forwards (Stage 1, project.py) -------------------
     #
-    # The open cart's six live-data fields live on self.project now; these forwarding
+    # The open cart's six live-data fields live on self.run.project now; these forwarding
     # properties delegate reads AND writes to it, so every surface file + test that
     # reads/writes ws.cart/ws.config/ws.sheet/ws.tilemap/ws.images/ws.pmem is byte-for-
     # byte unchanged. A getter that returns the live object covers in-place mutation
@@ -2308,59 +2289,59 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # the toolkit/deps; only its DATA moves off ws here.
     @property
     def cart(self):
-        return self.project.cart
+        return self.run.project.cart
 
     @cart.setter
     def cart(self, value):
-        self.project.cart = value
+        self.run.project.cart = value
 
     @property
     def config(self):
-        return self.project.config
+        return self.run.project.config
 
     @config.setter
     def config(self, value):
-        self.project.config = value
+        self.run.project.config = value
 
     @property
     def sheet(self):
-        return self.project.sheet
+        return self.run.project.sheet
 
     @sheet.setter
     def sheet(self, value):
-        self.project.sheet = value
+        self.run.project.sheet = value
 
     @property
     def tilemap(self):
-        return self.project.tilemap
+        return self.run.project.tilemap
 
     @tilemap.setter
     def tilemap(self, value):
-        self.project.tilemap = value
+        self.run.project.tilemap = value
 
     @property
     def images(self):
-        return self.project.images
+        return self.run.project.images
 
     @images.setter
     def images(self, value):
-        self.project.images = value
+        self.run.project.images = value
 
     @property
     def pmem(self):
-        return self.project.pmem
+        return self.run.project.pmem
 
     @pmem.setter
     def pmem(self, value):
-        self.project.pmem = value
+        self.run.project.pmem = value
 
     @property
     def scenes(self):                     # #85: the open cart's placed-actor scenes
-        return self.project.scenes
+        return self.run.project.scenes
 
     @scenes.setter
     def scenes(self, value):
-        self.project.scenes = value
+        self.run.project.scenes = value
 
     # -- cart-run forwards (Stage 2, player.py) ------------------------------
     #
@@ -2372,51 +2353,51 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # they stay private on the Player, no forward. cart_paused was retired in Stage 5.)
     @property
     def cart_error(self):
-        return self.player.cart_error
+        return self.run.player.cart_error
 
     @cart_error.setter
     def cart_error(self, value):
-        self.player.cart_error = value
+        self.run.player.cart_error = value
 
     @property
     def crash_line(self):
-        return self.player.crash_line
+        return self.run.player.crash_line
 
     @crash_line.setter
     def crash_line(self, value):
-        self.player.crash_line = value
+        self.run.player.crash_line = value
 
     @property
     def ns(self):
-        return self.player.ns
+        return self.run.player.ns
 
     @ns.setter
     def ns(self, value):
-        self.player.ns = value
+        self.run.player.ns = value
 
     @property
     def _update(self):
-        return self.player._update
+        return self.run.player._update
 
     @_update.setter
     def _update(self, value):
-        self.player._update = value
+        self.run.player._update = value
 
     @property
     def _draw(self):
-        return self.player._draw
+        return self.run.player._draw
 
     @_draw.setter
     def _draw(self, value):
-        self.player._draw = value
+        self.run.player._draw = value
 
     @property
     def _cart_key_prev(self):
-        return self.player._cart_key_prev
+        return self.run.player._cart_key_prev
 
     @_cart_key_prev.setter
     def _cart_key_prev(self, value):
-        self.player._cart_key_prev = value
+        self.run.player._cart_key_prev = value
 
     # -- active-tab forward (Stage 3, editor_app.py) --------------------------
     #
@@ -2517,7 +2498,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         card. The dead run's world is released exactly like a normal exit;
         cart_error/crash_line survive it (the editor's inline marker + the
         popover read them). A parked console (#197) goes home instead."""
-        if self.project is None or self.cart is None:
+        if self.run.project is None or self.cart is None:
             return False
         # #197: while WASM MODE is on, the glass is PARKED and the browser owns
         # authoring. A cart played by PLAY ON DEVICE that crashes must return to
@@ -2544,15 +2525,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # ...read straight off the player: the legacy ws-> player forwards are a
         # set that may only shrink (tests/test_console_facade.py), and this is a
         # new name with two readers.
-        self.code_file = self.player.crash_file or None
-        self.player.release_world()
+        self.code_file = self.run.player.crash_file or None
+        self.run.player.release_world()
         # Windowed desk world (#73/#105): the crashed playtest window closes
         # like a normal exit (never truncating windows stacked above it);
         # the fullscreen tiers just re-route the back-stack below.
         _cp = getattr(self.wm, "close_player", None)
         if _cp is not None and self.wm.desk_open():
             _cp()
-        self.editor_app.open(self.project)
+        self.editor_app.open(self.run.project)
         self.editor = None            # rebuild over the file that raised
         self.set_menu_view("code")
         if line is not None:
@@ -2593,8 +2574,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def _draw_tool_band(self):
         """A running tool cart's compact bar, on the system canvas over the
         composited game's top rows: True where it drew."""
-        p = self.player
-        if not p._is_tool or p.cart_error is not None or self.app_window_canvas \
+        p = self.run.player
+        if not p._is_tool or p.cart_error is not None or self.run.app_window_canvas \
                 or not self.wm.top_is_player() or self.bar_layer.tool_band() is None:
             return False
         self.bar_layer._draw_status_strip("tool")
@@ -2622,7 +2603,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # Deferred pmem (#66): persist the OUTGOING project's unsaved cells before
         # the fresh Project replaces it -- a re-open otherwise reloads pmem.json
         # over progress that only ever reached RAM.
-        _old = getattr(self, "project", None)
+        _old = self.run.project
         if _old is not None and _old.pmem is not None:
             try:
                 _old.pmem.flush()
@@ -2642,7 +2623,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if _editor_app is not None and _old is not None and _editor_app.project is _old:
             _editor_app.save_current()
             _editor_app.tab = None
-        self.project = Project(self)   # a fresh workspace for the cart being opened
+        self.run.project = Project(self)   # a fresh workspace for the cart being opened
         if cart is None:
             cart = self.launcher.selected()
         # INVARIANT: a workspace only ever opens a REAL cart. The "+ New" pseudo card
@@ -2651,7 +2632,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # cart instead of crashing on a non-cart (path/cfg-less) tile.
         if cart is None or cart.get("path") is None:
             cart = next((c for c in self.launcher.items if c.get("path")), cart)
-        prev = getattr(self, "_fat_cart", None)
+        prev = self.run.fat_cart
         if prev is not None and prev is not cart:
             self.carts.reslim(prev)            # at most ~one fat cart stays live (#66)
         self.carts.rehydrate(cart)
@@ -2664,14 +2645,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # enough for the source. The kid gets the panel a crashing cart gets --
         # open()/play() run() straight to it -- and the launcher stays usable.
         if cart is None or "src" not in cart:
-            self._fat_cart = None
-            self.player.release_world()    # the outgoing run's world is dead too,
+            self.run.fat_cart = None
+            self.run.player.release_world()    # the outgoing run's world is dead too,
                                            # and this is the heap that had no room
             self.cart_error = ("Couldn't open %.24s. Try again."
                                % ((cart or {}).get("title") or "that cart"))
             self.crash_line = None
             return False
-        self._fat_cart = cart
+        self.run.fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
         self.cards_layer.reset()      # no file list or dialog carried to the new cart
@@ -2688,8 +2669,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.tilemap = self._build_tilemap()
         # No ws.flags projection: the legacy property-forward set can only
         # shrink (tests/test_console_facade.py), so the one reader -- the
-        # Player, building the cart namespace -- goes through self.project.
-        self.project.flags = self._build_flags()
+        # Player, building the cart namespace -- goes through self.run.project.
+        self.run.project.flags = self._build_flags()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)
@@ -2839,15 +2820,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # The run's route is HOME (the launcher is its caller): what lets the
         # kernel stop the VM for it (docs/history/kernel_cartpath_2026-10.md 5.1).
         self._home_launch = True
-        self.player.declined = False
+        self.run.player.declined = False
         try:
             self._open_workspace(selected)
         finally:
             self._home_launch = False
-        if self.player.declined:
-            self.player.declined = False      # the shell asked first (ask_stop_music)
+        if self.run.player.declined:
+            self.run.player.declined = False      # the shell asked first (ask_stop_music)
             return
-        self.run(self.project, self.launcher_layer)   # activate desktop, record caller
+        self.play(self.launcher_layer)   # activate desktop, record caller
 
     def run_script(self, kind, name):
         """RUN a SCRIPT: a bare `.py`/`.lua` file in the vault, which is a cart
@@ -2903,7 +2884,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         caller = self._content_layer()
         if not self._open_workspace(cart):
             return (False, "CAN'T RUN IT")
-        player = self.player
+        player = self.run.player
         if player.cart_error is not None:
             # The body did not survive its own exec. The console IS this run's
             # error surface, so the traceback goes there and the run continues
@@ -2916,7 +2897,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         player._update = con.driver(player._update)
         self._set_text_mode(True)      # a script TYPES; this is the surface taking
         con.seed_key(getattr(self.input, "last_key", 0) or 0)
-        self.run(self.project, caller)
+        self.play(caller)
         return (True, "")
 
     def ask_run(self, handle):
@@ -2934,14 +2915,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         open) goes straight back. Nothing runs when the asking run is over."""
         ed = self._editor_run
         self._editor_run = None
-        if ed is None or ed not in self.player._editors:
+        if ed is None or ed not in self.run.player._editors:
             return
         back = (self.cart, ed.kind, ed.name(), ed.mode(), ed._where(),
                 self.returns.caller())
         ok, why = self.run_script(ed.kind, ed.name())
         if ok:
             self._script_return = back
-        elif ed in self.player._editors:
+        elif ed in self.run.player._editors:
             ed._refuse(why)
         else:
             self._return_to_runner(back)
@@ -2960,8 +2941,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._text_request = None
             self._go_home_or_back()
             return
-        self.run(self.project, caller)
-        for ed in self.player._editors:
+        self.play(caller)
+        for ed in self.run.player._editors:
             if ed.kind == kind and ed.name() == name:
                 ed._put(where)
 
@@ -2984,7 +2965,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             if not path:
                 return False
             kind = self.carts_store.project_kind(path)
-            if self.project is not None and self.project.cart is cart:
+            if self.run.project is not None and self.run.project.cart is cart:
                 into_project = cart      # opened FROM this project's Editor
         self.artwork.open_named(name, kind)
         if not self.open_app(app):
@@ -3013,9 +2994,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if not self._open_workspace(cart):
             # No source, nothing to edit: land on the same error panel a crashed
             # cart lands on rather than opening the Editor over an empty project.
-            self.run(self.project, self.launcher_layer)
+            self.play(self.launcher_layer)
             return
-        self.editor_app.open(self.project)
+        self.editor_app.open(self.run.project)
         if back is not None:
             self._editor_from = back + (frozenset(wm.window_kinds()),)
 
@@ -3043,24 +3024,24 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
     # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper
     # runner calls ws._build_sheet(cart), _start calls _build_audio, and open()
-    # calls all four -- all through self.project now).
+    # calls all four -- all through self.run.project now).
     def _build_sheet(self, cart=None):
-        return self.project._build_sheet(cart)
+        return self.run.project._build_sheet(cart)
 
     def _build_pmem(self):
-        return self.project._build_pmem()
+        return self.run.project._build_pmem()
 
     def _build_tilemap(self, cart=None):
-        return self.project._build_tilemap(cart)
+        return self.run.project._build_tilemap(cart)
 
     def _build_flags(self, cart=None):
-        return self.project._build_flags(cart)
+        return self.run.project._build_flags(cart)
 
     def _build_scenes(self, cart=None):
-        return self.project._build_scenes(cart)
+        return self.run.project._build_scenes(cart)
 
     def _build_audio(self):
-        return self.project._build_audio()
+        return self.run.project._build_audio()
 
     # -- frame + drawing -----------------------------------------------------
 
@@ -3071,7 +3052,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # auto-batch (#63), so cart sprites land before the console overlays draw.
         # The probe is cached by canvas identity: a `getattr` that finds a
         # method allocates a bound method, and this runs every cart frame.
-        cv = self.canvas
+        cv = self.run.canvas
         if cv is not self._rs_cv:
             self._rs_cv = cv
             self._rs_fn = getattr(cv, "reset_state", None)
@@ -3132,7 +3113,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (the 320x240 device case; #75: no per-frame tuple, no duplicate probe).
         # Both probes cached by canvas identity (a found method is a bound-method
         # allocation per probe, and this runs every painted frame).
-        cv = self.canvas
+        cv = self.run.canvas
         if cv is not self._fb_cv:
             self._fb_cv = cv
             self._fb_cv_fn = getattr(cv, "flush_batch", None)
@@ -3167,12 +3148,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         128x128 cart canvas (SPEC.md 3.1) concedes 8 rows via view(128, 120)
         and fills a 4:3 screen's height (2x on the handheld, 5x on the P4)
         instead of letterboxing the square -- and game_xy maps taps back
-        through it. Lives on the shared InputState (the cart_quit pattern) so
-        the verb needs no console handle; Player.start clears it per run."""
-        v = getattr(self.input, "game_view", None)
+        through it. The declaration is the run's (`Run.view`), which the
+        verb sets and Player.start clears."""
+        run = self.run
+        v = run.view
         if not v:
             return None
-        gc = self.canvas
+        gc = run.canvas
         w = min(int(v[0]), gc.w)
         h = min(int(v[1]), gc.h)
         if w <= 0 or h <= 0 or (w == gc.w and h == gc.h):
@@ -3186,13 +3168,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # A compiled cart's frame still in its own memory is shown from there
         # when the WM can; otherwise it lands in the game canvas and the
         # composite reads it as ever.
-        cf = self.cart_frame
+        cf = self.run.cart_frame
         if cf is not None:
             view = cf.take()
             if view is not None:
                 if self.wm.present_frame(cf, view):
                     return None
-                cf.settle(self.canvas)
+                cf.settle(self.run.canvas)
             cf.nrects = 0
         return self.wm.composite_game()
 
@@ -3201,15 +3183,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         cart's frame -- the FPS chip, the perf HUD line: the flush takes that
         rect from the canvas and the rest from the frame, so the frame need
         not be written first. A rect the frame cannot take settles it."""
-        cf = self.cart_frame
+        cf = self.run.cart_frame
         if cf is not None and not cf.patch(x, y, w, h):
-            cf.settle(self.canvas)
+            cf.settle(self.run.canvas)
 
     def settle_cart_frame(self):
         """Before anything draws on the game canvas over a compiled cart's
         frame: put the frame there first, the bytes its blit would have
         written."""
-        cf = self.cart_frame
+        cf = self.run.cart_frame
         if cf is not None:
             cf.settle()
 
@@ -3269,7 +3251,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # drawn on a change, over the frozen frame; a hidden window, the desk
         # Editor's paused Run slot). An app on the verbs, drawn on change,
         # changes its own content alone, as a verbs page does (`pages`).
-        player = self.player
+        player = self.run.player
         # (The Player's own fields: ws._update/_draw are property forwards to
         # exactly these.) An app on the verbs draws on change.
         if kind == "desktop" and player.cart_error is None and not self.pause.open \
@@ -3346,7 +3328,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         k = _glass.kernel_epoch()
         if k != self._kepoch:
             self._kepoch = k
-            self._kframes = max(1, getattr(self._sys_canvas or self.canvas,
+            self._kframes = max(1, getattr(self._sys_canvas or self.run.canvas,
                                            "RETAINED_FRAMES", 1))
         if self._kframes:
             self._kframes -= 1
@@ -3513,13 +3495,18 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # agreed frame instead of repainting it.
         procs = self.procs
         procs.frame(dt)               # the running set's games, by their states
-        if (self.wm.top_is_player() and self.player.cart_error is None and not self.pause.open
+        # The front run, taken once for the frame's head: the running set
+        # promoted any Proc the focus reached above. A layer's draw can open
+        # another run, so the draw loop reads `self.run` again.
+        run = self.run
+        player = run.player
+        if (self.wm.top_is_player() and player.cart_error is None and not self.pause.open
                 and not procs.front_minimised()):
-            if not self.player.frame_plan(dt):
-                self.player.tick(dt, render=False)
+            if not player.frame_plan(dt):
+                player.tick(dt, render=False)
                 return
-        elif self.player.tick_ms:
-            self.player.park()
+        elif player.tick_ms:
+            player.park()
         # The kernel's idle ladder is on its SAVER rung (idle_ladder.Saver): the
         # saver owns the glass until the ladder wakes, which moves the kernel
         # epoch so the gate below repaints what it covered.
@@ -3610,7 +3597,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # once at the EMA (_frame_perf_end).
         _frame_t0 = _ticks_us() if _perf else 0
         if _deep:
-            _bc = getattr(self.canvas, "batch_reset", None)
+            _bc = getattr(run.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
             # The DRAWBRK scratch (Player.tick fills it on the cart path, in
@@ -3625,13 +3612,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._pf_cart = 0   # cart _draw() (RENDERING)
             self._pf_audio = 0  # audio.tick(dt) (mixer feed)
             self._pf_bg = 0     # the backdrop restore's share of _pf_cart
-        elif getattr(self.canvas, "_prof", False):
+        elif getattr(run.canvas, "_prof", False):
             # Perf capture just went off: clear the device canvas's DRAW2 timing
             # gate so its hot verbs stop paying the per-op ticks_us pair (~6us a
             # fill, and chrome issues them by the hundred -- see _fill's note in
             # device_canvas.py). One attribute read per frame here; the host
             # canvas has no _prof, so getattr returns False and this never fires.
-            self.canvas._prof = False
+            run.canvas._prof = False
         # Compositor / router (docs/history/shell_layers_refactor_v1.md §3): draw the z-ordered
         # visible stack bottom -> top. The active content draws first (game-domain
         # content on the fixed 320x240 game canvas); at the game->system domain boundary
@@ -3660,7 +3647,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # is byte-identical, and a raster game canvas keeps the composite).
         _view = None
         if self._sys_canvas is not None:
-            _gc = self.canvas
+            _gc = run.canvas
             if _gc is not self._probe_gc:
                 self._probe_gc = _gc
                 self._probe_buf = getattr(_gc, "buf", None)
@@ -3734,7 +3721,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                     _game_open = False
                 self._composite_game()
                 _fold_live = True
-                if self.player._is_tool and self.bar_layer.tool_band() is not None:
+                if self.run.player._is_tool and self.bar_layer.tool_band() is not None:
                     _dsf = self._disarm_fn()        # #190: the band paints the root
                     if _dsf is not None:
                         _dsf()
@@ -3755,7 +3742,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 # behind the game (owner, 2026-07-31). Painting it here, before
                 # the bracket opens, is the same pixels in the right order.
                 self.sys_canvas.cls(0)      # _VIEWPORT_BEZEL: black
-                _view(_ox, _oy, _sc, self.canvas.w, self.canvas.h)
+                _gc = self.run.canvas       # a draw above may have opened a run
+                _view(_ox, _oy, _sc, _gc.w, _gc.h)
                 _game_open = True
             if _lb is not None and layer.domain == "game" and not _lb_done:
                 _lb()
@@ -3850,7 +3838,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def _mini_btn(self, label, rect, fill, cv=None, label_rect=None):
         # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
         # 2026-07 kernel-shrink direction); this stays the tested ws entry point.
-        _ui_draw.mini_btn(cv if cv is not None else self.canvas, rect, label, fill,
+        _ui_draw.mini_btn(cv if cv is not None else self.run.canvas, rect, label, fill,
                         label_rect)
 
     def _btn(self, label, rect, fill, cv=None):
@@ -3858,14 +3846,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas. The
         # implementation (incl. the frozen scale-2 baseline quirk) moved to
         # ui.game_btn; this stays the tested ws entry point.
-        _ui_draw.game_btn(cv if cv is not None else self.canvas, rect, label, fill)
+        _ui_draw.game_btn(cv if cv is not None else self.run.canvas, rect, label, fill)
 
     def _icon_btn(self, kind, label, rect, fill, cv=None):
         """A button that leads with an icon glyph (pre-literate) and keeps the
         word as a small secondary cue beside it -- so a reader still gets the
         label and a kid who can't read still gets the picture. Implementation:
         ui.game_icon_btn."""
-        _ui_draw.game_icon_btn(cv if cv is not None else self.canvas, rect,
+        _ui_draw.game_icon_btn(cv if cv is not None else self.run.canvas, rect,
                              kind, label, fill, _ui_draw.glyph_draw)
 
     def _draw_cursor(self):
@@ -3892,7 +3880,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # overrides that -- what the bar passes so its glyphs fill a chrome-scaled
         # slot (#203). The raster is native/moy_ui's, through `ui.glyph`, which
         # Launcher (canvas-only) is handed too.
-        _ui_draw.glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
+        _ui_draw.glyph(cv if cv is not None else self.run.canvas, kind, rect, c, scale)
 
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi

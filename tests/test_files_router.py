@@ -134,7 +134,7 @@ def test_a_note_opens_the_text_page_in_markdown_mode(tmp_path):
     ws.frame(1 / 30)
     assert ws.wm.top_is_player()
     assert ws.cart.get("title") == "Notes"
-    ed = ws.player.ns["ed"]
+    ed = ws.run.player.ns["ed"]
     assert (ed.name(), ed.mode()) == ("story", text_modes.MD)
     assert ed.text() == "once upon a time"
 
@@ -155,7 +155,7 @@ def test_a_json_file_is_routed_to_json_mode(tmp_path):
     ws.frame(1 / 30)
     assert ws.wm.top_is_player()
     assert ws.cart.get("title") == "Notes"
-    ed = ws.player.ns["ed"]
+    ed = ws.run.player.ns["ed"]
     assert (ed.name(), ed.mode()) == ("manifest.json", text_modes.JSON)
     assert ed.kind == moy_carts.project_kind(cart["path"])
     # the project was opened on the way, so leaving comes back to its Config tab
@@ -544,7 +544,7 @@ def test_the_deep_chain_still_finds_its_way_back_to_files(tmp_path):
     app = _open_files(ws)
     app.open_place(files_app.PROJECTS)
     app._open_row(0)
-    cart = ws.project.cart
+    cart = ws.run.project.cart
     assert ws.wm.top_kind() == "menu"
 
     name = _cart_image(cart)

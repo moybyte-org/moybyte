@@ -1142,7 +1142,7 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
     a = ws.cart
     assert a.get("lazy") is False and "src" in a
     assert ws.cart_error is None
-    ws.player.tick(1 / 30)
+    ws.run.player.tick(1 / 30)
     assert ws.cart_error is None
     # switching to a different cart re-slims the previous one
     other = next(c for c in ws.carts.all if c.get("path") and c is not a)
@@ -1155,7 +1155,7 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
         slug = wp[0]["path"].rsplit("/", 1)[-1][:-len(".moy")]
         ws.look.select_wallpaper(slug, persist=False)
         assert ws.wallpaper._wp_draw is not None, "wallpaper must compile from a slim cart"
-        assert wp[0] is ws._fat_cart or wp[0].get("lazy") is True
+        assert wp[0] is ws.run.fat_cart or wp[0].get("lazy") is True
 
 
 def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):

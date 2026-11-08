@@ -75,9 +75,9 @@ def test_a_compiled_app_reaches_prefs_and_theme_with_no_upcall(tmp_path):
     ws = host_app.build_workstation(_store(tmp_path))
     t0 = moy_loop.upcalls()[1]
     open_cart(ws, "App Roles Wasm")
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     _frames(ws, 10)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     from runtime import moy_play
     books = moy_play.info()[5]
     assert tuple(books) == (0, 0, 0, 0, 0, 0), "the run crossed into Python: %r" % (books,)
@@ -101,7 +101,7 @@ def test_the_same_module_one_permission_short_is_refused_naming_the_import(tmp_p
     _binding_or_skip()
     ws = host_app.build_workstation(_store(tmp_path, perms=[]))
     open_cart(ws, "App Roles Wasm")
-    err = ws.player.cart_error or ""
+    err = ws.run.player.cart_error or ""
     assert "moybyte.app.prefs_get" in err, err
     assert "prefs" in err.split("moybyte.app.prefs_get", 1)[1], err
 
@@ -117,7 +117,7 @@ def test_a_module_that_declares_no_extension_reaches_no_role(tmp_path):
         json.dump(man, f)
     ws = host_app.build_workstation(root)
     open_cart(ws, "App Roles Wasm")
-    err = ws.player.cart_error or ""
+    err = ws.run.player.cart_error or ""
     assert "moybyte.app.prefs_get" in err and "extensions it declares" in err, err
 
 

@@ -387,7 +387,7 @@ def _cart_reads(tmp_path, runtime, repeat, text):
         ws.input.set_repeat(DELAY, 0)
     select_on_home(ws, "Held")
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(3):
         drv.frame(1 / 30)
     drv.key_down(mi.KEY_DOWN)
@@ -398,7 +398,7 @@ def _cart_reads(tmp_path, runtime, repeat, text):
     drv.key_up(mi.KEY_DOWN)
     for _ in range(3):
         drv.frame(1 / 30)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     if runtime == "lua":                        # the Lua tier's pmem is C-side
         from array import array
         from runtime import moycore

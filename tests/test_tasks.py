@@ -66,7 +66,7 @@ def test_a_cart_of_known_cost_reads_its_cpu_and_memory(tmp_path, monkeypatch):
                                 title="Known", type="game")
     finally:
         tracemalloc.stop()
-    pl = ws.player
+    pl = ws.run.player
     assert 200000 <= pl.mem < 240000, pl.mem   # its `_init`'s bytearray, about
     us, ms, spend = _clocked(monkeypatch)
     pl.ns["_spend"] = spend
@@ -91,7 +91,7 @@ def test_memory_is_absent_where_nothing_counts_it(tmp_path):
     assert not tracemalloc.is_tracing()
     ws = build_ws_with_cart(tmp_path, KNOWN.replace("spend(", "int("), title="Known",
                             type="game")
-    assert ws.player.mem is None
+    assert ws.run.player.mem is None
     assert tasks_ui.mem_text(None) == "-" and tasks_ui.cpu_text(None) == "-"
     assert tasks_ui.mem_text(200000) == "~196K"
     assert tasks_ui.mem_text(3 << 20 | 1 << 19) == "~3.5M"
@@ -235,7 +235,7 @@ def test_the_pause_cards_minimise_keeps_the_game_held_and_goes_home(tmp_path):
     open_cart(ws, "Star Catcher")
     for _ in range(3):
         drv.frame(_DT)
-    pl = ws.player
+    pl = ws.run.player
     n = pl.ns["_update"]
     heard = []
     pl.ns["_minimise"] = lambda: heard.append("min")
@@ -263,7 +263,7 @@ def test_a_launch_beside_a_minimised_game_and_switching_back(tmp_path):
     assert [p.title() for p in ws.procs.list] == ["Star Catcher"]
     ws.open_tasks()
     drv.frame(_DT)
-    assert ws.screen == "tasks" and ws.player.paused   # it holds the front game
+    assert ws.screen == "tasks" and ws.run.player.paused   # it holds the front game
     rows = _rows(ws)
     assert [(r[1], r[3]) for r in rows] == [("Brick Siege", "paused"),
                                             ("Star Catcher", "minimised")]
@@ -271,10 +271,10 @@ def test_a_launch_beside_a_minimised_game_and_switching_back(tmp_path):
     ws.tasks_layer._do("Switch to", rows[1])
     drv.frame(_DT)
     assert ws.screen == "desktop" and ws.cart["title"] == "Star Catcher"
-    assert not ws.player.paused and not ws.player.detached
+    assert not ws.run.player.paused and not ws.run.player.detached
     assert [p.title() for p in ws.procs.list] == ["Brick Siege"]
     assert ws.procs.list[0].state == "minimised" and ws.procs.list[0].player.paused
-    n0 = ws.player.ns.get("score", 0)
+    n0 = ws.run.player.ns.get("score", 0)
     for _ in range(5):
         drv.frame(_DT)
     assert ws.screen == "desktop"
@@ -294,10 +294,10 @@ def test_the_task_manager_goes_back_to_the_game_it_held_and_home_keeps_it(tmp_pa
     drv.frame(_DT)
     ws.open_tasks()
     drv.frame(_DT)
-    assert ws.player.paused
+    assert ws.run.player.paused
     ws.tasks_layer.back()
     drv.frame(_DT)
-    assert ws.screen == "desktop" and not ws.player.paused
+    assert ws.screen == "desktop" and not ws.run.player.paused
     ws.open_tasks()
     drv.frame(_DT)
     rows = _rows(ws)

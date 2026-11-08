@@ -426,7 +426,7 @@ def painter_host_frames():
 _PAINTER_HELPER = """
 import ui_draw, chrome, moy_ui, device_canvas, binascii
 def _paint_scene(src, rect):
-    cv = (ws.sys_canvas or ws.canvas).new_layer(16, 12)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(16, 12)
     try:
         assert moy_ui.theme_install(src)[0] == 0
         ui_draw.use_shape('painted')
@@ -516,7 +516,7 @@ def _scale(cv, fs):
     cv._gate_state[device_canvas._ST_FONT_SCALE] = fs
 def _sprite_scene(src, what, args, fs):
     sheet = _SPRITE_SHEET
-    cv = (ws.sys_canvas or ws.canvas).new_layer(48, 40)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(48, 40)
     was = getattr(cv, 'font_scale', 1)
     try:
         assert moy_ui.theme_install(src)[0] == 0
@@ -636,7 +636,7 @@ def picker_kernel_matches_sspr(board):
     got = []
     for scale in (1, 2, 3, 5):      # one scale a command: all 72 trip an S3's task watchdog late in a suite
         got += board.pyval("ws._g['_pk_cases'](lambda w, h: "
-                           "(ws.sys_canvas or ws.canvas).new_layer(w, h), (%d,))" % scale,
+                           "(ws.sys_canvas or ws.run.canvas).new_layer(w, h), (%d,))" % scale,
                            timeout=60.0, strict=True)
     assert [same for same, _ in got] == [True] * len(want)
     assert [crc for _, crc in got] == [crc for _, crc in want]
@@ -703,7 +703,7 @@ def _sl_check(back, W, H, kd, prev, b, extra=None):
     return True
 
 def _sl_cases(cases, k=0):
-    cv = ws.sys_canvas or ws.canvas
+    cv = ws.sys_canvas or ws.run.canvas
     comp = cv._comp
     W, H = comp.size()
     ppa = _sl_engine()
@@ -735,7 +735,7 @@ def _sl_cases(cases, k=0):
     return out
 
 def _sl_into():
-    cv = ws.sys_canvas or ws.canvas
+    cv = ws.sys_canvas or ws.run.canvas
     comp = cv._comp
     W, H = comp.size()
     ppa = _sl_engine()
@@ -776,7 +776,7 @@ def shift_last_matches_the_reference(board, p4=False, rotated=False):
     lines the CPU had cached; on the rotated compositor a shift answers False
     while the frame's rotate flies. On an S3 the copy runs while the feeder
     ships its source."""
-    w, h = board.pyval("(ws.sys_canvas or ws.canvas)._comp.size()", strict=True)
+    w, h = board.pyval("(ws.sys_canvas or ws.run.canvas)._comp.size()", strict=True)
     rw, rh = min(400, w - 80), min(220, h - 60)
     cases = [(40, 30, rw, rh, 0, 8), (40, 30, rw, rh, 0, -8), (40, 30, rw, rh, 0, 1),
              (40, 30, rw, rh, 0, -1), (40, 30, rw, rh, 6, 0), (40, 30, rw, rh, -6, 0),
@@ -2484,7 +2484,7 @@ def idle_saver_and_wake(board):
         after = board.state()
         assert after["idle"]["state"] == 0, after["idle"]
         assert after["stack"] == stack
-        retained = board.pyval("getattr(ws.sys_canvas or ws.canvas, "
+        retained = board.pyval("getattr(ws.sys_canvas or ws.run.canvas, "
                                "'RETAINED_FRAMES', 1)", strict=True)
         assert board.pyval("ws._saver is None", strict=True) is True
         assert after["frames"] >= st["frames"] + retained, (st["frames"], after["frames"])
@@ -2758,7 +2758,7 @@ def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
         assert board.pyexec(
             "c = [c for c in ws.carts.all if c['title'] == %r][0]\n"
             "ws._open_workspace(c)\n"
-            "ws.run(ws.project, ws.launcher_layer)" % title), board.last_error
+            "ws.play(ws.launcher_layer)" % title), board.last_error
         st = None
         for _ in range(20):
             time.sleep(0.5)
@@ -2918,7 +2918,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
         paused = True
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is True
-        assert board.pyval("ws.player.paused", strict=True) is True
+        assert board.pyval("ws.run.player.paused", strict=True) is True
         sram1, psram1 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
         lit1 = _band_light(px, w, h, margin, rows)
@@ -2927,7 +2927,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
         paused = False
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is False
-        assert board.pyval("ws.player.paused", strict=True) is False
+        assert board.pyval("ws.run.player.paused", strict=True) is False
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
         f0 = st["frames"]
@@ -4019,7 +4019,7 @@ def _app_ui_host_pmem(look):
         quiesce(ws)
         ws._dirty = True
         drv.frame(1.0 / 30.0)
-    pm = list(ws.player._lua._run.pmem()[1])
+    pm = list(ws.run.player._lua._run.pmem()[1])
     ws.exit()
     ui_draw.input_kind("keys")      # the host's own again
     return pm
@@ -4116,8 +4116,8 @@ def hello_read_its_greeting(board):
     interpreted run shows ("RUNNING SLOWLY"), which the kernel's front draws
     centred over the top of the run's canvas."""
     px = board.pyval("(lambda b, i: b[i] | b[i + 1] << 8)"
-                     "(ws.canvas._buf, 2 * (9 * ws.canvas.w + 24))", strict=True)
-    black = board.pyval("ws.canvas._wire[0]", strict=True)
+                     "(ws.run.canvas._buf, 2 * (9 * ws.run.canvas.w + 24))", strict=True)
+    black = board.pyval("ws.run.canvas._wire[0]", strict=True)
     assert px == black, "the greeting was not read: pixel %#06x" % px
 
 
@@ -4373,7 +4373,7 @@ def wasm_unsigned_cart_follows_its_consent(board, board_dir):
 
     def _native_and_greets(b):
         hello_read_its_greeting(b)
-        assert b.pyval("bool(ws.player._lua.interp)", strict=True) is False
+        assert b.pyval("bool(ws.run.player._lua.interp)", strict=True) is False
     _runs_clean(board, UNSIGNED_NATIVE_TITLE, check=_native_and_greets)
     err = _wasm_run_error(board, TAMPERED_TITLE)
     assert "refused: bad signature" in err, err
@@ -4417,7 +4417,7 @@ def _notice_on_launch(board, title, text=None):
             assert notice == text, notice
         else:
             assert notice.startswith(title + " needs ") and " MB " in notice, notice
-        assert board.pyval("ws.player._lua is None", strict=True) is True
+        assert board.pyval("ws.run.player._lua is None", strict=True) is True
         return notice
     finally:
         board.leave_cart()
@@ -4586,7 +4586,7 @@ INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
 
 def _runs_on_interpreter(board, title, check=None, cause="missing"):
     """`title` runs clean (no blocking notice, no error) AND landed on the
-    interpreter tier: `ws.player._lua.interp` is true and the short system
+    interpreter tier: `ws.run.player._lua.interp` is true and the short system
     notice (`runtime/shell/console_notices.py`'s `_draw_notice`, the "MOYBYTE
     UPDATED" banner, never the achievement toast) named it with the sub-line
     `cause` says, exactly the same as a cart with no module at all
@@ -4600,7 +4600,7 @@ def _runs_on_interpreter(board, title, check=None, cause="missing"):
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
         assert not st.get("notice"), st["notice"]
-        assert board.pyval("bool(ws.player._lua.interp)", strict=True) is True
+        assert board.pyval("bool(ws.run.player._lua.interp)", strict=True) is True
         notice = board.pyval("list(ws._notice[:2]) if ws._notice else None",
                              strict=True)
         assert notice == [INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB[cause]], notice
@@ -5071,9 +5071,9 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
 _FRAME_FOLD_PROOF = """
 def _ff_proof():
     import moy_alloc
-    cf = ws.cart_frame
+    cf = ws.run.cart_frame
     comp = ws.comp
-    gc = ws.canvas
+    gc = ws.run.canvas
     gw = gc.w
     gh = gc.h
     fmt = cf.fmt
@@ -5148,7 +5148,7 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
         st = board.state()
         f1, ff1 = st["fold"], st["ffold"]
         snaps1 = board.pyval("ws.comp.snap_stats()", strict=True)
-        assert board.pyval("ws.cart_frame.fmt", strict=True) == fmt
+        assert board.pyval("ws.run.cart_frame.fmt", strict=True) == fmt
         assert board.pyexec(_FRAME_FOLD_PROOF, strict=True)
         bad = board.pyval("ws._g['_ff_proof']()", timeout=120, strict=True)
     finally:
@@ -5177,7 +5177,7 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
 _FRONT_FOLD_PROOF = """
 def _front_proof(shift):
     comp = ws.comp
-    gc = ws.canvas
+    gc = ws.run.canvas
     gw, gh = gc.w, gc.h
     ox, oy, scale = ws.wm.play_viewport()
     assert scale == 1, scale
@@ -5245,14 +5245,14 @@ def a_lua_run_folds_to_the_glass_in_front(board, title="Brick Siege Lua", second
 _P4_FRAME_PROOF = """
 def _p4_canvas_crc(rows):
     import binascii
-    gc = ws.canvas
+    gc = ws.run.canvas
     return binascii.crc32(memoryview(gc._buf)[:2 * gc.w * rows])
 
 def _p4_frame_proof(glass):
     import binascii, moy_alloc, moy_ppa
-    cf = ws.cart_frame
+    cf = ws.run.cart_frame
     comp = ws.comp
-    gc = ws.canvas
+    gc = ws.run.canvas
     sc = ws.sys_canvas
     gw = gc.w
     gh = gc.h
@@ -5302,7 +5302,7 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
         assert board.pyexec(_P4_FRAME_PROOF, strict=True)
-        rows = "ws.canvas.h - 24"
+        rows = "ws.run.canvas.h - 24"
         crc0 = board.pyval("ws._g['_p4_canvas_crc'](%s)" % rows, strict=True)
         snaps0 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         f0 = st["frames"]
@@ -5311,7 +5311,7 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
         f1 = st["frames"]
         snaps1 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         crc1 = board.pyval("ws._g['_p4_canvas_crc'](%s)" % rows, strict=True)
-        assert board.pyval("ws.cart_frame.fmt", strict=True) == 1
+        assert board.pyval("ws.run.cart_frame.fmt", strict=True) == 1
         bad, settled = board.pyval("ws._g['_p4_frame_proof'](%r)" % bool(glass),
                                    timeout=120, strict=True)
     finally:
@@ -5356,9 +5356,9 @@ def _ff_rect():
 
 def _front_frame_proof(kind, shift):
     import binascii, moy_glass
-    cf = ws.cart_frame
+    cf = ws.run.cart_frame
     comp = ws.comp
-    gc = ws.canvas
+    gc = ws.run.canvas
     gw, gh = gc.w, gc.h
     st = moy_glass.front_stats()
     off, fmt = st[1], st[2]
@@ -5454,9 +5454,9 @@ def _ff_diff(fb, dst, stride, x0, y0, w, h):
 def _front_settle_proof(kind):
     import binascii, moy_glass, moycore
     st = moy_glass.front_stats()
-    gc = ws.canvas
+    gc = ws.run.canvas
     n = gc.w * gc.h * (1 if st[2] == 2 else 2)
-    kept = memoryview(ws.cart_frame._scratch)[st[1]:st[1] + n]
+    kept = memoryview(ws.run.cart_frame._scratch)[st[1]:st[1] + n]
     # The front's frame fence first, as its hand-back takes it: the copy
     # of the frame shown last may still be landing.
     if kind == 'fold':
@@ -5496,7 +5496,7 @@ def a_compiled_run_shows_its_frames_in_front(board, title, kind, seconds=4.0):
         "WiFi is held: not a cart's state"
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
-    crc = "__import__('binascii').crc32(ws.canvas._buf)"
+    crc = "__import__('binascii').crc32(ws.run.canvas._buf)"
     try:
         board.drain(3.0)
         assert board.pyval("__import__('moy_play').front_live()", strict=True), \
@@ -5544,14 +5544,14 @@ def p4_palette_frames_keep_the_blit(board, title, seconds=2.0):
         board.drain(2.5)
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
-        assert board.pyval("ws.cart_frame is not None", strict=True) is True
-        crc = ("__import__('binascii').crc32(ws.canvas._buf)")
+        assert board.pyval("ws.run.cart_frame is not None", strict=True) is True
+        crc = ("__import__('binascii').crc32(ws.run.canvas._buf)")
         snaps0 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         crc0 = board.pyval(crc, strict=True)
         board.drain(seconds)
         snaps1 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         crc1 = board.pyval(crc, strict=True)
-        assert board.pyval("ws.cart_frame.fmt", strict=True) == 0
+        assert board.pyval("ws.run.cart_frame.fmt", strict=True) == 0
     finally:
         board.leave_cart()
         board.drain(1.0)

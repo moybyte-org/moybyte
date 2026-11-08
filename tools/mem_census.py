@@ -188,7 +188,7 @@ def fit(b, title=DOOM, secs=8):
     got.update({"need": need, "seen": seen,
                 "frames_moved": (f1 or 0) - (got.get("frames") or 0),
                 "frames_before": st0.get("frames"),
-                "lua_up": val(b, "ws.player._lua is not None")})
+                "lua_up": val(b, "ws.run.player._lua is not None")})
     home(b)
     return got
 

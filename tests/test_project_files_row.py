@@ -199,7 +199,7 @@ def test_the_keys_and_the_trackball_step_the_list_and_open_a_row(tmp_path):
     drv.ball_click()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
-    assert ws.wm.top_is_player() and ws.player.ns["ed"].name() == "config.json"
+    assert ws.wm.top_is_player() and ws.run.player.ns["ed"].name() == "config.json"
 
     ws._exit_to_caller()
     cl._open_files()
@@ -359,7 +359,7 @@ def test_a_text_file_opens_in_the_handle_in_its_mode(tmp_path):
     _frame(ws)
     _frame(ws)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
-    ed = ws.player.ns["ed"]
+    ed = ws.run.player.ns["ed"]
     assert (ed.name(), ed.mode()) == ("config.json", text_modes.JSON)
     assert ed.kind == moy_carts.project_kind(cart["path"])
     assert json.loads(ed.text()) == {}          # the file's real bytes
@@ -370,7 +370,7 @@ def test_a_text_file_opens_in_the_handle_in_its_mode(tmp_path):
     cl._open_files()
     cl._files_open("notes.md")
     _frame(ws)
-    assert ws.player.ns["ed"].mode() == text_modes.MD
+    assert ws.run.player.ns["ed"].mode() == text_modes.MD
 
 
 def test_leaving_the_handle_returns_to_the_config_tab(tmp_path):
@@ -385,7 +385,7 @@ def test_leaving_the_handle_returns_to_the_config_tab(tmp_path):
     ws._exit_to_caller()
     assert ws.wm.top_kind() == "menu"
     assert ws.editor_app.tab == "cards"
-    assert ws.project.cart["path"] == cart["path"]   # the PROJECT, not Notes
+    assert ws.run.project.cart["path"] == cart["path"]   # the PROJECT, not Notes
     assert ws._project_return is None                # the slot is popped once
     _frame(ws)
 
@@ -417,7 +417,7 @@ def test_the_write_goes_through_the_project_and_its_journal(tmp_path):
     cl._open_files()
     cl._files_open("config.json")
     _frame(ws)
-    ed = ws.player.ns["ed"]
+    ed = ws.run.player.ns["ed"]
     ed.set_text('{"lives": 4}')
     ok, badge = ed.save()
     assert ok and badge == ""
@@ -444,7 +444,7 @@ def test_an_invalid_manifest_is_refused_on_the_soft_save_and_written_on_exit(
     cl._open_files()
     cl._files_open("manifest.json")
     _frame(ws)
-    ed = ws.player.ns["ed"]
+    ed = ws.run.player.ns["ed"]
     good = ed.text()
     ed.set_text("{ this is not json")
 
@@ -460,13 +460,13 @@ def test_an_invalid_manifest_is_refused_on_the_soft_save_and_written_on_exit(
     # and the LOADER re-validates on the very next read -- which is what the
     # return from the handle does.
     ws._exit_to_caller()
-    assert ws.project.cart.get("broken", "").startswith("manifest.json: ")
+    assert ws.run.project.cart.get("broken", "").startswith("manifest.json: ")
     assert ws.editor_app.tab == "cards"
 
     # putting it back clears the note on the next open, with no restart
     on_disk.write_text(good)
-    ws.carts.reload(ws.project.cart)
-    assert "broken" not in ws.project.cart
+    ws.carts.reload(ws.run.project.cart)
+    assert "broken" not in ws.run.project.cart
 
 
 def _broken(ws):
@@ -506,7 +506,7 @@ def test_a_broken_manifest_keeps_the_project_openable_with_a_way_back(tmp_path):
     assert "manifest.json" in cl.files["rows"]
     cl._files_open("manifest.json")
     _frame(ws)
-    assert ws.player.ns["ed"].mode() == text_modes.JSON
+    assert ws.run.player.ns["ed"].mode() == text_modes.JSON
 
 
 def test_a_broken_manifests_files_opens_on_a_tap_and_on_A_and_B_comes_back(tmp_path):
@@ -594,7 +594,7 @@ def test_leaving_paint_returns_to_the_config_tab_through_the_loader(tmp_path):
     ws._exit_to_caller()                       # the context-X out of Paint
 
     assert ws.wm.top_kind() == "menu" and ws.editor_app.tab == "cards"
-    assert ws.project.cart.get("path") == cart["path"]
+    assert ws.run.project.cart.get("path") == cart["path"]
     blob = (path / "images" / "bg.moyimg").read_text()
     assert moy_carts.decode_moyimg(blob) == (4, 4, bytes((5,)) * 16)
 

@@ -119,8 +119,8 @@ def _handle(ws, name):
     the SECOND surface on the lane -- the code tab is the first, and the point
     of the lane is that text crosses between them."""
     ctx = ws.app_context("probe", ("files", "clipboard"))
-    return ws.player._open_cart_editor(ctx.files, "docs", name, None,
-                                       ws.canvas, ctx.clipboard)
+    return ws.run.player._open_cart_editor(ctx.files, "docs", name, None,
+                                       ws.run.canvas, ctx.clipboard)
 
 
 def test_a_note_pastes_what_the_code_editor_copied(tmp_path):

@@ -2,7 +2,7 @@
 
 SPEC.md 6 made `view` core, so libmoy owns the verb and RECORDS what the cart
 declared -- which is what lets the host read it instead of the cart crossing
-into Python to set it. But recording is only half: `ws.input.game_view` is what
+into Python to set it. But recording is only half: `ws.run.view` is what
 the WM composites from, and a console that never reads the recording shows a
 128x128 cart small in the corner of a 320x240 screen while every test passes.
 
@@ -20,7 +20,7 @@ from runtime import lua_binding
 def test_a_declared_view_reaches_the_console(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ns = ws.make_api(ws.canvas, ws.input, {}, ws.sheet, ws.audio,
+    ns = ws.make_api(ws.run.canvas, ws.input, {}, ws.sheet, ws.run.audio,
                      ws.tilemap, ws.pmem, None, {})
     run = ws.runtimes["lua"](ns, "function _init() view(128, 120) end\n"
                              "function _update(dt) end\n"
@@ -29,12 +29,12 @@ def test_a_declared_view_reaches_the_console(tmp_path):
         assert type(run).__name__ == "MoycoreRun"
         # Declared in _init, so it must be applied before the first frame --
         # the WM reads this on the frame the cart starts.
-        assert getattr(ws.input, "game_view", None) == (128, 120)
+        assert ws.run.view == (128, 120)
         # ...and the WM's own view of it, which is the property that clamps the
         # declaration to the canvas and hands back a source rect.
         assert ws.game_view is not None
         run.update(1 / 30.0)
-        assert getattr(ws.input, "game_view", None) == (128, 120)
+        assert ws.run.view == (128, 120)
     finally:
         run.close()
 
@@ -45,7 +45,7 @@ def test_a_view_changed_mid_run_follows(tmp_path):
     """SPEC.md 6: view chooses the region at runtime, so a cart may change it."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ns = ws.make_api(ws.canvas, ws.input, {}, ws.sheet, ws.audio,
+    ns = ws.make_api(ws.run.canvas, ws.input, {}, ws.sheet, ws.run.audio,
                      ws.tilemap, ws.pmem, None, {})
     run = ws.runtimes["lua"](ns, "n = 0\n"
                              "function _update(dt)\n"
@@ -58,7 +58,7 @@ def test_a_view_changed_mid_run_follows(tmp_path):
         run.update(1 / 30.0)
         assert ws.game_view is None
         run.update(1 / 30.0)
-        assert getattr(ws.input, "game_view", None) == (160, 120)
+        assert ws.run.view == (160, 120)
         assert ws.game_view is not None
     finally:
         run.close()

@@ -182,7 +182,7 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     assert scale >= 1
     # pix() reads a palette INDEX on every tier (the framebuffer holds RGB565),
     # so the two surfaces are comparable without naming a colour.
-    game_px = ws.canvas.pix(160, 100)
+    game_px = ws.run.canvas.pix(160, 100)
     sys_px = ws.sys_canvas.pix(ox + 160 * scale, oy + 100 * scale)
     assert sys_px == game_px
     ws._exit_to_caller()
@@ -230,8 +230,8 @@ def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
         def cls(self, color):
             bezels.append(color)
 
-    real_game, real_sys = ws.canvas, ws._sys_canvas
-    ws.canvas = _NoBufGame(real_game)
+    real_game, real_sys = ws.run.canvas, ws._sys_canvas
+    ws.run.canvas = _NoBufGame(real_game)
     ws._sys_canvas = _RasterSys(real_sys)
     ws.wm.composite_game()
     assert blits, "the fullscreen composite bailed on a device-shaped canvas"

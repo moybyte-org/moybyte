@@ -342,7 +342,7 @@ class EditorApp:
         back-stack kind Edit theme… was opened from."""
         ws = self.ws
         if self.theme is None:
-            if self.project is not None and self.project is ws.project:
+            if self.project is not None and self.project is ws.run.project:
                 self.save_current()
             self._theme_was = self.tab
         else:
@@ -429,7 +429,7 @@ class EditorApp:
             # A compiled cart that ships no `src/` has no Code tab: there is no
             # text behind its main.wasm to show (native/moy_wasm/README.md).
             view = "cards"
-        if view != self.tab and self.project is ws.project:
+        if view != self.tab and self.project is ws.run.project:
             # (#111) autosave-only: the OUTGOING tab still owes whatever it
             # holds (the exact verb the removed SAVE icon used to dispatch) --
             # commit_later takes the debt and the frame behind this switch pays
@@ -437,7 +437,7 @@ class EditorApp:
             # the right target. A same-tab call (view == self.tab, e.g.
             # open()'s landing set_menu_view) is a no-op here -- nothing
             # changed to commit. The
-            # `self.project is ws.project` guard skips a stale/never-opened editor
+            # `self.project is ws.run.project` guard skips a stale/never-opened editor
             # (self.tab defaults to "cards" from __init__, meaningless if EditorApp.
             # open() was never actually called for the CURRENT project -- e.g. a
             # bare ws.set_menu_view("code") on a workspace opened via the RUN path,
@@ -503,7 +503,7 @@ class EditorApp:
                 # somebody else's code -- and on a port the file that raises is
                 # very often not the one the tab opens on.
                 if ws.crash_line is not None \
-                        and (ws.player.crash_file or name) == name:
+                        and (ws.run.player.crash_file or name) == name:
                     # Opened after a runtime crash -> land on the line that raised.
                     ws._mark_code_error(ws.crash_line - 1,
                                         (ws.cart_error or "crashed")[:32])
@@ -623,7 +623,7 @@ class EditorApp:
             # start so a crash doesn't overwrite config with a half-applied edit.
             if ws.cart is not None and ws._start():
                 ws._save_config()
-        project = ws.project
+        project = ws.run.project
         if ws.cart is not None and self.tab not in ("code", "blocks", "scene", "cards") \
                 and (restart or owed or project.play_world()):
             ws._start()              # Restart: from the start, whatever the tab
@@ -632,7 +632,7 @@ class EditorApp:
         if self.restart_owed:
             self.restart_owed = False
             self.zone_gen += 1
-        ws.run(ws.project, self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
+        ws.play(self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
     #

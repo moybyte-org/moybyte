@@ -217,7 +217,7 @@ def test_one_focus_mark_under_the_pause_menu(tmp_path):
     ws = _ws(tmp_path, HANDHELD, "contrast", "dark")
     ws.go_home()
     ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     _frame(ws, 3)
     ws.system_key()
     assert ws.pause.open

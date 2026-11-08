@@ -332,13 +332,13 @@ class BlockEditorUI:
         on. The Part-1 `blocks` module is injected so the editor core stays
         dependency-free."""
         ws = self.ws
-        if self.blocks_ed is not None or ws.project.cart is None:
+        if self.blocks_ed is not None or ws.run.project.cart is None:
             return
         prog = None
-        if ws.carts_store is not None and ws.project.cart.get("path"):
+        if ws.carts_store is not None and ws.run.project.cart.get("path"):
             try:
                 prog = ws._with_sd(
-                    lambda: ws.carts_store.load_blocks(ws.project.cart))
+                    lambda: ws.carts_store.load_blocks(ws.run.project.cart))
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte load blocks failed:", self._err_text(exc))
         if prog is None:
@@ -346,7 +346,7 @@ class BlockEditorUI:
             # program in place and undo/redo rebinds it -- editing an aliased
             # cart["blocks"] would drift the cart's snapshot away from both the
             # disk file and the editor (save_blocks re-syncs it with a fresh copy).
-            prog = _clone_tree(ws.project.cart.get("blocks"))
+            prog = _clone_tree(ws.run.project.cart.get("blocks"))
         # DATA-LOSS GUARD (#29): a cart whose main.py is hand-written code (no
         # blocks.json, and main.py wasn't emitted by the block compiler) must
         # NEVER have that code clobbered by saving an empty block program. When
@@ -361,7 +361,7 @@ class BlockEditorUI:
         # heuristic. A graduated cart's blocks.json is FROZEN -- it still opens (so the
         # kid sees the last-good program), but renders read-only + celebrates, and
         # SAVE/graduate refuse to overwrite the diverged main.py (see save_blocks).
-        self.blk_graduated = bool(ws.project.cart.get("graduated"))
+        self.blk_graduated = bool(ws.run.project.cart.get("graduated"))
         self.blocks_ed = BlockEditor(_blocks_mod, prog)
         self.blk_slot = 0
         self.blk_menu = None
@@ -976,7 +976,7 @@ class BlockEditorUI:
         A non-SD/embedded cart just validates + applies in RAM."""
         ws = self.ws
         be = self.blocks_ed
-        if not (be and ws.project.cart):
+        if not (be and ws.run.project.cart):
             return False
         if self.blk_graduated:
             # GRADUATED (Stage 8, spec Section 8): the kid has leveled up to code; the
@@ -1005,21 +1005,21 @@ class BlockEditorUI:
         if not ok:
             self.blk_status = "SYNTAX " + msg
             return False
-        if not (ws.project.cart.get("path") and ws.can_manage and ws.carts_store):
+        if not (ws.run.project.cart.get("path") and ws.can_manage and ws.carts_store):
             # nothing to persist (embedded / writes deferred): apply in RAM so RUN
             # works. A DEEP COPY, never the live tree (#93) -- the editor keeps
             # mutating `prog` in place and undo/redo rebinds it, so an aliased
             # cart["blocks"] would drift from what this save captured (mirrors
             # moy_carts.save_blocks' own snapshot copy).
-            ws.project.cart["src"] = src
-            ws.project.cart["blocks"] = _clone_tree(prog)
+            ws.run.project.cart["src"] = src
+            ws.run.project.cart["blocks"] = _clone_tree(prog)
             be.dirty = False
             self.blk_status = None        # save is invisible (#111): no "SAVED"
             ws.ach.note("code_save")
             return True
         try:
             status, smsg = ws._with_sd(
-                lambda: ws.carts_store.save_blocks(ws.project.cart, prog))
+                lambda: ws.carts_store.save_blocks(ws.run.project.cart, prog))
             if status != ws.carts_store.SAVE_OK:
                 self.blk_status = "CAN'T SAVE " + str(smsg)
                 return False
@@ -1040,7 +1040,7 @@ class BlockEditorUI:
         switches to the code view on the freshly compiled source."""
         ws = self.ws
         be = self.blocks_ed
-        if not (be and ws.project.cart):
+        if not (be and ws.run.project.cart):
             return
         if self.blk_protect or self.blk_graduated:
             # Protected (hand-written main.py) OR already GRADUATED (Stage 8): don't
@@ -1057,7 +1057,7 @@ class BlockEditorUI:
             self.blk_status = "BAD: " + self._err_text(exc)
             return
         self.save_blocks()                       # persist (best-effort) before leaving
-        ws.project.cart["src"] = src                     # ensure the editor opens the latest
+        ws.run.project.cart["src"] = src                     # ensure the editor opens the latest
         ws.editor = None                         # rebuild on the new source
         self.blk_menu = None
         ws.set_menu_view("code")

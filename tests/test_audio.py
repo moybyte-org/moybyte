@@ -407,8 +407,8 @@ def test_a_cart_plays_music_sfx_and_a_raw_tone_through_the_console(tmp_path):
     na.trace(True)
     ws.open()
     assert ws.screen == "desktop" and ws.cart_error is None
-    assert isinstance(ws.audio, audio_session.AudioSession) and ws.audio.h
-    assert na.focused() == ws.audio.h
+    assert isinstance(ws.run.audio, audio_session.AudioSession) and ws.run.audio.h
+    assert na.focused() == ws.run.audio.h
     rendered0 = ws.audio_out.rendered
     for _ in range(8):
         ws.frame(1 / 30)
@@ -439,7 +439,7 @@ def test_cart_without_audio_backend_still_runs(tmp_path, monkeypatch):
     ws.open()
     ws.frame(1 / 30)
     assert ws.cart_error is None             # silent no-op, not a crash
-    assert ws.audio.h == 0 and ws.audio.bank is not None
+    assert ws.run.audio.h == 0 and ws.run.audio.bank is not None
 
 
 # -- music / sound editor core (#50) ----------------------------------------
@@ -890,18 +890,18 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    assert ws.cart_error is None and ws.audio is not None
+    assert ws.cart_error is None and ws.run.audio is not None
 
     ws._open_music()
     assert ws.screen == "menu" and ws.menu_view == "music"
     me = ws.music_ui.musicedit
     assert me is not None
     # The editor edits the SAME bank the running cart plays through.
-    assert me.bank is ws.audio.bank
+    assert me.bank is ws.run.audio.bank
 
     # A frame in the music view draws without error.
     ws.frame(1 / 30)
-    assert probe.drew_something(ws.canvas)
+    assert probe.drew_something(ws.run.canvas)
 
     # The pad's Note up -> the current step's pitch rises + bank goes dirty.
     page = ws.music_ui.page()
@@ -945,7 +945,7 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     page._view()
     assert me.view == me.SONG_VIEW
     ws.frame(1 / 30)
-    assert probe.drew_something(ws.canvas)
+    assert probe.drew_something(ws.run.canvas)
     # The song pad's Sfx up bumps the slot's SFX id.
     v0 = me.cur_slot_value()
     page.act("slot+")
@@ -994,7 +994,7 @@ def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
 
     # A frame still draws cleanly.
     ws.frame(1 / 30)
-    assert probe.drew_something(ws.canvas)
+    assert probe.drew_something(ws.run.canvas)
 
 
 def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
@@ -1022,7 +1022,7 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     assert len(me.bank.music) == n + 1 and me.track_idx == n
 
     ws.frame(1 / 30)
-    assert probe.drew_something(ws.canvas)
+    assert probe.drew_something(ws.run.canvas)
 
 
 def test_music_editor_ui_ctrl_z_y_keyboard_shortcut(tmp_path):

@@ -321,7 +321,7 @@ def _unlock(config, badge, game=False, secret=False):
             if getattr(ws.wm, "mode", None) is not None:
                 ws.open_library()
             ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-            ws.run(ws.project, ws.launcher_layer)
+            ws.play(ws.launcher_layer)
             for _ in range(PAUSE_FRAMES):
                 g._quiesce(ws)
                 ws.frame(g._DT)
@@ -480,14 +480,14 @@ def _stopped(compiled=False):
         if getattr(ws.wm, "mode", None) is not None:
             ws.open_library()
         ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-        ws.run(ws.project, ws.launcher_layer)
+        ws.play(ws.launcher_layer)
         for _ in range(PAUSE_FRAMES):
             g._quiesce(ws)
             ws.frame(g._DT)
         if compiled:
             ws.cart["runtime"] = "wasm"
-        ws.player._capture_frame_error(ws, TypeError(_STOP_ERROR[11:]))
-        ws.player.crash_line = 42
+        ws.run.player._capture_frame_error(ws, TypeError(_STOP_ERROR[11:]))
+        ws.run.player.crash_line = 42
     return setup
 
 
@@ -496,10 +496,10 @@ def _notice(g, ws):
     from runtime import chrome_ops
     _home(g, ws)
     ws._open_workspace(g._cart_by_title(ws, "Sky Run"))
-    p = ws.player
+    p = ws.run.player
     p._notice = p.cart_error = chrome_ops.newer_text(["tilemap2"])
     p._notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
 
 
 def _see_why(g, ws):
@@ -647,7 +647,7 @@ def _tool_cart(g, ws):
     made = moy_catalogue.create("Egg Timer", ws.carts_root, src=EGG_TIMER, type="tool")
     ws.carts.rescan()
     ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
 
 
 # The Editor's theme mode (GAPS 56, rounds/round17.py's theme_*): the door,
@@ -1252,12 +1252,12 @@ def _notes(g, ws, state, window):
         ws.pointer.visible = False        # the T-Deck's targets: no pointer rests
     ws.go_home()
     ws._open_workspace(g._cart_by_title(ws, "Notes"))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     _settle(g, ws, 3)
     if window:
         _place(ws, "desktop", 112, 52, 900, 536)
         _settle(g, ws, 3)
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     if state == "list":
         ns["cur"] = 2
     elif state == "new":
@@ -1443,7 +1443,7 @@ def _tool_xy(ws, ns, name):
     """The middle of tool `name`'s box as the Notes cart drew it last, in the
     desk's pixels."""
     from runtime import ui_draw
-    b = ui_draw._C.api_box(ws.player._ui[0], name)
+    b = ui_draw._C.api_box(ws.run.player._ui[0], name)
     gx, gy, _s = ws.wm.viewport()
     return gx + b[0] + b[2] // 2, gy + b[1] + b[3] // 2
 
@@ -1626,7 +1626,7 @@ def _pause(g, ws):
     if getattr(ws.wm, "mode", None) is not None:
         ws.open_library()                 # the windowed tier plays in console mode
     ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     for _ in range(PAUSE_FRAMES):
         g._quiesce(ws)
         ws.frame(g._DT)

@@ -123,11 +123,11 @@ def test_the_hello_cart_runs_from_the_launcher(tmp_path):
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     assert "wasm" in ws.runtimes
     open_cart(ws, "Hello Wasm")
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert type(ws.player._lua).__name__ == "WasmHostRun"
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert type(ws.run.player._lua).__name__ == "WasmHostRun"
     _frames(ws, 30)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player._update is not None
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player._update is not None
 
 
 def test_the_hello_cart_golden_at_the_320x240_row(tmp_path, request):
@@ -140,7 +140,7 @@ def test_the_hello_cart_golden_at_the_320x240_row(tmp_path, request):
     ws.look.set_theme_variant("dark", persist=False)
     open_cart(ws, "Hello Wasm")
     _frames(ws, GOLDEN_FRAMES)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (320, 240)
     got = hashlib.sha256(bytes(ws.sys_canvas._buf)).hexdigest()
     update = (os.environ.get(UPDATE_ENV)
@@ -170,7 +170,7 @@ def test_the_tier_cart_frame_is_the_one_every_tier_holds(tmp_path, request):
     ws = host_app.build_workstation(_store(tmp_path, _tier))
     open_cart(ws, "Tier Wasm")
     _frames(ws, GOLDEN_FRAMES)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     cv = ws.sys_canvas
     assert (cv.w, cv.h) == (tier_frame.W, tier_frame.H)
     got = tier_frame.digest(tier_frame.from_canvas(cv._buf, dc.PAL565_WIRE is not dc.PAL565))
@@ -193,14 +193,14 @@ def test_the_tier_cart_streams_and_traps_on_the_host(tmp_path):
     ws = host_app.build_workstation(_store(tmp_path, _tier))
     open_cart(ws, "Tier Wasm")
     _frames(ws, 10)
-    queued, played, _starved, room = ws.player._lua.snd_counts()[:4]
+    queued, played, _starved, room = ws.run.player._lua.snd_counts()[:4]
     assert queued > 0 and played > 0 and queued - played + room == 2048
     ws.input.set_held("a", True)
     for _ in range(3):
         ws.input.begin_frame()
         ws._dirty = True
         ws.frame(_DT)
-    assert "unreachable" in (ws.player.cart_error or ""), ws.player.cart_error
+    assert "unreachable" in (ws.run.player.cart_error or ""), ws.run.player.cart_error
 
 
 # A cart that counts its hooks into pmem: slot 0 the _init calls, 1 the
@@ -225,7 +225,7 @@ COUNTER = """
 
 
 def _pmem(ws):
-    return ws.player._lua._run.pmem()[1]
+    return ws.run.player._lua._run.pmem()[1]
 
 
 def test_the_hooks_run_under_the_tick_model(tmp_path):
@@ -235,7 +235,7 @@ def test_the_hooks_run_under_the_tick_model(tmp_path):
     ws = host_app.build_workstation(_store(
         tmp_path, _wat_cart("Counter", COUNTER, 1)))
     open_cart(ws, "Counter")
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(60):
         ws.frame(1.0 / 60.0)
     got = _pmem(ws)
@@ -269,13 +269,13 @@ def test_a_compiled_carts_time_is_the_players_cart_clock(tmp_path):
     ws = host_app.build_workstation(_store(
         tmp_path, _wat_cart("Clock", CLOCK, 1)))
     open_cart(ws, "Clock")
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player._play is not None, "the run's frame is not the kernel's Player's"
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player._play is not None, "the run's frame is not the kernel's Player's"
     ws.frame(_DT)
     t0 = _pmem(ws)[0]
     _time.sleep(0.2)
     ws.frame(_DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     t1 = _pmem(ws)[0]
     assert 150 <= t1 - t0 < 2000, (t0, t1)
 
@@ -299,24 +299,24 @@ def test_a_trap_ends_the_run_with_no_partial_frame_and_no_edit(tmp_path):
     ws = host_app.build_workstation(_store(
         tmp_path, _wat_cart("Trapper", TRAP_IN_DRAW, 1)))
     open_cart(ws, "Trapper")
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     _frames(ws, 3)
-    red = ws.canvas._wire[8]
-    assert ws.canvas._buf[0] | ws.canvas._buf[1] << 8 == red
+    red = ws.run.canvas._wire[8]
+    assert ws.run.canvas._buf[0] | ws.run.canvas._buf[1] << 8 == red
     _frames(ws, 3)
-    err = ws.player.cart_error
+    err = ws.run.player.cart_error
     assert err and "unreachable" in err, err
     # The run is over and never called again; the kid stays on the panel --
     # no throw into the Code tab, no line to mark.
-    assert ws.player._update is None and ws.player._draw is None
-    assert ws.player.crash_line is None and ws.player.crash_file is None
+    assert ws.run.player._update is None and ws.run.player._draw is None
+    assert ws.run.player.crash_line is None and ws.run.player.crash_file is None
     assert not ws.wm.top_is("menu"), "a trap threw into the Editor"
     # No partial frame: the red _draw that trapped is gone from the canvas;
     # what the panel does not cover is black.
-    w = ws.canvas.w
-    corner = (ws.canvas.h - 1) * w
-    px = ws.canvas._buf[2 * corner] | ws.canvas._buf[2 * corner + 1] << 8
-    assert px == ws.canvas._wire[0], hex(px)
+    w = ws.run.canvas.w
+    corner = (ws.run.canvas.h - 1) * w
+    px = ws.run.canvas._buf[2 * corner] | ws.run.canvas._buf[2 * corner + 1] << 8
+    assert px == ws.run.canvas._wire[0], hex(px)
     # The stop card offers no See why for a compiled cart: Restart and Home.
     assert ws.pause.open and ws.pause.stopped
     assert ws.pause.rows == (ws.pause.RESTART, ws.pause.HOME)
@@ -336,16 +336,16 @@ def test_a_trap_in_init_is_the_carts_error_and_init_runs_once(tmp_path):
     ws = host_app.build_workstation(root)
     open_cart(ws, "Deep Init")
     _frames(ws, 3)
-    err = ws.player.cart_error
+    err = ws.run.player.cart_error
     assert err and "stack overflow" in err, err
     assert ws.pause.open and ws.pause.stopped
     with open(os.path.join(os.path.dirname(root), "apps", "deep_init", "inits"),
               "rb") as f:
         assert f.read() == b"\x01"
-    ws.player.release_world()
+    ws.run.player.release_world()
     open_cart(ws, "Hello Wasm")
     _frames(ws, 3)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
 
 # A cart that keeps the console's sample queue full: every _update asks for
@@ -384,8 +384,8 @@ def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
     ws = host_app.build_workstation(_store(
         tmp_path, _wat_cart("Tone", TONE, 1)))
     open_cart(ws, "Tone")
-    assert ws.player.cart_error is None, ws.player.cart_error
-    run = ws.player._lua
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    run = ws.run.player._lua
     assert ws.audio_out.stream is run._run
     _frames(ws, 300)
     queued, played, starved, room = run.snd_counts()
@@ -425,7 +425,7 @@ def test_a_folder_reads_as_a_missing_file(tmp_path):
     root = _store(tmp_path, _readdir)
     ws = host_app.build_workstation(root)
     open_cart(ws, "Read Dir Wasm")
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     size = os.path.getsize(os.path.join(root, "readdir.moy", "manifest.json"))
     assert _pmem(ws)[:3] == [0, 0, size], _pmem(ws)[:3]
 
@@ -456,9 +456,9 @@ def test_a_carts_written_files_outlive_a_restart(tmp_path):
     for turn in (1, 2, 1):
         ws = host_app.build_workstation(root)
         open_cart(ws, "Files Wasm")
-        assert ws.player.cart_error is None, ws.player.cart_error
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
         assert _pmem(ws)[:4] == [turn, 0, 0, 4], _pmem(ws)[:4]
-        ws.player.release_world()
+        ws.run.player.release_world()
         if turn == 1:
             assert _written(root) == ["options.cfg", "saves%2f%43ase.sav",
                                       "saves%2fcase.sav", "saves%2fslot1.sav"]
@@ -515,9 +515,9 @@ def test_par_leaves_what_running_the_items_in_order_leaves(tmp_path):
         wasm_cart.build(os.path.join(FIXTURES, "par.moy"), os.path.join(root, "par.moy"))
     ws = host_app.build_workstation(_store(tmp_path, _par))
     open_cart(ws, "Par Wasm")
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     _frames(ws, 5)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     diff, frames, bad_sp, bad_caller = _pmem(ws)[:4]
     assert frames >= 3 and (diff, bad_sp, bad_caller) == (0, 0, 0), _pmem(ws)[:5]
 
@@ -528,7 +528,7 @@ def test_quit_ends_the_cart_as_its_own_choice(tmp_path):
         tmp_path, _wat_cart("Quitter", QUITTER, 1)))
     open_cart(ws, "Quitter")
     _frames(ws, 2)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert ws.wm.top_is("launcher"), "quit() did not return to the caller"
 
 
@@ -537,7 +537,7 @@ def test_a_memory_the_manifest_does_not_declare_is_refused(tmp_path):
     ws = host_app.build_workstation(_store(
         tmp_path, _wat_cart("Liar", COUNTER, 2)))
     open_cart(ws, "Liar")
-    err = ws.player.cart_error or ""
+    err = ws.run.player.cart_error or ""
     assert "refused" in err and "manifest declares 2" in err, err
 
 
@@ -548,7 +548,7 @@ def test_a_build_without_the_runtime_opens_the_runtime_missing_panel(tmp_path):
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     ws.runtimes.pop("wasm", None)
     open_cart(ws, "Hello Wasm")
-    assert "needs the wasm runtime (not in this build)" in ws.player.cart_error
+    assert "needs the wasm runtime (not in this build)" in ws.run.player.cart_error
     assert not ws.wm.top_is("menu")
     _frames(ws, 2)                                # the panel frame must not raise
 
@@ -717,7 +717,7 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     from runtime.dev_channel import _remote_state
     ws = host_app.build_workstation(_store(tmp_path, _huge, _hello))
     open_cart(ws, "Huge Wasm")
-    p = ws.player
+    p = ws.run.player
     assert p.notice is not None and p.notice == p.cart_error
     # The host always interprets (there is no AOT tier on it), so this is the
     # interpreted rule's number: the module file is never reused for the
@@ -735,9 +735,9 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     assert st["notice"] == p.notice and st["cart_error"] is None
     ws._exit_to_caller()
     open_cart(ws, "Hello Wasm")
-    assert ws.player.cart_error is None and ws.player.notice is None
+    assert ws.run.player.cart_error is None and ws.run.player.notice is None
     _frames(ws, 3)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
 
 def test_the_hosts_configured_limit_is_what_it_refuses_by(tmp_path, monkeypatch):
@@ -748,13 +748,13 @@ def test_the_hosts_configured_limit_is_what_it_refuses_by(tmp_path, monkeypatch)
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     monkeypatch.setattr(wasm_host, "MEMORY_LIMIT", 300 * 1024)
     open_cart(ws, "Hello Wasm")
-    assert ws.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. This "
+    assert ws.run.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. This "
                                 "console has 0.2 MB free. Restarting the console "
-                                "might free enough."), ws.player.notice
+                                "might free enough."), ws.run.player.notice
     ws._exit_to_caller()
     monkeypatch.undo()
     open_cart(ws, "Hello Wasm")
-    assert ws.player.cart_error is None and ws.player.notice is None
+    assert ws.run.player.cart_error is None and ws.run.player.notice is None
 
 
 class _Runtime:
@@ -792,13 +792,13 @@ def test_a_load_that_still_runs_out_of_memory_gets_the_same_notice(tmp_path):
                 MemoryError("no PSRAM for the module file")):
         ws.runtimes["wasm"] = _Runtime(real, start=exc)
         open_cart(ws, "Hello Wasm")
-        assert ws.player.notice == want, ws.player.notice
+        assert ws.run.player.notice == want, ws.run.player.notice
         ws._exit_to_caller()
     # any other start failure stays an error, with its own words
     ws.runtimes["wasm"] = _Runtime(real, start=RuntimeError("refused: bad signature"))
     open_cart(ws, "Hello Wasm")
-    assert ws.player.notice is None
-    assert ws.player.cart_error.endswith("refused: bad signature")
+    assert ws.run.player.notice is None
+    assert ws.run.player.cart_error.endswith("refused: bad signature")
 
 
 def test_a_console_whose_largest_block_is_too_small_says_so(tmp_path):
@@ -807,10 +807,10 @@ def test_a_console_whose_largest_block_is_too_small_says_so(tmp_path):
     ws.runtimes["wasm"] = _Runtime(ws.runtimes["wasm"],
                                    memory=(32 * 1024 * 1024, 100 * 1024))
     open_cart(ws, "Hello Wasm")
-    assert ws.player.notice == ("Hello Wasm needs 0.3 MB of memory in one "
+    assert ws.run.player.notice == ("Hello Wasm needs 0.3 MB of memory in one "
                                 "piece. The biggest piece this console has free "
                                 "is 0.0 MB. Restarting the console might free "
-                                "enough."), ws.player.notice
+                                "enough."), ws.run.player.notice
 
 
 def _parked_desk(tmp_path):
@@ -849,7 +849,7 @@ def test_a_failed_fit_releases_parked_stamps_until_it_passes(tmp_path):
 
     ws.runtimes["wasm"] = Growing(rt)
     open_cart(ws, "Hello Wasm")
-    assert ws.player.notice is None and ws.player.cart_error is None
+    assert ws.run.player.notice is None and ws.run.player.cart_error is None
     assert [k for k, w in wins.items() if w.buf is None] == ["settings", "calc"]
     assert wins["files"].buf is not None
     assert ws.launcher_layer._lib_cache is not None
@@ -863,7 +863,7 @@ def test_a_fit_that_never_passes_releases_everything_then_says_so(tmp_path):
     ws, wins = _parked_desk(tmp_path)
     ws.runtimes["wasm"] = _Runtime(ws.runtimes["wasm"], memory=(1, 1))
     open_cart(ws, "Hello Wasm")
-    assert ws.player.notice is not None
+    assert ws.run.player.notice is not None
     assert all(w.buf is None for w in wins.values())
     assert ws.launcher_layer._lib_cache is None
 
@@ -902,7 +902,7 @@ def test_a_cart_built_for_a_newer_console_opens_the_notice_not_an_error(tmp_path
     from runtime.dev_channel import _remote_state
     ws = host_app.build_workstation(_store(tmp_path, _newer, _hello))
     open_cart(ws, "Newer Wasm")
-    p = ws.player
+    p = ws.run.player
     assert p.notice == NEWER_NOTICE, p.cart_error
     assert p._notice_title == "Needs a newer console."
     assert p._lua is None and p._update is None and p._draw is None
@@ -912,7 +912,7 @@ def test_a_cart_built_for_a_newer_console_opens_the_notice_not_an_error(tmp_path
     assert st["notice"] == p.notice and st["cart_error"] is None
     ws._exit_to_caller()
     open_cart(ws, "Hello Wasm")
-    assert ws.player.cart_error is None and ws.player.notice is None
+    assert ws.run.player.cart_error is None and ws.run.player.notice is None
 
 
 def test_a_console_without_write_erase_and_list_refuses_a_cart_that_keeps_files(
@@ -928,13 +928,13 @@ def test_a_console_without_write_erase_and_list_refuses_a_cart_that_keeps_files(
     monkeypatch.setattr(wasm_binding, "table", lambda: older)
     ws = host_app.build_workstation(_store(tmp_path, _files))
     open_cart(ws, "Files Wasm")
-    assert ws.player.notice == ("It uses write, erase, list. Update in Settings, "
+    assert ws.run.player.notice == ("It uses write, erase, list. Update in Settings, "
                                 "then try again."), \
-        ws.player.cart_error
+        ws.run.player.cart_error
     ws._exit_to_caller()
     monkeypatch.undo()
     open_cart(ws, "Files Wasm")
-    assert ws.player.notice is None and ws.player.cart_error is None
+    assert ws.run.player.notice is None and ws.run.player.cart_error is None
 
 
 class _Gated:
@@ -982,7 +982,7 @@ def test_the_player_refuses_through_the_board_runtime_before_any_engine(
                         types.SimpleNamespace(WASM=1, wasm_table=lambda: ("cls",)))
     ws.runtimes["wasm"] = moycore_glue.WasmRuntime(ws)
     open_cart(ws, "Newer Wasm")
-    assert ws.player.notice == NEWER_NOTICE, ws.player.cart_error
+    assert ws.run.player.notice == NEWER_NOTICE, ws.run.player.cart_error
 
 
 def test_missing_imports_reads_only_the_functions_moy_is_asked_for():

@@ -16,7 +16,7 @@ Two layers, the same split as the console's other sub-UIs:
 Dependency profile (the facade lens, runtime/shell/system_api.py) -- PerfHud is
 the console's *cleanest* seam: it touches NO privileged verbs at all, only
 read-only frame-timing state through its `self.ws` back-reference:
-  * shared (non-privileged):   ws.canvas, ws.theme_colors, ws.perf_hud,
+  * shared (non-privileged):   ws.run.canvas, ws.theme_colors, ws.perf_hud,
                                ws.frame_state.fps, ws._flush_ms, ws._draw_ms, ws._upd_ms
 `NAMES` is injected at construction (same reason as BlockEditorUI: importing it
 back from console.py would be a circular import, since console.py builds the one
@@ -62,7 +62,7 @@ class PerfHud:
         call into moy_ui is dear there (#249). The card's parts are worked out
         only while the card shows."""
         ws = self.ws
-        cv = ws.canvas
+        cv = ws.run.canvas
         a = self._args
         fps = int(ws.frame_state.fps + 0.5)
         fps = fps if fps > 0 else 0
@@ -87,7 +87,7 @@ class PerfHud:
             a[_DETAIL] = 0
         th = ws.theme_colors
         b = self._box
-        if ws.cart_frame is not None:
+        if ws.run.cart_frame is not None:
             a[_DRAW] = 0
             _ui_draw.perf(cv, th, a, _WORDS, b)
             ws.patch_cart_frame(b[0], b[1], b[2], b[3])
@@ -98,7 +98,7 @@ class PerfHud:
         finally:
             _ui_draw.cart_text(was)
         _ui_draw.overdrew(b[0], b[1], b[2], b[3])
-        pl = ws.player
+        pl = ws.run.player
         if pl is not None:
             pl.overdrew(cv, b[0], b[1], b[2], b[3])
 
@@ -109,6 +109,6 @@ class PerfHud:
         FPS chip in GAME-canvas coords (the desktop hit-tests in game space). Kept
         off the cart's own top-bar tools, so a kid never trips it by accident --
         they'd have to deliberately poke the FPS number."""
-        cv = self.ws.canvas
+        cv = self.ws.run.canvas
         w, h = 60, 24
         return (cv.w - w, cv.h - h, w, h)

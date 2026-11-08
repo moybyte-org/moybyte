@@ -89,7 +89,7 @@ def _as(pid, fn, *a):
 def _on_screen(ws, drv):
     open_cart(ws, "Asker")
     _frames(drv)
-    asker = ws.player
+    asker = ws.run.player
     assert F.FRONT.on_screen() == asker.pid
     return asker
 
@@ -151,7 +151,7 @@ def test_a_run_behind_without_front_asks_by_a_notification(tmp_path):
     _as(asker.pid, asker.ns["ask"], "Documents/todo.md")
     _frames(drv)
     assert asker.ns["said"] == [True], "the request waits"
-    assert ws.cart["title"] == "Star Catcher" and not ws.player.paused
+    assert ws.cart["title"] == "Star Catcher" and not ws.run.player.paused
     n = N.NOTES.up()
     assert n is not None and (n.app, n.summary) == ("Asker", "Wants to open todo.md in Notes")
     assert n.pid == asker.pid
@@ -283,7 +283,7 @@ def test_a_pick_from_behind_brings_its_app_forward_with_the_picker(tmp_path):
     n = N.NOTES.up()
     assert (n.app, n.summary) == ("Asker", "Wants you to pick a file")
     _tap_banner(ws, drv)
-    assert ws.player is asker
+    assert ws.run.player is asker
     c = ws.confirm
     assert c.open and c.title == "Choose a document" and c.line == "For Asker"
     drv.press("a")

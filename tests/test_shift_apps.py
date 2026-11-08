@@ -110,7 +110,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
         ws.set_show_fps(True, persist=False)
     if not ships:
         ws.wm.CONTENT_RING = False
-        ws.player.holds = lambda cv: False
+        ws.run.player.holds = lambda cv: False
     if app.startswith("editor "):
         # an Editor tab over a cart: "editor TAB CART TITLE"
         _e, tab, title = app.split(" ", 2)
@@ -131,7 +131,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
         drv = host_app.ConsoleDriver(ws)
         for _ in range(4):
             drv.frame(_DT)
-        ws.player.ns["_open"]("alpha")
+        ws.run.player.ns["_open"]("alpha")
     elif app == "myart":
         for i in range(18):
             moy_carts.save_file("drawings", "Drawing %02d" % i,
@@ -390,7 +390,7 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     p = Pair(tmp_path, "console", bufs, desk, chip=True)
     assert p.a.show_fps
     if desk:
-        assert p.a.player.holds(p.a.canvas)
+        assert p.a.run.player.holds(p.a.run.canvas)
     _console_session(p)
     k = p.kinds
     assert k[:10] + k[12:16] == ["rows"] * 14, k
@@ -413,7 +413,7 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
     brings the caret, left at the top, back into view: a jump past the
     view's height, which draws whole.)"""
     p = Pair(tmp_path, "notes", bufs, desk)
-    sx, sy, sw, sh = p.a.player.ns["sheet"]
+    sx, sy, sw, sh = p.a.run.player.ns["sheet"]
     if desk:
         ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
         sx += ox
@@ -426,7 +426,7 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
     p.settle(60)
     coast = p.kinds[k:]
     assert len(coast) >= 4 and coast[:4] == ["shift"] * 4, p.kinds
-    top = p.a.player.ns["ed"].ed.top
+    top = p.a.run.player.ns["ed"].ed.top
     assert top > 0, top
     del p.kinds[:]
     for ch in "hello":
@@ -467,7 +467,7 @@ def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
     cx, top, _cw, _ch = p.a.app_content_rect()
     for ws in (p.a, p.b):
         def over(ws=ws):
-            ws.canvas.rect(cx + 100, top + 60, 60, 30, 3)
+            ws.run.canvas.rect(cx + 100, top + 60, 60, 30, 3)
             ui_draw.overdrew(cx + 100, top + 60, 60, 30)
         ws.perf_ui.draw = over
     _console_session(p)

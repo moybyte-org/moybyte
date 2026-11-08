@@ -174,7 +174,7 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
 
 def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    base = host_app.make_api(ws.canvas, ws.input, {})
+    base = host_app.make_api(ws.run.canvas, ws.input, {})
     assert "artwork" not in base
 
     paint_app = _open_paint(ws)
@@ -184,7 +184,7 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     other = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     other.setdefault("permissions", []).append("artwork")
     ws._open_workspace(other)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     assert "artwork" not in ws.ns
 
 
@@ -412,7 +412,7 @@ def _device_canvas(ws, w, h):
     install()
     from device_canvas import DeviceCanvas, _LayerComp
 
-    gfx = ws.canvas._gfx
+    gfx = ws.run.canvas._gfx
     assert gfx is not None, "no native kernel: this would not test the bake"
     return DeviceCanvas(_LayerComp(int(w), int(h), gfx))
 

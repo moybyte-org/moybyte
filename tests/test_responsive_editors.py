@@ -458,8 +458,8 @@ def test_paint_editor_tap_paints_in_system_coords(tmp_path):
     # Paint pixel (0, 0) of the tile via the top-left grid cell.
     drv.touch(lay.pg_x0 + 2, lay.pg_y0 + 2)
     drv.frame(1 / 30)
-    ox, oy = ws.project.sheet.tile_origin(pe.n)
-    assert ws.project.sheet.pget(ox, oy) == 12
+    ox, oy = ws.run.project.sheet.tile_origin(pe.n)
+    assert ws.run.project.sheet.pget(ox, oy) == 12
 
 
 def test_map_editor_320x240_is_byte_identical(tmp_path):
@@ -506,7 +506,7 @@ def test_map_editor_tap_paints_in_system_coords(tmp_path):
     ws._open_map()
     drv.frame(1 / 30)
     me = ws.map_ui.mapedit
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     if me is None or tm is None:
         return                                     # cart without a map -- nothing to pin
     me.n = 3                                       # pick a brush tile

@@ -590,7 +590,7 @@ def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
     ws.frame(1 / 30.0)
     assert ws.app_abi.files_end_all() == 0, "a frame left the sessions open"
     files.begin()
-    ws.player._end_grant()
+    ws.run.player._end_grant()
     assert ws.app_abi.files_end_all() == 0, "a run's end left a session open"
 
 

@@ -585,7 +585,7 @@ def ref_sounds(desk, r, u):
                 if on:
                     mu._stop_music_preview()
                 else:
-                    au = ws.audio
+                    au = ws.run.audio
                     if au is not None:
                         au.focus()
                         au.sound_stop()
@@ -672,7 +672,7 @@ def log_rows(desk):
     out = []
     err, line = ws.cart_error, ws.crash_line
     if err:
-        f = ws.player.crash_file or ws.code_file_name()
+        f = ws.run.player.crash_file or ws.code_file_name()
         if line:
             out.append(("%s:%d  %s" % (f, line, err), f, line - 1))
         else:

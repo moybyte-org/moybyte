@@ -146,12 +146,12 @@ def test_cart_that_raises_in_draw_shows_error_panel(tmp_path):
     # paint an error panel. The exception must never escape ws.frame().
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    raise ValueError('kaboom')\n")
     assert ws.screen == "desktop"
-    blank = bytes(ws.canvas._buf)
+    blank = bytes(ws.run.canvas._buf)
     for _ in range(5):
         ws.frame(1 / 30)                  # must not raise
     assert ws.cart_error is not None
     assert "kaboom" in ws.cart_error and "ValueError" in ws.cart_error
-    assert bytes(ws.canvas._buf) != blank  # the panel drew something
+    assert bytes(ws.run.canvas._buf) != blank  # the panel drew something
     # The editor stays reachable so the kid can fix the cart.
     ws._open_menu()
     assert ws.screen == "menu"
@@ -286,7 +286,7 @@ def test_runtime_crash_throws_to_code_line_with_popup(tmp_path):
     # A fresh crash re-arms it; the first EDIT dismisses it with the marker.
     ws.cart["src"] = "def _draw():\n    raise ValueError('again')\n"
     ws._start()
-    ws.run(ws.project, ws.editor_app)
+    ws.play(ws.editor_app)
     assert ws.screen == "desktop"
     ws.frame(1 / 30)
     _see_why(ws)
@@ -335,7 +335,7 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     ed.set_text("def _draw():\n    boom_undefined()\n")
     ws.cart["src"] = ed.text()
     ws._start()
-    ws.run(ws.project, ws.editor_app)
+    ws.play(ws.editor_app)
     ws.frame(1 / 30)                            # crash -> the stop card
     _see_why(ws)
     assert ws.screen == "menu" and ws.code_err_row == 1

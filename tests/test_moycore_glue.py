@@ -393,10 +393,7 @@ class FakeInput:
     """
 
     def __init__(self, **kw):
-        self.cart_start_ms = 0
         self.last_key = 0
-        self.game_view = None
-        self.view_writes = []
         self.mask_calls = []
         self._held = set()
         self._pressed = set()
@@ -467,9 +464,7 @@ class MinimalInput:
     `_refresh` at once.
     """
 
-    cart_start_ms = 0
     last_key = 0
-    game_view = None
 
     def __init__(self, held=(), pressed=()):
         self._held = set(held)
@@ -485,22 +480,31 @@ class MinimalInput:
         return name in self._pressed
 
 
-class _ViewRecordingInput(FakeInput):
-    """`ws.input.game_view` is a plain attribute; this counts the writes so
-    `_sync_view`'s skip-when-unchanged is observable rather than inferred."""
+class FakeRun:
+    """The run the glue plays in (procs.Run's fields it reads). `view` is a
+    plain attribute; this counts the writes so `_sync_view`'s
+    skip-when-unchanged is observable rather than inferred."""
+
+    def __init__(self, canvas, project=None, start=0):
+        self.canvas = canvas
+        self.project = project
+        self.audio = None
+        self.cart_frame = None
+        self.view_writes = []
+        self.view = None
+        self.cart_start_ms = start
 
     def __setattr__(self, name, value):
-        if name == "game_view":
-            self.__dict__.setdefault("view_writes", []).append(value)
+        if name == "view" and "view_writes" in self.__dict__:
+            self.view_writes.append(value)
         object.__setattr__(self, name, value)
 
 
 class FakeWs:
-    def __init__(self, canvas=None, inp=None, project=None, pmem=None):
-        self.canvas = canvas if canvas is not None else FakeCanvas()
+    def __init__(self, canvas=None, inp=None, project=None, pmem=None, start=0):
+        self.run = FakeRun(canvas if canvas is not None else FakeCanvas(),
+                           project, start)
         self.input = inp if inp is not None else FakeInput()
-        if project is not None:
-            self.project = project
         if pmem is not None:
             self.pmem = pmem
 
@@ -622,8 +626,8 @@ class World:
     def run(self, ws=None, ns=None, src=LUA_SRC):
         self.ws = FakeWs() if ws is None else ws
         self.ns = make_ns() if ns is None else ns
-        if getattr(self.ws, "audio", None) is None:
-            self.ws.audio = NsSession(self.ns)
+        if self.ws.run.audio is None:
+            self.ws.run.audio = NsSession(self.ns)
         return self.mod.MoycoreRun(self.ws, self.ns, src)
 
     def close(self):
@@ -1198,7 +1202,6 @@ def test_both_real_input_states_drive_the_snapshot_the_same_way(w):
         inp.set_button("up", True)
         inp.set_button("b", True)
         inp.begin_frame()
-        inp.cart_start_ms = 0
         world = World()
         try:
             run = world.run(ws=FakeWs(inp=inp))
@@ -1245,17 +1248,14 @@ def test_the_run_begin_snapshot_declares_one_player_before_any_frame(w):
 
 
 def test_the_time_slot_is_elapsed_since_the_cart_started(w):
-    inp = FakeInput(cart_start_ms=1000)
-    run = w.run(ws=FakeWs(inp=inp))
+    run = w.run(ws=FakeWs(start=1000))
     w.clock.ms = 1750
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 750
 
 
-def test_an_input_with_no_cart_clock_leaves_the_time_slot_alone(w):
-    inp = FakeInput()
-    del inp.cart_start_ms
-    run = w.run(ws=FakeWs(inp=inp))
+def test_a_run_with_no_cart_clock_leaves_the_time_slot_alone(w):
+    run = w.run(ws=FakeWs(start=None))
     w.clock.ms = 500
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 0
@@ -1269,7 +1269,7 @@ def test_the_host_import_path_reads_the_same_clock():
     world = World(flat_ticks=False)
     try:
         assert world.mod._since_ms is ticks._since_ms
-        run = world.run(ws=FakeWs(inp=FakeInput(cart_start_ms=ticks._ticks_ms() - 5000)))
+        run = world.run(ws=FakeWs(start=ticks._ticks_ms() - 5000))
         run._refresh()
         assert 5000 <= run.snap[C_CONSTS["SNAP_TIME_MS"]] < 6000
     finally:
@@ -1280,7 +1280,7 @@ def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
     """It was an `import` statement executed once per frame."""
     assert w.mod._since_ms == w.clock.since_ms
     sys.modules["ticks"] = None                  # gone mid-run: still fine
-    run = w.run(ws=FakeWs(inp=FakeInput(cart_start_ms=0)))
+    run = w.run(ws=FakeWs(start=0))
     w.clock.ms = 42
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 42
@@ -1378,7 +1378,7 @@ def test_a_frame_refreshes_then_ticks_then_syncs_the_view_then_drains(w):
     run._update(0.033)
     assert w.core.verbs() == ["tick"]
     assert run.snap[C_CONSTS["SNAP_BTN"]] != 0        # refreshed before tick
-    assert inp.game_view == (128, 120)
+    assert run.ws.run.view == (128, 120)
     assert ("music_stop",) in w.ns["_log"]
     assert run.aq[0] == 0
 
@@ -1422,31 +1422,30 @@ def test_a_swapped_framebuffer_is_retargeted_and_a_steady_one_is_not(w):
 
 def test_a_view_declared_in_init_lands_before_the_first_frame(w):
     """`_init` runs inside `run_begin`, so a cart that declares its region
-    there must reach `ws.input.game_view` at construction."""
+    there must reach `ws.run.view` at construction."""
     w.core.view_value = (128, 120)
     run = w.run()
-    assert run.ws.input.game_view == (128, 120)
+    assert run.ws.run.view == (128, 120)
 
 
 def test_an_unchanged_view_costs_one_comparison_and_no_write(w):
-    inp = _ViewRecordingInput()
     w.core.view_value = (128, 120)
-    run = w.run(ws=FakeWs(inp=inp))
-    writes = len(inp.view_writes)
+    run = w.run()
+    r = run.ws.run
+    writes = len(r.view_writes)
     run._sync_view()
     run._sync_view()
-    assert len(inp.view_writes) == writes
+    assert len(r.view_writes) == writes
 
 
 def test_a_cart_that_changes_its_region_at_runtime_is_followed(w):
-    inp = _ViewRecordingInput()
-    run = w.run(ws=FakeWs(inp=inp))
+    run = w.run()
     w.core.view_value = (64, 64)
     run._sync_view()
-    assert inp.game_view == (64, 64)
+    assert run.ws.run.view == (64, 64)
     w.core.view_value = None
     run._sync_view()
-    assert inp.game_view is None
+    assert run.ws.run.view is None
 
 
 def test_a_console_without_the_field_is_fine(w):
@@ -1484,7 +1483,7 @@ def test_an_empty_queue_costs_one_read(w):
 
 
 def test_every_op_is_one_call_on_the_runs_audio_session(w):
-    """One kernel call per queued command, on the run's session (ws.audio),
+    """One kernel call per queued command, on the run's session (ws.run.audio),
     in the queue's order."""
     run = w.run()
     _queue(run,
@@ -2364,7 +2363,7 @@ def test_a_compiled_cart_takes_its_frames_where_the_canvas_shows_them(tmp_path):
         assert ("take_frames", True, True) in world.core.calls
         assert world.core.verbs().index("take_frames") > world.core.verbs().index(
             "wasm_open")
-        assert ws.cart_frame is run.frame
+        assert ws.run.cart_frame is run.frame
         assert (run.frame.w, run.frame.h) == (320, 240)
         assert len(bytes(run.frame.lut)) == 512
     finally:
@@ -2381,7 +2380,7 @@ def test_a_canvas_without_a_palette_resolve_takes_only_direct_colour(tmp_path):
         ws.sys_canvas = DirectColourCanvas()
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert ("take_frames", True, False) in world.core.calls
-        assert ws.cart_frame is run.frame
+        assert ws.run.cart_frame is run.frame
     finally:
         world.close()
 
@@ -2396,7 +2395,7 @@ def test_a_canvas_that_cannot_show_them_keeps_the_blit(tmp_path):
                 ws.sys_canvas = canvas
             run = world.mod.WasmRun(ws, make_ns(), None)
             assert "take_frames" not in world.core.verbs()
-            assert run.frame is None and getattr(ws, "cart_frame", None) is None
+            assert run.frame is None and getattr(ws.run, "cart_frame", None) is None
         finally:
             world.close()
 
@@ -2470,7 +2469,7 @@ def test_closing_the_run_lets_go_of_the_frame_before_the_console(tmp_path):
         world.core.close = lambda: (order.append(("console",)), real())
         run.close()
         assert order == [("frame", "the compositor"), ("console",)]
-        assert ws.cart_frame is None and run.frame is None
+        assert ws.run.cart_frame is None and run.frame is None
     finally:
         world.close()
 

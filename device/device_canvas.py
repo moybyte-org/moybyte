@@ -706,11 +706,11 @@ class DeviceCanvas:
         # normal case allocates nothing and costs one attribute load.
         #
         # It is per-instance because SPEC.md 3.1 lets a cart ship its own 64-entry
-        # RGB table, and runtime/run/player.py duly assigns `ws.canvas.palette = table`
+        # RGB table, and runtime/run/player.py duly assigns `ws.run.canvas.palette = table`
         # on start and restores it on exit -- except player.py is STAGED TO BOTH
         # BOARDS and DeviceCanvas had no `palette` at all, so on device that
         # assignment set an attribute nobody read. Verified on P4 glass
-        # 2026-08-15: hasattr(ws.canvas, "palette") was False, the assignment was
+        # 2026-08-15: hasattr(ws.run.canvas, "palette") was False, the assignment was
         # accepted, and PAL565[8] stayed 0xf809. Cart palettes worked on the host
         # and were inert on every other tier.
         self._wire = _PAL565_WIRE_BUF

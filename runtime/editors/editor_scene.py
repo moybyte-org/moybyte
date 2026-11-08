@@ -67,7 +67,7 @@ class ScenePage:
         ui.at(*rect)
         ui.page("")
         se = su.sceneedit
-        if se is None or su.ws.project.sheet is None:
+        if se is None or su.ws.run.project.sheet is None:
             ui.at(*rect)
             ui.empty("scene", "No scene", ("This cart has no sprites to place",))
             ui.end()
@@ -76,7 +76,7 @@ class ScenePage:
         su.draw_view(cv, False)
         r = se.selected()
         if r is not None:
-            s = su._sv_metrics()[2] * su.ws.project.sheet.TILE
+            s = su._sv_metrics()[2] * su.ws.run.project.sheet.TILE
             vx, vy = self._to_view(r["x"], r["y"])
             ax, ay, aw, ah = su._sv_area()
             if ax <= vx and ay <= vy and vx + s <= ax + aw and vy + s <= ay + ah:
@@ -104,7 +104,7 @@ class ScenePage:
         return x0 + (wx - se.cam_x) * scale, y0 + (wy - se.cam_y) * scale
 
     def _actor(self, cv, se, r, px, y):
-        sheet = self.su.ws.project.sheet
+        sheet = self.su.ws.run.project.sheet
         self._checker(cv, px + 68, y, 24)
         t = r.get("tile", 0)
         if 0 <= t < sheet.count:
@@ -125,7 +125,7 @@ class ScenePage:
 
     def _stamps(self, cv, se, px, y):
         su = self.su
-        sheet = su.ws.project.sheet
+        sheet = su.ws.run.project.sheet
         ids = su._palette_ids()
         for k in range(len(ids)):
             tx = px + (k % 4) * CELL
