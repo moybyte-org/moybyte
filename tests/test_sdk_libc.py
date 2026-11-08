@@ -45,15 +45,15 @@ def test_the_libc_answers_as_the_host_s_own_does(term, tmp_path):
 
 def test_head_reads_files_through_stdio(term, tmp_path):
     _ws, app = term
-    run(app, "cd /files; printf '1\\n2\\n3\\n' > a.txt; printf 'x\\n' > b.txt")
-    run(app, "cd /files; elf.head/head -n 2 a.txt b.txt > o.txt; echo $? > s.txt")
-    assert (tmp_path / "files" / "o.txt").read_text() == "==> a.txt <==\n1\n2\n\n==> b.txt <==\nx\n"
-    assert (tmp_path / "files" / "s.txt").read_text() == "0\n"
-    run(app, "cd /files; printf 'p\\nq\\n' | elf.head/head -n 1 > o.txt")
-    assert (tmp_path / "files" / "o.txt").read_text() == "p\n"
-    got = out(app, "cd /files; elf.head/head -n x a.txt; echo status $?")
+    run(app, "cd /files/Documents; printf '1\\n2\\n3\\n' > a.txt; printf 'x\\n' > b.txt")
+    run(app, "cd /files/Documents; elf.head/head -n 2 a.txt b.txt > o.txt; echo $? > s.txt")
+    assert (tmp_path / "files" / "Documents" / "o.txt").read_text() == "==> a.txt <==\n1\n2\n\n==> b.txt <==\nx\n"
+    assert (tmp_path / "files" / "Documents" / "s.txt").read_text() == "0\n"
+    run(app, "cd /files/Documents; printf 'p\\nq\\n' | elf.head/head -n 1 > o.txt")
+    assert (tmp_path / "files" / "Documents" / "o.txt").read_text() == "p\n"
+    got = out(app, "cd /files/Documents; elf.head/head -n x a.txt; echo status $?")
     assert "".join(got[:-1]) == "head: invalid number of lines: 'x'" and got[-1] == "status 1"
-    got = out(app, "cd /files; elf.head/head nope.txt; echo status $?")
+    got = out(app, "cd /files/Documents; elf.head/head nope.txt; echo status $?")
     assert "".join(got[:-1]) == (
         "head: cannot open 'nope.txt' for reading: No such file or directory")
 
