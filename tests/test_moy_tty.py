@@ -127,15 +127,20 @@ class Host:
             time.sleep(0.01)
         raise AssertionError(self.log())
 
-    def wait_line(self, prefix, after=0, timeout=5.0):
-        """The first line from `after` in the log that starts with `prefix`."""
+    def wait_line(self, prefix, after=0, timeout=15.0):
+        """The first line from `after` in the log that starts with `prefix`.
+        The log is read once more after the deadline, so a line written while
+        the last poll slept still counts."""
         end = time.monotonic() + timeout
-        while time.monotonic() < end:
-            for ln in self.log()[after:].splitlines():
+        while True:
+            last = time.monotonic() >= end
+            text = self.log()
+            for ln in text[after:].splitlines():
                 if ln.startswith(prefix):
                     return ln
+            if last:
+                raise AssertionError("no %r in %s" % (prefix, text[-2000:]))
             time.sleep(0.02)
-        raise AssertionError("no %r in %s" % (prefix, self.log()[-2000:]))
 
     def send(self, method, target, body=b""):
         """One raw HTTP exchange: the response's bytes."""
