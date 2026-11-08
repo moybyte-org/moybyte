@@ -1685,7 +1685,7 @@ try:
     kept = 'showed'
 except OSError as e:
     kept = e.errno
-ws._ld = (held, safe, kept, N.held())
+ws._ld = (held, safe, kept, len([h for h in N.leases() if N.get(h)[0] == pid]))
 """
 
 LEASE_CRASH = """\
@@ -1697,7 +1697,8 @@ SRC = ('import moybyte, leases\\n'
 ws._lp = S.SCHED.start({'id': 't.lease', 'title': 'lease', 'type': 'service', 'src': SRC,
                         'runtime': 'python', 'permissions': ['lease:gpio'], 'required': []},
                        None, app_perms.services(ws))
-ws._lc = (N.pin_state(PIN), N.sim_get(PIN), N.held())
+ws._lc = (N.pin_state(PIN), N.sim_get(PIN),
+          len([h for h in N.leases() if N.get(h)[0] == ws._lp]))
 """
 
 
@@ -1708,7 +1709,9 @@ def a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, board_dir):
     process ending with its SPI's pins driven by the peripheral and its pins
     then read back safe from the GPIO matrix, and the driver kept past its
     process raising EBADF; then a service holding a pin it drove high crashes
-    in its wake, and the sweep leaves that pin an input with no pull."""
+    in its wake, and the sweep leaves that pin an input with no pull. Each
+    count is of the process's own leases: the console's may hold others (the
+    radio's row while the SSH server serves)."""
     import time
     mp = ROOT / "firmware" / board_dir / ".build" / "micropython"
     src = (mp.joinpath(*SSD1306)).read_text()
@@ -1726,7 +1729,8 @@ def a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, board_dir):
         assert state & 2 and level == 1 and n == 1, (state, level, n)
         time.sleep(1.0)
         board.pyexec("import moy_lease as N, scheduler as S\n"
-                     "ws._lc = (S.SCHED.procs[ws._lp].code, N.pin_state(%d), N.held())" % pin,
+                     "ws._lc = (S.SCHED.procs[ws._lp].code, N.pin_state(%d),\n"
+                     "          len([h for h in N.leases() if N.get(h)[0] == ws._lp]))" % pin,
                      strict=True)
         code, state, n = board.pyval("ws._lc", strict=True)
         assert (code, state, n) == (1, 1, 0), (code, state, n)
