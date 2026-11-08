@@ -18,6 +18,7 @@
 #include "lua.h"
 #include "lualib.h"
 #include "moy_json.h"
+#include "moy_proc_exit.h"
 
 #if defined(__has_include)
 #if __has_include("esp_heap_caps.h")
@@ -827,7 +828,7 @@ static bool ended_by(svc_t *s, int rc, const char *past) {
         end(s, s->exit_req);
     } else if (rc == CALL_ABORT) {
         snprintf(s->why, sizeof s->why, "%s ran past %u ms", past, MOYCORE_SVC_STOP_MS);
-        end(s, MOYCORE_SVC_EXIT_KILLED);
+        end(s, MOY_PROC_KILLED);
     } else {
         end(s, MOYCORE_SVC_EXIT_CRASHED);
     }
@@ -890,7 +891,7 @@ static void after(svc_t *s, int rc) {
         say(s, LOG_WARNING, line);
         if (s->strikes >= MOYCORE_SVC_STRIKES) {
             snprintf(s->why, sizeof s->why, "struck out");
-            end(s, MOYCORE_SVC_EXIT_KILLED);
+            end(s, MOY_PROC_KILLED);
         }
     }
 }
@@ -1308,7 +1309,7 @@ void moycore_svc_reset(void) {
         svc_t *s = s_row[i];
         if (s != NULL) {
             if (s->state != MOYCORE_SVC_EXITED) {
-                end(s, MOYCORE_SVC_EXIT_KILLED);
+                end(s, MOY_PROC_KILLED);
             }
             free(s);
             s_row[i] = NULL;

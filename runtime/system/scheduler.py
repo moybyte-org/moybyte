@@ -167,7 +167,10 @@ SVC_EXITED = 4                  # moycore_svc.h's MOYCORE_SVC_EXITED
 EINVAL = 22
 _WRAP = 0x3FFFFFFF              # a counter wraps as ticks do: a small int on a board
 
-EXIT_OK, EXIT_CRASHED, EXIT_KILLED = 0, 1, 137
+EXIT_OK, EXIT_CRASHED = 0, 1
+# A kill's status is the process table's (native/moy_kernel/moy_proc_exit.h),
+# read through moy_log's binding.
+EXIT_KILLED = _L.KILLED if _L is not None else None
 
 RUNNING = "running"             # an app's row (its wakes; the Player runs it)
 BACKGROUND = "background"       # a service, running

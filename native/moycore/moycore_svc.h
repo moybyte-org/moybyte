@@ -141,8 +141,9 @@ enum {
 #define MOYCORE_SVC_PRIO 2
 #define MOYCORE_SVC_STACK 12288u
 
+// A crash's exit status; a kill's is the process table's MOY_PROC_KILLED
+// (moy_proc_exit.h).
 #define MOYCORE_SVC_EXIT_CRASHED 1
-#define MOYCORE_SVC_EXIT_KILLED 137
 
 typedef struct {
     uint8_t state;

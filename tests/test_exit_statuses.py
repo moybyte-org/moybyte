@@ -5,8 +5,8 @@ Python reads the values through moy_log's binding."""
 import re
 from pathlib import Path
 
-import moy_log
-from runtime import cron, sh_door, sh_roles
+from runtime import moy_log
+from runtime import cron, scheduler, sh_door, sh_roles
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "native" / "moy_kernel" / "moy_proc_exit.h"
@@ -16,9 +16,10 @@ NAMES = ("NOT_RUN", "INTERRUPTED", "TRAPPED", "KILLED")
 C_FILES = (sorted((ROOT / "native" / "moy_sh").glob("moy_*.[ch]"))
            + sorted((ROOT / "native" / "moy_wasm").glob("*.[ch]"))
            + sorted((ROOT / "native" / "moy_elf").glob("*.[ch]"))
-           + sorted((ROOT / "native" / "moy_kernel").glob("*.[ch]")))
+           + sorted((ROOT / "native" / "moy_kernel").glob("*.[ch]"))
+           + sorted((ROOT / "native" / "moycore").glob("moycore_svc.[ch]")))
 PY_FILES = (sorted(Path(sh_door.__file__).parent.glob("sh_*.py"))
-            + [Path(cron.__file__)])
+            + [Path(cron.__file__), Path(scheduler.__file__)])
 
 
 def header():
@@ -38,6 +39,8 @@ def test_python_reads_them_through_the_binding():
         tuple(want[n] for n in NAMES)
     assert sh_roles.INTERRUPTED == want["INTERRUPTED"]
     assert cron.NOT_RUN == want["NOT_RUN"]
+    from runtime import scheduler
+    assert scheduler.EXIT_KILLED == want["KILLED"]
 
 
 def test_no_other_file_defines_one():
