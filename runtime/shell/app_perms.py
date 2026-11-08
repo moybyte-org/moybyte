@@ -54,8 +54,9 @@ ALL = ("python", "lua", "wasm", "elf")
 
 # `full_access`'s line by board (`[board] ota`), where the board's isolation
 # lets the prompt say less than the table's "Full access to the console"
-# (docs/os_2026-11/tiers.md section 1). Every board says the table's line.
-FULL_ACCESS_LINES = {}
+# (docs/os_2026-11/tiers.md section 1): the P4s run a module in U-mode,
+# confined to its own memory. Every other board says the table's line.
+FULL_ACCESS_LINES = {"p4": "Run its own machine code", "guition_p4": "Run its own machine code"}
 
 
 def _board():

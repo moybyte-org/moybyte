@@ -23,6 +23,8 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
                                     moybyte.os imports
     sdk/src/moyos_stubs.c           a module's side of every row: the function by
                                     its C library name, calling the table by ordinal
+    native/moy_elf/moy_os_check.c   each row's argument rule (u), checked before a
+                                    U-mode module's call runs (the P4s, moy_umode.h)
   the WASI tier
     native/moy_wasm/moy_wasi_os_rows.h  a WASI program's moybyte.os imports
   the app ABI (native/moy_app)
@@ -62,6 +64,7 @@ ROWS_H = os.path.join(ROOT, "native", "moy_elf", "moy_os_rows.h")
 KERNEL_C = os.path.join(ROOT, "native", "moy_elf", "moy_os_table.c")
 SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "os.h")
 STUBS_C = os.path.join(ROOT, "sdk", "src", "moyos_stubs.c")
+CHECK_C = os.path.join(ROOT, "native", "moy_elf", "moy_os_check.c")
 APP_H = os.path.join(ROOT, "native", "moy_app", "moy_app_rows.h")
 WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
@@ -86,9 +89,21 @@ TIERS = ("python", "lua", "wasm", "elf")
 SPEC_TIERS = ("python", "lua", "wasm")
 
 ROW_FIELDS = {"name", "kind", "server", "perm", "in", "ret", "how", "door", "wasm", "elf",
-              "lua", "py", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired"}
-ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired"}
+              "lua", "py", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
+ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 PERM_FIELDS = {"perm", "grants", "prompt", "needs", "py", "tiers", "spec"}
+# A row's argument rule (u): one token a kernel parameter. A row the door
+# serves takes its rule from its in (_door_u).
+#   -        a value: nothing to check
+#   s        a NUL-terminated string the process can read
+#   r w rw   a pointer to one of what it points at, readable / writable / both
+#   r:N      ... N of them (a parameter's name), or *N (what that parameter
+#            points at, itself checked first); void counts bytes
+#   r#N      ... N bytes, whatever it points at (a sockaddr and its length)
+#   f        a function the process's text holds
+#   k        a value the row's body matches against its own records
+#   ?        after any pointer token: NULL passes
+U_TOKEN = re.compile(r"^(?:-|k|f|s\??|(?P<perm>rw|r|w)(?P<null>\?)?(?:(?P<sep>[:#])(?P<deref>\*)?(?P<n>[A-Za-z_]\w*))?)$")
 KINDS = ("posix", "moybyte")
 # Where a row is served: a C row of native/moy_app ("c"), the Python
 # console's server for the role ("shell"), a process's ("proc:<name>"), a
@@ -285,6 +300,22 @@ def c_params(r):
     return out
 
 
+def _door_u(r):
+    """A door row's argument rule, from its in: the strings it reads, the
+    bytes it reads and the answer it writes, each by its length."""
+    u = []
+    for name, typ in params(r):
+        if typ == "int":
+            u.append("-")
+        elif typ in ("str", "str?"):
+            u.append("s" if typ == "str" else "s?")
+        elif typ == "bytes":
+            u += ["r:%s_len" % name, "-"]
+        elif typ == "out":
+            u += ["w:%s_cap" % name, "-"]
+    return u
+
+
 def elf(src):
     """The OS function table: {version, rows} by ordinal, every row with its
     C prototype (a moybyte row a door row serves gets its own, from its
@@ -307,7 +338,7 @@ def elf(src):
             e = {"name": c_name(r), "kind": "moybyte",
                  "c": "int32_t %s(%s)" % (c_name(r), ", ".join(c_params(r)) or "void"),
                  "fail": "-1", "door": index[r["name"]], "how": r.get("how", "hop"),
-                 "src": r}
+                 "u": _door_u(r), "src": r}
         rows[o] = e
     if sorted(rows) != list(range(len(rows))):
         raise TableError("the ordinals are not 0 .. %d" % (len(rows) - 1))
@@ -386,6 +417,7 @@ def _check_elf_table(table):
             raise TableError("row %d: fail is null exactly when it returns nothing" % i)
         if r.get("noreturn") and ret != "void":
             raise TableError("row %d: a noreturn row returns nothing" % i)
+        _check_u(i, r)
     if table["version"] != len(rows):
         raise TableError("version %d with %d rows: an append bumps it, nothing else does"
                          % (table["version"], len(rows)))
@@ -494,6 +526,28 @@ def check(src):
         if role_of(r) == "ui" and r.get("elf") != "deferred":
             raise TableError("%s: the toolkit's rows are deferred for ELF" % r["name"])
     _check_elf_table(elf(src))
+
+
+def _is_pointer(p):
+    return "*" in p or "[" in p
+
+
+def _check_u(i, r):
+    """Every pointer a row takes has a rule, and every rule a parameter."""
+    params = kernel_params(r)
+    u = r.get("u", ["-"] * len(params))
+    if len(u) != len(params):
+        raise TableError("row %d's u has %d tokens for %d parameters" % (i, len(u), len(params)))
+    names = [_param_name(p) for p in params]
+    for p, tok in zip(params, u):
+        m = U_TOKEN.match(tok)
+        if not m:
+            raise TableError("row %d: %r is not an argument rule" % (i, tok))
+        if _is_pointer(p) != (tok != "-"):
+            raise TableError("row %d: %s %s a rule" % (
+                i, _param_name(p), "needs" if _is_pointer(p) else "is a value and takes no"))
+        if m.group("n") and m.group("n") not in names:
+            raise TableError("row %d: %r names no parameter" % (i, tok))
 
 
 def kernel_params(r):
@@ -1201,6 +1255,84 @@ def gen_doc(src):
     return _splice(APP_DOC, "\n".join(o) + "\n", MD_BEGIN, MD_END)
 
 
+def _ptype(p):
+    """A parameter's type: its declaration without its name."""
+    name = _param_name(p)
+    return re.sub(r"\b%s\b" % name, "", p, count=1).strip()
+
+
+def _u_expr(tok, p, by_name):
+    m = U_TOKEN.match(tok)
+    name = _param_name(p)
+    if tok in ("-", "k"):
+        return None
+    if tok == "f":
+        return "U_CODE(%s)" % name
+    if tok.startswith("s"):
+        return ("U_STR0(%s)" if tok.endswith("?") else "U_STR(%s)") % name
+    perm = {"r": "MOY_U_R", "w": "MOY_U_W", "rw": "MOY_U_R | MOY_U_W"}[m.group("perm")]
+    pointee = _ptype(p).rstrip()[:-1].strip()
+    void = re.sub(r"\bconst\b", "", pointee).strip() == "void"
+    size = "1" if void or m.group("sep") == "#" else "sizeof *%s" % name
+    if m.group("n"):
+        n = m.group("n")
+        count = "(%s != NULL ? (size_t)*%s : 0)" % (n, n) if m.group("deref") else "(size_t)%s" % n
+        size = "u_n(%s, %s)" % (count, size)
+    return "%s(%s, %s, %s)" % ("U_BUF0" if m.group("null") else "U_BUF", name, size, perm)
+
+
+def gen_check_c(table):
+    rows = table["rows"]
+    o = [HEAD,
+         "// Each row's argument rule (os_calls.json's u), over a U-mode module's\n"
+         "// registers, before its call runs: every pointer it passes inside its own\n"
+         "// process (moy_umode.h). A row whose arguments are all values has none.\n",
+         "#include <stddef.h>", "#include <stdint.h>", "",
+         '#include "moy_os_rows.h"', '#include "moy_umode.h"', "",
+         "#define U_STR(p) moy_u_str(u, (const char *)(p))",
+         "#define U_STR0(p) ((p) == NULL || U_STR(p))",
+         "#define U_BUF(p, n, perm) moy_u_ok(u, (const void *)(p), (n), (perm))",
+         "#define U_BUF0(p, n, perm) ((p) == NULL || U_BUF(p, n, perm))",
+         "#define U_CODE(p) moy_u_ok(u, (const void *)(p), 4, MOY_U_X)",
+         "// Registers a parameter takes: a check sees at most 7 after its space.",
+         "#define U_REGS(t) ((sizeof(t) + 3u) / 4u)", "",
+         "static size_t u_n(size_t n, size_t each) {",
+         "    return each != 0 && n > SIZE_MAX / each ? SIZE_MAX : n * each;",
+         "}", "",
+         "typedef int u_check_fn(const moy_u_space_t *, uint32_t, uint32_t, uint32_t, uint32_t,",
+         "                       uint32_t, uint32_t, uint32_t);", ""]
+    checked = []
+    for i, r in enumerate(rows):
+        params = kernel_params(r)
+        u = r.get("u", ["-"] * len(params))
+        by_name = {_param_name(p): p for p in params}
+        exprs = []
+        # a deref'd count's own pointer first
+        order = sorted(range(len(params)), key=lambda k: bool(re.search(r"[:#]\*", u[k])))
+        for k in order:
+            e = _u_expr(u[k], params[k], by_name)
+            if e:
+                exprs.append(e)
+        if not exprs:
+            continue
+        checked.append(i)
+        o.append("// %d %s" % (i, r["name"]))
+        regs = " + ".join("U_REGS(%s)" % _ptype(p) for p in params)
+        o.append("_Static_assert(%s <= 7, \"%s's registers\");" % (regs, r["name"]))
+        o.append("static int u_check_%d(const moy_u_space_t *u, %s) {" % (i, ", ".join(params)))
+        o.append("    return %s;" % "\n        && ".join(exprs))
+        o.append("}")
+        o.append("")
+    o.append("int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {")
+    o.append("    u_check_fn *fn;")
+    o.append("    switch (row) {")
+    for i in checked:
+        o.append("    case %d: fn = (u_check_fn *)(void *)u_check_%d; break;" % (i, i))
+    o += ["    default: return 1;", "    }",
+          "    return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);", "}", ""]
+    return "\n".join(o)
+
+
 def outputs(src=None):
     """[(path, text)] for every generated file."""
     if src is None:
@@ -1209,7 +1341,7 @@ def outputs(src=None):
     table = elf(src)
     return [(KERNEL_H, gen_kernel_h(table)), (ROWS_H, gen_rows_h(table)),
             (KERNEL_C, gen_kernel_c(table)), (SDK_H, gen_sdk_h(table)),
-            (STUBS_C, gen_stubs_c(table)),
+            (STUBS_C, gen_stubs_c(table)), (CHECK_C, gen_check_c(table)),
             (APP_H, gen_app_h(src)), (WASM_H, gen_wasm_h(src)), (UI_H, gen_ui_h(src)),
             (LUA_H, gen_lua_h(src)), (WASI_OS_H, gen_wasi_h(src)),
             (APP_CONTEXT, gen_app_context(src)), (APP_PERMS, gen_app_perms(src)),

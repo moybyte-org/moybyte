@@ -3756,6 +3756,57 @@ def elf_commands_run(board, board_dir):
     _elf_nc_both_ways(board)
 
 
+def elf_umode_isolates(board, board_dir):
+    """A P4 runs a native module in RISC-V U-mode, confined by PMP to its own
+    memory (native/moy_elf/moy_umode.h): the FPU's lazy enable reaches it, its
+    mappings outnumber the PMP's slots while three of its threads and the
+    console's tasks take the core in turn, and every wild access -- a store
+    into the console's memory, internal RAM or PSRAM, a jump into kernel
+    text, a row handed a kernel pointer, an ecall past the table, a CSR, a
+    stack run off its end -- ends the process alone with a fault record
+    naming it, the console's frames going on."""
+    import tempfile
+    from tools import elf_cart, wasm_module
+    chip = _wasm_chip(board_dir)
+    if not elf_cart.available(chip):
+        pytest.skip("no %s toolchain under ~/.espressif for the native modules" % chip)
+    signed = wasm_module.signing_key() is not None
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_elf_")
+    out = os.path.join(tmp, "elf_wild.moy")
+    elf_cart.build(str(ROOT / "tests" / "fixtures" / "elf" / "elf_wild.moy"), out, [chip],
+                   signed=signed)
+    _push_folder(board, board_dir, out, root + "/elf_wild.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    assert board.pyval("__import__('moy_elf').umode() is not None", strict=True)
+
+    def runs(line, want):
+        got = _sh(board, line, timeout=120)
+        assert got == want, "%s -> %r" % (line, got)
+
+    runs("elf.wild/wild float 1000", (0, ["1000"]))
+    runs("elf.wild/wild spin 20000 7", (0, ["ok 7"]))
+    runs("elf.wild/wild spins 200000 11", (0, ["ok"]))
+    psram = board.pyval("id(ws)", strict=True)
+    sane = "type(ws).__name__"
+    kind = board.pyval(sane, strict=True)
+    wild = (("store 0x%x" % psram, 139, 7), ("store 0x4ff40000", 139, 7),
+            ("load 0x4ff40000", 139, 5), ("jump 0x4ff00100", 139, 1),
+            ("jump 0x40000100", 139, 1), ("row 0x4ff40000", 139, 0x200 | 3),
+            ("ecall", 159, 0x100), ("csr", 132, 2), ("stack", 139, 7))
+    for args, status, cause in wild:
+        f0 = board.state()["upcall_totals"][0]
+        st, got = _sh(board, "elf.wild/wild " + args, timeout=60)
+        said = " ".join(got)
+        assert st == status and "killed" in said and "survived" not in said, (args, st, got)
+        last = board.pyval("__import__('moy_elf').faults()[0]", strict=True)
+        assert last[2] == cause and "wild" in last[1], (args, last)
+        assert board.pyval(sane, strict=True) == kind
+        assert board.state()["upcall_totals"][0] > f0, "the frame stopped: " + args
+    stats = board.pyval("__import__('moy_elf').stats()", strict=True)
+    assert stats[3] == 0, stats
+
+
 def _elf_nc_both_ways(board):
     """The SDK's netcat on the board against a socket on this machine: it
     dials one listening here, then listens for this machine to dial it. The

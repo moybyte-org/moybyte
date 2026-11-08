@@ -84,10 +84,18 @@ typedef int (*moy_elf_entry_fn)(const moy_os_table_t *os, int op, int argc, char
 
 // A loaded module: its entry, and how its loader lets it go once its last
 // thread has (NULL: nothing to do).
+// A module the P4s run in U-mode (moy_umode.h) also carries its block (0
+// elsewhere): [ulo, urx) RX from its gate on, [urx, uhi) RW, uvbase the address
+// of its vaddr 0, its gate's table and return stub, and its constructors,
+// which its first thread runs.
+#define MOY_OS_INITS 16u
 typedef struct {
     moy_elf_entry_fn entry;
     void *loaded;
     void (*unload)(void *loaded);
+    uint32_t ulo, urx, uhi, uvbase, utable, uret;
+    uint32_t uinit[MOY_OS_INITS];
+    uint32_t uinits;
 } moy_os_module_t;
 
 // A process's caps: every thread of it is a task at `prio` on `core` (-1:
@@ -198,5 +206,19 @@ typedef struct {
     uint32_t leaked;            // processes left running (a host thread that would not end)
 } moy_os_stats_t;
 void moy_os_stats(moy_os_stats_t *out);
+
+// The last native faults since boot, newest first, n at most: a P4's U-mode
+// module killed where it stood (moy_umode.h). cause is the core's mcause code,
+// or 0x100 (no such row) or 0x200 | the row (a row given memory outside the
+// process); pc is the module's own address (its ELF's vaddr) when inside it.
+#define MOY_OS_FAULTS 4u
+typedef struct {
+    uint32_t pid;
+    uint32_t cause;
+    uint32_t pc;
+    uint32_t addr;
+    char name[24];
+} moy_os_fault_t;
+uint32_t moy_os_faults(moy_os_fault_t *out, uint32_t n);
 
 #endif // MOY_OS_H

@@ -26,6 +26,12 @@
 #include "moy_sh_prog.h"
 #include "moy_super.h"
 
+#ifdef MOY_OS_UMODE
+#include "moy_umode.h"
+#include <dirent.h>
+#include <netdb.h>
+#endif
+
 #ifdef MOY_OS_BOARD
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
@@ -231,6 +237,12 @@ typedef struct {
     uint8_t joined;
     volatile int in_row;
     int err;
+    int *errp;                  // where errno is: err, or a U-mode thread's own slot
+#ifdef MOY_OS_UMODE
+    moy_u_space_t *u;           // a U-mode thread's windows (moy_umode.h)
+    void *ustack;               // its U stack, the u_area_t at its top
+    uint32_t usp;               // the stack pointer a hook starts on
+#endif
     void *(*start)(void *);
     void *arg;
     void *out;
@@ -261,6 +273,7 @@ typedef struct {
 typedef struct map {
     struct map *next;
     size_t len;
+    void *mem;                  // a U-mode process's: its own 128-aligned block, the record apart
 } map_t;
 #define MAP_HDR ((sizeof(map_t) + 15u) & ~(size_t)15u)
 
@@ -302,7 +315,27 @@ struct moy_os_proc {
     moy_app_run_t run;          // its app run: what its app calls are answered for
     volatile uint8_t net_held;
     uint32_t wakes, events;
+#ifdef MOY_OS_UMODE
+    moy_u_proc_t *u;            // its memory, when its module runs in U-mode
+    char **uargv;               // argv and the environment, in its main thread's U area
+    char *uenv;
+    struct retired *retired;    // memory let go while another thread may hold it
+#endif
 };
+
+#ifdef MOY_OS_UMODE
+// What a U-mode thread's rows hand back that the module reads: at the top of
+// its U stack, so inside its windows.
+typedef struct {
+    int err;
+    struct dirent ent;
+} u_area_t;
+
+typedef struct retired {
+    struct retired *next;
+    void *mem;
+} retired_t;
+#endif
 
 static moy_os_proc_t *g_proc[MOY_OS_PROCS];
 static moy_os_stats_t g_stats;
@@ -334,7 +367,7 @@ static thr_t *self_thr(void) {
 void moy_os_errno_set(int e) {
     thr_t *t = self_thr();
     if (t != NULL) {
-        t->err = e;
+        *t->errp = e;
     } else {
         g_err_none = e;
     }
@@ -395,6 +428,30 @@ typedef struct {
     int op;
 } go_t;
 
+#ifdef MOY_OS_UMODE
+static u_area_t *u_area(const thr_t *t) {
+    return (u_area_t *)t->u->shi - 1;
+}
+
+// The module's code at `fn` in U-mode on thread t (moy_umode.h): a0..a4 = a.
+static int u_call(thr_t *t, uint32_t fn, const uint32_t a[5]) {
+    return moy_u_run(t->u, fn, t->p->mod.uret, t->usp, a);
+}
+#endif
+
+// The module's entry for `op` on thread t: its own code, in U-mode where the
+// module runs there.
+static int mod_call(thr_t *t, int op, int argc, char **argv) {
+    moy_os_proc_t *p = t->p;
+#ifdef MOY_OS_UMODE
+    if (p->u != NULL) {
+        uint32_t a[5] = { p->mod.utable, (uint32_t)op, (uint32_t)argc, (uint32_t)argv, 0 };
+        return u_call(t, (uint32_t)p->mod.entry, a);
+    }
+#endif
+    return p->mod.entry(&moy_os_table, op, argc, argv, NULL);
+}
+
 #ifdef MOY_OS_BOARD
 static void thr_main(void *arg)
 #else
@@ -410,9 +467,24 @@ static void *thr_main(void *arg)
         return NULL;
     }
 #endif
+#ifdef MOY_OS_UMODE
+    // A U-mode module's constructors run on its first thread (on a board's S3
+    // the loader runs them).
+    if (t == &p->thr[0] && p->u != NULL) {
+        for (uint32_t i = 0; i < p->mod.uinits; i++) {
+            uint32_t a[5] = { 0 };
+            u_call(t, p->mod.uinit[i], a);
+        }
+    }
+#endif
     if (t == &p->thr[0]) {
         // A command's main, or a service's loop.
-        int code = p->mod.entry(&moy_os_table, MOY_ELF_OP_MAIN, p->argc, p->argv, NULL);
+#ifdef MOY_OS_UMODE
+        char **argv = p->u != NULL ? p->uargv : p->argv;
+#else
+        char **argv = p->argv;
+#endif
+        int code = mod_call(t, MOY_ELF_OP_MAIN, p->argc, argv);
         lock();
         if (!p->main_done) {
             p->code = code;
@@ -420,6 +492,12 @@ static void *thr_main(void *arg)
         }
         unlock();
     } else {
+#ifdef MOY_OS_UMODE
+        if (p->u != NULL) {
+            uint32_t a[5] = { (uint32_t)t->arg };
+            t->out = (void *)(uintptr_t)u_call(t, (uint32_t)t->start, a);
+        } else
+#endif
         t->out = t->start(t->arg);
     }
     thr_end(t);
@@ -429,8 +507,125 @@ static void *thr_main(void *arg)
 }
 
 // A task for record `t` with the process's caps: 0, or an errno value.
+#ifdef MOY_OS_UMODE
+static size_t u_strings(char **v, size_t *count) {
+    size_t n = 0;
+    *count = 0;
+    for (; v != NULL && *v != NULL; v++) {
+        n += strlen(*v) + 1;
+        (*count)++;
+    }
+    return n;
+}
+
+static size_t env_len(const char *e) {
+    size_t n = 1;
+    for (; e != NULL && *e; e += strlen(e) + 1) {
+        n += strlen(e) + 1;
+    }
+    return n;
+}
+
+// Thread t's U stack and windows: its u_area_t at the top and, for the first
+// thread, argv and the environment below it. 0, or an errno value.
+static int u_thread(thr_t *t) {
+    moy_os_proc_t *p = t->p;
+    bool first = t == &p->thr[0];
+    size_t argc = 0;
+    size_t extra = first ? u_strings(p->argv, &argc) + (argc + 1) * sizeof(char *)
+                           + env_len(p->env) + 16 : 0;
+    uint32_t len = MOY_U_UP(p->caps.stack + sizeof(u_area_t) + extra);
+    uint8_t *mem = heap_caps_aligned_alloc(MOY_U_ALIGN, len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    moy_u_space_t *u = os_alloc(sizeof *u);
+    if (mem == NULL || u == NULL || moy_u_add(p->u, (uint32_t)mem, (uint32_t)mem + len,
+                                              MOY_U_R | MOY_U_W) != 0) {
+        heap_caps_free(mem);
+        os_free(u);
+        return ENOMEM;
+    }
+    u->proc = p->u;
+    u->id = moy_u_new_id();
+    u->slo = (uint32_t)mem;
+    u->shi = (uint32_t)mem + len;
+    u->ending = &p->ending;
+    u->thr = t;
+    t->u = u;
+    t->ustack = mem;
+    u_area_t *area = u_area(t);
+    memset(area, 0, sizeof *area);
+    t->errp = &area->err;
+    uint8_t *at = (uint8_t *)area;
+    if (first) {
+        size_t n = env_len(p->env);
+        at -= n;
+        p->uenv = (char *)at;
+        if (p->env != NULL) {
+            memcpy(at, p->env, n - 1);
+        }
+        at[n - 1] = 0;
+        size_t sn = u_strings(p->argv, &argc);
+        at -= sn;
+        char *str = (char *)at;
+        at = (uint8_t *)(((uint32_t)at - (argc + 1) * sizeof(char *)) & ~3u);
+        p->uargv = (char **)at;
+        for (size_t i = 0; i < argc; i++) {
+            size_t k = strlen(p->argv[i]) + 1;
+            memcpy(str, p->argv[i], k);
+            p->uargv[i] = str;
+            str += k;
+        }
+        p->uargv[argc] = NULL;
+    }
+    t->usp = (uint32_t)at & ~15u;
+    return 0;
+}
+
+static bool u_unmap(moy_os_proc_t *p, void *addr, bool locked);
+
+// Memory a U-mode process held, freed now when no other thread of it can be
+// inside a row or running on another core, else at the process's end.
+static void u_free(moy_os_proc_t *p, void *mem) {
+    bool busy = p->caps.core < 0;
+    thr_t *me = self_thr();
+    for (uint32_t k = 0; k < MOY_OS_THREADS; k++) {
+        busy |= &p->thr[k] != me && p->thr[k].state == T_LIVE && p->thr[k].in_row > 0;
+    }
+    retired_t *r = busy ? os_alloc(sizeof *r) : NULL;
+    if (r == NULL) {
+        heap_caps_free(mem);
+        return;
+    }
+    r->mem = mem;
+    r->next = __atomic_load_n(&p->retired, __ATOMIC_RELAXED);
+    while (!__atomic_compare_exchange_n(&p->retired, &r->next, r, false, __ATOMIC_ACQ_REL,
+                                        __ATOMIC_RELAXED)) {
+    }
+}
+
+// A thread's U stack and windows let go, its task gone.
+static void u_thread_end(thr_t *t) {
+    if (t->u == NULL) {
+        return;
+    }
+    moy_u_drop(t->p->u, t->u->slo);
+    u_free(t->p, t->ustack);
+    os_free(t->u);
+    t->u = NULL;
+    t->ustack = NULL;
+}
+#endif
+
 static int thr_spawn(thr_t *t) {
     moy_os_proc_t *p = t->p;
+    t->errp = &t->err;
+#ifdef MOY_OS_UMODE
+    if (p->u != NULL) {
+        int e = u_thread(t);
+        if (e != 0) {
+            return e;
+        }
+    }
+#endif
     sem_init(&t->done, false);
     t->state = T_LIVE;
 #ifdef MOY_OS_BOARD
@@ -442,6 +637,9 @@ static int thr_spawn(thr_t *t) {
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         t->state = T_FREE;
         sem_fini(&t->done);
+#ifdef MOY_OS_UMODE
+        u_thread_end(t);
+#endif
         return EAGAIN;
     }
     t->task = h;
@@ -468,6 +666,9 @@ static int thr_spawn(thr_t *t) {
 static void thr_reap(thr_t *t) {
 #ifdef MOY_OS_BOARD
     vTaskDeleteWithCaps(t->task);
+#endif
+#ifdef MOY_OS_UMODE
+    u_thread_end(t);
 #endif
     sem_fini(&t->done);
     memset(t, 0, sizeof *t);
@@ -509,6 +710,12 @@ static void handle_drop(moy_os_proc_t *p, uint32_t i) {
         SK(close)(h->fd);
         break;
     case H_ADDR:
+#ifdef MOY_OS_UMODE
+        if (p->u != NULL) {
+            u_unmap(p, h->ptr, true);
+            break;
+        }
+#endif
         SK(freeaddrinfo)(h->ptr);
         break;
     default:
@@ -1136,6 +1343,12 @@ struct dirent *moy_os_readdir(DIR *dir) {
             d->ent.d_type = e[0] == 'd' ? DT_DIR : DT_REG;
             d->at += k + 2;
             out = &d->ent;
+#ifdef MOY_OS_UMODE
+            if (t->u != NULL) {
+                u_area(t)->ent = d->ent;
+                out = &u_area(t)->ent;
+            }
+#endif
         }
     }
     leave(t);
@@ -1178,7 +1391,12 @@ char *moy_os_getenv(const char *name) {
     thr_t *t = enter();
     char *out = NULL;
     size_t k = name != NULL ? strlen(name) : 0;
-    for (char *e = t != NULL ? t->p->env : NULL; e != NULL && *e && k; e += strlen(e) + 1) {
+#ifdef MOY_OS_UMODE
+    char *env = t == NULL ? NULL : t->p->u != NULL ? t->p->uenv : t->p->env;
+#else
+    char *env = t != NULL ? t->p->env : NULL;
+#endif
+    for (char *e = env; e != NULL && *e && k; e += strlen(e) + 1) {
         if (strncmp(e, name, k) == 0 && e[k] == '=') {
             out = e + k + 1;
             break;
@@ -1212,7 +1430,7 @@ void moy_os__exit(int code) {
 
 int *moy_os___errno(void) {
     thr_t *t = self_thr();
-    return t != NULL ? &t->err : &g_err_none;
+    return t != NULL ? t->errp : &g_err_none;
 }
 
 // -- the rows: time ------------------------------------------------------------------
@@ -1610,6 +1828,59 @@ int moy_os_moy_on(const char *name, int on) {
 
 // -- the rows: memory -----------------------------------------------------------------
 
+#ifdef MOY_OS_UMODE
+// A mapping of a U-mode process: zeroed, 128-aligned, a window of its own.
+static void *u_map(moy_os_proc_t *p, size_t len) {
+    if (len > 0x7fffff80u) {
+        return NULL;
+    }
+    uint32_t n = MOY_U_UP(len);
+    map_t *m = os_alloc(sizeof *m);
+    void *mem = heap_caps_aligned_alloc(MOY_U_ALIGN, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (m == NULL || mem == NULL
+        || moy_u_add(p->u, (uint32_t)mem, (uint32_t)mem + n, MOY_U_R | MOY_U_W) != 0) {
+        os_free(m);
+        heap_caps_free(mem);
+        return NULL;
+    }
+    memset(mem, 0, n);
+    m->len = len;
+    m->mem = mem;
+    lock();
+    m->next = p->maps;
+    p->maps = m;
+    p->mapped += len;
+    unlock();
+    return mem;
+}
+
+// Mapping `addr` let go; `locked` when the caller holds the table's lock.
+static bool u_unmap(moy_os_proc_t *p, void *addr, bool locked) {
+    map_t *m = NULL;
+    if (!locked) {
+        lock();
+    }
+    for (map_t **at = &p->maps; *at != NULL; at = &(*at)->next) {
+        if ((*at)->mem == addr) {
+            m = *at;
+            *at = m->next;
+            p->mapped -= m->len;
+            break;
+        }
+    }
+    if (!locked) {
+        unlock();
+    }
+    if (m == NULL) {
+        return false;
+    }
+    moy_u_drop(p->u, (uint32_t)m->mem);
+    u_free(p, m->mem);
+    os_free(m);
+    return true;
+}
+#endif
+
 void *moy_os_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
     (void)addr;
     (void)prot;
@@ -1620,6 +1891,14 @@ void *moy_os_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off
         moy_os_errno_set(EPERM);
     } else if (len == 0 || fd != -1 || !(flags & MAP_ANONYMOUS) || (flags & MAP_SHARED)) {
         moy_os_errno_set(len == 0 ? EINVAL : ENODEV);
+#ifdef MOY_OS_UMODE
+    } else if (t->p->u != NULL) {
+        out = u_map(t->p, len);
+        if (out == NULL) {
+            out = MAP_FAILED;
+            moy_os_errno_set(ENOMEM);
+        }
+#endif
     } else {
         map_t *m = len < (size_t)-1 - MAP_HDR ? os_alloc(MAP_HDR + len) : NULL;
         if (m == NULL) {
@@ -1642,6 +1921,16 @@ int moy_os_munmap(void *addr, size_t len) {
     (void)len;
     thr_t *t = enter();
     map_t *m = NULL;
+#ifdef MOY_OS_UMODE
+    if (t != NULL && t->p->u != NULL) {
+        int r = u_unmap(t->p, addr, false) ? 0 : -1;
+        if (r != 0) {
+            moy_os_errno_set(EINVAL);
+        }
+        leave(t);
+        return r;
+    }
+#endif
     if (t != NULL) {
         lock();
         for (map_t **at = &t->p->maps; *at != NULL; at = &(*at)->next) {
@@ -2056,6 +2345,40 @@ ssize_t moy_os_recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr 
     return (ssize_t)r;
 }
 
+#ifdef MOY_OS_UMODE
+// The stack's answer copied into a mapping of the U-mode process's own.
+static struct addrinfo *u_addrinfo(moy_os_proc_t *p, const struct addrinfo *ai) {
+    size_t n = 0;
+    for (const struct addrinfo *a = ai; a != NULL; a = a->ai_next) {
+        n += sizeof *a + ((a->ai_addrlen + 3u) & ~3u)
+             + (a->ai_canonname != NULL ? strlen(a->ai_canonname) + 1 : 0);
+    }
+    uint8_t *at = n != 0 ? u_map(p, n) : NULL;
+    struct addrinfo *out = (struct addrinfo *)at, *prev = NULL;
+    for (const struct addrinfo *a = ai; at != NULL && a != NULL; a = a->ai_next) {
+        struct addrinfo *c = (struct addrinfo *)at;
+        *c = *a;
+        c->ai_next = NULL;
+        at += sizeof *c;
+        if (a->ai_addr != NULL) {
+            memcpy(at, a->ai_addr, a->ai_addrlen);
+            c->ai_addr = (struct sockaddr *)at;
+            at += (a->ai_addrlen + 3u) & ~3u;
+        }
+        if (a->ai_canonname != NULL) {
+            strcpy((char *)at, a->ai_canonname);
+            c->ai_canonname = (char *)at;
+            at += strlen(a->ai_canonname) + 1;
+        }
+        if (prev != NULL) {
+            prev->ai_next = c;
+        }
+        prev = c;
+    }
+    return out;
+}
+#endif
+
 int moy_os_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
                        struct addrinfo **res) {
     thr_t *t = enter();
@@ -2068,6 +2391,14 @@ int moy_os_getaddrinfo(const char *node, const char *service, const struct addri
         moy_os_errno_set(e);
     } else {
         r = SK(getaddrinfo)(node, service, hints, res);
+#ifdef MOY_OS_UMODE
+        if (r == 0 && t->p->u != NULL) {
+            struct addrinfo *u = u_addrinfo(t->p, *res);
+            SK(freeaddrinfo)(*res);
+            *res = u;
+            r = u != NULL ? 0 : EAI_MEMORY;
+        }
+#endif
         if (r == 0) {
             lock();
             int h = handle_new(t->p, H_ADDR, *res, -1);
@@ -2318,6 +2649,40 @@ void moy_os_default_caps(moy_os_caps_t *caps) {
     caps->stack = 16 * 1024;
 }
 
+// A record proc_new made and nothing else holds.
+static void proc_free(moy_os_proc_t *p) {
+    sem_fini(&p->wake);
+    sem_fini(&p->hop_done);
+    sem_fini(&p->hop_lock);
+    sem_fini(&p->stopped);
+    p->magic = 0;
+    os_free(p);
+}
+
+#ifdef MOY_OS_UMODE
+static volatile uint8_t g_never;
+
+// The module's hooks (its entry's BIND), asked in U-mode on the calling task
+// with a stack of its own: 0 when it faults.
+static uint32_t u_bind(moy_os_proc_t *p) {
+    uint32_t len = 1024;
+    uint8_t *stack = heap_caps_aligned_alloc(MOY_U_ALIGN, len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (stack == NULL) {
+        return 0;
+    }
+    moy_u_space_t u = { .proc = p->u, .id = moy_u_new_id(), .slo = (uint32_t)stack,
+                        .shi = (uint32_t)stack + len, .ending = &g_never };
+    uint32_t a[5] = { p->mod.utable, MOY_ELF_OP_BIND };
+    uint32_t hooks = (uint32_t)moy_u_run(&u, (uint32_t)p->mod.entry, p->mod.uret, u.shi, a);
+    heap_caps_free(stack);
+    if (u.fault != 0) {
+        log_line(p, MOY_LOG_ERR, "the native module's entry faulted");
+        return 0;
+    }
+    return hooks;
+}
+#endif
+
 static moy_os_proc_t *proc_new(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
                                bool service, char *err, size_t errlen) {
     lock();
@@ -2352,11 +2717,28 @@ static moy_os_proc_t *proc_new(const moy_os_module_t *m, const moy_os_caps_t *ca
     sem_init(&p->hop_done, false);
     sem_init(&p->hop_lock, true);
     sem_init(&p->stopped, false);
+#ifdef MOY_OS_UMODE
+    if (m->ulo != 0) {
+        p->u = os_alloc(sizeof *p->u);
+        if (p->u == NULL) {
+            snprintf(err, errlen, "out of memory");
+            proc_free(p);
+            return NULL;
+        }
+        p->u->lo = m->ulo;
+        p->u->rx = m->urx;
+        p->u->hi = m->uhi;
+        p->u->vbase = m->uvbase;
+        p->hooks = u_bind(p);
+    } else
+#endif
     p->hooks = (uint32_t)p->mod.entry(&moy_os_table, MOY_ELF_OP_BIND, 0, NULL, NULL);
     lock();
     g_proc[slot] = p;
     unlock();
     g_stats.started++;
+#ifdef MOY_OS_UMODE
+#endif
     return p;
 }
 
@@ -2393,6 +2775,9 @@ static bool proc_end(moy_os_proc_t *p) {
                 thr_t *t = &p->thr[k];
                 if (t->state == T_LIVE && t->in_row == 0) {
                     vTaskDeleteWithCaps(t->task);
+#ifdef MOY_OS_UMODE
+                    u_thread_end(t);
+#endif
                     sem_fini(&t->done);
                     memset(t, 0, sizeof *t);
                     g_stats.killed++;
@@ -2442,6 +2827,9 @@ static bool proc_end(moy_os_proc_t *p) {
     while (maps != NULL) {
         map_t *m = maps;
         maps = m->next;
+#ifdef MOY_OS_BOARD
+        heap_caps_free(m->mem);
+#endif
         os_free(m);
     }
     if (p->net_held && g_net != NULL) {
@@ -2467,6 +2855,15 @@ static bool proc_end(moy_os_proc_t *p) {
     }
     os_free(p->argv);
     os_free(p->env);
+#ifdef MOY_OS_UMODE
+    while (p->retired != NULL) {
+        retired_t *r = p->retired;
+        p->retired = r->next;
+        heap_caps_free(r->mem);
+        os_free(r);
+    }
+    os_free(p->u);
+#endif
     sem_fini(&p->wake);
     sem_fini(&p->hop_done);
     sem_fini(&p->hop_lock);
@@ -2718,6 +3115,115 @@ int moy_os_stop(uint32_t pid) {
     proc_end(p);
     return code;
 }
+
+// -- faults ---------------------------------------------------------------------------
+
+static moy_os_fault_t g_faults[MOY_OS_FAULTS];
+static uint32_t g_nfaults;
+
+uint32_t moy_os_faults(moy_os_fault_t *out, uint32_t n) {
+    uint32_t have = g_nfaults < MOY_OS_FAULTS ? g_nfaults : MOY_OS_FAULTS;
+    uint32_t k = 0;
+    for (; k < n && k < have; k++) {
+        out[k] = g_faults[(g_nfaults - 1u - k) % MOY_OS_FAULTS];
+    }
+    return k;
+}
+
+#ifdef MOY_OS_UMODE
+void moy_u_bail(uint32_t *frame) __attribute__((noreturn));
+
+static const char *u_why(uint32_t cause, int *sig) {
+    *sig = 11;
+    switch (cause) {
+    case 1: return "jumped outside its memory";
+    case 5: return "read outside its memory";
+    case 7: return "wrote outside its memory";
+    case 0: case 4: case 6: *sig = 7; return "made a misaligned access";
+    case 2: *sig = 4; return "ran an illegal instruction";
+    case 3: *sig = 5; return "hit a breakpoint";
+    case MOY_U_BAD_ROW: *sig = 31; return "called no such row";
+    default: break;
+    }
+    if (cause & MOY_U_BAD_ARG) {
+        return "passed a row memory outside it";
+    }
+    *sig = 4;
+    return "trapped";
+}
+
+// The thread's process ends where it stands: the fault recorded and logged,
+// told on the command's stderr, its code 128 + the signal a POSIX shell would
+// name, the thread parked for proc_end. A fault in a call no thread owns
+// (BIND, on the loading task) returns to that call instead.
+void moy_os_u_fault(moy_u_space_t *s, uint32_t *f, uint32_t cause, uint32_t pc, uint32_t addr) {
+    if (s->thr == NULL) {
+        s->fault = cause + 1u;
+        moy_u_bail(f);
+    }
+    thr_t *t = s->thr;
+    moy_os_proc_t *p = t->p;
+    const moy_u_proc_t *u = p->u;
+    uint32_t at = pc >= u->lo && pc < u->hi ? pc - u->vbase : pc;
+    int sig;
+    const char *why = u_why(cause, &sig);
+    const char *name = !p->service && p->argv != NULL && p->argv[0] != NULL ? p->argv[0] : "service";
+    char text[160];
+    if (cause & MOY_U_BAD_ARG) {
+        snprintf(text, sizeof text, "%s (pid %u) killed: %s (%s) at pc 0x%x\n", name,
+                 (unsigned)p->pid, why, moy_os_row_names[cause & 0xffu], (unsigned)at);
+    } else {
+        snprintf(text, sizeof text, "%s (pid %u) killed: %s at pc 0x%x, address 0x%08x\n", name,
+                 (unsigned)p->pid, why, (unsigned)at, (unsigned)addr);
+    }
+    lock();
+    moy_os_fault_t *r = &g_faults[g_nfaults++ % MOY_OS_FAULTS];
+    r->pid = p->pid;
+    r->cause = cause;
+    r->pc = at;
+    r->addr = addr;
+    snprintf(r->name, sizeof r->name, "%s", name);
+    unlock();
+    log_line(p, MOY_LOG_ERR, text);
+    if (!p->service) {
+        moy_os_write(2, text, strlen(text));
+    }
+    lock();
+    if (!p->main_done) {
+        p->code = 128 + sig;
+        p->main_done = 1;
+    }
+    p->ending = 1;
+    unlock();
+    thr_end(t);
+}
+
+void moy_os_u_park(moy_u_space_t *s) {
+    thr_end(s->thr);
+}
+
+// A row from a U-mode module's ecall: its ordinal in t0, its arguments in
+// a0..a7, each pointer checked by the row's rule (moy_os_check.c), and the
+// row called as any of its prototypes is, through the integer registers.
+typedef uint64_t u_row_fn(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                          uint32_t);
+
+void moy_os_u_row(moy_u_space_t *s, uint32_t *f) {
+    uint32_t row = f[5];
+    const uint32_t *a = &f[10];
+    if (row >= MOY_OS_ROWS) {
+        moy_os_u_fault(s, f, MOY_U_BAD_ROW, f[0], row);
+    }
+    if (!moy_os_check(s, row, a)) {
+        moy_os_u_fault(s, f, MOY_U_BAD_ARG | row, f[0], 0);
+    }
+    uint64_t r = ((u_row_fn *)(void *)moy_os_table.fn[row])(a[0], a[1], a[2], a[3], a[4], a[5],
+                                                             a[6], a[7]);
+    f[10] = (uint32_t)r;
+    f[11] = (uint32_t)(r >> 32);
+    f[0] += 4;
+}
+#endif
 
 int moy_os_info(uint32_t pid, moy_os_info_t *out) {
     moy_os_proc_t *p = proc_of(pid);

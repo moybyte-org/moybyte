@@ -5,7 +5,10 @@
 // UNSIGNED flag, the cart's consent), its verdict taken
 // (moy_elf_check), and Espressif's elf_loader (elf_loader/, vendored)
 // relocates it into PSRAM, resolving no name: a module imports nothing. Its
-// constructors run once (esp_elf_request), and the process is moy_os's.
+// constructors run once (esp_elf_request), and the process is moy_os's. On a
+// P4 the module runs in U-mode (moy_umode.h): the loader's one segment is the
+// block, 128-aligned after the gate this file writes, and its constructors run
+// on its first thread.
 //
 //   moy_elf.CHIP, ROWS, VERSION
 //   moy_elf.command(path, argv, roots, pid, id, bg_pid, budget_ms[, flags]) -> (status, err)
@@ -23,6 +26,10 @@
 //   moy_elf.mem() -> (internal free, internal largest, psram free, psram largest)
 //   moy_elf.load() -> (read_us, check_us, reloc_us, internal free before, after):
 //       the last load's cost, which the calling task waits out
+//   moy_elf.faults() -> [(pid, name, cause, pc, addr)], the newest first: the
+//       U-mode modules killed where they stood (moy_os_faults); [] on an S3
+//   moy_elf.umode() -> (pmpcfg0..3) on this core, or None where modules do not
+//       run in U-mode (an S3; a P4 whose bootloader locked its own PMP layout)
 //
 // `command`, `start`, `step` and `service` run on the MicroPython task: a
 // command's whole run holds it (its session's calls are served there), a
@@ -46,6 +53,11 @@
 #include "moy_ota.h"
 #include "moy_os.h"
 #include "moy_sh.h"
+#ifdef MOY_OS_UMODE
+#include "esp_cache.h"
+#include "riscv/csr.h"
+#include "moy_umode.h"
+#endif
 
 #define PSRAM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 #define INTERNAL_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
@@ -78,6 +90,114 @@ static uintptr_t resolve_none(const char *name) {
     return 0;
 }
 
+#ifdef MOY_OS_UMODE
+// The loader's executable allocation (a P4 has one: the segment) is a module's
+// block: the gate first, then the segment, 128-aligned and a multiple of 128
+// long (-Wl,--wrap=esp_elf_malloc). The free finds the block's start.
+#define GATE MOY_U_GATE(MOY_OS_ROWS)
+#define BLOCKS MOY_OS_PROCS
+static uint8_t *g_block[BLOCKS];
+static uint8_t *g_last;
+
+void *__real_esp_elf_malloc(uint32_t n, bool exec);
+void __real_esp_elf_free(void *ptr);
+
+void *__wrap_esp_elf_malloc(uint32_t n, bool exec) {
+    if (!exec) {
+        return __real_esp_elf_malloc(n, exec);
+    }
+    for (int i = 0; i < BLOCKS; i++) {
+        if (g_block[i] == NULL) {
+            uint8_t *b = heap_caps_aligned_alloc(MOY_U_ALIGN, GATE + MOY_U_UP(n), PSRAM_CAPS);
+            if (b == NULL) {
+                return NULL;
+            }
+            g_block[i] = b;
+            g_last = b;
+            return b + GATE;
+        }
+    }
+    return NULL;
+}
+
+void __wrap_esp_elf_free(void *ptr) {
+    for (int i = 0; ptr != NULL && i < BLOCKS; i++) {
+        if (g_block[i] != NULL && g_block[i] + GATE == ptr) {
+            heap_caps_free(g_block[i]);
+            g_block[i] = NULL;
+            return;
+        }
+    }
+    __real_esp_elf_free(ptr);
+}
+
+// Where the module's text ends and its data starts (vaddrs): from its program
+// headers, which the loader read the segment by.
+static int u_layout(const uint8_t *buf, size_t len, uint32_t *text_end, uint32_t *data_at) {
+    const elf32_hdr_t *eh = (const elf32_hdr_t *)buf;
+    *text_end = 0;
+    *data_at = UINT32_MAX;
+    if (len < sizeof *eh || eh->phoff > len
+        || eh->phnum > (len - eh->phoff) / sizeof(elf32_phdr_t)) {
+        return -1;
+    }
+    const elf32_phdr_t *ph = (const elf32_phdr_t *)(buf + eh->phoff);
+    for (int i = 0; i < eh->phnum; i++) {
+        if (ph[i].type != PT_LOAD) {
+            continue;
+        }
+        if (ph[i].flags & 2u) {             // PF_W
+            *data_at = ph[i].vaddr < *data_at ? ph[i].vaddr : *data_at;
+        } else if (ph[i].vaddr + ph[i].memsz > *text_end) {
+            *text_end = ph[i].vaddr + ph[i].memsz;
+        }
+    }
+    return 0;
+}
+
+// The module's block, gate and constructors into *m: 0, or -1 with the reason.
+static int u_module(esp_elf_t *elf, uint32_t text_end, uint32_t data_at, moy_os_module_t *m,
+                    char *err, size_t errlen) {
+    uint32_t base = (uint32_t)g_last;
+    uint32_t vbase = (uint32_t)elf->psegment - elf->svaddr;
+    uint32_t hi = (uint32_t)elf->psegment + MOY_U_UP(elf->segment_size);
+    uint32_t rx = data_at == UINT32_MAX ? hi : MOY_U_DOWN(vbase + data_at);
+    if (g_last == NULL || base + GATE != (uint32_t)elf->psegment || rx < vbase + text_end
+        || rx > hi) {
+        snprintf(err, errlen, "refused: its text and its data share a 128-byte line");
+        return -1;
+    }
+    m->ulo = base;
+    m->urx = rx;
+    m->uhi = hi;
+    m->uvbase = vbase;
+    m->utable = base;
+    moy_u_gate(base, MOY_OS_VERSION, MOY_OS_ROWS, &m->uret);
+    uint32_t entry = (uint32_t)elf->entry;
+    if (entry < base + GATE || entry >= rx) {
+        snprintf(err, errlen, "refused: its entry is not in its text");
+        return -1;
+    }
+    void (**lists[2])(void) = { elf->preinit_array, elf->init_array };
+    uint32_t counts[2] = { elf->preinit_count, elf->init_count };
+    for (int l = 0; l < 2; l++) {
+        for (uint32_t i = 0; i < counts[l]; i++) {
+            bool rev = l == 1 && elf->init_reverse;
+            uint32_t fn = (uint32_t)lists[l][rev ? counts[l] - 1 - i : i];
+            if (fn == 0 || fn == UINT32_MAX) {
+                continue;
+            }
+            if (fn < base + GATE || fn >= rx || m->uinits == MOY_OS_INITS) {
+                snprintf(err, errlen, "refused: a constructor outside its text, or too many");
+                return -1;
+            }
+            m->uinit[m->uinits++] = fn;
+        }
+    }
+    return 0;
+}
+#endif
+
 static void unload(void *loaded) {
     esp_elf_t *elf = loaded;
     esp_elf_deinit(elf);
@@ -88,6 +208,14 @@ static void unload(void *loaded) {
 // consent), checked and relocated into *m: 0, or -1 with the reason in err.
 // Raises only when the file cannot be read.
 static int load(mp_obj_t path, uint32_t flags, moy_os_module_t *m, char *err, size_t errlen) {
+    memset(m, 0, sizeof *m);
+#ifdef MOY_OS_UMODE
+    if (moy_u_ready() != 0) {
+        snprintf(err, errlen, "refused: this console cannot isolate a module (an interrupt "
+                 "table its isolation was not built for, or a bootloader that locked the PMP)");
+        return -1;
+    }
+#endif
     g_load.int_before = heap_caps_get_free_size(INTERNAL_CAPS);
     int64_t t0 = esp_timer_get_time();
     mp_obj_t args[2] = { path, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
@@ -140,6 +268,16 @@ static int load(mp_obj_t path, uint32_t flags, moy_os_module_t *m, char *err, si
     }
     esp_elf_init(elf);
     elf_set_symbol_resolver(resolve_none);
+#ifdef MOY_OS_UMODE
+    uint32_t text_end, data_at;
+    if (u_layout(buf, len, &text_end, &data_at) != 0) {
+        heap_caps_free(buf);
+        heap_caps_free(elf);
+        snprintf(err, errlen, "refused: its program headers");
+        return -1;
+    }
+    g_last = NULL;
+#endif
     int r = esp_elf_relocate(elf, buf, len);
     heap_caps_free(buf);
     if (r != 0) {
@@ -148,7 +286,15 @@ static int load(mp_obj_t path, uint32_t flags, moy_os_module_t *m, char *err, si
         snprintf(err, errlen, "load: the module would not relocate (%d)", r);
         return -1;
     }
+#ifdef MOY_OS_UMODE
+    if (u_module(elf, text_end, data_at, m, err, errlen) != 0) {
+        esp_elf_deinit(elf);
+        heap_caps_free(elf);
+        return -1;
+    }
+#else
     esp_elf_request(elf, 0, 0, NULL);
+#endif
     g_load.read_us = t1 - t0;
     g_load.check_us = t2 - t1;
     g_load.reloc_us = esp_timer_get_time() - t2;
@@ -366,7 +512,41 @@ static mp_obj_t mod_load(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_load_obj, mod_load);
 
+static mp_obj_t mod_faults(void) {
+    moy_os_fault_t f[MOY_OS_FAULTS];
+    uint32_t n = moy_os_faults(f, MOY_OS_FAULTS);
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    for (uint32_t i = 0; i < n; i++) {
+        mp_obj_t t[5] = {
+            mp_obj_new_int_from_uint(f[i].pid), mp_obj_new_str(f[i].name, strlen(f[i].name)),
+            mp_obj_new_int_from_uint(f[i].cause), mp_obj_new_int_from_uint(f[i].pc),
+            mp_obj_new_int_from_uint(f[i].addr),
+        };
+        mp_obj_list_append(list, mp_obj_new_tuple(5, t));
+    }
+    return list;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_faults_obj, mod_faults);
+
+static mp_obj_t mod_umode(void) {
+#ifdef MOY_OS_UMODE
+    if (moy_u_ready() != 0) {
+        return mp_const_none;
+    }
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(RV_READ_CSR(pmpcfg0)), mp_obj_new_int_from_uint(RV_READ_CSR(pmpcfg1)),
+        mp_obj_new_int_from_uint(RV_READ_CSR(pmpcfg2)), mp_obj_new_int_from_uint(RV_READ_CSR(pmpcfg3)),
+    };
+    return mp_obj_new_tuple(4, t);
+#else
+    return mp_const_none;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_umode_obj, mod_umode);
+
 static const mp_rom_map_elem_t moy_elf_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_faults), MP_ROM_PTR(&mod_faults_obj) },
+    { MP_ROM_QSTR(MP_QSTR_umode), MP_ROM_PTR(&mod_umode_obj) },
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_elf) },
     { MP_ROM_QSTR(MP_QSTR_CHIP), MP_ROM_QSTR(CHIP_QSTR) },
     { MP_ROM_QSTR(MP_QSTR_ROWS), MP_ROM_INT(MOY_OS_ROWS) },

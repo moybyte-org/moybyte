@@ -128,12 +128,14 @@ def test_the_prompt_is_the_tables_lines_in_the_manifests_order():
 
 def test_full_access_says_the_board_s_line(monkeypatch):
     """`full_access` says the table's line on every board, and a board's own
-    line where FULL_ACCESS_LINES names one (the P4s', once U-mode isolation
-    lands: docs/os_2026-11/tiers.md section 1)."""
+    line where FULL_ACCESS_LINES names one (the P4s', whose modules run in
+    U-mode: docs/os_2026-11/tiers.md section 1)."""
     cart = {"id": "a.b", "native": ["esp32p4"], "permissions": ["full_access"]}
+    monkeypatch.setattr(P, "_board", lambda: None)
     assert P.prompt(cart) == ["Full access to the console"]
     monkeypatch.setattr(P, "_board", lambda: "p4")
-    monkeypatch.setattr(P, "FULL_ACCESS_LINES", {"p4": "Run its own machine code"})
+    assert P.prompt(cart) == ["Run its own machine code"]
+    monkeypatch.setattr(P, "_board", lambda: "guition_p4")
     assert P.prompt(cart) == ["Run its own machine code"]
     monkeypatch.setattr(P, "_board", lambda: "tdeck")
     assert P.prompt(cart) == ["Full access to the console"]

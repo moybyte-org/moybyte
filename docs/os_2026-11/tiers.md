@@ -21,11 +21,20 @@ S3s get none: their C tier runs at the kernel's own trust level, with the crash
 record and the strike ledger as its floor.
 
 **The consent (owner, 2026-11-08).** The permission is `full_access`. On the
-S3s, as built, its install prompt line is "Full access to the console", the
-truth for a module at the kernel's trust. The plan for the P4s is the line
-"Run its own machine code" once U-mode isolation lands, since a confined
-module cannot reach the rest of the console; `app_perms.FULL_ACCESS_LINES` is
-where a board's line goes, and until then every board says the S3s'.
+S3s its install prompt line is "Full access to the console", the truth for a
+module at the kernel's trust. On the P4s it is "Run its own machine code",
+since a confined module cannot reach the rest of the console;
+`app_perms.FULL_ACCESS_LINES` is where a board's line goes.
+
+**As built (2026-11-08):** a module's code, its constructors and every hook
+run in U-mode on its own threads; its memory is one block (the loader's
+segment behind a gate the SDK's unchanged stubs call through) plus its
+threads' stacks and its mappings, each a 128-aligned PMP window; every row
+checks its pointers against them by its rule in the ordinal source; and any
+fault ends that process alone with a fault record. No ESP-IDF file is
+patched: the vectors are the kernel's own per core. How it works is
+`native/moy_elf/README.md` ("Isolation") and `native/moy_elf/moy_umode.h`; its
+costs are #227's.
 
 - **Process model.** A command is `main(argc, argv)` over the POSIX rows,
   as a WASI command is its `_start` (§3); a service is `main` too, a loop

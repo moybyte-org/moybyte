@@ -96,4 +96,18 @@ target_include_directories(usermod_moy_elf INTERFACE
 # harmless: nothing else in the tree reads a CONFIG_ELF_ name.
 target_compile_definitions(usermod_moy_elf INTERFACE ${MOY_ELF_DEFS})
 target_link_libraries(usermod_moy_elf INTERFACE moy_elf_loader)
+
+# The P4s run a module in RISC-V U-mode (moy_umode.h): the trap side, the
+# windows, each row's argument rule, the boot PMP layout, and the link's two
+# wraps -- the loader's executable allocation as a module's block.
+if(CONFIG_IDF_TARGET_ESP32P4)
+    target_sources(usermod_moy_elf INTERFACE
+        ${CMAKE_CURRENT_LIST_DIR}/moy_umode.c
+        ${CMAKE_CURRENT_LIST_DIR}/moy_umode.S
+        ${CMAKE_CURRENT_LIST_DIR}/moy_os_check.c
+    )
+    target_compile_definitions(usermod_moy_elf INTERFACE MOY_OS_UMODE=1)
+    target_link_options(usermod_moy_elf INTERFACE
+        "-Wl,--wrap=esp_elf_malloc" "-Wl,--wrap=esp_elf_free")
+endif()
 target_link_libraries(usermod INTERFACE usermod_moy_elf)

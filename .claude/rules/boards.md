@@ -289,6 +289,22 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `moybyte_patch_p4_dsi_underrun` and `patches/p4_ppa_srm_mb_order_bypass.patch`
   (the SRM deadlock a rotate with a sub-FIFO last unit hits) behind
   `moybyte_patch_p4_ppa_srm_mb_order`. Status and numbers: #58, #202.
+- **A native module runs in U-mode on a P4, and the boot PMP layout and the
+  vectors are the kernel's** (`native/moy_elf/moy_umode.h`): both P4 boards
+  build with `CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n` and
+  `moy_u_layout` writes each core's PMP at start (IDF's PMA table as it is,
+  the ROM locked in entry 15, nothing else locked: a locked entry binds U-mode
+  too, and a P4 lock holds until reset, so the bootloader's own on core 0
+  could never be undone). A board whose bootloader predates that (an OTA
+  keeps the bootloader) refuses every module; a cable flash fixes it. The
+  first module's load points both cores' `mtvt` and `mtvec` at
+  `moy_umode.S`'s stubs, which hand every M-mode trap on to IDF's handler for
+  its line. No IDF file is patched for it. A change to `vectors_clic.S`'s
+  table (an IDF bump) makes every module refuse to load until the stubs
+  follow it (`u_mtvt_want`). Kernel code inside a trap runs only after
+  `moy_u_close`'s `mret`: an exception taken before the trap's `mret` (the
+  lazy FPU enable is one) locks the core up with no panic, and the interrupt
+  watchdog's reset is all that shows.
 - **`moy_dsi` scans, it does not push**: DPI mode reads a PSRAM framebuffer
   continuously, so there is no per-frame flush (the P4 boards deny
   `moy_flush`). SD power, the C6's SDMMC slot, the 200 MHz PSRAM floor and the

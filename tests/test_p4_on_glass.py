@@ -476,6 +476,10 @@ def test_elf_commands_run_in_the_shell(board):
     on_glass.elf_commands_run(board, WASM_BOARD_DIR)
 
 
+def test_elf_modules_run_isolated_in_u_mode(board):
+    on_glass.elf_umode_isolates(board, WASM_BOARD_DIR)
+
+
 def test_pkg_installs_a_cart_from_the_carts_repo(board):
     on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
 

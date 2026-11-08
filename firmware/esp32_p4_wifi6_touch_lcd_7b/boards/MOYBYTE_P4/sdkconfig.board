@@ -192,3 +192,10 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
 # NTP (native/moy_net/moy_wifi.c) asks the moment the station has an address:
 # a handshake waits for that answer, so lwIP's random first delay is off.
 CONFIG_LWIP_SNTP_STARTUP_DELAY=n
+
+# --- the PMP is the kernel's -------------------------------------------------
+# A native module runs in U-mode under the PMP layout moy_umode.c writes on
+# each core at start (native/moy_elf/README.md, "Isolation"). This option
+# would have the bootloader lock IDF's layout on core 0 first, and a P4 lock
+# holds until reset (no Smepmp); the app call it gates is replaced too.
+CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n

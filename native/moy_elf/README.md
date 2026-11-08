@@ -2,7 +2,8 @@
 
 A native app or command is an ELF module per chip, built with the SDK
 (`sdk/README.md`) against the OS table and installed on the user's consent to
-"Full access to the console". The design and the owner's decisions are
+`full_access` ("Full access to the console" on an S3, "Run its own machine
+code" on a P4, where it runs isolated). The design and the owner's decisions are
 `docs/os_2026-11/tiers.md` §1; this file is the map of the code and the
 decisions the code rests on.
 
@@ -12,6 +13,8 @@ decisions the code rests on.
 | `moy_os_table.h`, `moy_os_rows.h`, `moy_os_table.c` | generated from it (`tools/gen_os_table.py`): the row enum, the kernel's prototypes, the table, its retired rows' typed stubs, and the body of each app call (below) |
 | `moy_os.h`, `moy_os.c` | the process model and every row's body |
 | `moy_elf.h`, `moy_elf_check.c` | the verdict a module passes before it is relocated |
+| `moy_umode.h`, `moy_umode.c`, `moy_umode.S` | the P4s' isolation: the boot PMP layout, the trap side, the windows |
+| `moy_os_check.c` | generated from `os_table.json`'s `u`: each row's argument rule, checked before a U-mode call runs |
 | `modmoy_elf.c` | the boards' binding (`moy_elf`): store file to PSRAM, signature, verdict, relocation |
 | `elf_loader/` | Espressif's loader, vendored and patched (`UPSTREAM.md`) |
 | `runtime/host/moyhost_elf.c` | the host's loader: a host module through the dynamic loader, under the same C |
@@ -113,6 +116,61 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
   the task that serves its session, and `runtime/run/elf_run.py` holds the
   WiFi for it until the last such process ends. The `network` permission
   reaches the kernel as the run's `MOY_OS_NET` flag (`runtime/shell/sh_door.py`).
+
+## Isolation (the P4s)
+
+How the P4s isolate a module (owner, 2026-11-07, `docs/os_2026-11/tiers.md`
+section 1). `moy_umode.h`'s header is the authority on the PMP layout and the
+traps; what the rest rests on:
+
+- **One block a module.** The loader's one segment allocation is the block
+  (`-Wl,--wrap=esp_elf_malloc` in `modmoy_elf.c`): 128-aligned, the gate
+  first, then the module's text RX and its data RW, split at the first
+  128-byte line of its data segment. A module whose text and data share a line
+  is refused. The gate is the U-mode table the SDK's stubs call through (the
+  S3's layout, so one SDK serves both chips), each row a stub that makes the
+  ecall with its ordinal in t0, and the stub a hook returns through.
+- **Everything else the process has is an extent**: each thread's U stack
+  (its errno, its last `readdir` entry and, on the first thread,
+  argv and the environment at the top), each mapping (128-aligned, a block of
+  its own: the SDK's heap arenas are mappings), `getaddrinfo`'s answer. A row
+  hands back nothing in kernel memory.
+- **A row's arguments are checked by the row's rule** (`os_table.json`'s `u`;
+  `tools/gen_os_table.py` refuses a pointer parameter without one) against
+  the calling thread's process before the row runs. A pointer outside it ends
+  the process, as does an ecall past the table.
+- **The module's code runs on the process's threads in U-mode**, BIND alone
+  on the loading task (its fault refuses the module); the constructors run on
+  the first thread before `main`. A service's wait (`moy_evq_wait`, inside
+  `poll`) is kernel code: a row, so its thread parks in M-mode on its kernel
+  stack.
+- **A fault ends the process where it stands**: the record (`moy_os_faults`,
+  `moy_elf.faults()`) names the process, the cause and the module's own
+  address, the log and a command's stderr say it, and the code is 128 + the
+  signal a POSIX shell names (SIGSEGV for memory, SIGILL, SIGBUS, SIGTRAP,
+  SIGSYS for no such row). Its other threads park at their next way into
+  U-mode (a tick at most), and `proc_end` frees once every thread is parked or
+  deleted. Memory an extent lets go while another thread may be in a row, or
+  on another core, is freed at the process's end.
+- **No ESP-IDF file is patched.** The vectors are ours per core once a module
+  loads (`moy_u_ready`): a trap from M-mode goes on to IDF's handler for its
+  line, one from U-mode reaches IDF as an interrupt of M-mode code on the
+  thread's kernel stack, so FreeRTOS never switches a U-mode context. The
+  stubs' targets are `vectors_clic.S`'s; a build whose `_mtvt_table` names
+  others refuses every module.
+- **The PMP is the kernel's from reset.** The P4 boards build with
+  `CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n` (their `sdkconfig.board`;
+  `moy_umode.c` refuses to build otherwise) and `moy_u_layout` writes each
+  core's layout at start. With the option on, the bootloader locks IDF's
+  layout on core 0, a P4 lock holds until reset (no Smepmp), and those entries
+  would open the CPU's peripherals to U-mode; ESP-IDF 6.2 takes the same step
+  for the same reason. A board whose bootloader predates the change (an OTA
+  never rewrites it) refuses every module until a cable flash.
+- **A trap is closed with `mret` before kernel code runs in it**
+  (`moy_u_close`): the P4's core locks up, with no panic, on an exception
+  taken before the one being handled has had its `mret`. A row, a fault's
+  ending and the way back to the caller all run after one; the lazy FPU
+  enable (IDF's illegal-instruction trap) is the exception that finds it.
 
 ## Signing
 
