@@ -107,9 +107,10 @@ def test_its_app_calls_are_answered_on_the_vms_task(svc):
     notifications.NOTES.reset()
     pid = S.start_cart(ws, cart, s)
     assert _polled(s, lambda: moy_evq.send(peer, "elf.svc", "note", "[]")[0] == 1)
-    assert _polled(s, lambda: moy_evq.queued(peer) == 1)
+    # both answers: the poll that serves the notification may serve the
+    # service_running call after it before this side looks
+    assert _polled(s, lambda: moy_evq.queued(peer) == 2)
     assert moy_evq.take(peer) == (pid, "elf.svc", "noted", "[1]")
-    assert _polled(s, lambda: moy_evq.queued(peer) == 1)
     # its own app declares no service: a `type: service` cart's call is ABSENT
     assert moy_evq.take(peer) == (pid, "elf.svc", "owned", '["absent"]')
     n = [n for n in notifications.NOTES.list if n.summary == "Hello"]
