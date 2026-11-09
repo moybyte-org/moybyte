@@ -446,8 +446,9 @@ def hardware(board_dir):
     None for a target with no table (the browser). Raises ValueError for a
     table that breaks a rule: an unknown chip or class, a pin outside the
     chip or in two places, a pin of the chip in none, an `os` or `never` row
-    without its why, a `class` row naming no known device API, or a `lease`
-    row holding a strapping, flash, PSRAM or USB pad."""
+    without its why, a `class` row naming no known device API, a `lease`
+    row holding a strapping, flash, PSRAM or USB pad, or a unit `lease` row
+    naming a unit an `os` or `class` row drives or the flash's SPI host."""
     hw = load(board_dir).get("hardware")
     if hw is None:
         return None
@@ -491,6 +492,15 @@ def hardware(board_dir):
             if not bus or not set(r["pins"]) <= set(bus[0]["pins"]):
                 raise ValueError("%s: the lease row %s rides %r, which must be a "
                                  "lease row holding its pins" % (where, r["name"], r["bus"]))
+            # A unit the OS drives is never leased: the T-Deck's SPI2 carries
+            # its panel and card, and a leased host would take the bus from them.
+            own = [b["class"] for b in rows if b["name"] == r["name"] and b["class"] != "lease"]
+            if own:
+                raise ValueError("%s: the lease row %s is a unit an %s row drives"
+                                 % (where, r["name"], own[0]))
+            if _lease_kind(r["name"]) == "spi" and int(r["name"][3:]) < 2:
+                raise ValueError("%s: the lease row %s is the flash's SPI host"
+                                 % (where, r["name"]))
     for pin, names in sorted(seen.items()):
         if pin not in chip["gpio"]:
             raise ValueError("%s: GPIO%s is not a pad of %s"

@@ -1130,6 +1130,11 @@ _GPIO_ROW = ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npin
      "holding its pins"),
     ('name = "uart1"\nclass = "lease"\nbus = "nope"\npins = {tx = 1, rx = 2}\n',
      "holding its pins"),
+    ('name = "spi2"\nclass = "os"\nwhy = "the panel"\npins = []\n'
+     '[[hardware.resource]]\nname = "spi2"\nclass = "lease"\nbus = "gpio"\n'
+     'pins = {sck = 1, mosi = 2, miso = 21}\n', "a unit an os row drives"),
+    ('name = "spi1"\nclass = "lease"\nbus = "gpio"\npins = {sck = 1, mosi = 2, miso = 21}\n',
+     "the flash's SPI host"),
 ])
 def test_a_unit_lease_row_rides_the_gpio_row_and_names_its_pins(tmp_path, row, says):
     with pytest.raises(ValueError, match=says):
