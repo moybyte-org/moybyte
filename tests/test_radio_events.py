@@ -169,6 +169,25 @@ def test_the_router_lives_while_somebody_waits(table, sched):
     assert moybyte.WAKES.radio is None
 
 
+def test_a_queue_that_listens_keeps_the_router_and_hears_the_change(table, sched):
+    """A process with no Python wake that listens on "net" on its own queue
+    (a compiled app's moybyte_on, runtime/shell/shell_servers.py's
+    ConsoleCalls) keeps the router while it listens and hears each change as
+    the system's message; its end drops the router."""
+    from runtime import moy_evq
+    pid = L.spawn("t.compiled")
+    assert moy_evq.open(pid, "t.compiled", "", False) == moy_evq.OK
+    assert moy_evq.listen(pid, "net", True) == moy_evq.OK
+    moybyte.WAKES.radio_sync()
+    assert moybyte.WAKES.radio is not None
+    table.radio(NET, True)
+    _frame(sched)
+    frm, _app, name, args = moy_evq.take(pid)
+    assert (name, args) == ("net", "[true, 0]") and frm <= moybyte.SHELL
+    moybyte.end(pid)
+    assert moybyte.WAKES.radio is None
+
+
 def test_a_new_table_takes_the_router_along(table, sched):
     pid = L.spawn("t.net")
     heard = []

@@ -528,7 +528,10 @@ moybyte.at(time.time() + 4 * 60, ring)
 `moybyte.on("net", fn)` hears WiFi come and go as `fn("system", up, why)`,
 and `"ble"` the BLE host, `why` what took it down (0 when it was put down
 or came up). A Python service and a Lua service hear them alike
-(`docs/os_2026-11/between_apps.md` §4).
+(`docs/os_2026-11/between_apps.md` §4), and so does a compiled app that
+listens with `moybyte_on("net", 1)`: its record's arguments are `[up, why]`.
+The multiplayer `net` and `on_net` are a game's (moy-spec's netplay), not
+these events.
 
 **Achievements.** A game declares its badges and tells the console when it
 earns one; the console keeps them, shows the unlock banner ("Harpoon Pop:

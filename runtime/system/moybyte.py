@@ -390,9 +390,10 @@ class Wakes:
         return out
 
     def radio_sync(self):
-        """The router made while a process waits on "net" or "ble" or
+        """The router made while a process waits on "net" or "ble" (a wake
+        of Python's, or a listen on its queue: a compiled app's) or
         `radio_keep` is set, and dropped once neither holds."""
-        want = self.radio_keep
+        want = self.radio_keep or _E.listening("net") > 0 or _E.listening("ble") > 0
         if not want:
             for w in self.mail:
                 if w[_MS] == "net" or w[_MS] == "ble":
@@ -481,6 +482,8 @@ class Wakes:
             _E.forget(pid)
             if self.queued and not _E.ready():
                 self.queued = 0         # what was queued was the ended process's
+            if self.radio is not None:
+                self.radio_sync()
         if self.ended is not None:
             self.ended(pid)
 

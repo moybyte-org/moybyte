@@ -735,6 +735,8 @@ class ConsoleCalls:
         if pid is None:
             return _DOOR_STALE
         rc = _E.listen(pid, name, bool(on))
+        if name in _moybyte.RADIO.values():
+            _moybyte.WAKES.radio_sync()     # the radios' router, while one listens
         return 0 if rc == _E.OK else _DOOR_FULL if rc == _E.FULL else _DOOR_STALE
 
     def at(self, g, t):
