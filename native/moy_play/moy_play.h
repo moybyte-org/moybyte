@@ -421,10 +421,19 @@ bool moy_play_front_live(void);
 // One loop frame of the run in front, `dt_us` since the last: 1 drew, 0 did
 // not, -1 the front gave the frame back (the run ended, or needs the console).
 int moy_play_front_frame(uint32_t now, uint32_t dt_us);
-// End the run in front (the dev channel's `end`, a Ctrl-C): false with none.
+// End the run in front (the dev channel's `end`, a Ctrl-C), or release a
+// stopped run's panel: false with neither.
 bool moy_play_front_end(int why);
-// `state` while a run is in front: the kernel's JSON object (the shell's
-// screen is the run's), or "null" with none in front. The bytes written.
+// The panel a run the kernel stopped the VM for leaves when its load is
+// refused or it raises (moy_play_stop.c): `run`, ended, holds it up showing
+// `text`; 0 takes it down. While it is up
+// the VM stays down: the dev channel's `end` and `state` reach it as they
+// reach a run in front, and moy_play_front_end releases it.
+void moy_play_panel(uint32_t run, const char *text);
+bool moy_play_panel_up(void);
+// `state` while a run is in front or a stopped run's panel is up: the
+// kernel's JSON object (the shell's screen is the run's, or "panel"), or
+// "null" with neither. The bytes written.
 size_t moy_play_state_json(char *out, size_t n);
 // A Ctrl-C is waiting for the VM (the board's: weak, none elsewhere).
 bool moy_play_interrupt_pending(void) __attribute__((weak));

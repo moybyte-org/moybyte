@@ -35,6 +35,9 @@ so this is what it finds.
                    the kernel loop's half of a run in front (a board's loop
                    calls the C), over a buffer standing in for a compositor.
                    Host only.
+  panel(run, text), panel_up
+                   the panel a stopped run leaves (a board's moy_play_stop.c
+                   holds it), which front_end releases. Host only.
 """
 
 from __future__ import annotations
@@ -724,8 +727,24 @@ def front_end(why):
     return bool(d.moy_play_front_end(int(why)))
 
 
+def panel(run, text=None):
+    """moy_play_panel: a stopped run's panel up for `run` (ended) showing
+    `text`, as moy_play_stop.c holds it while the VM is down; 0 takes it down."""
+    d, _ = _play()
+    d.moy_play_panel.argtypes = [_U32, ctypes.c_char_p]
+    d.moy_play_panel.restype = None
+    d.moy_play_panel(int(run), None if text is None else text.encode())
+
+
+def panel_up():
+    d, _ = _play()
+    d.moy_play_panel_up.restype = ctypes.c_bool
+    return bool(d.moy_play_panel_up())
+
+
 def state_json():
-    """The kernel's `state` answer while a run is in front, as text."""
+    """The kernel's `state` answer while a run is in front or a stopped run's
+    panel is up, as text."""
     d, _ = _play()
     out = ctypes.create_string_buffer(1024)
     d.moy_play_state_json.argtypes = [ctypes.c_char_p, ctypes.c_size_t]

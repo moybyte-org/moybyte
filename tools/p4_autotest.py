@@ -640,11 +640,13 @@ class P4Board:
         st = self.state()
         if not st.get("cart"):
             return
-        if st.get("front"):
-            # A run the kernel drives (native/moy_play's front): its `state`
-            # is the kernel's, which knows no desk, and the console's frame is
-            # not running to take `ws.exit()`. The kernel's `end` closes it
-            # the way the hold does; a windowed tier gets its desk back.
+        if st.get("front") or st.get("screen") == "panel":
+            # A run the kernel drives (native/moy_play's front), or the panel
+            # a run the VM stopped for left with the VM still down: its
+            # `state` is the kernel's, which knows no desk, and the console's
+            # frame is not running to take `ws.exit()`. The kernel's `end`
+            # closes it the way the hold does; a windowed tier gets its desk
+            # back.
             self.cmd("end", wait_for="REMOTE")
             st = self._settle(lambda s: not s.get("cart"), settle)
             if st.get("desk") is False:

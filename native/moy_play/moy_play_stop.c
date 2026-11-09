@@ -28,8 +28,9 @@
 // buffer. The run is then the loop's foreground (moy_play_front) and the
 // kernel's loop steps until it ends: the hold, quit(), a Ctrl-C (SERIAL), the
 // dev channel's `end`. A refusal or a raise paints the chrome's panel and
-// waits for a press. pmem is written back (the store's crash-safe write) and
-// everything is closed before the next VM starts.
+// waits for a press, a Ctrl-C or `end` (moy_play_panel). pmem is written
+// back (the store's crash-safe write) and everything is closed before the
+// next VM starts.
 
 #include "py/mpconfig.h"
 
@@ -45,12 +46,14 @@
 #include "py/gc.h"
 #include "sdkconfig.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/sha256.h"
 
 #include "moy_cat.h"
 #include "moy_chrome.h"
+#include "moy_drivers.h"
 #include "moy_fs.h"
 #include "moy_input.h"
 #include "moy_json.h"
@@ -614,8 +617,13 @@ static bool k_map(void *ctx, int32_t *x, int32_t *y) {
 
 static const moy_front_ops_t K_FRONT = { k_canvas, k_present, k_map, NULL };
 
-// The panel a refusal or a raise leaves, until a press or a Ctrl-C.
-static void panel_wait(const char *title, const char *text, bool notice) {
+// The panel a refusal or a raise leaves (the run ended), until a press, a
+// Ctrl-C or the dev channel's `end` (moy_play_panel: `end` and `state` reach
+// it as they reach a run in front). With the VM down the kernel's table holds
+// the keys and buttons only: the trackball's click and a touch, which the VM's
+// loop puts there, are read from the board's drivers here, as the recovery
+// floor reads them.
+static void panel_wait(uint32_t run, const char *title, const char *text, bool notice) {
     int w, h;
     uint16_t *px = k_canvas(NULL, &w, &h);
     memset(px, 0, (size_t)w * (size_t)h * 2u);
@@ -623,22 +631,43 @@ static void panel_wait(const char *title, const char *text, bool notice) {
     moy_chrome_panel(&S->chrome, w, h, notice, title, text);
     moy_chrome_raster(&S->chrome, px, w, h, S->wire, 1);
     k_present(NULL, true);
+    moy_play_panel(run, text);
     moy_input_t *in = moy_input_kernel();
+    moy_ball_t *ball = NULL;
+    bool was = false, click = false;
+    bool has_ball = moy_input_board_ball(&ball, &was);
+    moy_touchdev_t *touch = NULL;
+    bool has_touch = moy_input_board_touch(&touch, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H)
+                     && touch->available;
     uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
     for (;;) {
         moy_loop_step();
-        if (moy_loop_board_serial()) {
-            return;
+        if (moy_loop_board_serial() || !moy_play_panel_up()) {
+            break;
         }
         uint32_t held = 0, pressed = 0;
         if (in != NULL) {
             moy_input_masks(in, MOY_INPUT_UNION, &held, &pressed);
         }
         uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-        if (now - t0 > 500u && (pressed || moy_input_last_key(in) != 0)) {
-            return;
+        bool tap = false;
+        if (has_ball) {
+            moy_input_board_ball(&ball, &click);
+            tap = click && !was;
+            was = click;
+        }
+        if (has_touch) {
+            moy_touch_pt_t pt;
+            moy_touchdev_poll(touch, (uint32_t)(esp_timer_get_time() / 1000)
+                              & (MOY_INPUT_TICKS_PERIOD - 1u), &pt);
+            tap |= pt.down && pt.edge;
+        }
+        if (now - t0 > 500u
+            && (pressed || tap || (in != NULL && moy_input_last_key(in) != 0))) {
+            break;
         }
     }
+    moy_play_panel(0, NULL);
 }
 
 // The palette's 64 panel words: libmoy's canonical RGB565, byte-swapped
@@ -802,7 +831,7 @@ void moy_play_stopped_run(void) {
             } else {
                 moy_chrome_crash_title(title, sizeof(title), S->err, 0);
             }
-            panel_wait(title, S->err, notice);
+            panel_wait(run, title, S->err, notice);
         }
     }
     // The exit's first moment, which the return start is measured from.

@@ -4979,8 +4979,8 @@ def wasm_init_trap_is_the_carts_own_error(board, board_dir, stopped=False):
     _init a second time or be refused by the session still open. Its written
     "inits" counts one more run. With `stopped`, the run is the S3s' with the VM down
     (`vmstop force`, native/moy_play/moy_play_stop.c), whose panel the board
-    prints as "STOP error:". The hello cart runs after it. Returns the
-    error."""
+    prints as "STOP error:" and the dev channel's `end` releases. The hello
+    cart runs after it. Returns the error."""
     import time
     path = _deep_init_push(board, board_dir)
     before = _deep_init_inits(board, path)
@@ -5003,9 +5003,12 @@ def wasm_init_trap_is_the_carts_own_error(board, board_dir, stopped=False):
                     board.drain(0.2)
             assert said is not None, "the stop never said its error"
             err = said.split("STOP error:", 1)[1].strip()
-            # the panel waits for a press; a Ctrl-C ends it and brings the VM back
-            board.ser.write(b"\x03")
-            board.ser.flush()
+            # the panel waits with the VM down; the kernel's `state` names it,
+            # and the dev channel's `end` releases it and brings the VM back
+            st = board.state()
+            assert st.get("screen") == "panel" and st.get("vm") is False, st
+            assert st["run"]["vm_down"] is True, st
+            board.cmd("end", wait_for="REMOTE end", retry=False)
             ended = _said_since(board, n0, "STOP 1/1 ended", 30)
             assert ended, "the run never ended"
             _desk_back(board)

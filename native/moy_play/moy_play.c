@@ -987,9 +987,27 @@ static int front_ended(int why) {
     return -1;
 }
 
+// The panel a run the kernel stopped the VM for leaves (moy_play_stop.c): the
+// run has ended, and the panel holds the VM down until it is released.
+static uint32_t s_panel;
+static char s_panel_text[96];
+
+void moy_play_panel(uint32_t run, const char *text) {
+    s_panel = run;
+    snprintf(s_panel_text, sizeof(s_panel_text), "%s", run != 0u && text != NULL ? text : "");
+}
+
+bool moy_play_panel_up(void) {
+    return s_panel != 0u;
+}
+
 bool moy_play_front_end(int why) {
     if (!moy_play_front_live()) {
-        return false;
+        if (s_panel == 0u) {
+            return false;
+        }
+        s_panel = 0;                    // its run ended before the panel went up
+        return true;
     }
     front_ended(why);
     return true;
@@ -1137,9 +1155,33 @@ static void ups(char *o, size_t n, size_t *pat, const uint32_t *u) {
     *pat = at;
 }
 
+// `state` while a stopped run's panel waits: the run's title and the panel's
+// words, with the VM as it is.
+static size_t panel_json(char *o, size_t n) {
+    size_t at = 0;
+    moy_play_info_t i;
+    if (moy_play_info(s_panel, &i) != MOY_PLAY_OK) {
+        PUT("null");
+        return at;
+    }
+    PUT("{\"screen\": \"panel\", \"front\": false, \"vm\": %s, \"cart\": ",
+        moy_loop_vm == NULL || moy_loop_vm() ? "true" : "false");
+    PUTS(i.title);
+    PUT(", \"cart_error\": ");
+    PUTS(s_panel_text);
+    PUT(", \"run\": {\"runtime\": ");
+    PUTS(i.runtime);
+    PUT(", \"stop\": \"%s\", \"vm_down\": %s, \"end_why\": %u}}",
+        moy_play_stop_name(i.stop_why), i.vm_down ? "true" : "false", (unsigned)i.end_why);
+    return at;
+}
+
 size_t moy_play_state_json(char *o, size_t n) {
     size_t at = 0;
     if (!moy_play_front_live()) {
+        if (s_panel != 0u) {
+            return panel_json(o, n);
+        }
         PUT("null");
         return at;
     }

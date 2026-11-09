@@ -201,15 +201,20 @@ static bool parse_u32(const char *s, uint32_t *out) {
 // hands them to the console) ---------------------------------------------------
 
 bool moy_play_front_live(void) __attribute__((weak));
+bool moy_play_panel_up(void) __attribute__((weak));
 bool moy_play_front_end(int why) __attribute__((weak));
 size_t moy_play_state_json(char *out, size_t n) __attribute__((weak));
 
+// A run in front, or the panel a stopped run left: either holds the frame,
+// and the run's words are the kernel's.
 static bool front(void) {
-    return moy_play_front_live != NULL && moy_play_front_live();
+    return (moy_play_front_live != NULL && moy_play_front_live())
+           || (moy_play_panel_up != NULL && moy_play_panel_up());
 }
 
 // `state` while a run is in front is the kernel's: the console's frame is not
 // running, and asking it would be a crossing in the very run being measured.
+// With a stopped run's panel up there is no VM to ask.
 static bool w_state(int argc, char **argv, const char *line) {
     (void)argc;
     (void)argv;
@@ -225,7 +230,8 @@ static bool w_state(int argc, char **argv, const char *line) {
     return true;
 }
 
-// `end`: the run in front ends (the console's next frame takes its route).
+// `end`: the run in front ends (the console's next frame takes its route), or
+// a stopped run's panel is released and the VM starts again.
 static bool w_end(int argc, char **argv, const char *line) {
     (void)argc;
     (void)argv;

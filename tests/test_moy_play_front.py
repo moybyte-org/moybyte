@@ -165,3 +165,50 @@ def test_a_canvas_the_run_does_not_draw_at_keeps_the_console_front(tmp_path):
         assert mp.front_frame(0, 33333) == -1
     finally:
         mp.front_ops(None, 0, 0)
+
+
+def test_a_stopped_runs_panel_answers_the_dev_channel_with_the_vm_down():
+    """A run the kernel stopped the VM for whose load was refused, or which
+    raised, ends and leaves a panel with the VM still down
+    (native/moy_play/moy_play_stop.c). The dev channel reaches that panel as
+    it reaches a run in front: `state` describes it and `end` releases it,
+    so the VM starts again. Before, both were the console's words, refused
+    with no VM, and the board stayed down until a key or a Ctrl-C."""
+    from runtime import moy_loop as L
+    try:
+        mp._play()
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
+    L.trace_init(20, True, 1000)
+    run = mp.launch(SEED, False)
+    assert run
+    mp.end(run, mp.END_CRASH)
+    text = "Doom needs 4,456 KB in one piece; 4,312 KB is free"
+    mp.panel(run, text)
+    L.vm(False)
+
+    def word(line, clock):
+        L.trace_feed(line)
+        L.trace_clock(clock)
+        L.trace_input(False, False)
+        assert L.step() == L.OK
+        return L.trace_log()
+
+    try:
+        assert mp.panel_up() and not mp.front_live()
+        log = word(b"state\n", 1000)
+        # (the trace writes a said line's spaces as underscores)
+        assert 'say[STATE_{"screen":_"panel"' in log, log
+        st = json.loads(mp.state_json())
+        assert st["screen"] == "panel" and st["front"] is False and st["vm"] is False, st
+        assert st["cart"] == "Bullet Storm" and st["cart_error"] == text, st
+        assert st["run"]["end_why"] == mp.END_CRASH, st
+        log = word(b"end\n", 1050)
+        assert "say[REMOTE_end]" in log, log
+        assert not mp.panel_up(), "the dev channel's end left the panel up"
+        assert json.loads(mp.state_json()) is None
+        log = word(b"end\n", 1100)
+        assert "say[REMOTE_?_end]" in log, "with nothing held, end is the console's word"
+    finally:
+        mp.panel(0)
+        L.vm(True)
