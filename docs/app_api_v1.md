@@ -137,11 +137,12 @@ choose by cost and reach, not by what is available:
 | work near the hardware, or one chip's full speed | a C program (ELF) | built per chip, and unsealed on the S3s (`full_access`, §6) |
 
 **What a service survives.** A service outlives its app's window on every
-tier. On the S3s a compiled game stops the VM, and every app's service is
-stopped before that and started again after it, whatever its tier, its
-timers fresh (`docs/os_2026-11/processes.md` §5). Work that must go on
-through a game, like music, belongs to a service of the console's own, which
-an app asks (`media`, §6). The P4s have no VM stop.
+tier. On the S3s a game that needs the whole board stops the VM. Python
+services pause: they are stopped before it and started again after it, a new
+process with fresh timers. Every Lua, wasm or C service keeps running: its pid
+and timers carry on and its messages to other services arrive, while a call
+that needs the console (a notification, a role the shell serves) waits until
+the game ends (`docs/os_2026-11/processes.md` §5). The P4s have no VM stop.
 
 ## 2. The manifest
 
