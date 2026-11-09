@@ -126,7 +126,7 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
     }
     const int32_t *snap = moycore_ui_snap(&tick, &serial);
     if (!s_live || serial != s_serial) {
-        moy_ui_api_reset(s_ctx);
+        moy_ui_api_reset_in(s_ctx, NULL);
         s_serial = serial;
         s_tick = tick - 1u;
         s_live = 1;

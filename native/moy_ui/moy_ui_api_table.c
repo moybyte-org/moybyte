@@ -61,7 +61,7 @@ static int row_draws(const moy_ui_ctx_t *c, moy_ui_box_t b) {
 // The part open (moy_ui_api_table_part) closes: its ids no longer scoped.
 static void part_out(moy_ui_ctx_t *c) {
     c->tp_open = 0;
-    mua_scope = 0;
+    c->scope = 0;
 }
 
 // The parts of the table drawn last are done: the fades at the edges its
@@ -93,37 +93,36 @@ void mua_parts_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 
 // -- blocks of fields an app sets through the engine (moy_ui_api_block_*) ------
 
-typedef struct {
+// An instance's blocks are MOY_UI_BLOCKS of these (PSRAM on a board),
+// taken at its first block set; its block_gen is one count for every block,
+// so a block taken anew sets its fields past any generation a part kept.
+struct mua_block {
     uint32_t id, gen, used;
     uint32_t v[MOY_UI_BLOCK_FIELDS];    // each field's value...
     uint32_t g[MOY_UI_BLOCK_FIELDS];    // ...and the generation that set it (0: unset)
-} block_t;
-static block_t *s_blocks;               // MOY_UI_BLOCKS of them, PSRAM on a board,
-                                        // taken at the first block set
-static uint32_t s_block_tick;
-static uint32_t s_block_gen;            // one count for every block: a block taken anew
-                                        // sets its fields past any generation a part kept
+};
+typedef struct mua_block block_t;
 
-// The block `id` names; with `make`, one taken for it (the free one, else
-// the one set longest ago) where none holds it. NULL where the blocks'
-// memory could not be had.
-static block_t *block_of(moy_ui_span_t id, int make) {
-    if (s_blocks == NULL) {
+// The block `id` names in instance I; with `make`, one taken for it (the
+// free one, else the one set longest ago) where none holds it. NULL where
+// the blocks' memory could not be had.
+static block_t *block_of(moy_ui_inst_t *I, moy_ui_span_t id, int make) {
+    if (I->blocks == NULL) {
         if (!make) {
             return NULL;
         }
-        s_blocks = (block_t *)KEPT_ALLOC(MOY_UI_BLOCKS * sizeof(block_t));
-        if (s_blocks == NULL) {
+        I->blocks = (block_t *)KEPT_ALLOC(MOY_UI_BLOCKS * sizeof(block_t));
+        if (I->blocks == NULL) {
             return NULL;
         }
-        memset(s_blocks, 0, MOY_UI_BLOCKS * sizeof(block_t));
+        memset(I->blocks, 0, MOY_UI_BLOCKS * sizeof(block_t));
     }
     uint32_t h = mua_hash(id.p, id.n, 0x626c6f63u) | 1u;
     block_t *take = NULL;
     for (int i = 0; i < MOY_UI_BLOCKS; i++) {
-        block_t *b = &s_blocks[i];
+        block_t *b = &I->blocks[i];
         if (b->id == h) {
-            b->used = ++s_block_tick;
+            b->used = ++I->block_tick;
             return b;
         }
         if (take == NULL || (take->id != 0 && (b->id == 0 || b->used < take->used))) {
@@ -135,15 +134,18 @@ static block_t *block_of(moy_ui_span_t id, int make) {
     }
     memset(take, 0, sizeof(*take));
     take->id = h;
-    take->used = ++s_block_tick;
+    take->used = ++I->block_tick;
     return take;
 }
 
-int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value) {
+int moy_ui_api_block_set(moy_ui_inst_t *I, moy_ui_span_t id, int field, uint32_t value) {
     if (field < 0 || field >= MOY_UI_BLOCK_FIELDS) {
         return 0;
     }
-    block_t *b = block_of(id, 1);
+    if (I == NULL) {
+        I = moy_ui_inst_main();
+    }
+    block_t *b = block_of(I, id, 1);
     if (b == NULL) {
         return 1;                       // (nothing kept: every set is a change)
     }
@@ -151,17 +153,17 @@ int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value) {
         return 0;
     }
     b->v[field] = value;
-    b->g[field] = b->gen = ++s_block_gen;
+    b->g[field] = b->gen = ++I->block_gen;
     return 1;
 }
 
-int32_t moy_ui_api_block_gen(moy_ui_span_t id) {
-    const block_t *b = block_of(id, 0);
+int32_t moy_ui_api_block_gen(moy_ui_inst_t *I, moy_ui_span_t id) {
+    const block_t *b = block_of(I != NULL ? I : moy_ui_inst_main(), id, 0);
     return b == NULL ? 0 : (int32_t)b->gen;
 }
 
-uint32_t moy_ui_api_block_since(moy_ui_span_t id, int32_t gen) {
-    const block_t *b = block_of(id, 0);
+uint32_t moy_ui_api_block_since(moy_ui_inst_t *I, moy_ui_span_t id, int32_t gen) {
+    const block_t *b = block_of(I != NULL ? I : moy_ui_inst_main(), id, 0);
     uint32_t m = 0;
     if (b == NULL) {
         return ~0u;                     // (no block: nothing is known of its fields)
@@ -174,8 +176,8 @@ uint32_t moy_ui_api_block_since(moy_ui_span_t id, int32_t gen) {
     return m;
 }
 
-int32_t moy_ui_api_block_key(moy_ui_span_t id) {
-    const block_t *b = block_of(id, 0);
+int32_t moy_ui_api_block_key(moy_ui_inst_t *I, moy_ui_span_t id) {
+    const block_t *b = block_of(I != NULL ? I : moy_ui_inst_main(), id, 0);
     if (b == NULL) {
         return 0;
     }
@@ -273,7 +275,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     int fresh = 0, opened_on = 0;
     if (!placed && !xa && c->page_new && c->n_nest == 0 && o->disabled != 1 && count > 0
         && cur > 0) {
-        uint32_t tid = mua_id_of(o, label);
+        uint32_t tid = mua_id_of(c, o, label);
         fresh = c->focus == tid || c->focus == 0;
         if (fresh) {
             opened_on = page_open_on(c, s, c->y, cap_h + head_h, rh,
@@ -302,7 +304,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             g.w[1] = (int16_t)(g.w[1] - d > 0 ? g.w[1] - d : 0);
         }
     }
-    uint32_t id = mua_id_of(o, label);
+    uint32_t id = mua_id_of(c, o, label);
     int disabled = o->disabled == 1;
     moy_ui_keep_t *kp = disabled || !placed ? NULL : mua_keep(c, id, 1);
     int carry = part && kp != NULL && !xa;
@@ -341,7 +343,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                    : STOP_KEEP_UD | (row <= 0 ? STOP_AT_TOP : 0)
                          | (row >= count - 1 ? STOP_AT_END : 0) | (placed ? 0 : STOP_ROWS);
     int st = disabled ? 0 : mua_stop(c, id, b, flags, mua_name_of(o, label));
-    if (carry && st >= 0 && mua_audit_on) {
+    if (carry && st >= 0 && c->inst->audit_on) {
         // where its rows end is the carried rows' record's, not its own
         moy_ui_span_t nm = mua_name_of(o, label);
         c->cur[c->n_cur - 1].sig = mua_hash(nm.p, nm.n, (uint32_t)(c->cur[c->n_cur - 1].flags
@@ -509,7 +511,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                            | (o->has_gen || carry ? MOY_UI_KD_GEN : 0)
                            | (xa ? MOY_UI_KD_X | MOY_UI_KD_BAD : 0)
                            | (g.pic && !part && !o->has_gen ? MOY_UI_KD_BAD : 0));
-        if (mua_audit_on) {
+        if (c->inst->audit_on) {
             moy_ui_stop_t *vs = &c->cur[c->n_cur - 1];
             for (int i = c->n_cur - 1; i >= 0; i--) {
                 if (c->cur[i].id == id && (c->cur[i].flags & STOP_PAGE)) {
@@ -554,11 +556,11 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                         }
                     }
                 }
-                if (mua_audit_on && !carry) {
+                if (c->inst->audit_on && !carry) {
                     const moy_ui_stop_t *pv = mua_page_of_keep(c->prev, c->n_prev, kp);
                     const moy_ui_stop_t *vs = mua_page_of_keep(c->cur, c->n_cur, kp);
                     if (pv == NULL || vs == NULL || pv->sig != vs->sig) {
-                        mua_audit_fail++;     // rows unlike the last frame's under one gen
+                        c->inst->audit_fail++;     // rows unlike the last frame's under one gen
                     }
                 }
             }
@@ -752,8 +754,8 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     }
     if (table_r) {
         mua_ground_due(c, s);
-        if (c->fl_lost && mua_audit_on) {
-            mua_audit_fail++;
+        if (c->fl_lost && c->inst->audit_on) {
+            c->inst->audit_fail++;
         }
         c->fl_stage = 2;
         c->pic_tbl = 1;
@@ -837,7 +839,7 @@ int32_t moy_ui_api_table_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int32_t o
         if (i - c->tp_v0 < 64) {
             c->tp_ans |= (uint64_t)1 << (i - c->tp_v0);
         }
-        mua_scope = mua_hash((const uint8_t *)&i, sizeof(i), c->tp_id);
+        c->scope = mua_hash((const uint8_t *)&i, sizeof(i), c->tp_id);
         out[0] = x;                     // the cell whole
         out[1] = y;
         out[2] = w;
@@ -873,7 +875,8 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
                   : 0;
     moy_ui_box_t b = mua_place(c, caph + (fh > h ? fh : h), &stacked);
     int disabled = o->disabled == 1;
-    int st = disabled ? 0 : mua_stop(c, mua_id_of(o, label), b, STOP_FIELD, mua_name_of(o, label));
+    int st = disabled ? 0
+                      : mua_stop(c, mua_id_of(c, o, label), b, STOP_FIELD, mua_name_of(o, label));
     int at = !disabled && st >= 0 ? c->n_cur - 1 : -1;
     if (st < 0) {
         st = 0;

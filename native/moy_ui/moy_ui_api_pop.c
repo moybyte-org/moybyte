@@ -497,7 +497,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     int st = 0, moved = 0;
     c->at_last = (uint8_t)!stacked;
     if (o->disabled != 1) {
-        st = mua_stop(c, mua_id_of(o, title), b, 0, mua_name_of(o, title));
+        st = mua_stop(c, mua_id_of(c, o, title), b, 0, mua_name_of(o, title));
         if (st >= 0) {
             // a blank card's picture is the engine's tile: the app draws none
             moved = mua_pic_note(c, o, c->card_blank < 0 && c->card_blank_glyph < 0);
@@ -621,7 +621,7 @@ int moy_ui_api_tool(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
     int stacked;
     moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
     int disabled = o->disabled == 1;
-    int st = disabled ? 0 : mua_stop(c, mua_id_of(o, word), b, 0, mua_name_of(o, word));
+    int st = disabled ? 0 : mua_stop(c, mua_id_of(c, o, word), b, 0, mua_name_of(o, word));
     if (st < 0) {
         st = 0;
     }

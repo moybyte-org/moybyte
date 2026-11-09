@@ -7,11 +7,13 @@
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
 // the Python face's bytearray per app, the run's one static): the focused id,
 // the stops the previous frame drew, each id's kept state (a page's scroll, a
-// list's row) and the layout cursor. A frame begins with moy_ui_api_begin,
-// which resolves the frame's input once over the previous frame's stops --
-// focus moves, activation, the pointer's press and drag, the page scroll that
-// keeps focus in view -- and every verb after it draws through a sink
-// (moy_ui.h) with the theme's marks: a stop's `focus=` and `on`.
+// list's row) and the layout cursor. A context is of an INSTANCE
+// (moy_ui_inst_t, below), what its frames share with its sibling contexts'.
+// A frame begins with moy_ui_api_begin, which resolves the frame's input
+// once over the previous frame's stops -- focus moves, activation, the
+// pointer's press and drag, the page scroll that keeps focus in view -- and
+// every verb after it draws through a sink (moy_ui.h) with the theme's
+// marks: a stop's `focus=` and `on`.
 //
 // An id is its label's FNV-1a hash, or the override's `id`; a page's is its
 // title's under a page salt. A verb's answer is its value: true the frame a
@@ -105,8 +107,8 @@ typedef struct {
 // slots they are kept under, the uses counted, the warm order's next step,
 // the parts it named this round (wn) and the table's rows it runs over
 // (r0 .. r1 showed, of rows, np parts each);
-// each slot's part key and last use (0: empty). The engine's one record,
-// taken at the first moy_ui_api_slots (moy_ui_api_kept.c's kept memory).
+// each slot's part key and last use (0: empty). An instance's one record,
+// taken at its first moy_ui_api_slots (moy_ui_api_kept.c's kept memory).
 #define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
 typedef struct {
     uint32_t tick;
@@ -280,6 +282,40 @@ typedef struct {
     int16_t y, h;
     uint8_t page;
 } moy_ui_cap_t;
+
+// An INSTANCE of the toolkit: what its frames write outside their contexts --
+// the kept rings and the faces (moy_ui_api_kept.c), the text views' rows,
+// breaks and records (moy_ui_text.c), the blocks of fields
+// (moy_ui_api_table.c) and the engine's counts. Each block is taken at its
+// first use (PSRAM where the board has it) and moy_ui_inst_free gives them
+// back. A context belongs to one instance (moy_ui_api_ctx_in): the shell,
+// its Python apps and the console's run share the main one
+// (moy_ui_inst_main), and a program that runs the toolkit on a task of its
+// own makes its own, so no two tasks' frames write the same bytes.
+//
+// An instance holds none of the theme: the looks, the shape, the depth, the
+// fonts and icons, the text view's word table and tones, the keycaps' input
+// and the cart-text boundary are the console's, written on its task between
+// its frames and read by every instance, so a theme change shows from the
+// next frame an instance begins.
+typedef struct moy_ui_inst {
+    struct mua_kept_mem *kept;      // the kept rings and the faces' record
+    uint32_t fc_owner, fc_ids;      // the context holding the faces' ticket, the last given
+    struct moy_ui_text_mem *text;   // the text views' rows, breaks and records
+    struct mua_block *blocks;       // MOY_UI_BLOCKS blocks of fields
+    uint32_t block_tick, block_gen;
+    uint32_t fades;                 // moy_ui_api_fades's count
+    uint32_t audit_on, audit_fail;  // moy_ui_api_audit's switch and failures
+} moy_ui_inst_t;
+
+// The main instance; an instance's size, for a face that owns it as bytes; a
+// fresh one over `I` (no blocks taken); and its blocks given back, every
+// context of it then to be reset before its next frame. A function here
+// that takes an instance takes NULL as the main one.
+moy_ui_inst_t *moy_ui_inst_main(void);
+size_t moy_ui_inst_size(void);
+void moy_ui_inst_init(moy_ui_inst_t *I);
+void moy_ui_inst_free(moy_ui_inst_t *I);
 
 typedef struct {
     uint32_t magic;
@@ -556,14 +592,25 @@ typedef struct {
     // The ticket of the engine's faces this context holds (moy_ui_api_slots;
     // 0: none), tp_np the parts a row of the table drawn last holds.
     uint32_t fc_id;
+    // The instance it belongs to; the scope a table part's ids hash under
+    // (0 outside a part); and whether the region closing draws no fade at
+    // its foot.
+    moy_ui_inst_t *inst;
+    uint32_t scope;
+    uint8_t no_foot;
 } moy_ui_ctx_t;
 
-// A context's size, for a face that owns it as bytes; and a fresh one.
+// A context's size, for a face that owns it as bytes; and a fresh one, of
+// instance I (moy_ui_api_reset: the instance it was of, the main one for
+// bytes that held no context).
 size_t moy_ui_api_size(void);
 void moy_ui_api_reset(moy_ui_ctx_t *c);
-// A context the bytes at `p` hold (resetting them the first time), or NULL
-// where `n` is short or `p` misaligned.
+void moy_ui_api_reset_in(moy_ui_ctx_t *c, moy_ui_inst_t *I);
+// A context the bytes at `p` hold (resetting them the first time, into
+// instance I; moy_ui_api_ctx: the main one), or NULL where `n` is short or
+// `p` misaligned.
 moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n);
+moy_ui_ctx_t *moy_ui_api_ctx_in(moy_ui_inst_t *I, void *p, size_t n);
 
 // A frame begins: `in` (MOY_UI_IN_LEN words, NULL none), the surface a page
 // fills, its flags (moy_ui.h's MOY_UI_DESK: the desk's rows, else the
@@ -616,8 +663,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // shown. Its content scrolls at most 32767 pixels: past that, the rows at
 // the end are cut.
 //
-// A view keeps a record by its id (moy_ui_text.h's MOY_UI_TEXT_VIEWS, every
-// context's views together, the least recently drawn given up first): the
+// A view keeps a record by its id (moy_ui_text.h's MOY_UI_TEXT_VIEWS, the
+// views of every context of an instance together, the least recently drawn
+// given up first): the
 // rows it drew, which it plans the next frame against, and where they lay,
 // which moy_ui_api_text_at reads. Its scroll is its region's, kept by the
 // context like every page's.
@@ -935,10 +983,14 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c);
 // ago, whose fields are then set past any generation a part kept.
 #define MOY_UI_BLOCKS 16
 #define MOY_UI_BLOCK_FIELDS 32
-int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value);  // 1 where it changed
-int32_t moy_ui_api_block_gen(moy_ui_span_t id);                  // its generation (0: not held)
-uint32_t moy_ui_api_block_since(moy_ui_span_t id, int32_t gen);  // the fields set after `gen`
-int32_t moy_ui_api_block_key(moy_ui_span_t id);                  // what its fields show, hashed (30 bits)
+// An instance's blocks (NULL: the main instance's).
+int moy_ui_api_block_set(moy_ui_inst_t *I, moy_ui_span_t id, int field,
+                         uint32_t value);                          // 1 where it changed
+int32_t moy_ui_api_block_gen(moy_ui_inst_t *I, moy_ui_span_t id);  // its generation (0: not held)
+uint32_t moy_ui_api_block_since(moy_ui_inst_t *I, moy_ui_span_t id,
+                                int32_t gen);                      // the fields set after `gen`
+int32_t moy_ui_api_block_key(moy_ui_inst_t *I,
+                             moy_ui_span_t id);  // what its fields show, hashed (30 bits)
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one; and over everything, the tooltip of a tool a resting
@@ -997,10 +1049,10 @@ int moy_ui_api_moving(const moy_ui_ctx_t *c);
 // no page lies there. A measuring tool's probe (tools/input_bench.py).
 int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y);
 // The fades drawn at the edges lists run on past (a page's foot, a scroll
-// region's, a cut popover body's, a table's), in every context since the
-// count was last reset; `reset` zeroes it after reading. The review kit's
-// net that a list with hidden rows says so.
-uint32_t moy_ui_api_fades(int reset);
+// region's, a cut popover body's, a table's), in every context of instance
+// I (NULL: the main one) since the count was last reset; `reset` zeroes it
+// after reading. The review kit's net that a list with hidden rows says so.
+uint32_t moy_ui_api_fades(moy_ui_inst_t *I, int reset);
 // out: x, y, w, h, state.
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]);
@@ -1278,7 +1330,8 @@ int moy_ui_api_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, i
 // is kept, and a shift frame whose stops differ from the last frame's
 // outside the floor, or that draws a stop outside R reaching into it with
 // the part of R it reaches not the floor's, counts a failure; answers the failures since the last
-// call and zeroes them (`on` -1 reads, leaving the switch as it is).
-uint32_t moy_ui_api_audit(int on);
+// call and zeroes them (`on` -1 reads, leaving the switch as it is); per
+// instance (NULL: the main one).
+uint32_t moy_ui_api_audit(moy_ui_inst_t *I, int on);
 
 #endif // MOY_UI_API_H

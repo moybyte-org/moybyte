@@ -2,9 +2,28 @@
 
 #include "moy_ui_api_int.h"
 
-// The salt of the ids drawn now: a part's (its table's and its row's) while
-// one is open (moy_ui_api_table_part), else none.
-uint32_t mua_scope;
+// The main instance (moy_ui_api.h): the shell's, its Python apps' and the
+// console's run's.
+static moy_ui_inst_t s_main;
+
+moy_ui_inst_t *moy_ui_inst_main(void) {
+    return &s_main;
+}
+
+size_t moy_ui_inst_size(void) {
+    return sizeof(moy_ui_inst_t);
+}
+
+void moy_ui_inst_init(moy_ui_inst_t *I) {
+    memset(I, 0, sizeof(*I));
+}
+
+void moy_ui_inst_free(moy_ui_inst_t *I) {
+    KEPT_FREE(I->kept);
+    KEPT_FREE(I->text);
+    KEPT_FREE(I->blocks);
+    moy_ui_inst_init(I);
+}
 
 uint32_t mua_hash(const uint8_t *p, size_t n, uint32_t salt) {
     uint32_t h = 2166136261u ^ salt;
@@ -214,11 +233,16 @@ size_t moy_ui_api_size(void) {
     return sizeof(moy_ui_ctx_t);
 }
 
-void moy_ui_api_reset(moy_ui_ctx_t *c) {
-    moy_ui_text_views_drop(c);
+void moy_ui_api_reset_in(moy_ui_ctx_t *c, moy_ui_inst_t *I) {
+    if (I == NULL) {
+        I = &s_main;
+    }
+    c->inst = I;
+    moy_ui_text_views_drop(I, c);
     mua_kept_drop(c);
     memset(c, 0, sizeof(*c));
     c->magic = MAGIC;
+    c->inst = I;
     c->fs = 1;
     c->page_keep = -1;
     c->page_stop = NO_PAGE;
@@ -228,15 +252,23 @@ void moy_ui_api_reset(moy_ui_ctx_t *c) {
     c->bar_chip_at = -1;
 }
 
-moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n) {
+void moy_ui_api_reset(moy_ui_ctx_t *c) {
+    moy_ui_api_reset_in(c, c->magic == MAGIC ? c->inst : NULL);
+}
+
+moy_ui_ctx_t *moy_ui_api_ctx_in(moy_ui_inst_t *I, void *p, size_t n) {
     if (p == NULL || n < sizeof(moy_ui_ctx_t) || ((uintptr_t)p & 3u) != 0u) {
         return NULL;
     }
     moy_ui_ctx_t *c = (moy_ui_ctx_t *)p;
     if (c->magic != MAGIC) {
-        moy_ui_api_reset(c);
+        moy_ui_api_reset_in(c, I);
     }
     return c;
+}
+
+moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n) {
+    return moy_ui_api_ctx_in(NULL, p, n);
 }
 
 // -- the previous frame's stops ------------------------------------------------------
@@ -863,7 +895,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->elsewhere = (uint8_t)((flags & MOY_UI_ELSEWHERE) ? 1 : 0);
     c->tp_id = 0;                       // the parts a last frame left open are done
     c->tp_open = 0;
-    mua_scope = 0;
+    c->scope = 0;
     if (c->elsewhere) {
         c->focus = 0;
     }
@@ -1473,8 +1505,6 @@ moy_ui_box_t mua_place(moy_ui_ctx_t *c, int h, int *stacked) {
 // so a pixel in the floor takes every draw over it in the order a whole
 // frame draws them, and a pixel of R outside it keeps what the move left.
 
-uint32_t mua_audit_on, mua_audit_fail;
-
 rc_t mua_rc_of(moy_ui_box_t b) {
     return (rc_t){b.x, b.y, b.x + b.w, b.y + b.h};
 }
@@ -2003,7 +2033,7 @@ static void reach_check(const moy_ui_ctx_t *c, int i) {
     const moy_ui_stop_t *s = &c->cur[i];
     // a dialog's rows frame: what lies outside its card is the page under
     // it, which the card covers where they meet
-    if (!mua_audit_on || !mua_armed(c) || c->fl_stage == 1 || (s->flags & STOP_PAGE)
+    if (!c->inst->audit_on || !mua_armed(c) || c->fl_stage == 1 || (s->flags & STOP_PAGE)
         || s->id == c->sh_id || c->sh_dlg) {
         return;
     }
@@ -2022,13 +2052,13 @@ static void reach_check(const moy_ui_ctx_t *c, int i) {
     }
     if ((c->fl_stage == 0 && !c->fl_early)
         || ((c->sh_dy || (s->st & MARKS) != was) && !mua_floor_holds(c, b))) {
-        mua_audit_fail++;
+        c->inst->audit_fail++;
     }
 }
 
 // The L8 record (tests only): what the stop just recorded draws, mixed in.
 void mua_sig_mix(moy_ui_ctx_t *c, const void *p, size_t n) {
-    if (mua_audit_on && c->n_cur > 0) {
+    if (c->inst->audit_on && c->n_cur > 0) {
         moy_ui_stop_t *s = &c->cur[c->n_cur - 1];
         s->sig = mua_hash((const uint8_t *)p, n, s->sig);
     }
@@ -2069,7 +2099,7 @@ int mua_stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_spa
     }
     s->st = 0;
     s->gen = 0;
-    s->sig = mua_audit_on ? mua_hash(name.p, name.n, (uint32_t)s->flags) : 0;
+    s->sig = c->inst->audit_on ? mua_hash(name.p, name.n, (uint32_t)s->flags) : 0;
     if (c->modal && !dlg) {
         reach_check(c, c->n_cur - 1);
         floor_check(c, c->n_cur - 1);
@@ -2155,8 +2185,9 @@ int mua_mark_flags(int st, const moy_ui_over_t *o) {
     return f;
 }
 
-uint32_t mua_id_of(const moy_ui_over_t *o, moy_ui_span_t label) {
-    return o->id.p != NULL ? mua_hash(o->id.p, o->id.n, mua_scope) : mua_hash(label.p, label.n, mua_scope);
+uint32_t mua_id_of(const moy_ui_ctx_t *c, const moy_ui_over_t *o, moy_ui_span_t label) {
+    return o->id.p != NULL ? mua_hash(o->id.p, o->id.n, c->scope)
+                           : mua_hash(label.p, label.n, c->scope);
 }
 
 moy_ui_span_t mua_name_of(const moy_ui_over_t *o, moy_ui_span_t label) {
@@ -2192,7 +2223,7 @@ void mua_vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int 
     clip_t k;
     int f = mua_mark_flags(st, o) | ((st & MOY_UI_ST_PRESSED) ? MOY_UI_F_PRESSED : 0);
     int danger = r->kind == MOY_UI_VROW_DANGER ? MOY_UI_F_HOT : 0;
-    if (mua_audit_on && c->n_cur > 0) {
+    if (c->inst->audit_on && c->n_cur > 0) {
         const moy_ui_box_t sb = c->cur[c->n_cur - 1].b;
         if (sb.x == b.x && sb.y == b.y && sb.w == b.w && sb.h == b.h) {
             int32_t w[5] = {kind, r->cur, r->v, r->lo, r->hi};
@@ -2589,7 +2620,7 @@ void mua_page_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
             }
         }
         mua_ground_due(c, s);
-        if (mua_audit_on && !c->fl_struct && !c->fl_mute) {
+        if (c->inst->audit_on && !c->fl_struct && !c->fl_mute) {
             for (int j = 0, k = 0; j < sn && k < c->fl_pn; j++, k++) {
                 const moy_ui_stop_t *a = &c->cur[s0 + j];
                 if (in_part(c, a)) {
@@ -2604,12 +2635,12 @@ void mua_page_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
                 }
                 const moy_ui_stop_t *q = &c->prev[c->fl_p0 + k];
                 if (a->sig != q->sig && !mua_floor_holds(c, a->b)) {
-                    mua_audit_fail++;
+                    c->inst->audit_fail++;
                 }
             }
         }
-        if (c->fl_lost && mua_audit_on) {
-            mua_audit_fail++;
+        if (c->fl_lost && c->inst->audit_on) {
+            c->inst->audit_fail++;
         }
         c->fl_stage = 2;
     }
@@ -2761,7 +2792,7 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     int stacked;
     moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
     int disabled = o->disabled == 1;
-    int st = disabled ? 0 : mua_stop(c, mua_id_of(o, label), b, 0, mua_name_of(o, label));
+    int st = disabled ? 0 : mua_stop(c, mua_id_of(c, o, label), b, 0, mua_name_of(o, label));
     if (st < 0) {
         st = 0;
     }
@@ -2793,7 +2824,7 @@ int moy_ui_api_toggle(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     o = mua_over(o);
     int stacked;
     moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
-    int st = mua_vrow_stop(c, mua_id_of(o, label), b, 0, o, label);
+    int st = mua_vrow_stop(c, mua_id_of(c, o, label), b, 0, o, label);
     on = on ? 1 : 0;
     if (st & MOY_UI_ST_ACTIVATED) {
         on = !on;
@@ -2815,7 +2846,7 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     int stacked;
     moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
-    uint32_t id = mua_id_of(o, label);
+    uint32_t id = mua_id_of(c, o, label);
     int st = mua_vrow_stop(c, id, b, STOP_KEEP_LR, o, label);
     if ((st & MOY_UI_ST_FOCUS) && c->step_x) {
         v += c->step_x;
@@ -2897,7 +2928,7 @@ int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_s
     }
     int stacked;
     moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
-    int st = kind == MOY_UI_V_LINK ? mua_vrow_stop(c, mua_id_of(o, label), b, 0, o, label) : 0;
+    int st = kind == MOY_UI_V_LINK ? mua_vrow_stop(c, mua_id_of(c, o, label), b, 0, o, label) : 0;
     moy_ui_vrow_t r;
     mua_vrow_init(c, &r, label);
     r.value = value;
@@ -2927,7 +2958,7 @@ int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy
     }
     int stacked;
     moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
-    int st = mua_vrow_stop(c, mua_id_of(o, label), b, STOP_KEEP_LR, o, label);
+    int st = mua_vrow_stop(c, mua_id_of(c, o, label), b, STOP_KEEP_LR, o, label);
     moy_ui_vrow_t r;
     mua_vrow_init(c, &r, label);
     r.n = (int16_t)n;
@@ -3077,7 +3108,7 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
     }
     int stacked;
     moy_ui_box_t b = mua_place(c, (count ? count : 1) * rh, &stacked);
-    uint32_t id = mua_id_of(o, label);
+    uint32_t id = mua_id_of(c, o, label);
     int disabled = o->disabled == 1;
     moy_ui_keep_t *kp = disabled ? NULL : mua_keep(c, id, 1);
     int row = kp != NULL ? kp->a : 0;
@@ -3695,12 +3726,13 @@ void mua_nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int u
 // A list's edges in view `v`: where rows `rows` high scrolled by `scroll`
 // run on below it, a fade over its last `h` pixels toward colour `ci`;
 // with `head`, where rows are scrolled off above it, one over its first.
-static uint32_t s_fades;
-
-uint32_t moy_ui_api_fades(int reset) {
-    uint32_t n = s_fades;
+uint32_t moy_ui_api_fades(moy_ui_inst_t *I, int reset) {
+    if (I == NULL) {
+        I = &s_main;
+    }
+    uint32_t n = I->fades;
     if (reset) {
-        s_fades = 0;
+        I->fades = 0;
     }
     return n;
 }
@@ -3716,14 +3748,14 @@ void mua_edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int
         EACH_PIECE(c, k, s, b) {
             moy_ui_fade(s, b, ci, 0, c->fs, mua_ground_of(c));
         }
-        s_fades++;
+        c->inst->fades++;
     }
     if (head && scroll > 0) {
         moy_ui_box_t b = {v.x, v.y, v.w, (int16_t)h};
         EACH_PIECE(c, k, s, b) {
             moy_ui_fade(s, b, ci, 1, c->fs, mua_ground_of(c));
         }
-        s_fades++;
+        c->inst->fades++;
     }
 }
 
@@ -3741,11 +3773,10 @@ void mua_thumb(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows
 // The page's (or a scroll region's) edges, its groups closed: where its rows
 // run on below what shows, a fade over its last FADE_H rows of the scale,
 // and where they are scrolled off above it, one over its first.
-int mua_no_foot;               // the region closing draws no fade at its foot
 
 void mua_foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     moy_ui_keep_t *k = mua_page_keep(c);
-    if (k != NULL && !mua_no_foot) {
+    if (k != NULL && !c->no_foot) {
         mua_edge_fades(c, s, c->page, k->b, c->scroll, MOY_UI_DEFAULT, 0, FADE_H * c->fs);
     }
 }
@@ -3762,7 +3793,7 @@ int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
         // a thumb where the region never shifts: one under the app's gen
         // shifts its rows on a shift frame, and the thumb is no row
         moy_ui_keep_t *kk = mua_page_keep(c);
-        if (kk != NULL && !mua_no_foot && !(kk->kd & MOY_UI_KD_GEN)) {
+        if (kk != NULL && !c->no_foot && !(kk->kd & MOY_UI_KD_GEN)) {
             mua_thumb(c, s, c->page, kk->b, c->scroll);
         }
     } else if (kind == 3 && mua_page_keep(c) != NULL) {

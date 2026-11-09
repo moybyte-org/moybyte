@@ -148,17 +148,20 @@ typedef struct {
     int32_t line[MOY_UI_TEXT_ROWS], ca[MOY_UI_TEXT_ROWS], cb[MOY_UI_TEXT_ROWS];
     moy_ui_text_t t;
 } moy_ui_tview_t;
+// The records, the rows and the breaks are an instance's (moy_ui_api.h's
+// moy_ui_inst_t, NULL the main one), in one block taken at its first use.
+typedef struct moy_ui_inst moy_ui_inst_t;
 // Owner `owner`'s view `id`, or NULL where it keeps none; with `make`, the
 // least recently drawn record taken for it where it has none (forgotten:
 // its next frame draws whole). NULL where no memory could be had.
-moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make);
+moy_ui_tview_t *moy_ui_text_view_of(moy_ui_inst_t *I, const void *owner, uint32_t id, int make);
 // Every view `owner` keeps, forgotten.
-void moy_ui_text_views_drop(const void *owner);
+void moy_ui_text_views_drop(moy_ui_inst_t *I, const void *owner);
 // The rows one draw lays out (MOY_UI_TEXT_ROWS) and a wrapped line's breaks
-// (MOY_UI_TEXT_BREAKS), shared by every face, one view drawing at a time:
-// taken at first use, NULL where no memory could be had.
-moy_ui_trow_t *moy_ui_text_scratch(void);
-uint32_t *moy_ui_text_breaks(void);
+// (MOY_UI_TEXT_BREAKS), shared by the instance's contexts, one view drawing
+// at a time: NULL where no memory could be had.
+moy_ui_trow_t *moy_ui_text_scratch(moy_ui_inst_t *I);
+uint32_t *moy_ui_text_breaks(moy_ui_inst_t *I);
 
 
 // Forget the record: the next frame draws whole.

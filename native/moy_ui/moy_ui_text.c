@@ -7,6 +7,7 @@
 #include "moy_gfx_kernels.h"
 #include "moy_shape.h"
 #include "moy_ui_tables.h"
+#include "moy_ui_api.h"
 #include "moy_ui_text.h"
 
 #if __has_include("esp_heap_caps.h")
@@ -28,12 +29,20 @@
 #define WORD_MAX 160
 #define WORD_SLOTS 256
 
-// What the views share -- the rows one draw lays out, a wrapped line's
-// breaks and the word table -- in one block taken at first use (PSRAM where
-// the board has it): a static would hold it in internal SRAM from boot.
-typedef struct {
+// An instance's views (moy_ui_api.h's moy_ui_inst_t): the rows one draw
+// lays out, a wrapped line's breaks and the views' records, in one block
+// taken at the instance's first view (PSRAM where the board has it): a
+// static would hold it in internal SRAM from boot.
+struct moy_ui_text_mem {
     moy_ui_trow_t rows[MOY_UI_TEXT_ROWS];
     uint32_t starts[MOY_UI_TEXT_BREAKS];
+    moy_ui_tview_t views[MOY_UI_TEXT_VIEWS];
+    uint32_t used;
+};
+typedef struct moy_ui_text_mem text_mem_t;
+
+// The word table, the console's: one block taken at its first word.
+typedef struct {
     char pool[WORD_POOL];
     struct {
         uint16_t off;
@@ -42,34 +51,46 @@ typedef struct {
     } word[WORD_MAX];
     uint8_t slot[WORD_SLOTS];   // word index + 1, 0 empty
     uint16_t pool_n, words;
-    moy_ui_tview_t views[MOY_UI_TEXT_VIEWS];
-    uint32_t used;
-} text_mem_t;
+} words_t;
 
-static text_mem_t *s_mem;
+static words_t *s_words;
 
-static text_mem_t *mem(void) {
-    if (s_mem == NULL) {
-        s_mem = (text_mem_t *)TEXT_ALLOC(sizeof(text_mem_t));
-        if (s_mem != NULL) {
-            memset(s_mem, 0, sizeof(*s_mem));
+static words_t *words_mem(void) {
+    if (s_words == NULL) {
+        s_words = (words_t *)TEXT_ALLOC(sizeof(words_t));
+        if (s_words != NULL) {
+            memset(s_words, 0, sizeof(*s_words));
         }
     }
-    return s_mem;
+    return s_words;
 }
 
-moy_ui_trow_t *moy_ui_text_scratch(void) {
-    text_mem_t *m = mem();
+static text_mem_t *mem(moy_ui_inst_t *I) {
+    if (I->text == NULL) {
+        I->text = (text_mem_t *)TEXT_ALLOC(sizeof(text_mem_t));
+        if (I->text != NULL) {
+            memset(I->text, 0, sizeof(text_mem_t));
+        }
+    }
+    return I->text;
+}
+
+moy_ui_trow_t *moy_ui_text_scratch(moy_ui_inst_t *I) {
+    text_mem_t *m = mem(I != NULL ? I : moy_ui_inst_main());
     return m != NULL ? m->rows : NULL;
 }
 
-uint32_t *moy_ui_text_breaks(void) {
-    text_mem_t *m = mem();
+uint32_t *moy_ui_text_breaks(moy_ui_inst_t *I) {
+    text_mem_t *m = mem(I != NULL ? I : moy_ui_inst_main());
     return m != NULL ? m->starts : NULL;
 }
 
-moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make) {
-    text_mem_t *m = make ? mem() : s_mem;
+moy_ui_tview_t *moy_ui_text_view_of(moy_ui_inst_t *I, const void *owner, uint32_t id,
+                                    int make) {
+    if (I == NULL) {
+        I = moy_ui_inst_main();
+    }
+    text_mem_t *m = make ? mem(I) : I->text;
     if (m == NULL || owner == NULL) {
         return NULL;
     }
@@ -98,8 +119,8 @@ moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make) {
     return old;
 }
 
-void moy_ui_text_views_drop(const void *owner) {
-    text_mem_t *m = s_mem;
+void moy_ui_text_views_drop(moy_ui_inst_t *I, const void *owner) {
+    text_mem_t *m = (I != NULL ? I : moy_ui_inst_main())->text;
     if (m == NULL) {
         return;
     }
@@ -119,7 +140,7 @@ static uint32_t word_hash(const uint8_t *p, size_t n) {
 }
 
 static int word_find(const uint8_t *p, size_t n) {
-    text_mem_t *m = s_mem;
+    words_t *m = s_words;
     if (m == NULL || n == 0 || n > 255) {
         return -1;
     }
@@ -138,7 +159,7 @@ static int word_find(const uint8_t *p, size_t n) {
 }
 
 void moy_ui_text_words_reset(void) {
-    text_mem_t *m = s_mem;
+    words_t *m = s_words;
     if (m != NULL) {
         m->pool_n = 0;
         m->words = 0;
@@ -151,7 +172,7 @@ int moy_ui_text_words(int syntax, const uint8_t *words, size_t n, int tone) {
         || tone >= MOY_UI_TT_N) {
         return MOY_UI_BAD;
     }
-    text_mem_t *m = mem();
+    words_t *m = words_mem();
     if (m == NULL) {
         return MOY_UI_NOMEM;
     }
@@ -196,7 +217,7 @@ static int word_tone(const uint8_t *p, size_t n, int lua) {
     if (w < 0) {
         return MOY_UI_TT_TEXT;
     }
-    int t = (s_mem->word[w].tone >> (lua ? 4 : 0)) & 0xF;
+    int t = (s_words->word[w].tone >> (lua ? 4 : 0)) & 0xF;
     return t == 0xF ? MOY_UI_TT_TEXT : t;
 }
 

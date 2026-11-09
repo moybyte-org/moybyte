@@ -3002,7 +3002,7 @@ static mp_obj_t ui_api_block_set(mp_obj_t id, mp_obj_t field, mp_obj_t value) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_bool(moy_ui_api_block_set(sp, mp_obj_get_int(field),
+    return mp_obj_new_bool(moy_ui_api_block_set(NULL, sp, mp_obj_get_int(field),
                                                 (uint32_t)mp_obj_get_int_truncated(value)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_block_set_obj, ui_api_block_set);
@@ -3013,7 +3013,7 @@ static mp_obj_t ui_api_block_gen(mp_obj_t id) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_int(moy_ui_api_block_gen(sp));
+    return mp_obj_new_int(moy_ui_api_block_gen(NULL, sp));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_gen_obj, ui_api_block_gen);
 
@@ -3023,7 +3023,7 @@ static mp_obj_t ui_api_block_since(mp_obj_t id, mp_obj_t gen) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_int_from_uint(moy_ui_api_block_since(sp, (int32_t)mp_obj_get_int(gen)));
+    return mp_obj_new_int_from_uint(moy_ui_api_block_since(NULL, sp, (int32_t)mp_obj_get_int(gen)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_block_since_obj, ui_api_block_since);
 
@@ -3033,7 +3033,7 @@ static mp_obj_t ui_api_block_key(mp_obj_t id) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_int(moy_ui_api_block_key(sp));
+    return mp_obj_new_int(moy_ui_api_block_key(NULL, sp));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_key_obj, ui_api_block_key);
 
@@ -3627,7 +3627,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_offset_obj, ui_api_offset);
 
 // api_fades(reset) -> the list fades drawn since the count was reset
 static mp_obj_t ui_api_fades(mp_obj_t reset) {
-    return mp_obj_new_int_from_uint(moy_ui_api_fades(mp_obj_is_true(reset)));
+    return mp_obj_new_int_from_uint(moy_ui_api_fades(NULL, mp_obj_is_true(reset)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_fades_obj, ui_api_fades);
 
@@ -3884,7 +3884,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_keep_obj, 5, 5, ui_api_keep);
 // api_audit(on) -> the shift frames whose records moved outside the floor
 // since the last call (the tests' net); on -1 leaves the switch
 static mp_obj_t ui_api_audit(mp_obj_t on) {
-    return mp_obj_new_int_from_uint(moy_ui_api_audit(mp_obj_get_int(on)));
+    return mp_obj_new_int_from_uint(moy_ui_api_audit(NULL, mp_obj_get_int(on)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_audit_obj, ui_api_audit);
 

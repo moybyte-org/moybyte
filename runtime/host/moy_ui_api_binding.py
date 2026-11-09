@@ -352,7 +352,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return int(lib.moy_ui_api_offset(p, int(x), int(y)))
 
     def api_fades(reset):
-        return int(lib.moy_ui_api_fades(1 if reset else 0))
+        return int(lib.moy_ui_api_fades(None, 1 if reset else 0))
 
     def api_shift_plan(ctx, out):
         p, _k = _ctx(ctx)
@@ -439,7 +439,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return int(lib.moy_ui_api_keep(p, c.byref(sink(cv, look)), t, int(h)))
 
     def api_audit(on):
-        return int(lib.moy_ui_api_audit(int(on)))
+        return int(lib.moy_ui_api_audit(None, int(on)))
 
     def api_end(ctx, cv, look):
         p, _k = _ctx(ctx)
@@ -518,19 +518,19 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
 
     def api_block_set(name, field, value):
         t, _keep = _block(name)
-        return bool(lib.moy_ui_api_block_set(t, int(field), int(value) & 0xffffffff))
+        return bool(lib.moy_ui_api_block_set(None, t, int(field), int(value) & 0xffffffff))
 
     def api_block_gen(name):
         t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_gen(t))
+        return int(lib.moy_ui_api_block_gen(None, t))
 
     def api_block_since(name, gen):
         t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_since(t, int(gen)))
+        return int(lib.moy_ui_api_block_since(None, t, int(gen)))
 
     def api_block_key(name):
         t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_key(t))
+        return int(lib.moy_ui_api_block_key(None, t))
 
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
