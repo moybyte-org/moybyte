@@ -143,11 +143,12 @@ int moy_app_run_live(const moy_app_run_t *r);
 // (native/moy_play/moy_play_stop.c). The Player holds it in the state before
 // the stop, the kernel's open reads it (the kernel's state's, or NULL), and
 // the start after the stop (moy_app_stop_end) ends its grant and lets it go,
-// with every other RUN grant: a service's, whose process the stop ended
-// whether or not its end ran, and which the next console starts afresh.
+// with every other RUN grant but those owned by one of the `n` pids of `keep`:
+// the services on tasks of their own the stop left running, which the next
+// console takes back (docs/os_2026-11/processes.md section 5).
 void moy_app_stop_hold(moy_appabi_t *a, const moy_app_run_t *r);
 const moy_app_run_t *moy_app_stopped(void);
-void moy_app_stop_end(moy_appabi_t *a);
+void moy_app_stop_end(moy_appabi_t *a, const uint32_t *keep, size_t n);
 
 // -- the policy -------------------------------------------------------------------
 

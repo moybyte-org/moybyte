@@ -149,7 +149,12 @@ typedef struct {
     int why;
 } role_t;
 
-// On the VM's task: the row called through the ROLE door, its errno kept.
+// The VM's queue (native/moy_kernel/moy_vmq.h): weak, for an image whose
+// Lua runs on the VM's task alone.
+bool moy_vmq_defer(void) __attribute__((weak));
+
+// On the VM's task: the row called through the ROLE door, its errno kept. A
+// row the door serves, hopped while no VM runs, waits for the VM.
 static void role_run(void *p) {
     role_t *c = p;
     if (!moy_app_run_live(c->run)) {
@@ -158,6 +163,9 @@ static void role_run(void *p) {
         return;
     }
     c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->ans, c->cap);
+    if (c->r == -MOY_APP_NEEDS_VM && moy_vmq_defer != NULL && moy_vmq_defer()) {
+        return;
+    }
     c->why = moy_app_why(c->run->a);
 }
 

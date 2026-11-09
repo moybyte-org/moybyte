@@ -242,7 +242,6 @@ def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(ta
              % rep[0].split()[1]]
     assert ticks and "cancel 1" in lines, lines
     assert lines.count("cancel 1") == 1, "a tick after the cancel is a cancel of none"
-    assert int(rep[0].split()[1]) not in moybyte.WAKES.by_id
     was = L.current()
     L.current(moybyte.SHELL)
     shell = moybyte.WAKES.after(60000, lambda: None)
@@ -255,9 +254,10 @@ def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(ta
         moybyte.WAKES.cancel(shell)
     assert "timers %d -2" % (moybyte.TIMERS_MAX - 3) in lines, lines
     assert "uncap %d" % (moybyte.TIMERS_MAX - 4) in lines, lines
-    assert [w[3] for w in moybyte.WAKES.list if w[1] == pid] == [60000]
+    assert moy_evq.timers(pid) == 1 and not [w for w in moybyte.WAKES.list if w[1] == pid]
     ws.exit()
     assert not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail if w[1] == pid]
+    assert moy_evq.timers(pid) == 0
 
 
 def test_a_compiled_app_hears_an_item_handed_to_it_and_reads_it(talk):

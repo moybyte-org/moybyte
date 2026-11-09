@@ -196,26 +196,35 @@ const moy_app_run_t *moy_app_stopped(void) {
                                                                    : NULL;
 }
 
-// Every RUN grant ended: the runs and services that held them were the
-// stopped VM's, and none outlives it.
-static void runs_end(moy_appabi_t *a) {
+static bool kept(uint32_t owner, const uint32_t *keep, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (keep[i] != 0u && keep[i] == owner) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Every RUN grant ended but those `keep`'s pids own: the runs and services
+// that held them were the stopped VM's.
+static void runs_end(moy_appabi_t *a, const uint32_t *keep, size_t n) {
     for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
         uint32_t h = moy_htab_at(a->grants, s);
         const moy_grant_t *g;
         if (h != 0u && moy_app_grant_get(a, h, &g) == MOY_APP_OK
-            && g->cls == MOY_GRANT_RUN) {
+            && g->cls == MOY_GRANT_RUN && !kept(g->owner, keep, n)) {
             moy_htab_release(a->grants, h);
         }
     }
     memset(&a->stopped, 0, sizeof(a->stopped));
 }
 
-void moy_app_stop_end(moy_appabi_t *a) {
-    runs_end(a);
+void moy_app_stop_end(moy_appabi_t *a, const uint32_t *keep, size_t n) {
+    runs_end(a, keep, n);
 }
 
 void moy_app_fresh(moy_appabi_t *a) {
-    runs_end(a);
+    runs_end(a, NULL, 0);
     a->damage = 0u;
     seq_open(a);
     a->clip_kind = MOY_CLIP_EMPTY;

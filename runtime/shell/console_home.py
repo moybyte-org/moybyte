@@ -128,15 +128,18 @@ class HomeVerbs:
     def resume_record(self):
         """The launcher's place as the resume record's text: the selection,
         the shelf's scroll, the search and the selected cart's folder (the
-        selection is found by it again, in case the shelf moved), and the
-        paths of the services running, which the console after the stop
-        starts again (scheduler.pause)."""
+        selection is found by it again, in case the shelf moved), the paths
+        of the Python services running, which the console after the stop
+        starts again (scheduler.pause), and the services on tasks of their
+        own, which run on through it and that console takes back
+        (`kept_rows`, scheduler.take_back)."""
         import json
         lw = self.launcher
         sel = lw.selected() or {}
         return json.dumps({"tab": lw.tab, "sel": int(lw.sel),
                            "search": self.search_query, "path": sel.get("path"),
-                           "svc": _scheduler.SCHED.running_paths()})
+                           "svc": _scheduler.SCHED.running_paths(),
+                           "keep": _scheduler.SCHED.kept_rows()})
 
     def resume_launcher(self, text):
         """Land the launcher where the resume record left it. A record that
@@ -163,6 +166,7 @@ class HomeVerbs:
             svc = rec.get("svc")
             if isinstance(svc, list):
                 _scheduler.SCHED.resumed = tuple(p for p in svc if isinstance(p, str))
+            _scheduler.SCHED.kept = _scheduler.kept_of(rec)
         except (ValueError, TypeError, AttributeError) as exc:
             print("Moybyte resume: %s" % exc)
 

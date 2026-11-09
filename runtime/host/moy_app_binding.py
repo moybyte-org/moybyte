@@ -168,7 +168,7 @@ _SIGS = (
     ("moy_app_wasm_forget", [_P], None),
     ("moy_app_run_make", [_P, _U32, _U32, _P], None),
     ("moy_app_stop_hold", [_P, _P], None),
-    ("moy_app_stop_end", [_P], None),
+    ("moy_app_stop_end", [_P, _P, ctypes.c_size_t], None),
     ("moy_app_wasm_natives", [_PU32], _P),
     ("moy_app_wasm_row", [_U32], c.c_int),
     ("moy_app_wasm_hops", [_PU32, _PU32, _PU32], None),
@@ -462,8 +462,10 @@ def binding(sanitize=False):
             r = _Run.from_buffer_copy(bytes(run))
             lib.moy_app_stop_hold(self._p, c.byref(r))
 
-        def stop_end(self):
-            lib.moy_app_stop_end(self._p)
+        def stop_end(self, keep=()):
+            keep = [int(k) for k in keep]
+            arr = (ctypes.c_uint32 * max(1, len(keep)))(*keep)
+            lib.moy_app_stop_end(self._p, arr, len(keep))
 
         def role(self, g, row, args, cap):
             """The ROLE door (moy_app_role): (answer, the bytes it wrote)."""

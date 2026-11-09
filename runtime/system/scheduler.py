@@ -97,8 +97,8 @@ console hands a system process (its
 run, whose role names its state opens. `poll()` (THE POLL, below) steps
 them where they have no task (the host, the desktop MicroPython), answers
 the console calls
-they wait on the VM's queue (native/moy_kernel/moy_vmq.h: `moybyte.notify`,
-`send` and the `env` functions, run here on the VM's task as the service's
+they wait on the VM's queue (native/moy_kernel/moy_vmq.h: `moybyte.notify`
+and the `env` functions, run here on the VM's task as the service's
 process, and, on a board, the role rows its task hopped), reads
 each one's heap (exact) and its calls' time onto its row, and hands an end
 to the same exit, log line and restart policy; a stop is its TERM there, the
@@ -182,13 +182,28 @@ policy}, read at the end: `service policy` sets and shows them
 (runtime/shell/sh_roles.py), and every start, end, restart and the cap are
 lines of the OS log.
 
-ACROSS A VM STOP (the S3s). The stop ends the VM's heap, so a service's row
-cannot be held through it, whatever its tier: `pause()`, just before the
-stop, TERMs every running service (its `moy_stop` persists what it needs; a
-Lua one's, on its own task, is polled to its end, and one still running then
-ends inside the stop, moycore_svc_vm_stop) and the resume
-record names them; the console that starts after the stop starts them again
-(`moy_start`). Records their sources took during the stop are not delivered.
+ACROSS A VM STOP (the S3s). A service on a task of its own runs on through
+the stop, whoever wrote it; a Python one pauses. `pause()`, just before the
+stop, TERMs every running Python service (its `moy_stop` persists what it
+needs), whose paths the resume record names (`running_paths`), and closes
+the device handles of the others (`_handles_end`: Python objects in the
+heap the stop ends); the record also names the others as rows the kernel
+keeps (`kept_rows`: pid, cart path, Lua handle). Their grants outlive the
+stop (console._app_abi, moy_app_stop_end's `keep`); their timers are the
+kernel's (moy_evq.h, TIMERS) and go off meanwhile, and a message between
+processes on their own tasks is delivered; a call or a role row that needs
+Python waits on the VM's queue until the VM is back (moy_vmq.h, WITH NO
+VM), and a message to a Python process meanwhile is not taken (its queue
+closed with the VM). The console that starts after the stop takes the kept
+rows back at its first frame (`take_back`, from `boot`): the same pid, its
+row made again from the tier's table, its grant re-held, its waits then
+answered; a row whose service ended meanwhile is reaped by that poll into
+the ordinary exit and restart policy, and the autostart and the record's
+Python services start after it, never a second copy (`start` finds the
+running one). The Python services start again (`moy_start`), records their
+sources took during the stop not delivered. `adopt` is the same row for a
+service the kernel starts on demand (a C one: its runtime answers
+`figures`, `reap` and `stop`), so it shows, stops and ends as any other.
 """
 
 try:
@@ -394,7 +409,8 @@ class Scheduler:
         self.procs = {}             # pid -> Proc
         self.frame = 0              # frames since the last guaranteed slice
         self.spent_us = 0           # the last tick's background time
-        self.resumed = ()           # what the resume record says was running
+        self.resumed = ()           # the Python services the resume record restarts
+        self.kept = ()              # what it says ran on through the stop: (pid, path, handle)
         self._due = [0] * DUE_MAX
         self._n = 0
         self._i = 0
@@ -428,6 +444,7 @@ class Scheduler:
         """The frame's background work; answers the microseconds spent."""
         f = self.frame + 1
         self.frame = f = 0 if f >= MOY_BG_SLICE_EVERY else f
+        _E.timers_run()                 # the kernel's frame runs them too (moy_evq.h, TIMERS)
         w = self.wakes
         if not w.list and not w.queued:
             self._n = self._i = 0
@@ -1354,30 +1371,110 @@ class Scheduler:
             del self.procs[pid]
 
     def pause(self):
-        """Before a VM stop: every live service TERMed, its wakes ended.
-        A Lua service's TERM runs on its own task, so the poll is run until
-        each has ended, MOY_SERVICE_STOP_MS at most: its end (its grant, its
-        row) is then this VM's, where the stop would otherwise leave what it
-        held in the memory the stop frees for the run. Answers the carts'
-        paths, which the resume record carries."""
+        """Before a VM stop (ACROSS A VM STOP): every live Python service
+        TERMed, its wakes ended; a service on a task of its own runs on, the
+        device handles it holds closed (they are the VM's, dev_handles.py).
+        Answers the Python services' carts' paths, which the resume record
+        carries for the next VM to start again."""
         out = []
         for p in list(self.procs.values()):
-            if p.kind == SERVICE and p.state != EXITED:
-                path = p.cart.get("path") if p.cart else None
-                if path:
-                    out.append(path)
-                self.stop(p.pid)
-        t0 = _ticks_ms()
-        while (any(p.native and p.state == STOPPING for p in self.procs.values())
-               and _ticks_diff(_ticks_ms(), t0) < MOY_SERVICE_STOP_MS):
-            self.poll()
-            _sleep_ms(1)
+            if p.kind != SERVICE or p.state == EXITED:
+                continue
+            if _off_vm(p):
+                _handles_end(p.pid)
+                continue
+            path = p.cart.get("path") if p.cart else None
+            if path:
+                out.append(path)
+            self.stop(p.pid)
         return out
 
     def running_paths(self):
+        """The live Python services' carts' paths: the resume record's
+        services to start again after a stop."""
         return [p.cart.get("path") for p in self.procs.values()
-                if p.kind == SERVICE and p.state != EXITED
+                if p.kind == SERVICE and p.state not in (EXITED, STOPPING)
+                and not _off_vm(p) and p.cart and p.cart.get("path")]
+
+    def kept_rows(self):
+        """The live services on tasks of their own a VM stop leaves running,
+        as the resume record carries them: [pid, its cart's path, its Lua
+        handle (0 for a compiled one)]. A kernel service (`adopt` with no
+        cart) is its own to find again, and is not among them."""
+        return [[p.pid, p.cart.get("path"), p.native] for p in self.procs.values()
+                if p.kind == SERVICE and p.state not in (EXITED, STOPPING) and _off_vm(p)
                 and p.cart and p.cart.get("path")]
+
+    def adopt(self, pid, name, rt=None, cart=None, native=0):
+        """A row for service `pid`, running on a task of its own, that this
+        VM's scheduler did not start: one a VM stop left running (`take_back`,
+        its cart and its Lua `native` handle or compiled runtime `rt`), or a
+        kernel service with no cart (its runtime `rt`: `figures(pid)` while it
+        lives, `reap()` its end, `stop(pid)`), which starts on its first
+        request and ends when its work is done. Its figures are read and its
+        end reaped at the poll as a started one's are; a kernel service has
+        no restart policy. Answers its Proc, or the live row it already has."""
+        p = self.procs.get(pid)
+        if p is not None and p.state != EXITED:
+            return p
+        p = self.procs[pid] = Proc(pid, SERVICE, name, cart)
+        p.started = _ticks_ms()
+        p.native = native
+        p.rt = rt
+        _log(INFO, pid, "taken back" if cart is not None else "start", name)
+        self._polling()
+        return p
+
+    def take_back(self, ws):
+        """The services the resume record says ran on through the VM stop,
+        each found again in its tier's table (the kernel's, which outlived
+        the stop) and given its row, its grant (the same row of the app ABI,
+        which the start kept for it) and what its console calls are answered
+        with. One that ended during the stop gets its row and its end, which
+        its restart policy follows. Answers the pids taken back."""
+        try:
+            import app_perms
+        except ImportError:  # host: the runtime package
+            from runtime import app_perms
+        out = []
+        kept, self.kept = self.kept, ()
+        carts = getattr(ws, "carts", None)
+        shelf = {c.get("path"): c for c in (carts.all if carts is not None else ())}
+        attach(ws, self)
+        ends = {}
+        for pid, path, native in kept:
+            cart = shelf.get(path)
+            got = prepared(ws, cart, True) if cart is not None else None
+            if got is None:
+                _log(ERR, pid, "taken back: its cart is gone")
+                continue
+            run, rec, have, env = got
+            tier = app_perms.tier_of(run)
+            rt = None if native else (getattr(ws, "runtimes", None) or {}).get(tier)
+            if not native and rt is None:
+                _log(ERR, pid, "taken back: a %s service does not run here" % tier)
+                continue
+            p = self.adopt(pid, _svc_name(run), rt, run, native)
+            p.granted = tuple(app_perms.check(run, rec, have)[0])
+            p.ws, p.origin, p.args = ws, cart, (rec, have, env)
+            try:
+                if native:
+                    self._grant(p, ws, run)
+                else:
+                    compiled_run(ws, p, run)
+            except (OSError, ValueError) as e:     # the grant table full, a refused kind
+                _log(ERR, pid, "its grant: %s" % e)
+            p.held = LUA_SVC_NEED if native else 0
+            if native:
+                self._rows(_svc(), ends)
+                if not p.native and p.state != EXITED:
+                    _log(ERR, pid, "taken back: its tier has no such service")
+                    self._exit(p, EXIT_CRASHED)
+            elif not self._compiled(p, ends):
+                continue
+            if p.state != EXITED:
+                out.append(pid)
+        return out
 
     def reset(self):
         """Every service ended and every row forgotten (a test's teardown)."""
@@ -1407,6 +1504,56 @@ class Scheduler:
         self.asked.clear()
         self._n = self._i = 0
         self.resumed = ()
+        self.kept = ()
+
+
+def kept_of(rec):
+    """The resume record's (a dict) services the stop kept running, as
+    (pid, path, Lua handle) rows; a malformed one is left out."""
+    out = []
+    for row in (rec.get("keep") or ()) if isinstance(rec, dict) else ():
+        if (isinstance(row, list) and len(row) == 3 and isinstance(row[0], int)
+                and isinstance(row[1], str) and isinstance(row[2], int)):
+            out.append((row[0], row[1], row[2]))
+    return tuple(out)
+
+
+def kept_pids():
+    """The pids the kernel's resume record says a VM stop kept running,
+    read at a return start before the console takes them back (its app
+    ABI's start keeps their grants); () off a board or with no record."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return ()
+    get = getattr(moy_kernel, "resume", None)
+    text = get() if get is not None else None
+    if not text or _json is None:
+        return ()
+    try:
+        rec = _json.loads(text)
+    except ValueError:
+        return ()
+    return tuple(r[0] for r in kept_of(rec))
+
+
+def _off_vm(p):
+    """A service on a task of its own (a Lua one, a compiled one, a kernel
+    one): the VM's heap holds only its row."""
+    return bool(p.native) or p.rt is not None
+
+
+def _handles_end(pid):
+    """The device handles process `pid` holds closed (dev_handles.py: they
+    are Python objects in the VM's heap)."""
+    try:
+        import dev_handles
+    except ImportError:  # host: the runtime package
+        try:
+            from runtime import dev_handles
+        except ImportError:
+            return
+    dev_handles.sweep(pid)
 
 
 def _svc():
@@ -1623,10 +1770,12 @@ def wants_autostart(ws, cart):
 
 
 def boot(ws):
-    """The console's services at its first frame: the autostart ones and
-    those the resume record names. Answers the pids started."""
-    out = []
+    """The console's services at its first frame: those a VM stop left
+    running taken back first (`take_back`), then the autostart ones and the
+    Python ones the resume record names started; a service taken back is
+    not started again. Answers the pids started and taken back."""
     attach(ws)
+    out = SCHED.take_back(ws) if SCHED.kept else []
     carts = getattr(ws, "carts", None)
     for cart in (carts.all if carts is not None else ()):
         if wants_autostart(ws, cart) or cart.get("path") in SCHED.resumed:

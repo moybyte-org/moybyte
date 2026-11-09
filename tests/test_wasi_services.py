@@ -280,7 +280,6 @@ def test_a_wasi_service_s_timers_and_alarm_are_the_system_s_messages(svc, perms)
     assert after and after[0] > 0 and every and every[0] > 0, texts
     assert "moybyte.timer from system [%d]" % after[0] in _texts(since, pid)
     assert "cancel 1" in _texts(since, pid), _texts(since, pid)
-    assert every[0] not in moybyte.WAKES.by_id
     at = [t for t in _texts(since, pid) if t.startswith("at ")]
     if perms:
         wid = int(at[0].split()[1])
@@ -295,10 +294,10 @@ def test_a_wasi_service_s_timers_and_alarm_are_the_system_s_messages(svc, perms)
     texts = _texts(since, pid)
     assert "timers %d -1 errno 68" % moybyte.TIMERS_MAX in texts, texts   # WASI's RANGE
     assert "uncap %d" % (moybyte.TIMERS_MAX - 1) in texts, texts
-    assert [w[3] for w in moybyte.WAKES.list if w[1] == pid] == [60000]
+    assert moy_evq.timers(pid) == 1 and not [w for w in moybyte.WAKES.list if w[1] == pid]
     assert s.stop(pid)
     assert _polled(s, lambda: not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail
-                                   if w[1] == pid])
+                                   if w[1] == pid] and moy_evq.timers(pid) == 0)
 
 
 @pytest.mark.parametrize("perms", [("prefs", "clipboard"), ()])

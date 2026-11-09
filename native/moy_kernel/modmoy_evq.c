@@ -21,8 +21,13 @@
 //   next_call() -> (ticket, pid, name, args) or None
 //   answer(ticket, ans)                      ans a JSON text, or None: refused
 //   drop(pid)
+//   vm(up=None) -> up  the VM up or down for the queue (moy_vmq.h, WITH NO VM),
+//                      set when `up` is given
 //   vm_stop() -> closed  the VM's queues closed, as its teardown does
 //   live()             the queues open
+//   timer(pid, ms, every=0) -> (rc, id)   a timer of its queue (TIMERS)
+//   timer_cancel(pid, id) -> bool, timers(pid) -> n
+//   timers_run() -> ms to the next      the due ones posted
 //   want(bits), wanted(mask) -> bits    THE VM'S WAKE: bits wanted, and those
 //                      of `mask` taken; wants() what is wanted, left set
 //   listening(name)    the queues that are not the VM's listening on `name`
@@ -212,6 +217,40 @@ static mp_obj_t ev_drop(mp_obj_t pid) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ev_drop_obj, ev_drop);
 
+static mp_obj_t ev_timer(size_t n_args, const mp_obj_t *args) {
+    uint32_t id = 0;
+    int rc = moy_evq_timer((uint32_t)mp_obj_get_int(args[0]), (uint32_t)mp_obj_get_int(args[1]),
+                           n_args > 2 ? (uint32_t)mp_obj_get_int(args[2]) : 0u, &id);
+    mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(rc), mp_obj_new_int_from_uint(id) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_timer_obj, 2, 3, ev_timer);
+
+static mp_obj_t ev_timer_cancel(mp_obj_t pid, mp_obj_t id) {
+    return mp_obj_new_bool(moy_evq_timer_cancel((uint32_t)mp_obj_get_int(pid),
+                                                (uint32_t)mp_obj_get_int_truncated(id)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ev_timer_cancel_obj, ev_timer_cancel);
+
+static mp_obj_t ev_timers(mp_obj_t pid) {
+    return MP_OBJ_NEW_SMALL_INT(moy_evq_timers((uint32_t)mp_obj_get_int(pid)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_timers_obj, ev_timers);
+
+static mp_obj_t ev_timers_run(void) {
+    uint32_t next = moy_evq_timers_run();
+    return MP_OBJ_NEW_SMALL_INT(next > 0x3FFFFFFFu ? 0x3FFFFFFF : (mp_int_t)next);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_timers_run_obj, ev_timers_run);
+
+static mp_obj_t ev_vm(size_t n_args, const mp_obj_t *args) {
+    if (n_args > 0 && args[0] != mp_const_none) {
+        moy_vmq_vm(mp_obj_is_true(args[0]));
+    }
+    return mp_obj_new_bool(moy_vmq_vm_up());
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_vm_obj, 0, 1, ev_vm);
+
 static mp_obj_t ev_vm_stop(void) {
     return MP_OBJ_NEW_SMALL_INT(moy_evq_vm_stop());
 }
@@ -247,6 +286,7 @@ static mp_obj_t ev_reset(void) {
     moy_evq_reset();
     moy_super_reset();
     moy_vmq_reset();
+    moy_vmq_vm(true);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_reset_obj, ev_reset);
@@ -272,6 +312,12 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rungs), MP_ROM_PTR(&ev_rungs_obj) },
     { MP_ROM_QSTR(MP_QSTR_forget), MP_ROM_PTR(&ev_forget_obj) },
     { MP_ROM_QSTR(MP_QSTR_serve), MP_ROM_PTR(&ev_serve_obj) },
+    { MP_ROM_QSTR(MP_QSTR_vm), MP_ROM_PTR(&ev_vm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_timer), MP_ROM_PTR(&ev_timer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_timer_cancel), MP_ROM_PTR(&ev_timer_cancel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_timers), MP_ROM_PTR(&ev_timers_obj) },
+    { MP_ROM_QSTR(MP_QSTR_timers_run), MP_ROM_PTR(&ev_timers_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_TIMER_ID), MP_ROM_INT(MOY_EVQ_TIMER_ID) },
     { MP_ROM_QSTR(MP_QSTR_next_call), MP_ROM_PTR(&ev_next_call_obj) },
     { MP_ROM_QSTR(MP_QSTR_answer), MP_ROM_PTR(&ev_answer_obj) },
     { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&ev_drop_obj) },

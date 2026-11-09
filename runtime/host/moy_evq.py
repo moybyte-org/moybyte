@@ -77,6 +77,12 @@ _SIGS = (
                       ctypes.POINTER(_VP), ctypes.POINTER(_SZ)], _I),
     ("moy_vmq_answer", [_U32, _P, _SZ], _I),
     ("moy_vmq_drop", [_U32], None),
+    ("moy_vmq_vm", [ctypes.c_bool], None),
+    ("moy_evq_timer", [_U32, _U32, _U32, ctypes.POINTER(_U32)], _I),
+    ("moy_evq_timer_cancel", [_U32, _U32], ctypes.c_bool),
+    ("moy_evq_timers", [_U32], _U32),
+    ("moy_evq_timers_run", [], _U32),
+    ("moy_vmq_vm_up", [], ctypes.c_bool),
     ("moy_vmq_reset", [], None),
 )
 
@@ -209,6 +215,37 @@ def drop(pid):
     _lib().moy_vmq_drop(pid)
 
 
+def vm(up=None):
+    """The VM up or down for the queue (moy_vmq.h, WITH NO VM), set when `up`
+    is given: whether it is up."""
+    if up is not None:
+        _lib().moy_vmq_vm(bool(up))
+    return bool(_lib().moy_vmq_vm_up())
+
+
+def timer(pid, ms, every=0):
+    """A timer of `pid`'s queue (moy_evq.h, TIMERS): (rc, its id)."""
+    t = _U32(0)
+    rc = _lib().moy_evq_timer(pid, max(0, int(ms)), max(0, int(every)), ctypes.byref(t))
+    return rc, t.value
+
+
+def timer_cancel(pid, tid):
+    return bool(_lib().moy_evq_timer_cancel(pid, int(tid) & 0xFFFFFFFF))
+
+
+def timers(pid):
+    return _lib().moy_evq_timers(pid)
+
+
+def timers_run():
+    """The due timers posted: the ms to the next one (0x3FFFFFFF: none)."""
+    return min(_lib().moy_evq_timers_run(), 0x3FFFFFFF)
+
+
+TIMER_ID = 0x40000000
+
+
 def vm_stop():
     return _lib().moy_evq_vm_stop()
 
@@ -238,3 +275,4 @@ def reset():
     d.moy_evq_reset()
     d.moy_super_reset()
     d.moy_vmq_reset()
+    d.moy_vmq_vm(True)

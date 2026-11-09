@@ -7,6 +7,7 @@
 
 #include "moy_evq.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,7 +16,14 @@
 
 #ifdef MOY_SYNC_RTOS
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
+#else
+#include <time.h>
 #endif
+
+// The kernel's frame (moy_loop.h's jobs): weak, for an image or a harness
+// without the loop, where whoever stands in for the frame runs the timers.
+bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
 
 #ifdef MOY_SYNC_THREADS
 pthread_mutex_t moy_sync_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -38,7 +46,14 @@ typedef struct {
 } peer_t;
 
 typedef struct {
+    uint32_t id;                // 0: a free row
+    uint32_t due;               // ms, the timers' clock (now_ms)
+    uint32_t every;             // 0: once
+} evq_timer_t;
+
+typedef struct {
     uint32_t flags;
+    evq_timer_t tm[MOY_EVQ_TIMERS];
     char app[MOY_EVQ_APP];
     char *receives;             // one name a line, NUL ended; NULL: none
     listen_t on[MOY_EVQ_LISTEN];
@@ -59,6 +74,8 @@ static volatile uint32_t s_seq[MOY_EVQ_PROCS];
 static moy_sync_who_t s_who[MOY_EVQ_PROCS];
 static uint32_t s_turn;
 static volatile uint32_t s_want;    // THE VM'S WAKE's bits
+static uint32_t s_timer_n;          // the last timer id handed out, its bit apart
+static uint32_t s_timers;           // timers held, every queue's
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
 
 static void *mem(size_t n) {
@@ -276,6 +293,14 @@ int moy_evq_open(uint32_t pid, const char *app, const char *recv, uint32_t flags
     return MOY_EVQ_OK;
 }
 
+static uint32_t held_timers(const q_t *q) {
+    uint32_t n = 0;
+    for (uint32_t k = 0; k < MOY_EVQ_TIMERS; k++) {
+        n += q->tm[k].id != 0u;
+    }
+    return n;
+}
+
 int moy_evq_close(uint32_t pid) {
     MOY_SYNC_LOCK(&s_lock);
     int i = slot_of(pid);
@@ -284,6 +309,7 @@ int moy_evq_close(uint32_t pid) {
         return MOY_EVQ_STALE;
     }
     q_t *q = s_q[i];
+    s_timers -= held_timers(q);
     s_q[i] = NULL;
     s_pid[i] = 0;
     moy_sync_who_t who = s_who[i];
@@ -676,4 +702,145 @@ void moy_evq_reset(void) {
     close_all(0u);
     s_turn = 0;
     __atomic_store_n(&s_want, 0u, __ATOMIC_RELEASE);
+}
+
+// -- the timers --------------------------------------------------------------------
+
+static uint32_t now_ms(void) {
+    #ifdef MOY_SYNC_RTOS
+    return (uint32_t)(esp_timer_get_time() / 1000);
+    #else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+    #endif
+}
+
+static bool timers_job(void *arg) {
+    (void)arg;
+    moy_evq_timers_run();
+    MOY_SYNC_LOCK(&s_lock);
+    bool any = s_timers != 0u;
+    MOY_SYNC_UNLOCK(&s_lock);
+    return any;
+}
+
+int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id) {
+    if (moy_evq_listen(pid, MOY_EVQ_TIMER, true) != MOY_EVQ_OK) {
+        return moy_evq_has(pid) ? MOY_EVQ_FULL : MOY_EVQ_STALE;
+    }
+    int rc = MOY_EVQ_FULL;
+    MOY_SYNC_LOCK(&s_lock);
+    int i = slot_of(pid);
+    if (i < 0) {
+        rc = MOY_EVQ_STALE;
+    } else {
+        for (uint32_t k = 0; k < MOY_EVQ_TIMERS; k++) {
+            evq_timer_t *t = &s_q[i]->tm[k];
+            if (t->id == 0u) {
+                s_timer_n = (s_timer_n + 1u) & (MOY_EVQ_TIMER_ID - 1u);
+                if (s_timer_n == 0u) {
+                    s_timer_n = 1u;
+                }
+                t->id = MOY_EVQ_TIMER_ID | s_timer_n;
+                t->due = now_ms() + ms;
+                t->every = every;
+                *id = t->id;
+                s_timers++;
+                rc = MOY_EVQ_OK;
+                break;
+            }
+        }
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
+    if (rc != MOY_EVQ_OK) {
+        moy_evq_listen(pid, MOY_EVQ_TIMER, false);
+    } else if (moy_loop_job != NULL) {
+        moy_loop_job(timers_job, NULL);
+    }
+    return rc;
+}
+
+bool moy_evq_timer_cancel(uint32_t pid, uint32_t id) {
+    bool got = false;
+    MOY_SYNC_LOCK(&s_lock);
+    int i = slot_of(pid);
+    for (uint32_t k = 0; i >= 0 && id != 0u && k < MOY_EVQ_TIMERS; k++) {
+        if (s_q[i]->tm[k].id == id) {
+            s_q[i]->tm[k].id = 0u;
+            s_timers--;
+            got = true;
+        }
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
+    if (got) {
+        moy_evq_listen(pid, MOY_EVQ_TIMER, false);
+    }
+    return got;
+}
+
+uint32_t moy_evq_timers(uint32_t pid) {
+    MOY_SYNC_LOCK(&s_lock);
+    int i = slot_of(pid);
+    uint32_t n = i >= 0 ? held_timers(s_q[i]) : 0u;
+    MOY_SYNC_UNLOCK(&s_lock);
+    return n;
+}
+
+uint32_t moy_evq_timers_run(void) {
+    enum { BURST = 16 };
+    uint32_t to[BURST], ids[BURST], ends[BURST];
+    uint32_t next = UINT32_MAX;
+    if (__atomic_load_n(&s_timers, __ATOMIC_RELAXED) == 0u) {
+        return next;
+    }
+    for (;;) {
+        uint32_t n = 0, now = now_ms();
+        next = UINT32_MAX;
+        MOY_SYNC_LOCK(&s_lock);
+        for (uint32_t i = 0; i < MOY_EVQ_PROCS; i++) {
+            q_t *q = s_q[i];
+            for (uint32_t k = 0; q != NULL && k < MOY_EVQ_TIMERS; k++) {
+                evq_timer_t *t = &q->tm[k];
+                if (t->id == 0u) {
+                    continue;
+                }
+                int32_t left = (int32_t)(t->due - now);
+                if (left > 0) {
+                    next = (uint32_t)left < next ? (uint32_t)left : next;
+                    continue;
+                }
+                if (n == BURST) {
+                    next = 0;
+                    continue;
+                }
+                to[n] = s_pid[i];
+                ids[n] = t->id;
+                ends[n] = t->every == 0u;
+                if (t->every == 0u) {
+                    t->id = 0u;
+                    s_timers--;
+                } else {
+                    // the next tick from now: one a late frame missed is not owed
+                    t->due = (int32_t)(now - t->due) >= (int32_t)t->every ? now + t->every
+                                                                          : t->due + t->every;
+                    left = (int32_t)(t->due - now);
+                    next = (uint32_t)left < next ? (uint32_t)left : next;
+                }
+                n++;
+            }
+        }
+        MOY_SYNC_UNLOCK(&s_lock);
+        for (uint32_t j = 0; j < n; j++) {
+            char args[16];
+            int k = snprintf(args, sizeof args, "[%lu]", (unsigned long)ids[j]);
+            moy_evq_post(to[j], 0u, MOY_EVQ_TIMER, args, (size_t)k);
+            if (ends[j]) {
+                moy_evq_listen(to[j], MOY_EVQ_TIMER, false);
+            }
+        }
+        if (n < BURST) {
+            return next;
+        }
+    }
 }

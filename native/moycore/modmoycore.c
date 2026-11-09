@@ -887,8 +887,13 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
 #endif
 }
 
-// The VM is going (native/moy_kernel's soft reset): a run still open closes
-// with it, while its objects are still the VM's, and the Lua services end.
+// The kernel's stop (native/moy_kernel): nonzero while the VM goes for a VM
+// stop rather than a soft reset. Weak, for an image without the stop.
+int moy_kernel_stop_pending(void) __attribute__((weak));
+
+// The VM is going (native/moy_kernel's soft reset, a VM stop's included): a
+// run still open closes with it, while its objects are still the VM's; the
+// Lua services run on through a VM stop and end with a soft reset.
 void moycore_vm_stop(void)
 {
     for (int i = 0; i < MOYCORE_RUNS; i++) {
@@ -897,7 +902,7 @@ void moycore_vm_stop(void)
         moycore_run_use(r);
         moycore_close_c();
     }
-    moycore_svc_vm_stop();
+    moycore_svc_vm_stop(moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() != 0);
     MP_STATE_VM(moycore_keep) = MP_OBJ_NULL;    // the list is the heap going
 }
 

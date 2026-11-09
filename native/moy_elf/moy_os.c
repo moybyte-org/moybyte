@@ -916,9 +916,13 @@ static bool vm_hop(moy_os_proc_t *p, void (*fn)(void *), void *arg) {
     return rc == MOY_VMQ_OK;
 }
 
+// A row the door serves, hopped while no VM runs, waits for the VM.
 static void role_body(void *arg) {
     role_call_t *c = arg;
     c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->out, c->cap);
+    if (c->r == -MOY_APP_NEEDS_VM) {
+        moy_vmq_defer();
+    }
 }
 
 static void put32(uint8_t *q, uint32_t v) {

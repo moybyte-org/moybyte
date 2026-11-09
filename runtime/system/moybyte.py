@@ -175,7 +175,9 @@ keeps its period from the deadline, never bursting to catch up. Precise timing
 is C's (hardware.md section 2). A process whose callbacks are not the VM's (a
 compiled program; a Lua service for its alarms) asks through the message
 halves (`every_message`, `after_message`, `at_message`), which hold it to
-TIMERS_MAX timers and alarms at once and answer FULL past them.
+TIMERS_MAX timers and alarms at once and answer FULL past them. Its timers
+are the kernel's (native/moy_kernel/moy_evq.h, TIMERS: they go off with no
+VM, through an S3's VM stop); its alarms are this registry's.
 
 THE REGISTRY (`WAKES`) is what the cooperative scheduler drives: once a frame
 it asks `due(now_ms, out)` for the wakes due (allocation-free, into a
@@ -685,10 +687,10 @@ def at(t, fn):
     return WAKES.alarm(t, fn, True)
 
 
-# The messages a wake of a process whose callbacks are not the VM's posts it
-# (a Lua service's alarm, a compiled program's alarms and timers), from the
-# system, each carrying the wake's id: an alarm's AT, a timer's (`every`,
-# `after`) TIMER, two names of the MOY_EVQ_LISTEN a process listens on.
+# The messages a process whose callbacks are not the VM's gets from the system
+# for its alarms and timers, each carrying the id: an alarm's AT (a wake of
+# this registry's), a timer's (`every`, `after`) TIMER (the kernel's,
+# MOY_EVQ_TIMER), two names of the MOY_EVQ_LISTEN a process listens on.
 AT, TIMER = "moybyte.at", "moybyte.timer"
 TIMERS_MAX = 16             # the timers and alarms a message half lets one process hold
 
@@ -731,16 +733,30 @@ def at_message(t):
     return _wake_message(AT, lambda t, fn: WAKES.alarm(t, fn, True), t)
 
 
+def _timer_message(ms, every):
+    """A timer of the kernel's (moy_evq.h, TIMERS): it posts the process
+    message TIMER from the system carrying its id, VM or no VM; FULL where
+    the process holds TIMERS_MAX timers and alarms already."""
+    pid = _pid()
+    if _timers(pid) + _E.timers(pid) >= TIMERS_MAX:
+        return FULL
+    rc, tid = _E.timer(pid, ms, every)
+    if rc != _E.OK:
+        raise OSError(EMFILE, "process %d hears no %s" % (pid, TIMER))
+    return tid
+
+
 def every_message(ms):
     """`every` for a compiled program: each tick posts it message TIMER
     from the system carrying the timer's id, which it answers. A tick its
     queue cannot take is dropped."""
-    return _wake_message(TIMER, WAKES.every, ms)
+    ms = max(1, int(ms))
+    return _timer_message(ms, ms)
 
 
 def after_message(ms):
     """`after` for a compiled program: message TIMER with the timer's id."""
-    return _wake_message(TIMER, WAKES.after, ms)
+    return _timer_message(ms, 0)
 
 
 def cancel(wid):
@@ -750,6 +766,8 @@ def cancel(wid):
 def cancel_message(wid):
     """`cancel` for a compiled program: a wake of its own process alone,
     1 where one was cancelled, else 0."""
+    if wid & _E.TIMER_ID:
+        return int(_E.timer_cancel(_pid(), wid))
     w = WAKES.by_id.get(wid)
     if w is None or w[_OWNER] != _pid():
         return 0

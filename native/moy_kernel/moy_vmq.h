@@ -19,13 +19,24 @@
 // A post or hop wants the VM (moy_evq.h, THE VM'S WAKE), which serves the
 // queue at the scheduler's poll that want runs.
 //
+// WITH NO VM (an S3's VM stop: the kernel's frame runs a compiled game, and
+// the services on tasks of their own run on through it, docs/os_2026-11/
+// processes.md section 5). The kernel says the VM is down (moy_vmq_vm) and
+// its frame serves the hops while it is (a loop job, moy_loop.h): what is C
+// runs as with the VM up. A hop that needs Python -- a role row the door
+// serves, which answers MOY_APP_NEEDS_VM with no VM -- says so from inside
+// its fn (moy_vmq_defer) and is run again once the VM is back, its poster
+// waiting until then; a call waits for its answer the same way, since only
+// the VM's console answers one. Nothing is refused for the VM being down.
+//
 // MOY_VMQ_SLOTS calls and hops wait at once, every process's together; a
 // process's end drops what it left. Any task may post; serve, next and answer
-// are the VM's task's.
+// are the VM's task's, and the kernel's frame's while no VM runs.
 
 #ifndef MOY_VMQ_H
 #define MOY_VMQ_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -69,6 +80,16 @@ int moy_vmq_next(uint32_t *ticket, uint32_t *pid, const char **name, const char 
 // The console's answer to a call: a JSON value of `n` bytes, or NULL where it
 // refused. OK, STALE, NOMEM.
 int moy_vmq_answer(uint32_t ticket, const char *ans, size_t n);
+
+// The VM is up (true, at boot and when it comes back) or down (a VM stop):
+// down, the kernel's frame serves the hops as a loop job and a deferred one
+// waits. Whether it is up.
+void moy_vmq_vm(bool up);
+bool moy_vmq_vm_up(void);
+// Inside a hop's fn while moy_vmq_serve runs it: while no VM runs, the hop is
+// run again once one does, its poster waiting (true); with the VM up, false
+// and the hop is done.
+bool moy_vmq_defer(void);
 
 // Every slot freed (a test's teardown).
 void moy_vmq_reset(void);

@@ -45,7 +45,10 @@
 //   moybyte.send(app, name, ...) -> n
 //                                  message `name` to the processes of app
 //                                  `app` that listen on it, under the rule
-//                                  (moy_evq.h): how many took it
+//                                  (moy_evq.h): how many took it, or nil
+//                                  and "full" (BACKPRESSURE); the kernel's
+//                                  send on the service's own task, no
+//                                  console call
 // and `print`, which logs at info. Its allocator counts every byte it holds,
 // in PSRAM on a board, so the task manager's figure is exact
 // (moycore_svc_info's `heap`), and refuses past MOYCORE_SVC_HEAP_MAX.
@@ -62,16 +65,18 @@
 // JSON array [values, calls]): each of `values`' members a global, and each
 // name in `calls` a global function whose call the console answers, as
 // `moybyte.notify` is (its name "moybyte.notify"). Such a call enters the
-// console, so it runs on the VM's task (`moybyte.open_with`, `moybyte.share`
-// and `moybyte.send` are such calls too): the service's call yields its
+// console, so it runs on the VM's task (`moybyte.open_with` and
+// `moybyte.share` are such calls too): the service's call yields its
 // coroutine with the call posted on the VM's queue (moy_vmq_post: its name
 // and its arguments as a JSON array), the VM's task takes it (moy_vmq_next),
 // runs it and answers (moy_vmq_answer: a JSON value, or none where the
 // console refused, which the call answers as nil and why), which wakes the
-// service, and its next step resumes it with the answer. A call waits its answer apart from its
-// budget: the abort counts the time it runs, not the time the VM takes to
-// answer. A call from a coroutine the service made itself, or from where it
-// cannot yield, is an error.
+// service, and its next step resumes it with the answer. A call waits its
+// answer apart from its budget: the abort counts the time it runs, not the
+// time the VM takes to answer, and through a VM stop it waits for the next
+// VM (moy_vmq.h, WITH NO VM), its service's timers and messages held behind
+// it meanwhile. A call from a coroutine the service made itself, or from
+// where it cannot yield, is an error.
 //
 // ITS APP'S ROLES. The run a start is handed (native/moy_app/moy_app_run.h:
 // the service's own grant, made from its permissions as its app's
@@ -180,12 +185,16 @@ uint32_t moycore_svc_step(uint32_t now_ms);
 // Every service ended where it stands and its row freed (a test's teardown;
 // a stepped tier only).
 void moycore_svc_reset(void);
-// The VM is going (a VM stop, on the VM's task while the VM stands): each
-// service, TERMed by its scheduler just before, is given until
-// MOYCORE_SVC_STOP_MS to end, its console calls refused and its hops served
-// meanwhile, and its row and its event queue freed, since no reaper outlives
-// the VM; one that has not ended by then is freed by the first start after
-// it ends. A stepped tier's are reset.
-void moycore_svc_vm_stop(void);
+// The VM is going, on the VM's task while the VM stands. A VM STOP (`keep`,
+// an S3's stop for a compiled game, docs/os_2026-11/processes.md section 5)
+// leaves every service running on its task: its rows are the kernel's, its
+// console calls wait for the next VM (moy_vmq.h, WITH NO VM) and that VM's
+// scheduler takes it back. A SOFT RESET (a fresh start) ends them: each is
+// given until MOYCORE_SVC_STOP_MS to end, its console calls refused and its
+// hops served meanwhile, and its row and its event queue freed, since no
+// reaper outlives the VM; one that has not ended by then is freed by the
+// first start after it ends. A stepped tier's are reset either way, its
+// services having no task to run on.
+void moycore_svc_vm_stop(bool keep);
 
 #endif // MOYCORE_SVC_H

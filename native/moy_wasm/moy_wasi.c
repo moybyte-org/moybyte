@@ -106,6 +106,7 @@ struct moy_wasi {
     volatile uint32_t cost_us;  // its wakes' time, charged to the supervisor (wraps)
     volatile uint32_t struck;   // strikes the watchdog gave its current wake
     volatile uint8_t polling;   // inside a poll of the descriptor
+    volatile uint8_t calling;   // waiting on the VM's queue (moy_vmq.h): not its wake's run
     volatile uint8_t hup;       // stopped: the descriptor hangs up
     wasm_module_inst_t volatile inst;   // while `_start` runs: what a kill terminates
     // the watchdog's own, on the console's task
@@ -740,7 +741,8 @@ static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint
 // console's next serve of it: a service's at the scheduler's poll, a
 // foreground command's at its job's step. The module's thread waits for the
 // answer in slices of CALL_SLICE_MS, CALL_MS at most (AGAIN past it: a
-// background command's door serves nothing while it waits). The answer is
+// background command's door serves nothing while it waits), the time with no
+// VM not counted (moy_vmq.h, WITH NO VM: the next VM answers it). The answer is
 // the verb's number (true 1, false 0), a negative one a door code read as
 // its errno (role_errno: ABSENT is NOENT, FULL is RANGE, as an ELF module
 // reads them); a refusal (the verb's null, or its raise) is ACCES.
@@ -801,6 +803,8 @@ static int32_t role_errno(int32_t r) {
     }
 }
 
+static int32_t call_wait(moy_wasi_t *w, uint32_t ticket, int64_t t0);
+
 static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args, size_t n) {
     moy_wasi_t *w = os_run(e);
     if (w == NULL || w->pid == 0) {
@@ -812,10 +816,18 @@ static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args,
         return -(int32_t)(rc == MOY_VMQ_FULL ? W_AGAIN : W_NOMEM);
     }
     int64_t t0 = mono_us();
+    w->calling++;
+    int32_t v = call_wait(w, ticket, t0);
+    w->calling--;
+    return v;
+}
+
+// The answer to console call `ticket`, posted at `t0`, waited for.
+static int32_t call_wait(moy_wasi_t *w, uint32_t ticket, int64_t t0) {
     for (;;) {
         char *ans = NULL;
         size_t an = 0;
-        rc = moy_vmq_result(ticket, &ans, &an);
+        int rc = moy_vmq_result(ticket, &ans, &an);
         if (rc == MOY_VMQ_OK) {
             int32_t v = -(int32_t)W_ACCES;
             if (ans != NULL && an > 0) {
@@ -843,7 +855,9 @@ static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args,
         if (w->prog.exited) {
             return -(int32_t)W_INTR;
         }
-        if (mono_us() - t0 >= (int64_t)CALL_MS * 1000) {
+        if (!moy_vmq_vm_up()) {
+            t0 = mono_us();                 // no VM to answer it: it waits for one
+        } else if (mono_us() - t0 >= (int64_t)CALL_MS * 1000) {
             return -(int32_t)W_AGAIN;
         }
         if (moy_evq_wait(w->pid, CALL_SLICE_MS) != 0 && h_sleeps(w)) {
@@ -914,9 +928,13 @@ typedef struct {
     int32_t r;
 } role_call_t;
 
+// A row the door serves, hopped while no VM runs, waits for the VM.
 static void role_body(void *arg) {
     role_call_t *c = arg;
     c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->out, c->cap);
+    if (c->r == -MOY_APP_NEEDS_VM) {
+        moy_vmq_defer();
+    }
 }
 
 static void le32(uint8_t *q, uint32_t v) {
@@ -981,9 +999,11 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, bool seq, const os_arg_t
         w->hopped_us += mono_us() - t0;
     } else {
         uint32_t waited = 0;
+        w->calling++;
         if (moy_vmq_hop(w->pid, role_body, &c, &waited) != MOY_VMQ_OK) {
             c.r = -MOY_APP_NEEDS_VM;
         }
+        w->calling--;
         w->hopped_us += waited;
     }
     if (buf != stack) {
@@ -2207,7 +2227,7 @@ const char *moy_wasi_watch(moy_wasi_t *w) {
         return NULL;                    // ending
     }
     uint32_t wakes = w->wakes;
-    if (w->polling || wakes != w->seen) {
+    if (w->polling || w->calling || wakes != w->seen) {
         w->seen = wakes;
         w->seen_us = now;
         return NULL;

@@ -513,12 +513,21 @@ static mp_obj_t app_stop_hold(mp_obj_t self_in, mp_obj_t run) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(app_stop_hold_obj, app_stop_hold);
 
-static mp_obj_t app_stop_end(mp_obj_t self_in) {
-    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    moy_app_stop_end(self->a);
+// stop_end(keep=()): the RUN grants ended but those the pids in `keep` own.
+static mp_obj_t app_stop_end(size_t n_args, const mp_obj_t *args) {
+    app_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    uint32_t keep[16];
+    size_t n = 0;
+    if (n_args > 1) {
+        mp_obj_t it = mp_getiter(args[1], NULL), x;
+        while ((x = mp_iternext(it)) != MP_OBJ_STOP_ITERATION && n < MP_ARRAY_SIZE(keep)) {
+            keep[n++] = (uint32_t)mp_obj_get_int_truncated(x);
+        }
+    }
+    moy_app_stop_end(self->a, keep, n);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(app_stop_end_obj, app_stop_end);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_stop_end_obj, 1, 2, app_stop_end);
 
 static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_role), MP_ROM_PTR(&app_role_obj) },

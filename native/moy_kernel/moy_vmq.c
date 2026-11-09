@@ -25,6 +25,7 @@ enum { FREE, HOP, HOP_DONE, CALL, ANSWERED };
 
 typedef struct {
     uint8_t kind;               // FREE .. ANSWERED
+    bool vm;                    // a hop deferred: it runs once the VM is up
     uint16_t gen;
     uint32_t pid;
     uint32_t order;             // when it was posted, to serve the oldest first
@@ -43,6 +44,12 @@ static moy_sync_who_t s_who[MOY_VMQ_SLOTS];
 static uint16_t s_gen;
 static uint32_t s_order;
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
+static volatile bool s_up = true;       // the VM runs
+static bool s_defer;                    // the hop being served asked to wait for it
+
+// The kernel's frame (moy_loop.h's jobs): weak, for an image or a harness
+// without the loop, where whoever stands in for the frame serves.
+bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
 
 static int64_t now_us(void) {
     #ifdef MOY_SYNC_RTOS
@@ -78,6 +85,7 @@ static int claim(uint8_t kind, uint32_t pid) {
                 s_gen = 1;
             }
             s->kind = kind;
+            s->vm = false;
             s->gen = s_gen;
             s->pid = pid;
             s->order = ++s_order;
@@ -209,8 +217,9 @@ uint32_t moy_vmq_serve(void) {
         int pick = -1;
         MOY_SYNC_LOCK(&s_lock);
         calls = 0;
+        bool up = s_up;
         for (uint32_t i = 0; i < MOY_VMQ_SLOTS; i++) {
-            if (s_slot[i].kind == HOP
+            if (s_slot[i].kind == HOP && (up || !s_slot[i].vm)
                 && (pick < 0 || s_slot[i].order < s_slot[pick].order)) {
                 pick = (int)i;
             }
@@ -220,13 +229,48 @@ uint32_t moy_vmq_serve(void) {
         if (pick < 0) {
             return calls;
         }
+        s_defer = false;
         s_slot[pick].fn(s_slot[pick].arg);
         MOY_SYNC_LOCK(&s_lock);
+        if (s_defer) {
+            s_slot[pick].vm = true;     // the VM's to run: its poster waits on
+            MOY_SYNC_UNLOCK(&s_lock);
+            continue;
+        }
         moy_sync_who_t who = s_who[pick];
         __atomic_store_n(&s_slot[pick].kind, (uint8_t)HOP_DONE, __ATOMIC_RELEASE);
         MOY_SYNC_UNLOCK(&s_lock);
         moy_sync_wake(&s_done[pick], who);
     }
+}
+
+bool moy_vmq_defer(void) {
+    if (s_up) {
+        return false;
+    }
+    s_defer = true;
+    return true;
+}
+
+// The kernel's frame with no VM: the hops served, until the VM is up.
+static bool down_job(void *arg) {
+    (void)arg;
+    moy_vmq_serve();
+    return !s_up;
+}
+
+void moy_vmq_vm(bool up) {
+    s_up = up;
+    if (!up && moy_loop_job != NULL) {
+        moy_loop_job(down_job, NULL);
+    }
+    if (up) {
+        moy_evq_want(MOY_EVQ_WANT_POLL);   // what waited for it is the poll's
+    }
+}
+
+bool moy_vmq_vm_up(void) {
+    return s_up;
 }
 
 int moy_vmq_next(uint32_t *ticket, uint32_t *pid, const char **name, const char **args, size_t *n) {

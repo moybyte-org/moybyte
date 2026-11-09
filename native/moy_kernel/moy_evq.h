@@ -66,6 +66,15 @@
 // the program's nearest deadline as its timeout. sdk/include/moybyte/os.h
 // carries the record, MOY_EVQ_FD and MOY_EVQ_VERSION from here.
 //
+// TIMERS. A process on a task of its own (a compiled program's moy_every and
+// moy_after; docs/os_2026-11/processes.md section 1) holds its timers on its
+// queue, MOY_EVQ_TIMERS at most: each posts it MOY_EVQ_TIMER from the system,
+// its one argument the timer's id, when it is due, and again every `every`
+// ms after (a tick its queue cannot take is dropped). They are the kernel's,
+// so they run on through a VM stop, and they go with the queue. The kernel's
+// frame runs them (moy_evq_timers_run, a loop job while one is set); a
+// harness with no frames, and the host's scheduler, call it.
+//
 // Any task may call any function; no ISR may. Posting allocates the
 // message's copy (outside the lock); nothing else allocates but an open.
 
@@ -97,6 +106,9 @@ enum {
 #define MOY_EVQ_APP 48u             // an app id, its NUL counted
 #define MOY_EVQ_LISTEN 8u           // names a process listens on at once
 #define MOY_EVQ_SYSTEM "system"     // the app a message from pid 0 or 1 is from
+#define MOY_EVQ_TIMERS 16u          // timers a queue holds
+#define MOY_EVQ_TIMER "moybyte.timer"   // a timer's message
+#define MOY_EVQ_TIMER_ID 0x40000000u    // a timer's id has this bit: apart from the console's wakes
 
 #define MOY_EVQ_VM 0x01u            // the VM's task serves it (a Python process)
 
@@ -191,6 +203,16 @@ uint32_t moy_evq_wants(void);
 uint32_t moy_evq_wanted(uint32_t mask);
 // How many queues that are not the VM's listen on `name`.
 uint32_t moy_evq_listening(const char *name);
+
+// TIMERS: a timer of `pid`'s queue, due `ms` from now and then every `every`
+// ms (0: once), the queue made to listen on MOY_EVQ_TIMER: OK with *id,
+// STALE (no queue), FULL (MOY_EVQ_TIMERS held, or no name left to listen
+// on). Cancel: whether `pid` held timer `id`. How many it holds.
+int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id);
+bool moy_evq_timer_cancel(uint32_t pid, uint32_t id);
+uint32_t moy_evq_timers(uint32_t pid);
+// The due timers posted: the ms to the next one, UINT32_MAX for none.
+uint32_t moy_evq_timers_run(void);
 
 // Every queue closed (a test's teardown).
 void moy_evq_reset(void);

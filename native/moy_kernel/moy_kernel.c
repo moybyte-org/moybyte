@@ -113,6 +113,7 @@
 #include "moy_boot.h"
 #include "moy_crash.h"
 #include "moy_evq.h"
+#include "moy_vmq.h"
 #include "moy_kernel.h"
 #include "moy_lease.h"
 #include "moy_log.h"
@@ -1856,6 +1857,10 @@ static void moy_kernel_vm_down(void **heap) {
         s_start = MOY_START_BOOT;
         return;
     }
+    // The services on tasks of their own run on through the stop: the
+    // kernel's frame serves their hops, and what needs Python waits for the
+    // next VM (moy_vmq.h, WITH NO VM).
+    moy_vmq_vm(false);
     size_t lo = offsetof(mp_state_ctx_t, thread.dict_locals);
     size_t hi = offsetof(mp_state_ctx_t, vm.qstr_last_chunk);
     memset((uint8_t *)&mp_state_ctx + lo, 0, hi - lo);
@@ -1883,6 +1888,7 @@ static void moy_kernel_vm_down(void **heap) {
     }
     MP_THREAD_GIL_EXIT();
     s_stop = MOY_STOP_NONE;
+    moy_vmq_vm(true);
     *heap = MP_PLAT_ALLOC_HEAP(MICROPY_GC_INITIAL_HEAP_SIZE);
     if (*heap == NULL) {
         printf("mp_task_heap allocation failed!\n");

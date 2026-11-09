@@ -516,6 +516,40 @@ static int l_console(lua_State *L) {
     return lua_yieldk(L, 0, 0, console_k);
 }
 
+// `moybyte.send(app, name, ...)`: the kernel's send (moy_evq.h) on the
+// service's own task, as a compiled program's moy_send is, so it needs no
+// console and goes on through a VM stop: how many took it, or nil and why
+// ("full": BACKPRESSURE refused it; "no queue").
+static int l_send(lua_State *L) {
+    svc_t *s = of_state(L);
+    const char *app = luaL_checkstring(L, 1);
+    const char *name = luaL_checkstring(L, 2);
+    if (moy_app_lua_json_dump == NULL) {
+        return luaL_error(L, "no messages in this build");
+    }
+    int n = lua_gettop(L);
+    luaL_checkstack(L, 2 * n + 4, NULL);
+    lua_pushliteral(L, "[");
+    for (int i = 3; i <= n; i++) {
+        if (i > 3) {
+            lua_pushliteral(L, ", ");
+        }
+        moy_app_lua_json_dump(L, i, NULL);
+    }
+    lua_pushliteral(L, "]");
+    lua_concat(L, n >= 3 ? 2 * (n - 2) + 1 : 2);
+    size_t len;
+    const char *text = lua_tolstring(L, -1, &len);
+    int took = moy_evq_send(s->pid, app, name, text, len, NULL);
+    if (took >= 0) {
+        lua_pushinteger(L, took);
+        return 1;
+    }
+    lua_pushnil(L);
+    lua_pushstring(L, took == -MOY_EVQ_FULL ? "full" : "no queue");
+    return 2;
+}
+
 static int deliver_k(lua_State *L, int status, lua_KContext ctx) {
     (void)L;
     (void)status;
@@ -589,6 +623,8 @@ static void open_names(lua_State *L) {
     MOY_APP_LUA_CALLS(CALL)
     CALL("at")                          // the alarm's console half (ALARMS)
 #undef CALL
+    lua_pushcfunction(L, l_send);       // the kernel's, not a console call
+    lua_setfield(L, -2, "send");
     lua_setglobal(L, "moybyte");
     if (moy_app_lua_open_crypto != NULL) {
         moy_app_lua_open_crypto(L);     // its run's role binding's, held with no grant
@@ -1251,12 +1287,14 @@ void moycore_svc_reset(void) {
     #endif
 }
 
-void moycore_svc_vm_stop(void) {
+void moycore_svc_vm_stop(bool keep) {
     #ifdef SVC_TASKS
-    // The scheduler TERMed each service just before the stop; what follows
-    // its TERM runs now. No console answers a call any more, so each is
-    // refused, and the hops its role rows wait on are served here, on the
-    // VM's task while the VM still stands.
+    if (keep) {
+        return;
+    }
+    // A fresh start follows: each service ends now. No console answers a
+    // call any more, so each is refused, and the hops its role rows wait on
+    // are served here, on the VM's task while the VM still stands.
     int64_t until = now_us() + (int64_t)(MOYCORE_SVC_STOP_MS + 500u) * 1000;
     for (;;) {
         bool live = false;
@@ -1289,6 +1327,7 @@ void moycore_svc_vm_stop(void) {
         }
     }
     #else
+    (void)keep;
     moycore_svc_reset();
     #endif
 }

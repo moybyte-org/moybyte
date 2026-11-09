@@ -153,35 +153,24 @@ function moy_stop() print("saved") end
     assert sched.procs[pid].code == S.EXIT_KILLED
 
 
-def test_the_pause_before_a_vm_stop_leaves_each_lua_service_ended(sched, monkeypatch):
-    """A board's Lua service ends on its own task after its TERM, so the pause
-    polls until it has: its moy_stop ran and its row and grant are this VM's
-    to end, not left in the memory the stop frees. A task's lag is stood in
-    for by a poll that sees the end only on its third call."""
+def test_the_pause_before_a_vm_stop_leaves_each_lua_service_running(sched, monkeypatch):
+    """A Lua service runs on its own task, so the pause before a VM stop
+    sends it no TERM and names it among the services the next VM takes back
+    (scheduler.py, ACROSS A VM STOP); tests/test_services_vm_stop.py runs one
+    through the stop."""
     keeper = """
 moybyte.every(1000, function() end)
 function moy_stop() print("saved") end
 """
     since = L.next()
     pid = sched.start(_cart(keeper))
-    real_poll, polls = sched.poll, []
-
-    def lagging_stop(q):
-        p = sched.procs[q]
-        moycore.svc_stop(p.native)
-        p.state = S.STOPPING
-        return True
-
-    def counted_poll():
-        polls.append(1)
-        if len(polls) >= 3:
-            real_poll()
-    monkeypatch.setattr(sched, "stop", lagging_stop)
-    monkeypatch.setattr(sched, "poll", counted_poll)
-    assert sched.pause() == ["/carts/t.lua.moy"]
+    stopped = []
+    monkeypatch.setattr(sched, "stop", lambda q: stopped.append(q))
+    assert sched.pause() == []
     p = sched.procs[pid]
-    assert len(polls) >= 3 and p.state == S.EXITED and p.code == 0
-    assert _texts(since, pid)[-2:] == ["saved", "exit 0"]
+    assert not stopped and p.state == S.BACKGROUND
+    assert sched.kept_rows() == [[pid, "/carts/t.lua.moy", p.native]]
+    assert "saved" not in _texts(since, pid)
 
 
 def test_the_c_side_refuses_what_it_does_not_run():

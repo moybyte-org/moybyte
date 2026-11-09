@@ -30,8 +30,8 @@
 // tools/mp_task_calls.py fails it when the tag's call list moves (v1.29.0
 // drops machine_timer_deinit_all, so the stop stops timers itself). The ORDER
 // of a stop: the app's close(); the cooperative stops (threads joined,
-// moycore's close() -- which ends a wasm session, frees the Lua state and
-// ends the Lua services (moycore_svc_vm_stop) -- the flush feeder drained and
+// moycore's close() -- which ends a wasm session and frees the Lua state, the
+// Lua services on their tasks kept (moycore_svc_vm_stop) -- the flush feeder drained and
 // the fold disarmed, async copies waited: moy_glass_vm_stop); the port's
 // deinit list, with the pin sweep replaced by one that removes only the pins
 // a Python handler holds, so the kernel's GPIO ISRs survive; gc_sweep_all,
@@ -136,8 +136,9 @@ int moy_kernel_start(void);
 // a lease set on the kernel's tables before it and read back after.
 void moy_kernel_kstop_stop(int n);
 // The resume record: what the launcher writes before a stop and reads at the
-// return start (its place on the shelf), PSRAM, never flash.
-#define MOY_KERNEL_RESUME_MAX 256
+// return start (its place on the shelf, the Python services to start again and
+// the services the stop kept running), PSRAM, never flash.
+#define MOY_KERNEL_RESUME_MAX 512
 void moy_kernel_resume_set(const char *text, size_t n);
 size_t moy_kernel_resume(const char **text);
 // A line out through the kernel's serial path, with no VM's stream.

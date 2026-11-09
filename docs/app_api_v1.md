@@ -541,9 +541,10 @@ that doubles from 1 s and a cap of 3 ends in a row
 **Which boards.** Python services run on every console board, in the
 shell's VM; on the S3s they are stopped before a VM stop (a game that needs
 the whole board) and started again after it. Lua and WASI services run on
-every console board and the host, on core 1 on the S3s, whose VM stop
-ends them and whose return starts them again, as it does a Python one.
-ELF services run on both chips (core 1 on the S3s). The browser's VM has no asyncio. The per-board table is
+every console board and the host, ELF services on both chips, on core 1 on
+the S3s, and they run on through a VM stop: their timers go off and their
+messages to other services arrive, while a call that needs the console
+(a notification, a role the shell serves) waits until the game ends. The browser's VM has no asyncio. The per-board table is
 `docs/os_2026-11.md` §5.
 
 ## 8. Messages

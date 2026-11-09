@@ -446,8 +446,7 @@ while the browser's VM has none and the Zero runs no scheduler. An abort
 skips `finally` and `__exit__`, so a lock the callback took stays held; an
 aborted callback is a strike. A callback's exception is a crash (§10). On
 a board with the VM stop, Python services are stopped before the stop and
-started again after it (§5; the mini-VM spike, P3.8, may keep them
-running). The hardening rung is the overview's §4.
+started again after it (§5). The hardening rung is the overview's §4.
 
 **`asyncio`** is MicroPython's, on one event loop the shell owns on this
 scheduler (`runtime/system/aio.py`, whose header is the authority): no
@@ -522,27 +521,33 @@ game's lost time shows in the task manager as the slice's cost (§6).
 
 A service sleeps on its declared wake sources (§1), and the idle ladder
 (`native/moy_kernel/moy_idle.h`) treats a running service as activity for
-those sources only. Across a VM stop (the S3s) an OS service keeps
-running. A service the scheduler runs is not held through it, whatever its
-tier, since the stop ends the VM's heap, which holds its row (an ELF
-service's app calls are the VM's to serve, too): the Player TERMs every
-running service just before the stop (its `moy_stop`, or its loop at its
-descriptor's end of file, persists what it needs; the Player waits for a
-Lua service's to end on its own task, and one still running then ends inside
-the stop, its console calls refused, `moycore_svc_vm_stop`), the resume
-record names
-them, and the console that starts after the stop starts them again
-(`moy_start`, `main`), so its timers start
-afresh and the records its sources took during the stop are not delivered
-(the owner's 2026-11-03 answer asked for them with their real timestamps,
-which a restart cannot give; #246 holds the question). The mini-VM
+those sources only. **Across a VM stop (the S3s) a service on a task of
+its own runs on, whoever wrote it**: an OS service, and a Lua, WASI or ELF
+one (owner, 2026-11-09). The rows that run it are the kernel's (its event
+queue, its tier's table, its run grant, its timers, `moy_evq.h` TIMERS); the
+Player's pause sends it no TERM and the resume record names it, and the
+console that starts after the stop takes its row back at its first frame,
+the same pid, with no second start (`runtime/system/scheduler.py`, ACROSS A
+VM STOP). Meanwhile its timers go off, a message between processes on their
+own tasks is delivered, and files and the kernel's services answer; a call
+that needs Python (a console call, a role row the door serves) waits on the
+VM's queue and is answered once the VM is back (`native/moy_kernel/moy_vmq.h`,
+WITH NO VM), and a message to a Python process is not taken, its queue
+having closed with the VM. Its device handles are Python objects, closed at
+the pause. **A Python service pauses**: the Player TERMs it just before the
+stop (its `moy_stop` persists what it needs), the resume record names it,
+and the console that starts after the stop starts it again (`moy_start`), a
+new process, so its timers start afresh and the records its sources took
+during the stop are not delivered (the owner's 2026-11-03 answer asked for
+them with their real timestamps, which a restart cannot give; #246 holds the
+question). The mini-VM
 spike (P3.8, branch `minivm`, f4496588f) built the alternative and it was
 DROPPED (owner, 2026-11-06): a small MicroPython started in the stopped
 VM's place, strictly after its teardown, ran the services through Doom on
 both S3s, but it cost the cart 1-2 fps and 256 KB of its PSRAM, reached no
 card and no glass, and helps only Python services while the ones that
 matter during a game (media, the radio link) are C. "Python pauses"
-stands. What it showed that outlives it: a VM with only the services
+stands, and every other tier runs on (2026-11-09). What it showed that outlives it: a VM with only the services
 subset frozen in boots in about 100-350 ms and runs one service in a
 12-20 KB heap, the starting point for a board with no PSRAM whose only
 Python is service-sized (#246 has the numbers). A service that is killed under

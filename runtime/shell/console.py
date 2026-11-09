@@ -596,9 +596,11 @@ def _app_abi(rows):
     runs on a kernel (a board), so a VM stop leaves its grants and clipboard
     for the next VM, its prefs the kernel's settings rows; elsewhere this
     console's own, its prefs written into `rows`. Every start ends the run
-    grants, the stopped VM's runs' and services' (a service's whether or not
-    its end ran before the stop); a return start keeps the rest of the
-    kernel's as it was, the clipboard among it."""
+    grants, the stopped VM's runs' and Python services', but for a return
+    start's services on tasks of their own, which ran on through the stop
+    and keep theirs (scheduler.kept_pids, taken back at the first frame); a
+    return start keeps the rest of the kernel's as it was, the clipboard
+    among it."""
     try:
         import moy_kernel
     except ImportError:
@@ -609,8 +611,8 @@ def _app_abi(rows):
     if returning:
         # A compiled app's run that stopped the VM held its grant across the
         # stop (Player._stop_grant); that run is over now, and so is every
-        # process the stopped VM ran.
-        app.stop_end()
+        # process the stopped VM ran but the services it kept running.
+        app.stop_end(_scheduler.kept_pids())
     return app
 
 
