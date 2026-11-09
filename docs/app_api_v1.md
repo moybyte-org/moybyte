@@ -395,8 +395,9 @@ card, SFTP, USB, a browser's push) shows those lines when it is first opened,
 and runs only on a yes. Your own carts, written on the console, and the
 built-ins are never asked about. The record is kept per app id (`runtime/shell/app_perms.py`,
 `Consent`); `docs/os_2026-11/processes.md`
-§2 has the rules, and `docs/os_2026-11.md` §4 what the permissions protect
-against and what they do not.
+§2 has the rules. What a permission, a tier and a signature protect
+against, and what they do not (a Python app is trusted, a C module on an S3
+is the whole console), is `docs/os_2026-11/threat_model.md`.
 
 **Notifications** (`notifications`): `moybyte.notify(summary, body="",
 icon=None, actions=(), urgency=1, replaces_id=0)` answers the notification's

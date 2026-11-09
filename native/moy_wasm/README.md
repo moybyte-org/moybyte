@@ -43,9 +43,10 @@ product), with the owner's later calls dated where they land.
   module only when its key matches and its signature verifies ("Provenance").
   A module for another chip or format is never opened (the interpreter plays
   the cart); a present signature that does not verify is refused.
-- **Signing is the default, not a lock (owner, 2026-09-29):** "Unknown
-  sources". The store compiles and signs what it lists, so its carts never
-  need the switch.
+- **Signing is the default, not a lock (owner, 2026-09-29):** an unsigned
+  module loads only for a cart whose consent grants `full_access`, and there
+  is no console-wide switch (owner, 2026-11-02). The store compiles and signs
+  what it lists, so its carts never need that consent.
 - **A moy-spec binding, not a Moybyte runtime.** The import table is the verb
   table, which is the spec's subject: SPEC.md §16, an optional binding beside
   Lua (2026-09-30). A host without the tier refuses the runtime cleanly
