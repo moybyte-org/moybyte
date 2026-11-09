@@ -167,7 +167,13 @@ one parses it as hostile.
 
 ## 6. Crypto for apps
 
-Random bytes, SHA-256, HMAC-SHA256, AES-GCM, X25519 and Ed25519 are rows of the one table, served on every tier by `native/moy_net/moy_crypto.c` over the image's mbedTLS and, for Ed25519, the vendored Monocypher 4.0.3 (`native/moy_net/monocypher/`), with no permission (`between_apps.md` §5, `tests/test_crypto_rows.py`; 65076d1f9, 879de54d4). GCM draws its own nonce and an open that does not authenticate answers FORGED; X25519 clamps the secret and refuses a small-order peer; Ed25519 signs deterministically from a 32-byte seed (RFC 8032), and a key or signature that does not decode verifies as 0. There is no key store: an app keeps its keys in its prefs or files, in the clear on the card.
+The crypto rows (random bytes, hashing, MACs, AES-GCM, X25519, Ed25519) are
+`between_apps.md` §5's: one table, every tier, no permission, mbedTLS and
+the vendored Monocypher (`native/moy_net/monocypher/`). What they hold: a
+GCM open that does not authenticate is refused, a small-order X25519 peer is
+refused, and an Ed25519 key or signature that does not decode verifies as 0.
+There is no key store: an app keeps its keys in its prefs or files, in the
+clear on the card.
 
 Every random byte the console makes (the sign-in's, the SSH server's, the TLS
 client's, a WASI program's `random_get`, LoRaWAN's and these rows') comes
