@@ -2757,6 +2757,7 @@ def roles_trace(ws):
             f.write(files[name])
     ws.rescan_carts()
     cart = [c for c in ws.carts.all if c.get("title") == "Tracer"][0]
+    __import__("app_perms").made_here(ws, cart)
     ws.select_cart(cart)
     ws.open()
     for _ in range(6):
