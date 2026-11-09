@@ -276,24 +276,24 @@ int32_t moybyte_aes_gcm_open(const void *key, uint32_t key_n, const void *sealed
 // moybyte.x25519
 int32_t moybyte_x25519(const void *secret, uint32_t secret_n, const void *peer, uint32_t peer_n,
                        void *shared, uint32_t shared_cap) MOYBYTE_APP_IMPORT(moybyte_x25519);
-// moybyte.dev_open: lease, http, lora, mic, ble, usb, midi
+// moybyte.dev_open: lease, http, lora, mic, ble, usb, midi, camera
 int32_t moybyte_dev_open(const char *name, uint32_t name_n, const char *cfg,
                          uint32_t cfg_n) MOYBYTE_APP_IMPORT(moybyte_dev_open);
-// moybyte.dev_close: lease, http, lora, mic, ble, usb, midi
+// moybyte.dev_close: lease, http, lora, mic, ble, usb, midi, camera
 int32_t moybyte_dev_close(int32_t h) MOYBYTE_APP_IMPORT(moybyte_dev_close);
-// moybyte.dev_read: lease, http, lora, mic, ble, usb, midi
+// moybyte.dev_read: lease, http, lora, mic, ble, usb, midi, camera
 int32_t moybyte_dev_read(int32_t h, void *data,
                          uint32_t data_cap) MOYBYTE_APP_IMPORT(moybyte_dev_read);
-// moybyte.dev_write: lease, http, lora, mic, ble, usb, midi
+// moybyte.dev_write: lease, http, lora, mic, ble, usb, midi, camera
 int32_t moybyte_dev_write(int32_t h, const void *data,
                           uint32_t data_n) MOYBYTE_APP_IMPORT(moybyte_dev_write);
-// moybyte.dev_xfer: lease, http, lora, mic, ble, usb, midi
+// moybyte.dev_xfer: lease, http, lora, mic, ble, usb, midi, camera
 int32_t moybyte_dev_xfer(int32_t h, const void *data, uint32_t data_n, void *into,
                          uint32_t into_cap) MOYBYTE_APP_IMPORT(moybyte_dev_xfer);
-// moybyte.dev_set: lease, http, lora, mic, ble, usb, midi
+// moybyte.dev_set: lease, http, lora, mic, ble, usb, midi, camera
 int32_t moybyte_dev_set(int32_t h, const char *cfg,
                         uint32_t cfg_n) MOYBYTE_APP_IMPORT(moybyte_dev_set);
-// moybyte.dev_get: lease, http, lora, mic, ble, usb, midi
+// moybyte.dev_get: lease, http, lora, mic, ble, usb, midi, camera
 int32_t moybyte_dev_get(int32_t h, const char *what,
                         uint32_t what_n) MOYBYTE_APP_IMPORT(moybyte_dev_get);
 

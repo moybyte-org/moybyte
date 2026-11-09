@@ -679,3 +679,35 @@ def test_a_midi_handle_refuses_what_it_cannot_open_and_keeps_nothing(midi):
     leases.LEASES.grants = None
     devices.grants = lambda p: ("usb",)
     assert _open(pid, "midi", "uart=uart1") == H.DENIED
+
+
+# -- the camera --------------------------------------------------------------------------
+
+
+def test_a_camera_handle_reads_whole_frames_and_its_end_lets_it_go():
+    from runtime import moy_camera
+    from runtime.host import camera_sim
+    devices.grants = devices.console = None
+    camera_sim.install(4, 2)
+    try:
+        pid, other = L.spawn("t.cam"), L.spawn("t.other")
+        h = _open(pid, "camera")
+        assert h > 0 and moy_camera.owner() == pid
+        assert _get(pid, h, "w") == 4 and _get(pid, h, "h") == 2
+        assert _as(pid, lambda: H.read(pid, h, 16)) == b""        # before the first frame
+        frame = bytes(range(16))
+        camera_sim.frame(frame)
+        assert _as(pid, lambda: H.read(pid, h, 15)) == H.FULL     # whole frames only
+        assert _as(pid, lambda: H.read(pid, h, 64)) == frame
+        assert _open(pid, "camera") == H.BUSY and _open(other, "camera") == H.BUSY
+        assert _open(other, "camera", "fps=30") == H.BAD
+        moybyte.end(pid)
+        assert moy_camera.owner() == 0
+        devices.grants = lambda p: ("mic",)
+        assert _open(other, "camera") == H.DENIED
+        devices.grants = None
+        camera_sim.remove()
+        assert _open(other, "camera") == H.ABSENT
+    finally:
+        devices.grants = None
+        camera_sim.remove()

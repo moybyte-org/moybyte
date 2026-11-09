@@ -5,6 +5,7 @@ section 1) over its driver, the module `moy_camera`. No console has a camera
 (runtime/host/camera_sim.py). Needs the `camera` permission; one process
 holds it, taken at its first verb and let go at its end.
 
+  open()            the camera held before its first verb
   size() -> (w, h)
   capture(into=None) -> n | bytes
                     the latest frame, w * h RGB565 pixels big-endian (the
@@ -34,6 +35,10 @@ def _take():
     if _N.owner() != p:
         _D.check(_N.open(p))
     return p
+
+
+def open():  # noqa: A001 -- the verb's name
+    _take()
 
 
 def size():

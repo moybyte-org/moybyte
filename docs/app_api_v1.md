@@ -372,8 +372,8 @@ opens a text file from Files with (Notes).
 | `autostart` | a service starts with the console (§7) | python, lua, wasm, elf |
 | `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1); by handle on the compiled tiers (§10) | python, wasm, elf |
 | `full_access` | what a native (ELF) cart must ask for, and what admits an unsigned compiled module (§10) | wasm, elf |
-| `http`, `mic`, `lora`, `ble`, `usb`, `midi` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); by handle on the compiled tiers too, `lora` with LoRaWAN (§10, Devices by handle) | python, wasm, elf |
-| `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`) | python |
+| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); by handle on the compiled tiers too, `lora` with LoRaWAN (§10, Devices by handle) | python, wasm, elf |
+| `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`) | python |
 | `alarms` | `moybyte.at` (§9) | python, lua, wasm, elf |
 | `editor`, `calc`, `terminal`, `getcarts`, `storybook`, `myart`, `artwork`, `music` | nothing: a marker, a shipped app's claim on its own cart (§13) | python |
 <!-- END GENERATED -->
@@ -736,13 +736,13 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
 | `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
 | `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
-| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
-| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
-| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
-| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
-| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
-| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
-| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
+| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
+| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
+| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
+| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
+| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
+| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
+| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -818,7 +818,7 @@ a native module) holds a lease or a device API by a handle where a Python
 program holds an object (`runtime/system/dev_handles.py` is the authority
 on every name, key and answer). `dev_open(name, cfg)` answers the handle:
 `name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
-`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`), `cfg` words
+`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`, `"camera"`), `cfg` words
 `key=value` (`"mode=out value=1"`, `"baudrate=9600"`, `"scl=20 sda=21
 addr=0x48"`, `"url=http://example.com/ cap=4096"`). On the handle,
 `dev_read(h, buf, cap)` takes what waits (0 when nothing does),
@@ -866,18 +866,20 @@ connected, found and subscribed for you; `dev_get(h, "state")` is 1 once
 its messages flow). `dev_write` sends whole MIDI messages and `dev_read`
 takes the port's messages, 3 bytes each (status, data1, data2). A process
 opens as many ports as it needs, and holds the MIDI API from its first to
-its last.
+its last. A `camera` handle's `dev_read` is the latest frame, whole
+(`dev_get(h, "w")` by `"h"` RGB565 pixels, big-endian), nothing before the
+first.
 
 Each name needs what Python's needs: `lease:<row>` (`lease:gpio` for
 anything on the pins: a pin, a PWM, an ADC, an I²C bus), `http`, `lora`,
-`mic`, `ble`, `usb`, `midi`. One holder a lease or a device, whatever the tiers: a
+`mic`, `ble`, `usb`, `midi`, `camera`. One holder a lease or a device, whatever the tiers: a
 resource a Python program's object holds is BUSY to a handle and the
 reverse (`-11` to a compiled app, `EBUSY` to a native or WASI program), and
-a process opens a radio, the microphone or the USB host once. A refused permission is
+a process opens a radio, the microphone, the USB host or the camera once. A refused permission is
 DENIED (`EACCES`), a name, key or value the console does not take BAD
 (`EINVAL`), a handle not open, or a radio verb that needs a connection or a
 join, ABSENT (`ENOENT`), a buffer that cannot hold one record FULL
-(`ERANGE`). `camera` and `media` are Python's alone.
+(`ERANGE`). `media` is Python's alone.
 
 **A command** (`"type": "command"`) is a program the terminal runs by
 its id's name (`local.hello` is `hello`): in Python its `main(argv)`, with

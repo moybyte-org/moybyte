@@ -7,8 +7,8 @@ WASI program, an ELF module) holds where a Python program holds an object
   open(name, cfg) -> h      a lease of row `name` (leases.py's names:
                             "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",
                             "adc<n>", "i2c") or a device API ("http", "lora",
-                            "mic", "ble", "usb", "midi"), configured by
-                            `cfg`
+                            "mic", "ble", "usb", "midi", "camera"),
+                            configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
   write(h, bytes) -> n      what was sent
@@ -95,13 +95,16 @@ answers:
             connects, 1 once messages flow, 2 failed or gone); a write to a
             BLE port before it is ready is ABSENT. A process holds the
             `midi` API from its first port to its last
+  camera    read: the latest frame, w * h RGB565 pixels big-endian (the
+            glass's byte order), whole (FULL where `into` cannot hold it),
+            0 bytes before the first; get w, h
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
 name needs (leases.perm_of's `lease:<row>`, a device's own), BUSY where
 another process holds the lease or the device (a Python program's object, or
-another compiled program's handle; a process opens lora, mic, ble and usb
-once),
+another compiled program's handle; a process opens lora, mic, ble, usb and
+the camera once),
 BAD for a name, a key or a value this console does not take, ABSENT for a
 handle not open, a device this console lacks and a radio verb that needs a
 connection or a join, FULL where `into` cannot hold one record, IO where the
@@ -976,10 +979,35 @@ class _Midi(_Ring):
             self.f.sweep(pid)
 
 
+class _Camera(_Handle):
+    def __init__(self, cfg):
+        _only(cfg, ())
+        self.f = _face("camera")
+        self.f.open()
+        w, h = self.f.size()
+        self.buf = bytearray(w * h * 2)
+
+    def read(self, cap):
+        n = self.f.capture(self.buf)
+        if n > cap:
+            return FULL
+        return bytes(self.buf[:n])
+
+    def get(self, what):
+        if what == "w":
+            return self.f.size()[0]
+        if what == "h":
+            return self.f.size()[1]
+        raise OSError(EINVAL, "no %s" % what)
+
+    def close(self, pid):
+        self.f.sweep(pid)
+
+
 _DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb,
-            "midi": _Midi}
+            "midi": _Midi, "camera": _Camera}
 # A device with one holder: a process opens it once.
-_ONE = ("lora", "mic", "ble", "usb")
+_ONE = ("lora", "mic", "ble", "usb", "camera")
 
 
 def _need(pid, perm):
