@@ -7,7 +7,8 @@ WASI program, an ELF module) holds where a Python program holds an object
   open(name, cfg) -> h      a lease of row `name` (leases.py's names:
                             "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",
                             "adc<n>", "i2c") or a device API ("http", "lora",
-                            "mic", "ble", "usb"), configured by `cfg`
+                            "mic", "ble", "usb", "midi"), configured by
+                            `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
   write(h, bytes) -> n      what was sent
@@ -82,6 +83,18 @@ answers:
             vid and pid (u16) and the name, REPORT's the HID report,
             DATA's the bytes the device sent. The open reads as an ATTACH
             for each device already plugged in
+  midi      one port a handle, named by the open's cfg: uart=<row> (baud=<n>,
+            31250 by default; the row's `lease:<row>` too), usb=<addr> (a
+            USB-MIDI device, as a usb handle's ATTACH names it) or
+            ble=aa:bb:cc:dd:ee:ff (a BLE-MIDI peripheral: connected, its
+            MIDI characteristic found and subscribed); write: MIDI bytes,
+            whole messages (no system exclusive), to it; read: the messages
+            it sent, 3 bytes each (status, data1, data2: 0 where the
+            message has fewer), whole messages only (FULL where one does
+            not fit); get port (the driver's), state (0 while a BLE port
+            connects, 1 once messages flow, 2 failed or gone); a write to a
+            BLE port before it is ready is ABSENT. A process holds the
+            `midi` API from its first port to its last
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
@@ -903,7 +916,68 @@ class _Usb(_Ring):
         self.f.sweep(pid)
 
 
-_DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb}
+MIDI_BYTES = 3              # a message read: status, data1, data2
+_MIDI_STATE = {"connecting": 0, "finding": 0, "ready": 1, "failed": 2, "gone": 2}
+
+
+class _Midi(_Ring):
+    KIND = _moybyte.MIDI
+
+    def __init__(self, cfg):
+        f = _face("midi")
+        if _moybyte.WAKES.table is None:
+            raise OSError(ENODEV, "no input table")
+        _only(cfg, ("uart", "baud", "usb", "ble"))
+        ways = [k for k in ("uart", "usb", "ble") if k in cfg]
+        if len(ways) != 1:
+            raise OSError(EINVAL, "a midi handle is one port: uart=, usb= or ble=")
+        if "baud" in cfg and ways[0] != "uart":
+            raise OSError(EINVAL, "baud is a uart's")
+        way = ways[0]
+        v = cfg[way]
+        try:
+            self._reader(f.source())
+            if way == "uart":
+                if not isinstance(v, str) or not v.startswith("uart"):
+                    raise OSError(EINVAL, "uart=%r" % (v,))
+                self.port = f.uart(v, _int(cfg.get("baud", 31250), 1, 4000000, "baud"))
+            elif way == "usb":
+                self.port = f.usb(_int(v, 1, 127, "usb"))
+            else:
+                self.port = f.ble(_addr(v))
+        except BaseException:
+            self._free()
+            if not f.ports():
+                f.close()
+            raise
+        self.f = f
+
+    def _rec(self, port, a, b):
+        if port != self.port:
+            return None
+        return bytes((a & 0xFF, (a >> 8) & 0x7F, b & 0x7F))
+
+    def write(self, data):
+        self.f.send(self.port, data)
+        return len(data)
+
+    def get(self, what):
+        if what == "port":
+            return self.port
+        if what == "state":
+            return _MIDI_STATE.get(self.f.state(self.port), 2)
+        raise OSError(EINVAL, "no %s" % what)
+
+    def close(self, pid):
+        self._free()
+        if any(type(x) is _Midi for x in HANDLES.get(pid, {}).values()):
+            self.f.close(self.port)
+        else:
+            self.f.sweep(pid)
+
+
+_DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb,
+            "midi": _Midi}
 # A device with one holder: a process opens it once.
 _ONE = ("lora", "mic", "ble", "usb")
 

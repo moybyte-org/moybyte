@@ -16,6 +16,10 @@ its end closes every port.
   send(port, data)      MIDI bytes, whole messages (no system exclusive)
   on(fn)                fn(port, status, data1, data2) for each message
   ports() -> [(port, transport, unit)]   transport UART, USB or BLE
+  state(port)           "ready" once messages flow (a UART's and a USB
+                        device's at once), a BLE port's "connecting",
+                        "finding", "failed" or "gone" before or after
+  source()              the ring source its messages ride (a reader's)
   close(port=None)      one port, or all of them and the API
 
 A transport the console lacks refuses with OSError(ENODEV); `present()` is
@@ -272,6 +276,17 @@ def on(fn):
 def ports():
     p = _D.pid()
     return [(k, v[0], v[1]) for k, v in sorted(_ports.get(p, {}).items())]
+
+
+def state(port):
+    v = _ports.get(_D.pid(), {}).get(port)
+    if v is None:
+        raise _err(_D.EBADF)
+    return v[2]["state"] if v[0] == BLE else "ready"
+
+
+def source():
+    return _N.source()
 
 
 def _drop(p, port, v):

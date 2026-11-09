@@ -104,7 +104,7 @@ TABLE = (
     ("ble", "api:ble", ("python", "wasm", "elf"), "Use Bluetooth devices", "ble", ()),
     ("usb", "api:usb", ("python", "wasm", "elf"),
      "Use USB devices plugged into the console", "usb", ()),
-    ("midi", "api:midi", ("python",), "Play and hear MIDI instruments", "midi", ()),
+    ("midi", "api:midi", ("python", "wasm", "elf"), "Play and hear MIDI instruments", "midi", ()),
     ("camera", "api:camera", ("python",), "Take pictures with the camera", "camera", ()),
     ("media", "api:media", ("python",), "Play music in the background", "media", ()),
     ("media:url", "api:media", ("python",), "Play radio streams from the internet", "wifi", ()),
