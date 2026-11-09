@@ -33,32 +33,44 @@ console has none of refuses the launch by name, required or not: the cart
 would otherwise run with no `files` and fail on its first use. Turned off or unconsented, each of its `py`
 names reads `None`; on a console without the service, it has no name, as
 the console has no verb. An absent permission the manifest's `"required"`
-lists refuses the launch with a message naming it. A cart with no consent record -- one written in the
-Editor, a seed, a cart brought in by hand -- never prompts and runs on its
-manifest as written, less what Settings turned off.
+lists refuses the launch with a message naming it.
+
+A cart in a folder with no consent record -- one that arrived as files:
+copied onto the card, over SFTP or USB, pushed by a paired browser -- is
+asked on its first run, with the install prompt's lines (`asks_first`): the
+home's launch asks (`Workstation.ask_first`), a command asks in its terminal
+(`sh_door`), and until a yes every launch of it is refused (`UNASKED`). A
+yes records the consent an install would. Never asked: a built-in (known by
+its seed, `builtin_name`), a cart with no folder (a script), a cart whose
+prompt would ask nothing, and a cart made on this console, whose record the
+making writes (`Consent.made`) and which runs on its manifest as written,
+less what Settings turned off.
 
 The consent record lives in system/settings under `KEY`, one entry per app id
 (`moy_app.id_for`, the grant's key): `{"perms": [...], "off": [...]}`, the
-manifest permissions consented at install (None where nothing was
-installed: a Settings switch on an Editor cart) and the ones turned off
-since. A malformed entry reads as no entry."""
+manifest permissions consented at install or first run (None for a cart
+made here, and for a Settings switch on a cart with no record) and the ones
+turned off since. A malformed entry reads as no entry."""
 
 try:
     import moy_app as _moy_app
 except ImportError:  # pragma: no cover - host fallback
     from runtime import moy_app as _moy_app
 try:
-    from moy_store_base import is_cart_id, vendor
+    from moy_store_base import builtin_name, is_cart_id, vendor
 except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_store_base import is_cart_id, vendor
+    from runtime.moy_store_base import builtin_name, is_cart_id, vendor
 
 ALL = ("python", "lua", "wasm", "elf")
 
 # `full_access`'s line by board (`[board] ota`), where the board's isolation
 # lets the prompt say less than the table's "Full access to the console"
-# (docs/os_2026-11/tiers.md section 1): the P4s run a module in U-mode,
-# confined to its own memory. Every other board says the table's line.
-FULL_ACCESS_LINES = {"p4": "Run its own machine code", "guition_p4": "Run its own machine code"}
+# (docs/os_2026-11/tiers.md section 1): the P4s run a native module in
+# U-mode, confined to its own memory, but an unsigned compiled (AOT) module
+# runs with the kernel, unconfined, and the line says so. Every other board
+# says the table's line.
+_P4_FULL = "Run its own machine code. Unsigned code has full access to the console"
+FULL_ACCESS_LINES = {"p4": _P4_FULL, "guition_p4": _P4_FULL}
 
 
 def _board():
@@ -134,6 +146,12 @@ TRUSTED = "A trusted app: Python can reach the whole console"
 BACKGROUND = "Runs in the background, and can do all of this with no window open"
 
 KEY = "consent"
+
+# The record a launch reads for a cart that must be asked first and has not
+# been (`Consent.for_run`): every permission absent and the run refused, the
+# refusal saying where it is asked.
+UNASKED = {"perms": [], "off": []}
+UNASKED_REFUSAL = "needs your OK - open it to say yes"
 
 # A raw lease's line: full access to one of the board's resources (the
 # overview's section 4).
@@ -271,8 +289,8 @@ def admits_unsigned(granted):
 
 
 def run_admits_unsigned(ws, cart):
-    """`admits_unsigned` for `cart` on console `ws`, under its consent record
-    (none: its manifest as written)."""
+    """`admits_unsigned` for `cart` on console `ws`, under the record its
+    launch reads (`Consent.for_run`; none: its manifest as written)."""
     consent = getattr(ws, "consent", None)
     granted = consent.check(cart)[0] if consent is not None else check(cart, None, ())[0]
     return admits_unsigned(granted)
@@ -304,10 +322,13 @@ def _refusal(perm, why, tier):
 def check(cart, rec, have):
     """`(granted, absent, refusal)` for running or installing `cart` on a
     console holding the services `have`, under consent record `rec` (None:
-    none). `granted` and `absent` split the manifest's permissions; `refusal`
-    is the message naming the first `required` permission that is absent,
-    else None."""
+    none; UNASKED: every permission absent and the run refused).
+    `granted` and `absent` split the manifest's permissions; `refusal` is
+    the message naming the first `required` permission that is absent, else
+    None."""
     perms = (cart.get("permissions") if cart else None) or ()
+    if rec is UNASKED:
+        return [], list(perms), UNASKED_REFUSAL
     req = (cart.get("required") if cart else None) or ()
     tier = tier_of(cart)
     granted, absent = [], []
@@ -397,6 +418,37 @@ def prompt(cart, rec=None):
     return lines
 
 
+def asks_first(cart, rec):
+    """True when `cart`, under its consent record `rec`, is asked before it
+    runs: it has no record, it lives in a folder and is no built-in (by its
+    seed, `builtin_name`), and its install prompt would ask something
+    (`prompt`)."""
+    path = cart.get("path") if cart else None
+    if rec is not None or not path or builtin_name(path) is not None:
+        return False
+    return prompt(cart) is not None
+
+
+def made_here(ws, cart):
+    """`cart` (a cart dict, or None), just made on console `ws`: its consent
+    record is a made cart's (`Consent.made`)."""
+    consent = getattr(ws, "consent", None)
+    if consent is not None and cart:
+        consent.made(app_id(cart))
+
+
+def show(ui, lines):
+    """The install prompt's body, drawn into the dialog the public UI API
+    `ui` has open: "It can:" over the prompt's `lines`, TRUSTED in the
+    danger tone. Get Carts' install prompt and the shell's first-run one
+    (`console_notices.DeleteConfirm`) both draw it."""
+    if any(ln != TRUSTED for ln in lines):
+        ui.label("It can:", {"tone": "dim"})
+    for ln in lines:
+        ui.label(ln, {"wrap": True, "lines": 2, "tone": "danger"}
+                 if ln == TRUSTED else {"wrap": True, "lines": 2})
+
+
 def _has_service(cart):
     """An app cart declaring its own service (scheduler.entry_of)."""
     try:
@@ -433,10 +485,18 @@ class Consent:
         self._d = None
 
     def check(self, cart, install=False):
-        """`check` for `cart` on this console: at launch under its record,
-        at install under none (what Settings turned off is the launch's)."""
+        """`check` for `cart` on this console: at launch under its record
+        (`for_run`), at install under none (what Settings turned off is the
+        launch's)."""
         have = self._services() if self._services is not None else ()
-        return check(cart, None if install else self.get(app_id(cart)), have)
+        return check(cart, None if install else self.for_run(cart), have)
+
+    def for_run(self, cart):
+        """The record a launch of `cart` runs under: its own, else UNASKED
+        where it is asked first (`asks_first`), else None (its manifest as
+        written)."""
+        rec = self.get(app_id(cart))
+        return UNASKED if asks_first(cart, rec) else rec
 
     def _all(self):
         if self._d is None:
@@ -478,6 +538,14 @@ class Consent:
         off = [p for p in (old["off"] if old else ()) if p in perms]
         self._all()[aid] = {"perms": list(perms), "off": off}
         yield from self._put_steps()
+
+    def made(self, aid):
+        """A cart made on this console, as app `aid`: a record consenting to
+        nothing in particular (`perms` None), so it runs on its manifest as
+        written and is never asked. A record it has already stays."""
+        if self.get(aid) is None:
+            self._all()[aid] = {"perms": None, "off": []}
+            self._put()
 
     def forget(self, aid):
         for _ in self.forget_steps(aid):

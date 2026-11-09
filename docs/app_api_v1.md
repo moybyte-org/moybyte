@@ -389,9 +389,11 @@ roles (`carts`, `install`, `wallpaper`, `artwork`, `damage`, `surface`,
 
 **Consent.** A cart installed from Get Carts (or `pkg install`) shows what it
 asks for first and installs only on the user's yes, all or nothing; an update
-that adds a permission asks again. A cart written on the console, a seed and a
-cart copied onto the card are never asked about. The record is kept per app
-id (`runtime/shell/app_perms.py`, `Consent`); `docs/os_2026-11/processes.md`
+that adds a permission asks again. Any other cart brought in as files (a
+card, SFTP, USB, a browser's push) shows those lines when it is first opened,
+and runs only on a yes. Your own carts, written on the console, and the
+built-ins are never asked about. The record is kept per app id (`runtime/shell/app_perms.py`,
+`Consent`); `docs/os_2026-11/processes.md`
 §2 has the rules, and `docs/os_2026-11.md` §4 what the permissions protect
 against and what they do not.
 

@@ -343,12 +343,24 @@ that asks for nothing a game does not, install unasked.
 holds one record per app id (`moy_app.id_for`, what the grant, the prefs
 namespace and the crash strikes are keyed by), the permissions consented
 at install and the ones turned off since (`runtime/shell/app_perms.py`,
-`Consent`). A cart with no record (written in the Editor, a seed, a cart
-copied onto the card by hand) never prompts and runs on its manifest, less
-what Settings turned off. Get Carts asks once every file of the download is
-checked and before anything moves onto the shelf, since a carts index
-carries no manifest (`cart_index.Install`'s `ask`); a denied install
-removes the build, and Remove forgets the record.
+`Consent`). Get Carts asks once every file of the download is checked and
+before anything moves onto the shelf, since a carts index carries no
+manifest (`cart_index.Install`'s `ask`); a denied install removes the
+build, and Remove forgets the record.
+
+**A cart that arrived as files is asked on its first run (owner,
+2026-11-09).** One copied onto the card, over SFTP or USB, or pushed by a
+paired browser has no record, and its first launch from the home shows the
+install prompt's lines, "Open <title>?" (`Workstation.ask_first`); a
+command asks in its terminal (`sh_door`). Open records the consent an
+install would; No runs nothing and records nothing, so the next launch
+asks again; and until a yes every other way in (a service's start, the
+Editor, another app's play) is refused by name (`app_perms.UNASKED`), its
+unsigned modules with it. Never asked: a built-in (known by its seed), a
+script (no folder), a cart whose prompt would say nothing, and a cart made
+on the console: making one, or copying one that is not waiting to be asked,
+writes a record consenting to its manifest as written (`Consent.made`),
+less what Settings turns off. Deleting a cart forgets its record.
 
 **The permission table.** One JSON source, `native/os_calls.json`'s
 `"permissions"` beside the rows of every call (`tiers.md` §1), which

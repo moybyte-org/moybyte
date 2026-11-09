@@ -129,15 +129,17 @@ def test_the_prompt_is_the_tables_lines_in_the_manifests_order():
 
 def test_full_access_says_the_board_s_line(monkeypatch):
     """`full_access` says the table's line on every board, and a board's own
-    line where FULL_ACCESS_LINES names one (the P4s', whose modules run in
-    U-mode: docs/os_2026-11/tiers.md section 1)."""
+    line where FULL_ACCESS_LINES names one (the P4s', whose native modules
+    run in U-mode: docs/os_2026-11/tiers.md section 1), which says that
+    unsigned code, an AOT module's, is not confined."""
     cart = {"id": "a.b", "native": ["esp32p4"], "permissions": ["full_access"]}
     monkeypatch.setattr(P, "_board", lambda: None)
     assert P.prompt(cart) == ["Full access to the console"]
+    p4 = "Run its own machine code. Unsigned code has full access to the console"
     monkeypatch.setattr(P, "_board", lambda: "p4")
-    assert P.prompt(cart) == ["Run its own machine code"]
+    assert P.prompt(cart) == [p4]
     monkeypatch.setattr(P, "_board", lambda: "guition_p4")
-    assert P.prompt(cart) == ["Run its own machine code"]
+    assert P.prompt(cart) == [p4]
     monkeypatch.setattr(P, "_board", lambda: "tdeck")
     assert P.prompt(cart) == ["Full access to the console"]
 
@@ -329,9 +331,11 @@ def test_a_files_folder_the_console_has_none_of_refuses_the_launch(tmp_path):
     assert ws.app_guard.strikes(P.app_id(cart)) == 0
 
 
+@pytest.mark.first_run
 def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
-    """+ New makes the cart; its author gives it permissions; PLAY grants
-    them, with no prompt and no consent record."""
+    """+ New makes the cart, and its record a made cart's (`Consent.made`:
+    nothing consented in particular); its author gives it permissions; PLAY
+    grants them, with no prompt."""
     ws = build_ws(tmp_path)
     ws.new_cart_and_edit()
     new = ws.run.project.cart
@@ -345,8 +349,9 @@ def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
     ws._open_workspace(cart)
     assert ws.run.player.start(ws.run.project), ws.run.player.cart_error
     assert ws.run.player.ns["prefs"] is not None
-    assert ws.consent.get(P.app_id(cart)) is None
-    assert ws.consent.ids() == []
+    assert not ws.confirm.open
+    assert ws.consent.get(P.app_id(cart)) == {"perms": None, "off": []}
+    assert ws.consent.ids() == [P.app_id(cart)]
 
 
 # -- the install, end to end ---------------------------------------------------------

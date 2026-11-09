@@ -273,6 +273,42 @@ def _console_state_fresh():
     ui_draw.console_reset()
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "first_run: the test's carts are asked before their first run "
+        "(app_perms.asks_first), as a cart that arrived as files is")
+
+
+# Whether the running test is marked `first_run` (`_carts_are_made_here`).
+_FIRST_RUN = [False]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _carts_are_made_here():
+    """A test writes its carts as files (`moy_carts.create`, a fixture copied
+    into the store), which on a console is a cart that arrived as files and
+    is asked for its permissions on its first run (`app_perms.asks_first`).
+    Every test's carts, a module fixture's included, stand for carts made on
+    the console, never asked; a test of the first-run prompt is marked
+    `first_run` (`_first_run_marked`)."""
+    try:
+        from runtime import app_perms
+    except ImportError:
+        yield
+        return
+    real = app_perms.asks_first
+    app_perms.asks_first = lambda cart, rec: _FIRST_RUN[0] and real(cart, rec)
+    yield
+    app_perms.asks_first = real
+
+
+@pytest.fixture(autouse=True)
+def _first_run_marked(request):
+    _FIRST_RUN[0] = request.node.get_closest_marker("first_run") is not None
+    yield
+    _FIRST_RUN[0] = False
+
+
 # What `_cover_budget_unbounded` raises the cover slice to: every cover builds
 # inside the frame that asks for it.
 COVER_SLICE_UNBOUNDED = 10 ** 9

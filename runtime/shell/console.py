@@ -2809,6 +2809,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             # Editor's Config tab, which shows the break and offers the file.
             self.open_in_editor(selected)
             return
+        # A cart that arrived as files is asked for its permissions first
+        # (app_perms.asks_first): Open records them and opens it again.
+        if self.ask_first(selected, lambda: self.open(selected)):
+            return
         # Several games at once (runtime/shell/procs.py): the front one joins
         # the running set, a game already running comes forward, or the
         # admission names what to close.

@@ -1528,7 +1528,8 @@ def tick(slack_us=0):
 def prepared(ws, cart, service=False):
     """What a launch of `cart` on console `ws` runs under: (the cart with
     its source, read from the store when the shelf holds it slim, its
-    consent record, the console's services, its namespace's names: a
+    consent record as a launch reads it (`Consent.for_run`), the console's
+    services, its namespace's names: a
     system process's, `ws.service_env`), or None where it has no source
     (a compiled cart's is its module, which its runtime reads). Where
     `service`, an app cart's is its own service's (`as_service`)."""
@@ -1549,7 +1550,7 @@ def prepared(ws, cart, service=False):
         return None
     consent = getattr(ws, "consent", None)
     if consent is not None:
-        rec = consent.get(app_perms.app_id(run))
+        rec = consent.for_run(run)
         have = app_perms.services(ws)
     else:
         rec, have = None, ()

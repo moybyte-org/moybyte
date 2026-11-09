@@ -217,8 +217,10 @@ included (`tests/test_guition_on_glass.py` does it); a pinned `POST /run`
 plays it (`device/moy_webhost.py`'s `_run`). "A cart with no consent record
 -- one ... brought in by hand -- never prompts and runs on its manifest as
 written" (`runtime/shell/app_perms.py`), and Python is sealed by nothing
-(`docs/os_2026-11.md` §4). So the pin is already root on a console, and a
-shell behind it adds no exposure.
+(`docs/os_2026-11.md` §4). Since 2026-11-09 a cart pushed new is asked on
+its first run, on the glass (`processes.md` §2), but a push may rewrite a
+cart already allowed, whose record stands. So the pin is already root on a
+console, and a shell behind it adds no exposure.
 
 **On the Zero it is not.** The Zero runs no carts (no `/run`), its batches
 reach only the carts and files roots, and a pushed `.py` needs the cable.

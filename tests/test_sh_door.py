@@ -232,6 +232,30 @@ def test_a_command_is_a_process_under_its_own_consent(console):
     assert io.err.startswith('needy: needs "mic"')
 
 
+@pytest.mark.first_run
+def test_a_command_that_arrived_as_files_asks_in_its_terminal_first(console):
+    """A command with no consent record (copied in) asks with the install
+    prompt's lines before its first run in the foreground; a no runs
+    nothing and records nothing, the background never asks, and a yes
+    records its permissions, as an install does, and runs it."""
+    from runtime import app_perms
+    ws, door = console
+    io, d = door(b"n\n")
+    assert call(d, "spawn", "0", "exits") == 126
+    lines = app_perms.prompt({"permissions": ["http", "notifications"]})
+    assert io.out == "".join(ln + "\n" for ln in lines) + "Open it? [y/N] "
+    assert io.err == "exits: %s\n" % app_perms.UNASKED_REFUSAL
+    assert ws.consent.get("local.exits") is None
+    io, d = door(b"y\n")
+    assert call(d, "spawn", "1", "exits") == 126 and io.out == ""
+    io, d = door(b"y\n")
+    assert call(d, "spawn", "0", "exits") == 5
+    assert io.out.endswith("Open it? [y/N] command exits http notifications\n")
+    assert ws.consent.get("local.exits") == {"perms": ["http", "notifications"], "off": []}
+    io, d = door()
+    assert call(d, "spawn", "0", "exits") == 5 and "Open it?" not in io.out
+
+
 def moybyte_wakes():
     from runtime import moybyte
     return moybyte.WAKES.list

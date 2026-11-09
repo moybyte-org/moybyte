@@ -133,13 +133,22 @@ def restore_shelf(board, before):
         warnings.warn("could not give the shelf back: %r" % (exc,))
 
 
+# The store scanned again for the folders a suite pushed, each cart on the
+# shelf then recorded as made on the console (`Consent.made`): a pushed cart
+# is one that arrived as files, which the console asks about on its first
+# run (runtime/shell/app_perms.py, `asks_first`), and a suite runs it on its
+# manifest as written.
+RESCAN = ("len(ws.rescan_carts() or ()) + len([ws.consent.made("
+          "__import__('app_perms').app_id(c)) for c in ws.carts.all])")
+
+
 def _new_on_shelf(board, before, rescan=False):
     """Ids on the shelf that `before` does not hold; `rescan` first picks up
     folders a suite wrote with no rescan of their own."""
     expr = ("sorted(str(c.get('id')) for c in ws.carts.all "
             "if str(c.get('id')) not in %r)" % (list(before),))
     if rescan:
-        expr = "(ws.rescan_carts(), %s)[1]" % expr
+        expr = "(%s, %s)[1]" % (RESCAN, expr)
     got = board.pyval(expr, timeout=120)
     if got is None:
         raise RuntimeError("the board did not list its shelf")
@@ -3638,7 +3647,7 @@ def wasm_carts_push(board, board_dir):
                         out, chips=(chip,))
         _push_folder(board, board_dir, out,
                      root.rstrip("/") + "/wasm_" + name + ".moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     titles = board.pyval("[c['title'] for c in ws.carts.all]", timeout=20,
                          strict=True)
     for title in WASM_CARTS.values():
@@ -3672,7 +3681,7 @@ def wasi_commands_run(board, board_dir):
         wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / (name + ".moy")), out,
                         chips=chips)
         _push_folder(board, board_dir, out, root + "/" + name + ".moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
     def runs(line, want):
         got = _sh(board, line, timeout=60)
@@ -3752,7 +3761,7 @@ def elf_commands_run(board, board_dir):
     out = os.path.join(tmp, "elf_newer.moy")
     elf_cart.build(newer, out, [chip], signed=signed)
     _push_folder(board, board_dir, out, root + "/elf_newer.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
     def runs(line, want):
         got = _sh(board, line, timeout=60)
@@ -3821,7 +3830,7 @@ def elf_umode_isolates(board, board_dir):
     elf_cart.build(str(ROOT / "tests" / "fixtures" / "elf" / "elf_wild.moy"), out, [chip],
                    signed=signed)
     _push_folder(board, board_dir, out, root + "/elf_wild.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     assert board.pyval("__import__('moy_elf').umode() is not None", strict=True)
 
     def runs(line, want):
@@ -4104,7 +4113,7 @@ def wasm_app_push(board, board_dir):
             with open(p, "w") as f:
                 json.dump(man, f)
         _push_folder(board, board_dir, out, root + "/wasm_" + name + ".moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     # Pushed code is fixed code: the strikes an earlier run of these left
     # (the crash guard, #160) are forgiven, as a commit forgives them.
     for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1]):
@@ -4336,7 +4345,7 @@ def jet_push(board, board_dir, **config):
     cart = jet_cart.build(tempfile.mkdtemp(prefix="moy_jet_"), chips=(chip,),
                           config=config or None)
     _push_folder(board, board_dir, cart, root.rstrip("/") + "/jet_teapot.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     titles = board.pyval("[c['title'] for c in ws.carts.all]", timeout=20,
                          strict=True)
     assert JET_TITLE in titles, "%s is not on the shelf after the push" % JET_TITLE
@@ -4401,7 +4410,7 @@ def _wasm_fixture_variant(board, board_dir, chip, title, slug, change=None,
         change(out)
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_" + slug + ".moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
 
 def _wasm_run_error(board, title):
@@ -4430,7 +4439,7 @@ def wasm_read_of_a_folder_reads_nothing(board, board_dir):
                     chips=(chip,))
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_readdir.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     size = os.path.getsize(os.path.join(out, "manifest.json"))
     pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a)[:3])[1])"
           "(__import__('array').array('i', bytearray(1024)))")
@@ -4468,7 +4477,7 @@ def wasm_files_push(board, board_dir, fresh=True):
         board.pyval("ws._with_sd(lambda: __import__('moy_store_base')._rmtree("
                     "__import__('cart_files').folder_of(str(ws.carts_root) + '/' + %r))) or 1"
                     % FILES_FOLDER, timeout=30, strict=True)
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
 
 def wasm_files_turn(board):
@@ -4654,7 +4663,7 @@ def stuck_carts_push(board, board_dir):
     _push_folder(board, board_dir, out, root + "/wasm_stuck.moy")
     _push_folder(board, board_dir, str(ROOT / "tests" / "fixtures" / "stuck_lua.moy"),
                  root + "/stuck_lua.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
 
 def a_stuck_run_is_ended(board, runtime):
@@ -4721,7 +4730,7 @@ def lanes_carts_push(board, board_dir):
         m["title"] = m["title"].replace("Wasm", "Interp")
         json.dump(m, open(man, "w"))
         _push_folder(board, board_dir, interp, root + "/wasm_%s_interp.moy" % name)
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
 
 def timed_lanes_run(board, tier, runaway):
@@ -4844,7 +4853,7 @@ def wasm_too_big_cart_opens_the_notice(board, board_dir):
                     chips=(chip,))
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_huge.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     need, have = wasm_fit(board, HUGE_TITLE)
     assert need[0] > have[0], (need, have)
     notice = _notice_on_launch(board, HUGE_TITLE)
@@ -4877,7 +4886,7 @@ def wasm_newer_cart_opens_the_notice(board, board_dir):
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "newer.moy"), out)
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_newer.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     missing = board.pyval(
         "ws.runtimes['wasm'].missing([c for c in ws.carts.all if c['title'] == %r][0])"
         % NEWER_TITLE, timeout=30, strict=True)
@@ -4918,7 +4927,7 @@ def wasm_deep_recursion_traps_with_its_numbers(board, board_dir):
                     chips=(chip,))
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_deep.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     err = _wasm_run_error(board, DEEP_TITLE)
     m = STACK_NOTE.search(err)
     assert m, err
@@ -4949,7 +4958,7 @@ def _deep_init_push(board, board_dir):
                     chips=(chip,))
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
     _push_folder(board, board_dir, out, root + "/" + DEEP_INIT_FOLDER)
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     return root + "/" + DEEP_INIT_FOLDER
 
 
@@ -5109,7 +5118,7 @@ def doom_push(board, board_dir):
         pytest.skip("the cart store at %s has %d bytes free and the Doom cart "
                     "needs %d more: the store cannot hold it" % (root, free, need))
     _push_folder(board, board_dir, local, dest)
-    board.pyval("len(ws.rescan_carts() or ())", timeout=90)
+    board.pyval(RESCAN, timeout=90)
     return frames
 
 

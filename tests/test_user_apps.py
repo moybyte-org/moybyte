@@ -839,3 +839,69 @@ def test_editing_the_code_forgives_a_struck_out_app(tmp_path):
     _open(ws, "Boomy")
     _frames(ws, CrashGuard.HEAL_FRAMES + 1)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
+
+
+# ---------------------------------------------------------------------------
+# a cart that arrived as files is asked on its first run
+# ---------------------------------------------------------------------------
+
+COPIED_SRC = "said = []\ndef _init():\n    said.append('ran')\n\ndef _draw():\n    cls(1)\n"
+
+
+@pytest.mark.first_run
+def test_a_cart_that_arrived_as_files_is_asked_before_its_first_run(tmp_path):
+    """A cart copied onto the card has no consent record: the home's launch
+    asks with the install prompt's lines, nothing of it runs and nothing is
+    recorded until Open, and Open records what it asks for, as an install
+    does, and runs it. The next launch asks nothing."""
+    carts = str(tmp_path / "carts")
+    _write_cart(carts, "Copied", COPIED_SRC, perms=["prefs"])
+    ws = build_ws(tmp_path)
+    cart = select_on_home(ws, "Copied")
+    aid = app_perms.app_id(cart)
+    ws.open()
+    assert ws.confirm.open and ws.confirm.title == "Open Copied?"
+    assert ws.confirm.buttons == ("No", "Open")
+    assert ws.confirm.lines == ["Keep its own settings", app_perms.TRUSTED]
+    assert (ws.cart or {}).get("title") != "Copied"
+    assert ws.consent.get(aid) is None
+    act = ws.confirm._act
+    ws.confirm.cancel()
+    act()
+    assert ws.consent.get(aid) == {"perms": ["prefs"], "off": []}
+    assert ws.cart["title"] == "Copied" and ws.run.player.cart_error is None
+    assert "prefs" in ws.run.player.granted
+    assert not app_perms.asks_first(cart, ws.consent.get(aid))
+
+
+@pytest.mark.first_run
+def test_a_refused_first_run_runs_nothing_and_asks_again(tmp_path):
+    """No leaves the cart unrun and records nothing; every other way in
+    (a launch that does not ask) is refused by name until a yes."""
+    carts = str(tmp_path / "carts")
+    _write_cart(carts, "Copied", COPIED_SRC, perms=["prefs"])
+    ws = build_ws(tmp_path)
+    cart = select_on_home(ws, "Copied")
+    ws.open()
+    ws.confirm.cancel()
+    assert ws.consent.get(app_perms.app_id(cart)) is None
+    ws._open_workspace(cart)
+    assert ws.run.player.cart_error == app_perms.UNASKED_REFUSAL
+    assert not app_perms.run_admits_unsigned(ws, cart)
+    select_on_home(ws, "Copied")
+    ws.open()
+    assert ws.confirm.open and ws.confirm.title == "Open Copied?"
+
+
+@pytest.mark.first_run
+def test_a_built_in_and_a_made_cart_are_never_asked(tmp_path):
+    """A built-in (known by its seed) and a cart made on the console run
+    with no question; a copy of a cart still to be asked about is asked."""
+    ws = build_ws(tmp_path)
+    notes = next(c for c in ws.carts.all if c["path"].endswith("moybyte.notes.moy"))
+    assert ws.consent.get(app_perms.app_id(notes)) is None
+    assert not app_perms.asks_first(notes, None)
+    made = ws.carts.new()
+    assert made is not None
+    assert ws.consent.get(app_perms.app_id(made)) == {"perms": None, "off": []}
+    assert not app_perms.asks_first(made, ws.consent.get(app_perms.app_id(made)))

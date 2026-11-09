@@ -513,6 +513,7 @@ class ShellDoor:
             self.err(name, "no source")
             return NOT_RUN
         run, rec, have, env = got
+        rec = self._first_run(run, rec, bg)
         granted, absent, refusal = app_perms.check(run, rec, have)
         if refusal is not None:
             self.err(name, refusal)
@@ -551,6 +552,30 @@ class ShellDoor:
         self.exits = ([(pid, code)] + self.exits)[:EXITS]
         return pid
 
+    def _first_run(self, run, rec, bg):
+        """The record command `run` runs under, from `rec` (`Consent.for_run`'s):
+        where it is asked first, the install prompt's lines and "Open it?"
+        in the foreground's terminal, a yes recording the consent as an
+        install does and the record it made coming back; in the background,
+        or on a no, `rec` as it was (UNASKED: the launch refuses)."""
+        try:
+            import app_perms
+        except ImportError:  # host: the runtime package
+            from runtime import app_perms
+        if rec is not app_perms.UNASKED or bg or self.io is None:
+            return rec
+        self.out("".join(ln + "\n" for ln in app_perms.prompt(run)))
+        self.out("Open it? [y/N] ")
+        line = In(self.io).readline().strip().lower()
+        if not line:
+            self.out("\n")
+        if line not in ("y", "yes"):
+            return rec
+        consent = self.ws.consent
+        aid = app_perms.app_id(run)
+        consent.record(aid, list(run.get("permissions") or ()))
+        return consent.get(aid)
+
     def run_compiled(self, cart, name, argv, bg, tier, job=None):
         """Compiled command `cart` run as `argv`: a WASI module's `_start`
         through the wasm runtime's `command` (native/moy_wasm/moy_wasi.h), a
@@ -575,7 +600,7 @@ class ShellDoor:
         carts = getattr(self.ws, "carts", None)
         run = carts.rehydrate(cart) if carts is not None else cart
         consent = getattr(self.ws, "consent", None)
-        rec = consent.get(app_perms.app_id(run)) if consent is not None else None
+        rec = self._first_run(run, consent.for_run(run), bg) if consent is not None else None
         have = app_perms.services(self.ws) if consent is not None else ()
         granted, _absent, refusal = app_perms.check(run, rec, have)
         if refusal is None:

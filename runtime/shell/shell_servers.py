@@ -195,6 +195,15 @@ class _Session(_Store):
 
 # -- the cart store ------------------------------------------------------------
 
+def _app_perms():
+    """The permission table's module (`app_perms`), imported at the call."""
+    try:
+        import app_perms
+    except ImportError:  # host: the runtime package
+        from runtime import app_perms
+    return app_perms
+
+
 def _catalogue():
     """The store's cart interface (`moy_catalogue`), imported at the call."""
     try:
@@ -225,8 +234,10 @@ class CartsServer(_Session):
         """A new cart in the store: `(cart, err)`. The live list is not
         changed until `rescan`."""
         root = self._ws.carts_root
-        return self._write(lambda: _catalogue().create(title, root, src=src,
-                                                       type=type))
+        got = self._write(lambda: _catalogue().create(title, root, src=src,
+                                                      type=type))
+        _app_perms().made_here(self._ws, got[0])
+        return got
 
     def journal(self, g, cart, main, src, grad=0):
         """Append `src` to `cart`'s undo journal for its file `main` (#111),
@@ -357,9 +368,13 @@ class NavServer:
         if caller is None:
             caller = ws.launcher_layer
 
-        def then():
+        def go():
             ws._open_workspace(cart)
             ws.play(caller)
+
+        def then():
+            if not ws.ask_first(cart, go):
+                go()
         self._go(g, "Wants to play " + str((cart or {}).get("title") or "a cart"), then)
 
     def run_script(self, g, kind, name):

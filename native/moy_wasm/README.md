@@ -549,8 +549,8 @@ that says what native code can do; there is no console-wide switch
 (`docs/os_2026-11.md` section 1). So
 someone who rebuilds a cart from its source -- Doom from moybyte-org/carts,
 their own game -- adds `full_access` to its manifest and runs it on their own
-console; a cart pushed by hand has no consent record and runs on its manifest
-as written. The consent is the cart's (`app_perms.run_admits_unsigned`); the
+console; a cart pushed by hand has no consent record and is asked for its
+permissions, `full_access` among them, on its first run. The consent is the cart's (`app_perms.run_admits_unsigned`); the
 engine is told it per load: `moycore_glue.WasmRun` hands it to
 `moycore.wasm_open`, which hands it to `moy_wasm_session_open` as
 `allow_unsigned`, and `moy_ota_admit_module` reads it on the MicroPython task

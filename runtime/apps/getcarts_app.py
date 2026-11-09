@@ -2105,11 +2105,7 @@ class GetCartsAppLayer(ListShellApp):
             return
         pick = ui.dialog("Install %s?" % self.cur["cart"]["name"], ("No", "Install"),
                          "primary")
-        if any(ln != _perms.TRUSTED for ln in lines):
-            ui.label("It can:", {"tone": "dim"})
-        for ln in lines:
-            ui.label(ln, {"wrap": True, "lines": 2, "tone": "danger"}
-                     if ln == _perms.TRUSTED else {"wrap": True, "lines": 2})
+        _perms.show(ui, lines)
         ui.dialog()
         if pick == 1:
             self._answer(True)

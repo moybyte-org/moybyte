@@ -70,6 +70,15 @@ def _folder_order(cart):
     return cart.get("path") or ""
 
 
+def _perms():
+    """The permission table's module (`app_perms`), imported at the call."""
+    try:
+        import app_perms
+    except ImportError:  # host: the runtime package
+        from runtime import app_perms
+    return app_perms
+
+
 class CartManager:
     """The scanned cart list, its store-writing verbs and the #105 favorites.
 
@@ -338,11 +347,14 @@ class CartManager:
             self._say_if_full(exc, "CAN'T MAKE")
             return None
         if new:
+            _perms().made_here(ws, new)
             self.rescan([new["path"]])
         return new
 
     def dup(self, sel):
-        """COPY on the home's Make tab: duplicate the cart `sel` as the kid's own."""
+        """COPY on the home's Make tab: duplicate the cart `sel` as the kid's
+        own, made here unless `sel` is still to be asked about (a copy of a
+        cart that arrived as files is asked on its first run, as it is)."""
         ws = self.ws
         if sel is not None and not sel.get("path"):
             sel = None                     # the "+ New" card is not a cart
@@ -356,6 +368,10 @@ class CartManager:
             self._say_if_full(exc, "CAN'T COPY")
             return
         if made:
+            perms = _perms()
+            consent = getattr(ws, "consent", None)
+            if consent is None or not perms.asks_first(sel, consent.get(perms.app_id(sel))):
+                perms.made_here(ws, made)
             self.rescan([made["path"]])
 
     def _ns(self):
@@ -375,10 +391,10 @@ class CartManager:
 
     def delete(self, cart=None):
         """Delete `cart` (a home's Delete), else the OPEN cart (the system
-        menu's "Delete cart"), for good: the folder goes, and no Trash holds
-        a cart. Every route asks first (`console_notices.DeleteConfirm`) and
-        calls this on its Delete. Keeps at least one real cart on the
-        device."""
+        menu's "Delete cart"), for good: the folder goes, its consent record
+        with it, and no Trash holds a cart. Every route asks first
+        (`console_notices.DeleteConfirm`) and calls this on its Delete. Keeps
+        at least one real cart on the device."""
         ws = self.ws
         target = cart if cart is not None else ws.cart
         if target is not None and not target.get("path"):
@@ -388,6 +404,9 @@ class CartManager:
         path = target["path"]
         try:
             self.store.call(lambda: moy_catalogue.delete(target["h"]))
+            consent = getattr(ws, "consent", None)
+            if consent is not None:
+                consent.forget(_perms().app_id(target))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
         self.rescan([path])

@@ -22,8 +22,10 @@ record and the strike ledger as its floor.
 
 **The consent (owner, 2026-11-08).** The permission is `full_access`. On the
 S3s its install prompt line is "Full access to the console", the truth for a
-module at the kernel's trust. On the P4s it is "Run its own machine code",
-since a confined module cannot reach the rest of the console;
+module at the kernel's trust. On the P4s it is "Run its own machine code.
+Unsigned code has full access to the console": a native module is confined
+and cannot reach the rest of the console, but an unsigned compiled (AOT)
+module runs with the kernel, unconfined (owner, 2026-11-09);
 `app_perms.FULL_ACCESS_LINES` is where a board's line goes.
 
 **As built (2026-11-08):** a module's code, its constructors and every hook

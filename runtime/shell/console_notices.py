@@ -48,6 +48,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name as _builtin_name
 try:
+    import app_perms as _perms
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import app_perms as _perms
+try:
     from notifications import NOTES as _NOTES
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.notifications import NOTES as _NOTES
@@ -484,6 +488,27 @@ class Notices:
         self.confirm.ask_close("Stop the music to play %s?" % title,
                                "%s needs the music's memory. You can start the music "
                                "again after." % title, then, _STOP_PLAY)
+
+    def ask_first(self, cart, then):
+        """A cart that is asked before its first run (`app_perms.asks_first`:
+        it arrived as files, with no consent record): the install prompt's
+        lines in the running set's dialog, "Open <title>?", No focused;
+        Open records the consent, as an install does, then `then()`. No
+        records nothing and the cart stays unrun. True when it asked."""
+        consent = getattr(self, "consent", None)
+        if consent is None or not cart:
+            return False
+        aid = _perms.app_id(cart)
+        if not _perms.asks_first(cart, consent.get(aid)):
+            return False
+        title = str(cart.get("title") or "this cart")[:18]
+        perms = list(cart.get("permissions") or ())
+
+        def allow():
+            consent.record(aid, perms)
+            then()
+        self.confirm.ask_lines("Open %s?" % title, _perms.prompt(cart), allow, _OPEN)
+        return True
 
     def open_status_menu(self, item):
         """Status item `item`'s menu on the desk, hung from its cell; the
@@ -1108,6 +1133,7 @@ _STOP_WORDS = {"wrap": True, "lines": 4, "tone": "dim"}
 _STOP_ERROR = {"wrap": True, "lines": 4, "face": "mono", "sunk": True}
 _WRAP = {"wrap": True, "lines": 3}
 _STOP_PLAY = ("Cancel", "Stop & play")
+_OPEN = ("No", "Open")
 
 
 class DeleteConfirm:
@@ -1130,6 +1156,10 @@ class DeleteConfirm:
     running names what to close, Cancel and Close; and the Player's before
     a compiled game the VM must stop for while the music holds the Wi-Fi,
     Cancel and Stop & play. Its line wraps, the card growing to fit.
+
+    And the first run of a cart that arrived as files (`ask_lines`,
+    `Workstation.ask_first`): "Open <title>?" over the install prompt's
+    lines, as Get Carts draws them (`app_perms.show`), No and Open.
 
     And the intents' "open with" menu (`choose`, runtime/system/intents.py):
     "Open with", the item's name over a menu of the apps that open it, each
@@ -1154,6 +1184,7 @@ class DeleteConfirm:
         self.rows = ()               # a choice's rows (`choose`), else ()
         self.icons = ()
         self._choice = None          # fn(i) told the row picked, None on a cancel
+        self.lines = ()              # a first-run prompt's lines (`ask_lines`), else ()
 
     UNDONE = "This can't be undone."
     CLOSE = ("Cancel", "Close")
@@ -1178,6 +1209,7 @@ class DeleteConfirm:
         self.cart = None
         self.title = title
         self.line = label
+        self.lines = ()
         self.rows = list(rows)
         self.icons = list(icons)
         self.buttons = ("Cancel",)
@@ -1200,10 +1232,19 @@ class DeleteConfirm:
         self.cart = None
         self.title = title
         self.line = line
+        self.lines = ()
         self.buttons = buttons or self.CLOSE
         self._then = None
         self._act = then
         self._arm()
+        return True
+
+    def ask_lines(self, title, lines, then, buttons):
+        """Ask the install prompt's question: `title` over the prompt's
+        `lines` (`app_perms.show`), `buttons` No and the verb; `then()` on
+        the verb."""
+        self.ask_close(title, "", then, buttons)
+        self.lines = list(lines)
         return True
 
     def ask(self, cart, then=None):
@@ -1218,6 +1259,7 @@ class DeleteConfirm:
         self.cart = cart
         self.title = "Delete %s?" % name if name else "Delete this cart?"
         self.line = self.UNDONE
+        self.lines = ()
         self.buttons = self.BUTTONS
         self._then = then
         self._act = self._delete
@@ -1300,6 +1342,9 @@ class DeleteConfirm:
         if self.rows:
             pick = _ui.dialog(self.title, self.buttons, "normal")
             got = _ui.menu(self.line, self.rows, self.icons)
+        elif self.lines:
+            pick = _ui.dialog(self.title, self.buttons, "primary")
+            _perms.show(_ui, self.lines)
         else:
             pick = _ui.dialog(self.title, self.buttons, "danger")
             _ui.label(self.line, _WRAP)
