@@ -90,9 +90,11 @@ permissions name (`runtime/shell/sh_door.py`, as a service's is), handed to
 -1 with errno (EACCES a role or a folder the grant lacks, ERANGE a buffer too
 small, EAGAIN the VM's queue full). A service has no session: its calls run
 for a run grant the scheduler makes it the same way
-(`scheduler.compiled_run`), as hops on the VM's queue
-(`native/moy_kernel/moy_vmq.h`) that the scheduler's poll runs, its thread
-waiting meanwhile and the wait not its wake's cost. The
+(`scheduler.compiled_run`), a row the table answers here (the store's and the
+settings' among them, `native/os_calls.json`) on its own thread, and the rest
+as hops on the VM's queue (`native/moy_kernel/moy_vmq.h`) that the
+scheduler's poll runs, its thread waiting meanwhile. Neither a hop's wait nor
+a here row's time is its wake's cost. The
 toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
 
 ## The process model
@@ -116,7 +118,8 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
 - Native code is not aborted where it stands by a timer. A wake that runs
   on without polling its descriptor again is struck at that poll by
   `moy_os_reap`'s watchdog (`moy_os.c`, THE WATCHDOG), once for each
-  `MOY_SUPER_ABORT_US`, and killed (137) by the strike that suspends it; a
+  `MOY_SUPER_ABORT_US` of its own time (a hop's wait and a here row's time
+  are the console's), and killed (137) by the strike that suspends it; a
   kill deletes its threads where they stand, as a stop past its time does.
 - A game is a service's loop with a screen (`moy_os.h`, A GAME), started by
   the Player for its run's pid (`moy_os_game`) and never the scheduler's: it

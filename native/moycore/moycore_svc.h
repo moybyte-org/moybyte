@@ -83,8 +83,11 @@
 // foreground run's is, owned by its pid) opens the same names a Lua app's
 // state opens (native/moy_app/moy_app_lua.h): `files`, `io` and
 // `os.remove`/`os.rename` with files, `prefs`, `set_theme`, `open_app`, and
-// none it is not granted. Each row runs on the VM's task: on the service's
-// own task the binding's hop is a hop on the VM's queue (moy_vmq_hop) and the
+// none it is not granted. A row the table answers here (MOY_APP_LUA_HERE:
+// the store's and the settings') runs on the service's own task, its time
+// not counted against the call's budget, and hops where it answers that it
+// needs the VM. Every other row runs on the VM's task: on the service's own
+// task the binding's hop is a hop on the VM's queue (moy_vmq_hop) and the
 // task waits until the VM's task runs it at its next moy_vmq_serve (the
 // scheduler's poll), its wait not counted against the call's budget; a
 // stepped service is on the VM's task already and calls the row in place.

@@ -75,7 +75,7 @@ int moy_app_lua_open_crypto(lua_State *L) __attribute__((weak));
 #include "moy_app_run.h"
 #define SVC_APP 1
 int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
-                         int (*hop)(lua_State *L, void (*fn)(void *), void *arg))
+                         int (*hop)(lua_State *L, void (*fn)(void *), void *arg, int here))
     __attribute__((weak));
 #endif
 #endif
@@ -693,11 +693,20 @@ static int l_unalarm(lua_State *L) {
 // From the service's own task it is a hop on the VM's queue (moy_vmq.h), the
 // task waiting until the VM's task has run it, the wait not counted against
 // the call's budget nor its time; anywhere else (a stepped tier, the VM's
-// task) fn runs in place.
-static int vm_hop(lua_State *L, void (*fn)(void *), void *arg) {
+// task) fn runs in place. A row answered `here` runs in place, its time
+// (the store's) not counted either.
+static int vm_hop(lua_State *L, void (*fn)(void *), void *arg, int here) {
     #ifdef SVC_TASKS
     svc_t *s = of_state(L);
-    if (xTaskGetCurrentTaskHandle() == s->task) {
+    if (here && xTaskGetCurrentTaskHandle() == s->task) {
+        int64_t t0 = now_us();
+        fn(arg);
+        uint32_t took = (uint32_t)(now_us() - t0);
+        s->t0 += took;
+        s->seg += took;
+        return 0;
+    }
+    if (!here && xTaskGetCurrentTaskHandle() == s->task) {
         uint32_t waited = 0;
         if (moy_vmq_hop(s->pid, fn, arg, &waited) != MOY_VMQ_OK) {
             return luaL_error(L, "the console's queue is full");
@@ -709,6 +718,7 @@ static int vm_hop(lua_State *L, void (*fn)(void *), void *arg) {
     #else
     (void)L;
     #endif
+    (void)here;
     fn(arg);
     return 0;
 }

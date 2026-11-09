@@ -313,6 +313,7 @@ struct moy_os_proc {
     int64_t started_us;         // a service's start: its first wake runs from here
     volatile uint8_t polling;   // inside a poll of the descriptor: no wake runs
     volatile uint8_t hopping;   // threads waiting on the VM's queue (moy_vmq.h)
+    volatile uint8_t here;      // threads in a row answered here (the store's work)
     uint8_t struck;             // aborted strikes the watchdog charged the wake running
     uint8_t reaped;             // its end reported (moy_os_reap)
     uint32_t cpu_us;            // its wakes' cost, summed (wrapping)
@@ -869,9 +870,10 @@ static int on_session(thr_t *t, void (*fn)(void *arg), void *arg) {
 // on the VM's queue (moy_vmq.h), which the scheduler's poll serves -- a
 // read of what the look and the clipboard write where it is called, under the
 // state's seqlock, or a row over the kernel's own locked state (its queues,
-// timers and log: the how "here") run where it is called, and hopped only
-// where it answers that it needs the VM. A hop's wait is not its wake's cost;
-// a queue that is full answers EAGAIN.
+// timers and log, the store and the settings: the how "here") run where it is
+// called, and hopped only where it answers that it needs the VM. Neither a
+// hop's wait nor a here row's time is its wake's cost; a queue that is full
+// answers EAGAIN.
 
 typedef struct {
     const moy_app_run_t *run;
@@ -901,6 +903,26 @@ static bool vm_hop(moy_os_proc_t *p, void (*fn)(void *), void *arg) {
     }
     unlock();
     return rc == MOY_VMQ_OK;
+}
+
+// A row answered on the module's own thread: its time is the console's (the
+// store's lock and its medium), moved out of the wake that made it as a
+// hop's wait is.
+static void here_role(moy_os_proc_t *p, role_call_t *c) {
+    lock();
+    p->here++;
+    unlock();
+    int64_t t0 = mono_us();
+    c->r = moy_app_role_here(c->run->a, c->run->g, c->row, c->arg, c->n, c->out, c->cap);
+    int64_t took = mono_us() - t0;
+    lock();
+    p->here--;
+    if (p->woke_us != 0) {
+        p->woke_us += took;
+    } else {
+        p->started_us += took;
+    }
+    unlock();
 }
 
 // A row the door serves, hopped while no VM runs, waits for the VM.
@@ -987,7 +1009,7 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
             role_call_t c = { &p->run, row, buf, len, out, out != NULL ? cap : 0u,
                               -MOY_APP_NEEDS_VM };
             if (how == MOY_OS_HERE) {
-                c.r = moy_app_role_here(p->run.a, p->run.g, row, buf, len, c.out, c.cap);
+                here_role(p, &c);
             }
             if (how == MOY_OS_HERE && c.r != -MOY_APP_NEEDS_VM) {
                 // answered on the module's own thread
@@ -3695,7 +3717,8 @@ uint32_t moy_os_service_of(const char *id, size_t n) {
 // wake that runs on is struck here, on the console's task, once for each
 // MOY_SUPER_ABORT_US it runs without polling its descriptor again (the
 // strikes its tier's abort would have charged), and its own poll charges it
-// nothing more. A wake waiting on the VM's queue is not running. Where the
+// nothing more. A wake waiting on the VM's queue, or inside a row answered
+// here, is not running. Where the
 // strikes suspend it while its wake still runs, suspension cannot hold it,
 // so it is killed (MOY_PROC_KILLED), as a stop past its time is; a service
 // whose start runs MOY_OS_STOP_US without a first poll is killed too, as a
@@ -3703,7 +3726,7 @@ uint32_t moy_os_service_of(const char *id, size_t n) {
 // killed, or NULL.
 static const char *watch(moy_os_proc_t *p, int64_t now) {
     lock();
-    if (p->main_done || p->ending || p->polling || p->hopping) {
+    if (p->main_done || p->ending || p->polling || p->hopping || p->here) {
         unlock();
         return NULL;
     }

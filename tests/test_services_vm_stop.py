@@ -560,17 +560,10 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     moy_evq.close(peer_w)
 
 
-def test_an_elf_and_a_wasi_service_work_files_and_prefs_on_their_own_tasks_through_a_vm_stop(
-        tmp_path, elf_built, wasi_built, fresh, monkeypatch):
-    """`files.*` and `prefs.*` run on each program's own task (native/os_calls.json,
-    how "here", under the store's lock): with the VM down and nothing serving
-    the hops, an ELF and a WASI service each save, load back, rename, load
-    again and list documents and set a pref. Once the VM is back the documents
-    read back from the store, and the console's next frame saves both prefs
-    into system/settings."""
-    from runtime.carts.moy_docs import system_store_path
+def _files_services(tmp_path, elf_built, wasi_built):
+    """A console whose shelf holds the ELF and the WASI service, granted files
+    and prefs, each hearing its files round's message."""
     from runtime.host_app import build_workstation
-    rounds = 6
     carts = tmp_path / "carts"
     carts.mkdir()
     for built, name, perms, hears in (
@@ -585,6 +578,20 @@ def test_an_elf_and_a_wasi_service_work_files_and_prefs_on_their_own_tasks_throu
     ws = build_workstation(str(carts))
     if "elf" not in ws.runtimes or "wasm" not in ws.runtimes:
         pytest.skip("no ELF or wasm tier on this host")
+    return carts, ws
+
+
+def test_an_elf_and_a_wasi_service_work_files_and_prefs_on_their_own_tasks_through_a_vm_stop(
+        tmp_path, elf_built, wasi_built, fresh, monkeypatch):
+    """`files.*` and `prefs.*` run on each program's own task (native/os_calls.json,
+    how "here", under the store's lock): with the VM down and nothing serving
+    the hops, an ELF and a WASI service each save, load back, rename, load
+    again and list documents and set a pref. Once the VM is back the documents
+    read back from the store, and the console's next frame saves both prefs
+    into system/settings."""
+    from runtime.carts.moy_docs import system_store_path
+    rounds = 6
+    carts, ws = _files_services(tmp_path, elf_built, wasi_built)
     s = fresh
     since = L.next()
     elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
@@ -626,6 +633,49 @@ def test_an_elf_and_a_wasi_service_work_files_and_prefs_on_their_own_tasks_throu
                    for line in text.splitlines()), text
     for p in (elf, wasi):
         assert s2.stop(p) and s2.procs[p].code == 0
+    moy_evq.close(peer)
+
+
+def test_a_wake_waiting_on_the_store_s_lock_is_not_struck(tmp_path, elf_built, wasi_built, fresh):
+    """A row answered here spends the console's time, not its wake's
+    (native/moy_elf/moy_os.c's THE WATCHDOG, moy_wasi_watch): with the store's
+    lock held past three abort budgets, an ELF and a WASI service's files
+    rounds wait on it and are not struck; each round completes once it is
+    let go."""
+    import ctypes
+    from runtime.host import host_native
+    lib = ctypes.CDLL(host_native.build())
+    _carts, ws = _files_services(tmp_path, elf_built, wasi_built)
+    s = fresh
+    since = L.next()
+    elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
+    wasi = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "t.peer", "", False) == moy_evq.OK
+    assert _polled(s, lambda: all(any(t in ("listening", "started") for t in _texts(since, p))
+                                  for p in (elf, wasi)))
+    hold = 3.5 * S.MOY_BG_ABORT_US / 1e6
+    lib.moy_store_lock()
+    try:
+        assert moy_evq.send(peer, "elf.svc", "files", "[1]")[0] == 1
+        assert moy_evq.send(peer, "wasi.svc", "wake", '["files",1]')[0] == 1
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < hold:
+            s.poll()
+            time.sleep(0.01)
+        for pid in (elf, wasi):
+            assert not any(t.startswith("files ") for t in _texts(since, pid)), "the lock was not held"
+    finally:
+        lib.moy_store_unlock()
+    assert _polled(s, lambda: all(any(t.startswith("files ") for t in _texts(since, p))
+                                  for p in (elf, wasi)), 10)
+    for pid in (elf, wasi):
+        texts = _texts(since, pid)
+        assert "files 1 1" in texts, texts
+        assert not any(t.startswith(("strike", "killed")) for t in texts), texts
+        assert s.procs[pid].state == S.BACKGROUND
+    for pid in (elf, wasi):
+        assert s.stop(pid)
     moy_evq.close(peer)
 
 

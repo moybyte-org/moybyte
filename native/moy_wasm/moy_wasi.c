@@ -100,14 +100,14 @@ struct moy_wasi {
     uint32_t pid;               // its process, whose queue MOY_EVQ_FD reads (0: none)
     moy_app_run_t run;          // its app run, its app rows' grant (no state: none)
     int64_t woke_us;            // when its last poll of the descriptor returned (0: none yet)
-    int64_t hopped_us;          // what its calls waited for the session's task since
+    int64_t hopped_us;          // what its calls waited for the session's task, or spent in a row answered here, since
     // A service's (moy_wasi_service): written on its thread, read by the
     // watchdog on the console's task, each a word.
     volatile uint32_t wakes;    // its polls of the descriptor that returned
     volatile uint32_t cost_us;  // its wakes' time, charged to the supervisor (wraps)
     volatile uint32_t struck;   // strikes the watchdog gave its current wake
     volatile uint8_t polling;   // inside a poll of the descriptor
-    volatile uint8_t calling;   // waiting on the VM's queue (moy_vmq.h): not its wake's run
+    volatile uint8_t calling;   // waiting on the VM's queue (moy_vmq.h) or in a row answered here: not its wake's run
     volatile uint8_t hup;       // stopped: the descriptor hangs up
     moy_wasi_t *svc_next;       // the live services' list (moy_wasi_service_of), under moy_lock
     uint8_t listed;
@@ -1094,7 +1094,11 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, int how, const os_arg_t 
     }
     role_call_t c = { &w->run, row, buf, k, out, out != NULL ? cap : 0u, -MOY_APP_NEEDS_VM };
     if (how == OS_HERE) {
+        int64_t t0 = mono_us();         // the console's time (the store's), not its wake's
+        w->calling++;
         c.r = moy_app_role_here(c.run->a, c.run->g, c.row, c.arg, c.n, c.out, c.cap);
+        w->calling--;
+        w->hopped_us += mono_us() - t0;
     }
     if (how == OS_HERE && c.r != -MOY_APP_NEEDS_VM) {
         // answered on the module's own thread

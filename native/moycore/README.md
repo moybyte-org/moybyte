@@ -52,8 +52,9 @@ its rungs are the one supervisor's (`moy_super.h`), and its console calls
 (`moybyte.notify`, `send`, the functions the console hands it) go through
 the VM's queue (`moy_vmq.h`) for the VM's task to answer; their JSON is the
 prefs names' (`native/moy_app/moy_app_lua.h`). Its state opens its app's role
-names over the run its start was handed (`moy_app_lua_open_hop`), each row
-on a P4 a hop on the VM's queue.
+names over the run its start was handed (`moy_app_lua_open_hop`), a row the
+table answers here (the store's and the settings') run on its own task, and
+each other row on a P4 a hop on the VM's queue.
 
 | piece | how |
 |---|---|

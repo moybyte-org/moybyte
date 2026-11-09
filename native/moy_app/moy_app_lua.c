@@ -57,7 +57,7 @@ static int on_vm(lua_State *L, moy_app_lua_hop_fn hop, void (*fn)(void *), void 
         fn(arg);
         return 0;
     }
-    return hop(L, fn, arg);
+    return hop(L, fn, arg, 0);
 }
 
 // -- a growing byte buffer held in a userdata at a fixed stack slot ------------------
@@ -183,7 +183,8 @@ static int row_here(int k) {
 
 // A row that runs where it is called, on the state's own task: its answer,
 // or NEEDS_VM where only the VM's task can serve it.
-static void role_here(role_t *c) {
+static void role_here(void *arg) {
+    role_t *c = arg;
     if (!moy_app_run_live(c->run)) {
         c->r = -MOY_APP_STALE;
         c->why = EIO;
@@ -207,7 +208,7 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
         role_t c = { &u->run, (uint32_t)row, b != NULL ? b->p : NULL, b != NULL ? b->n : 0u,
                      p, cap, -MOY_APP_NEEDS_VM, EIO };
         if (u->hop != NULL && row_here(row)) {
-            role_here(&c);
+            u->hop(L, role_here, &c, 1);
         }
         if (c.r == -MOY_APP_NEEDS_VM) {
             on_vm(L, u->hop, role_run, &c);

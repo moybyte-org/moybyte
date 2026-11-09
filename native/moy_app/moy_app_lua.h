@@ -53,8 +53,10 @@
 int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
 
 // A hop: fn(arg) run on the VM's task while the caller waits, 0; or -1 where
-// nothing serves it, fn not run (a row then answers NEEDS_VM).
-typedef int (*moy_app_lua_hop_fn)(lua_State *L, void (*fn)(void *arg), void *arg);
+// nothing serves it, fn not run (a row then answers NEEDS_VM). With `here`,
+// fn(arg) runs in place, on the caller's task, its time the console's (the
+// store's) and not the call's; 0.
+typedef int (*moy_app_lua_hop_fn)(lua_State *L, void (*fn)(void *arg), void *arg, int here);
 // moy_app_lua_open for a state whose calls take `hop` (NULL: in place).
 int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
                          moy_app_lua_hop_fn hop);
