@@ -362,6 +362,39 @@ def test_the_prompt_asks_for_what_the_app_and_its_service_are_served(runtime, en
         == app_perms.tiers_of(cart)
 
 
+PY_NOTE_SVC = '''
+heard = []
+
+
+def moy_action(nid, key):
+    heard.append((nid, key))
+
+
+def moy_start():
+    moybyte.every(60000, lambda: None)
+'''
+
+
+def test_a_notification_from_its_service_opens_the_app(tmp_path):
+    """Tapped, an app's own service's notification opens the app (its main,
+    never the entry) and still reaches the service's `moy_action`
+    (tests/test_notifications.py has a `type: service` cart's, which
+    reaches the service alone)."""
+    from runtime import notifications as N
+    ws = _ws(tmp_path, "python", src=PY_NOTE_SVC, perms=("notifications",))
+    make_drv(ws).frame(1 / 30)
+    pid = S.start_cart(ws, _shelf(ws))
+    assert pid is not None and S.SCHED.procs[pid].cart["entry"] == "service"
+    nid = _as(pid, lambda: moybyte.notify("Both", "a ping"))
+    assert nid
+    opened = []
+    ws.open = lambda c=None: opened.append(c)
+    assert N.NOTES.act(nid)
+    assert [c["path"] for c in opened] == [_shelf(ws)["path"]]
+    assert opened[0]["main"] == "main.py" and opened[0]["type"] == "app"
+    assert S.SCHED.procs[pid].ns["heard"] == [(nid, "default")]
+
+
 def test_the_install_prompt_says_the_app_works_in_the_background():
     cart = {"id": APP, "type": "app", "runtime": "lua", "permissions": ["files", "prefs"],
             "entries": {"service": "service.lua"}}

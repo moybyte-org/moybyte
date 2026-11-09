@@ -433,7 +433,8 @@ A Python service with no wakes left has exited (0).
 its service's program beside its `main`, and the service is the cart's own:
 its id, its permissions and its one install prompt, its storage, its
 `receives`, its row under the cart's title in the task manager and under its
-id in `service` and `ps`:
+id in `service` and `ps`; a notification it posts, tapped, opens the app as
+well as reaching its `moy_action`:
 
 ```json
 "moybyte": {"type": "app", "permissions": ["prefs", "autostart"],

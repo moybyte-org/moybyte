@@ -520,7 +520,8 @@ class Notices:
         it (the game in front then throttled on the desk, minimised on a
         handheld), a cart no longer running opened again -- and its
         `moy_action(id, key)` runs; a service, which has no window, gets
-        the call alone."""
+        the call alone, and an app's own service's notification opens its
+        app too (scheduler.as_service)."""
         self._dirty = True
         procs = self.procs
         brought = self._bring(n.pid)
@@ -532,9 +533,12 @@ class Notices:
             import scheduler as _sched
         except ImportError:  # pragma: no cover - host fallback
             from runtime import scheduler as _sched
-        if _sched.SCHED.hook(n.pid, "moy_action", n.id, key):
-            return
+        hooked = _sched.SCHED.hook(n.pid, "moy_action", n.id, key)
         c = n.cart
+        if c and c.get("entry") and c.get("path"):
+            c = next((a for a in self.carts.all if a.get("path") == c["path"]), None)
+        elif hooked:
+            return
         if c and c.get("path") and c.get("type") != "service":
             if self.wm.top_is("tasks") and procs.handheld():
                 self.close_tasks()

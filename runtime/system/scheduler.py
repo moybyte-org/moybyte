@@ -1465,7 +1465,8 @@ def as_service(cart):
     """App `cart`'s service as a start takes it (AN APP'S OWN SERVICE): the
     cart with its type SERVICE, its main the entry and its tier the entry's,
     its source the entry's text (a Python or Lua one, read from its folder),
-    and its id, title, permissions, `receives` and path the app's. None where
+    `entry` ENTRY, and its id, title, permissions, `receives` and path the
+    app's. None where
     it declares no service or a Python or Lua entry does not read."""
     got = entry_of(cart)
     if got is None:
@@ -1473,6 +1474,7 @@ def as_service(cart):
     f, tier = got
     run = dict(cart)
     run["type"] = SERVICE
+    run["entry"] = ENTRY                # an app's own service, not a service cart
     run["main"] = f
     run["src_before"] = []
     run["src_after"] = []
