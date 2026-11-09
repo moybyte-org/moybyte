@@ -1003,7 +1003,8 @@ class MusicAppLayer:
         self.leave_asked = False
         self.shown = False          # on screen: from a draw until close()
         self.wifi = True
-        self._first = True
+        self._first = True          # a page or tab opened: its first draw is owed
+        self._fresh = False         # this draw is its first
         self._r = array("i", [0] * 4)
         self._key = 0
         self._load_stations()
@@ -1135,6 +1136,9 @@ class MusicAppLayer:
         self.cv, self.th, self.fs, self.desk = cv, th, fs, desk
         self.shown = True
         self.touch = ui.input_kind() == "touch"
+        # Taken now, not cleared after: a page or tab this draw opens (Enter
+        # on Add a station) owes its first draw to the next frame.
+        self._fresh, self._first = self._first, False
         s = self.stream
         if s.card is None and s.what is None:
             self._sync()
@@ -1164,7 +1168,6 @@ class MusicAppLayer:
                 self._damage.all()
         if self.page == "now":
             ui.focus(_NO_FOCUS)
-        self._first = False
 
     def _sync(self):
         """A stream the console already plays (this app's, before it was
@@ -1359,9 +1362,9 @@ class MusicAppLayer:
                 ui.empty("music", "No music yet",
                          ("Put MP3 songs in the Music folder", "on the SD card."))
             return
-        if self._first and cur < 0:
+        if self._fresh and cur < 0:
             cur = self._playing_row(rows)
-        if self._first:
+        if self._fresh:
             ui.focus("music.rows%d" % t)
         got, opened = self._rows(page, rows, cur, "music.rows%d" % t)
         if got != cur:
@@ -1463,7 +1466,7 @@ class MusicAppLayer:
         lh = ui.text_size("Ag", fs)[1] + 2 * fs
         cy = y + 8 * fs
         err = self.err
-        if self._first:
+        if self._fresh:
             ui.focus("Address")
         nxt = None
         for label, help_ in (("Address", err or HELP_ADDRESS), ("Name", None)):
@@ -1549,7 +1552,7 @@ class MusicAppLayer:
         by = min(under, y + h - bh - 8 * fs)
         ui.at(x + (w - bw) // 2, by, bw, bh)
         ui.icon("wifi")
-        if self._first:
+        if self._fresh:
             ui.focus("Wi-Fi settings")
         if ui.button("Wi-Fi settings", "primary", _WIFI):
             self._install.wifi()
@@ -1584,7 +1587,7 @@ class MusicAppLayer:
         files = t == 1
         rows = self._files_rows(desk=True) if files else self._station_rows()
         heads = ("Name", "Kind", "Length") if files else ("Station", "Style")
-        if self._first:
+        if self._fresh:
             ui.focus("music.rows%d" % t)
         body = (mx, my + head, mw, mh - head)
         if files and not rows:
@@ -1598,7 +1601,7 @@ class MusicAppLayer:
                          ("Put MP3 songs in the Music folder", "on the SD card."))
         else:
             cur = self.cur[t]
-            if self._first and cur < 0:
+            if self._fresh and cur < 0:
                 cur = self._playing_row(rows)
             got, opened = self._rows(body, rows, cur, "music.rows%d" % t)
             if got != cur:

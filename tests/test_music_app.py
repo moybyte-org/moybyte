@@ -246,6 +246,37 @@ def test_add_a_station_refuses_https_and_keeps_an_http_one(tmp_path, face):
     assert M.STREAM.stations[-1][0] == "Lush", "the station is read back from the prefs"
 
 
+@pytest.mark.parametrize("desk", [False, True])
+def test_enter_on_add_a_station_types_into_its_address(tmp_path, face, desk):
+    """Enter on Add a station opens it during a draw; its first draw is the
+    next frame's, which focuses Address, so the keys typed straight after
+    go there, Enter moves on to Name, and Enter again adds and plays it."""
+    ws = build_desktop_ws(tmp_path) if desk else build_ws(tmp_path)
+    app = _app(ws)
+    if desk:
+        ws.open_desk()
+    ws.open_app(app)
+    drv = make_drv(ws)
+    _settle(ws)
+    app.cur[0] = 0                                  # the Add a station row
+    for code in (13, "http://a.example/live", 13, "Test FM", 13):
+        if code == 13:
+            drv.key_down(13)
+            drv.frame(1 / 30)
+            drv.key_up(13)
+            drv.frame(1 / 30)
+            continue
+        for ch in code:
+            drv.type_char(ord(ch))
+            drv.frame(1 / 30)
+        for _ in range(3):                          # the typed queue drained
+            drv.frame(1 / 30)
+    assert app.page == "list", (app.page, app.url, app.name)
+    assert M.STREAM.stations[-1] == ("Test FM", "Added", "http://a.example/live")
+    assert face.played[-1] == "http://a.example/live"
+    M.STREAM.stations = M.STATIONS
+
+
 def test_mic_cancels_add_a_station(tmp_path, face):
     ws = build_ws(tmp_path)
     app = _app(ws)

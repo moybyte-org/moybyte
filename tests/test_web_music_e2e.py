@@ -201,9 +201,9 @@ _HERO = "?dev=1&desktop=1&start=1&edit=moybyte.star_catcher.moy&tab=code&scheme=
 def test_site_a_station_plays_on_a_desk_that_booted_into_the_editor(tmp_path):
     """The hero's start opens the Editor, which starts its cart for PLAY;
     with the Editor closed (its X), Music opened from the desk adds a
-    station (Enter on Add a station, its fields and Add at the desk's
-    1024x600) and it plays: Music's commands are the shell's, never the
-    Editor's run's."""
+    station by keys alone (Enter on Add a station, its address typed
+    straight into Address, Enter, a name, Enter) and it plays: Music's
+    commands are the shell's, never the Editor's run's."""
     station = _station(tmp_path, True)
     server, base = _site(tmp_path)
     try:
@@ -213,9 +213,9 @@ def test_site_a_station_plays_on_a_desk_that_booted_into_the_editor(tmp_path):
             {"js": "__moyState().then(s => 'EDIT ' + JSON.stringify(s.edit))"},
             {"click": [999, 19]}, {"wait": 1200},                   # the Editor's X
             {"click": [143, 80]}, {"wait": 2500},                   # Music on the desk
-            {"key": "Enter"}, {"wait": 800}, {"click": [610, 159]}]   # Add a station: Address
-            + [{"key": c} for c in url] + [{"click": [610, 245]}]   # Name
-            + [{"key": c} for c in "Test FM"] + [{"click": [962, 519]}] + [   # Add
+            {"key": "Enter"}, {"wait": 800}]                         # Add a station: Address
+            + [{"key": c} for c in url] + [{"wait": 300}, {"key": "Enter"}, {"wait": 300}]
+            + [{"key": c} for c in "Test FM"] + [{"wait": 300}, {"key": "Enter"}] + [
             {"waitFor": "__moyState().then(s => (s.media && s.media.at >= 1)"
                         " || (s.media_last && s.media_last.state === 'failed'))",
              "timeout": 20000},
