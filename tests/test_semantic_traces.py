@@ -848,7 +848,7 @@ seed Seed One=5.1/2 Seed Two=6.1/1
 seed warm Seed One=5.1/2 Seed Two=6.1/1
 seed bump Seed One=5.1/3 Seed Two=6.1/1
 load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
-loaded ['achievements', 'audio_ring', 'author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'handles', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'native', 'palette', 'permissions', 'pictures', 'receives', 'required', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
+loaded ['achievements', 'audio_ring', 'author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'entries', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'handles', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'native', 'palette', 'permissions', 'pictures', 'receives', 'required', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
 publish True
 recover True True
 journal 1 None False False

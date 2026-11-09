@@ -352,19 +352,6 @@ def test_the_install_prompt_says_the_app_works_in_the_background():
     assert app_perms.prompt(dict(cart, entries=None))[-1] != app_perms.BACKGROUND
 
 
-def test_no_seed_cart_declares_entries_until_the_seed_carries_them():
-    """The seed writers (runtime/carts/moy_seed.py, native/moy_store/
-    moy_seed.c, tools/gen_device_carts.py) regenerate a built-in's manifest
-    field by field and write its main and sources alone: a seed with a
-    service entry needs the field and the entry's file passed through first."""
-    base = os.path.join(ROOT, "system_carts")
-    for name in sorted(os.listdir(base)):
-        man = os.path.join(base, name, "manifest.json")
-        if os.path.exists(man):
-            with open(man) as f:
-                assert "entries" not in (json.load(f).get("moybyte") or {}), name
-
-
 # -- a WASI service entry --------------------------------------------------------
 
 @pytest.fixture(scope="module")

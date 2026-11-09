@@ -166,6 +166,8 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
             ven["handles"] = cart["handles"]
         if cart.get("receives") is not None:     # the message names other apps may send it
             ven["receives"] = cart["receives"]
+        if cart.get("entries") is not None:      # its entry points beside main
+            ven["entries"] = cart["entries"]
         if cart.get("achievements") is not None:  # the badges it declares
             ven["achievements"] = cart["achievements"]
         if cart.get("glass") is True:             # a per-glass wallpaper
@@ -186,8 +188,10 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
         # The cart's other scripts beside it (SPEC.md 4), and `sources` in the
         # manifest above naming the order -- a port's main.lua cannot run
         # without its shim chunk, and nothing else says where that goes.
+        # Its entry files (an app's service, docs/app_api_v1.md section 7)
+        # likewise.
         for script, text in list(cart.get("src_before") or ()) \
-                + list(cart.get("src_after") or ()):
+                + list(cart.get("src_after") or ()) + list(cart.get("entry_src") or ()):
             _write(d + "/" + script, text)
         if not _exists(d + "/config.json"):      # the kid's config stands
             _write(d + "/config.json", json.dumps(cart["cfg"]))

@@ -577,6 +577,48 @@ def test_the_native_seed_carries_a_picture_carts_pictures(tmp_path):
     assert man["moybyte"]["pictures"] == pictures
 
 
+def test_the_native_seed_carries_an_apps_service_entry(tmp_path):
+    """An app with its own service (docs/app_api_v1.md section 7): the
+    manifest keeps `entries` and the entry's file is written beside main,
+    by the C and the twin alike, and the seeded cart's service reads."""
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import gen_device_carts
+    from runtime import moy_carts, scheduler
+    src = tmp_path / "src" / "moybyte.both.moy"
+    src.mkdir(parents=True)
+    (src / "manifest.json").write_text(json.dumps({
+        "format": "moybyte-cart-v1", "title": "Both", "id": "moybyte.both",
+        "runtime": "python", "main": "main.py", "version": 1,
+        "moybyte": {"type": "app", "system": True, "order": 1, "edit": [],
+                    "permissions": ["prefs"], "entries": {"service": "service.lua"}}}))
+    (src / "main.py").write_text("def _draw():\n    cls(1)\n")
+    (src / "service.lua").write_text("function moy_start() end\n")
+    packed = gen_device_carts.build_packed(str(tmp_path / "src"))
+    with open(str(tmp_path / "roster.json"), "w") as f:
+        json.dump([[t, v] for t, v, _ in packed], f)
+    for i, (_t, _v, blob) in enumerate(packed):
+        with open(str(tmp_path / ("blob%d" % i)), "wb") as f:
+            f.write(blob)
+    vm_root, cp_root = str(tmp_path / "vm" / "carts"), str(tmp_path / "cp" / "carts")
+    assert _seed_step([_vm()], tmp_path, vm_root, "cold")[1:] \
+        == _seed_step([sys.executable], tmp_path, cp_root, "cold")[1:]
+    a, b = _tree(vm_root), _tree(cp_root)
+    assert a == b
+    man = json.loads(a[os.path.join("moybyte.both.moy", "manifest.json")])
+    assert man["moybyte"]["entries"] == {"service": "service.lua"}
+    assert a[os.path.join("moybyte.both.moy", "service.lua")] == b"function moy_start() end\n"
+    cart = moy_carts.load(os.path.join(cp_root, "moybyte.both.moy"))
+    run = scheduler.as_service(cart)
+    assert run["runtime"] == "lua" and run["src"] == "function moy_start() end\n"
+
+
+def test_a_seed_entry_that_is_a_module_is_refused(tmp_path):
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import gen_device_carts
+    with pytest.raises(ValueError):
+        gen_device_carts._entry_src(str(tmp_path), {"service": "service.wasm"})
+
+
 # -- the journal (slice 6) -------------------------------------------------------------------
 
 JOURNAL_DRIVER = r'''

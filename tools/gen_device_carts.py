@@ -105,6 +105,19 @@ def _read(path):
         return f.read()
 
 
+def _entry_src(base, entries):
+    """A seed's entry files as [(name, text)] (`"moybyte": {"entries": ...}`,
+    docs/app_api_v1.md section 7), which the seed writes beside its main.
+    A seed is text: an entry that is a module raises."""
+    out = []
+    for name in sorted(entries) if isinstance(entries, dict) else ():
+        f = entries[name]
+        if not isinstance(f, str) or not f.endswith((".py", ".lua")):
+            raise ValueError("%s: a seed's entry %r is not a script" % (base, f))
+        out.append((f, _read(os.path.join(base, f))))
+    return out
+
+
 def read_manifests(system_carts_dir=None):
     """Every system cart as `(folder, manifest)`, in SEED order.
 
@@ -317,6 +330,9 @@ def build_carts(system_carts_dir):
             cart["handles"] = vendor(man)["handles"]
         if "receives" in vendor(man):            # the message names other apps may send it
             cart["receives"] = vendor(man)["receives"]
+        if "entries" in vendor(man):             # its entry points beside main: their files too
+            cart["entries"] = vendor(man)["entries"]
+            cart["entry_src"] = _entry_src(base, vendor(man)["entries"])
         if "achievements" in vendor(man):        # the badges it declares
             cart["achievements"] = vendor(man)["achievements"]
         if vendor(man).get("glass") is True:   # a per-glass wallpaper

@@ -552,6 +552,11 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
         sb_str(b, ", \"receives\": ");
         sb_canon(b, f.v, f.e);
     }
+    f = get(c, ce, "entries");              // its entry points beside main
+    if (f.v != NULL && *f.v != 'n') {
+        sb_str(b, ", \"entries\": ");
+        sb_canon(b, f.v, f.e);
+    }
     f = get(c, ce, "achievements");         // the badges it declares
     if (f.v != NULL && *f.v != 'n') {
         sb_str(b, ", \"achievements\": ");
@@ -769,8 +774,10 @@ int moy_seed_write(const char *root, const char *folder, const char *json,
     }
     moy_fs_mkdir(d);
     rc = put_str(d, main != NULL ? main : "main.py", src);
-    for (int part = 0; part < 2 && rc == 0; part++) {
-        span_t l = get(c, ce, part == 0 ? "src_before" : "src_after");
+    // Its other scripts, then its entry files (an app's service).
+    static const char *const scripts[] = { "src_before", "src_after", "entry_src" };
+    for (int part = 0; part < 3 && rc == 0; part++) {
+        span_t l = get(c, ce, scripts[part]);
         if (!truthy(l) || *l.v != '[') {
             continue;
         }
