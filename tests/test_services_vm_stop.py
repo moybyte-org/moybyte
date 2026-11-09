@@ -536,7 +536,7 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     bus_sim.feed(1, b"far")
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["read"]')[0] == 1
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["uart"]')[0] == 1
-    assert moy_evq.send(peer_e, "elf.svc", "pin", "[]")[0] == 1
+    assert moy_evq.send(peer_e, "elf.svc", "wake", '["pin"]')[0] == 1
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["clip"]')[0] == 1
     got = []
     t0 = time.monotonic()
