@@ -949,7 +949,15 @@ the console's own apps take this path. **Calc** (`runtime/apps/calc_app.py`,
 
 **The two files.** An identity cart, `system_carts/moybyte.<slug>.moy`,
 gives the app its tile, title and re-seed, and its manifest declares the
-app:
+app. A built-in is known by where it came from: a folder the firmware's seed
+wrote (`moy_store_base.builtin_name`, against the roster the seed records
+for its store, `seeded`). Only the seed writes the built-ins' namespace (a
+carts index naming a `moybyte.` folder or id is refused, a cart made under
+an author of that name is made as `local.`'s), and an id of that namespace
+names a cart only in its own folder, so a cart that copies a built-in's
+manifest, its id, title, marker and `"system": true` (which only
+`tools/gen_device_carts.py` reads, to pick the seed carts), is an ordinary
+user cart with its own grant key (`tests/test_user_apps.py`):
 
 ```json
 "moybyte": { "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",

@@ -810,7 +810,7 @@ def test_the_details_read_the_play_records(tmp_path):
 def test_the_metadata_line_says_the_genre_where_the_manifest_has_one(tmp_path):
     ws, _drv = _desk_home(tmp_path)
     meta = ws.launcher._meta
-    game = {"type": "game", "id": "moybyte.star_catcher", "path": "/x"}
+    game = {"type": "game", "id": "moybyte.star_catcher", "path": "/x/moybyte.star_catcher.moy"}
     assert meta(game) == ("Game", "Built in")
     assert meta(dict(game, genre="arcade")) == ("Arcade", "Built in")
     assert meta(dict(game, genre="rpg")) == ("RPG", "Built in")

@@ -287,6 +287,10 @@ def _folders(root, rng, n):
         elif rng.random() < 0.1:
             with open(os.path.join(d, "scenes"), "w") as f:
                 f.write("a file, not a folder")
+    for name in ("moybyte.x.moy", "moybyte.y.moy", "mine.moy"):
+        os.makedirs(os.path.join(root, name))      # a built-in's id names only its folder
+        with open(os.path.join(root, name, "manifest.json"), "w") as f:
+            f.write(json.dumps({"title": "X", "id": "moybyte.x"}))
     with open(os.path.join(root, "loose.moy"), "w") as f:
         f.write("an archive")
 

@@ -420,6 +420,71 @@ def test_an_identity_cart_of_a_shipped_app_is_not_a_user_app(tmp_path):
     assert ws.cart_broken(calc) is False
 
 
+def _copy_of_calc(carts_dir, folder):
+    """A cart in `folder` whose manifest is the built-in Calc's, word for
+    word: its id, its title, its marker and `"system": true`."""
+    import shutil
+    d = Path(carts_dir) / folder
+    shutil.copytree(ROOT / "system_carts" / "moybyte.calc.moy", d)
+    man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    man["id"] = "moybyte.calc"
+    man.setdefault("moybyte", {})["system"] = True
+    (d / "manifest.json").write_text(json.dumps(man), encoding="utf-8")
+    return d
+
+
+def test_a_user_cart_copying_a_built_ins_manifest_gets_no_built_in_privileges(tmp_path):
+    """A built-in is known by where it came from, the firmware's seed, not by
+    anything its manifest says: a cart installed beside it with Calc's
+    manifest, and one copied onto the card into a folder of the built-ins'
+    namespace the seed never wrote, are neither Calc nor any built-in, and
+    share none of Calc's grant key (its prefs and consent)."""
+    from runtime.moy_store_base import builtin_name
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    _copy_of_calc(carts, "my_calc.moy")
+    _copy_of_calc(carts, "moybyte.calc_too.moy")
+    ws = build_ws(tmp_path)
+    by = {Path(c["path"]).name: c for c in ws.carts.all if c.get("path")}
+    calc = by["moybyte.calc.moy"]
+    assert ws.is_system_app(calc) and system_api.draws_in_look(calc)
+    for folder in ("my_calc.moy", "moybyte.calc_too.moy"):
+        fake = by[folder]
+        assert fake["title"] == "Calc" and "calc" in fake["permissions"]
+        assert fake["id"] == folder[:-4]
+        assert app_perms.app_id(fake) != app_perms.app_id(calc)
+        assert builtin_name(fake["path"]) is None
+        assert not ws.is_system_app(fake)
+        assert not system_api.draws_in_look(fake)
+        assert ws.is_user_app(fake)
+
+
+def test_a_text_marker_names_the_text_app_only_on_a_built_in(tmp_path):
+    """`editor` is the marker the Files router opens a text file with; a cart
+    the kid made that claims it is not the console's text app."""
+    ws = build_ws(tmp_path)
+    notes = next(c for c in ws.carts.all if c.get("path", "").endswith("moybyte.notes.moy"))
+    assert system_api.is_text_app(notes)
+    mine = dict(notes, path=str(tmp_path / "carts" / "local.notes.moy"))
+    assert not system_api.is_text_app(mine)
+
+
+def test_the_built_ins_namespace_is_the_seeds_alone(tmp_path):
+    """No door but the seed writes a folder of the built-ins' namespace: a
+    carts index naming one (or a built-in's id) is refused, and a cart made
+    under an author named after it is made as the kid's."""
+    from runtime import cart_index
+    entry = {"id": "calc", "name": "Calc", "folder": "calc.moy", "runtime": "python",
+             "version": 1}
+    assert cart_index.check_cart(dict(entry, folder="moybyte.calc.moy")) \
+        == "folder 'moybyte.calc.moy'"
+    assert cart_index.check_cart(dict(entry, id="moybyte.calc")) == "id 'moybyte.calc'"
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    made = moy_carts.create("Calc", root, ns="moybyte")
+    assert Path(made["path"]).name == "local.calc.moy"
+
+
 # ---------------------------------------------------------------------------
 # the canvas: fixed by default, responsive by opt-in
 # ---------------------------------------------------------------------------

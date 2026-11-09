@@ -265,6 +265,21 @@ static int is_cart_id(const char *s, size_t n) {
     return dots == 1u && dot > 0u && dot + 1u < n;
 }
 
+// Whether a cart id may name the cart in `folder` (moy_carts._cart_id): one in
+// the built-ins' namespace only in its own folder, so a manifest copied from a
+// built-in shares none of its grant, prefs or consent.
+#define BUILTIN_NS "moybyte."
+static int id_may_name(const char *id, size_t n, const char *folder, size_t fn) {
+    size_t ns = sizeof BUILTIN_NS - 1u;
+    if (n < ns || memcmp(id, BUILTIN_NS, ns) != 0) {
+        return 1;
+    }
+    if (fn >= 4u && memcmp(folder + fn - 4u, MOY_CAT_EXT, 4u) == 0) {
+        fn -= 4u;
+    }
+    return fn == n && memcmp(id, folder, n) == 0;
+}
+
 static int is_str(moy_cat_json_t f, const char *s) {
     return f.v != NULL && *f.v == '"' && moy_json_str_is(f.v, f.e, s, strlen(s));
 }
@@ -990,7 +1005,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     moy_cat_json_t id = field(man, mend, "id");
     size_t idn = 0;
     char *ids = broken == NULL ? str_of(&r->a, id, &idn) : NULL;
-    if (ids != NULL && is_cart_id(ids, idn)) {
+    if (ids != NULL && is_cart_id(ids, idn) && id_may_name(ids, idn, e->folder, e->folder_n)) {
         e->id = ids;
         e->id_n = idn;
     } else {

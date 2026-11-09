@@ -154,15 +154,19 @@ import moy_app as _moy_app
 # The marker permission the console's TEXT APP claims its cart with -- the
 # `.md`/`.json`/`.txt` door the Files router opens (docs/theme_and_shell_2026-11.md §10).
 # Not a permission the grant policy maps, so it grants nothing; it only says
-# which cart this is, the way a shipped app claims its cart by title +
-# `APP_PERM`.
+# which built-in this is, the way a shipped app claims its cart by title +
+# `APP_PERM`, and counts only on a built-in (`_builtin_name`).
 TEXT_APP_PERM = "editor"
 
 
 def is_text_app(cart):
-    """True when `cart` is the console's text app."""
+    """True when `cart` is the console's text app: a built-in (or an
+    embedded one, with no path) that claims the marker."""
     perms = (cart.get("permissions") or ()) if cart else ()
-    return TEXT_APP_PERM in perms
+    if TEXT_APP_PERM not in perms:
+        return False
+    path = cart.get("path")
+    return not path or _builtin_name(path) is not None
 
 
 def draws_in_look(cart):

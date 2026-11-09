@@ -267,13 +267,47 @@ def is_cart_id(s):
     return _id_part(a) and _id_part(n)
 
 
+# The store's origin record: each root a seed ran on, and the folders its
+# roster names there (`seeded`, which moy_catalogue.seed and the host's seed
+# call). A built-in is known by where it came from, the firmware's seed, never
+# by what its manifest says: nothing a user cart's manifest can copy (its id,
+# its title, a marker permission, `"system": true`) makes it one.
+_SEEDED = {}
+
+
+def _root_key(root):
+    return str(root).replace("\\", "/").rstrip("/")
+
+
+def seeded(root, folders):
+    """Record that the seed of the store `root` writes `folders` (the
+    roster's): from now on a folder of the built-in namespace under `root` is
+    a built-in only when it is one of them."""
+    _SEEDED[_root_key(root)] = frozenset(folders)
+
+
+def builtin_ns(name):
+    """True when `name` (a folder or an id) is in the built-ins' namespace,
+    which only the firmware's seed writes: an install, a made cart and an
+    index's id never take it."""
+    return isinstance(name, str) and name.startswith(BUILTIN_NS + ".")
+
+
 def builtin_name(path):
     """The folder of the built-in at `path` (`moybyte.files.moy` for
     `.../moybyte.files.moy`), or None for any other cart: an app's identity
-    cart is a built-in, never a cart a kid made or copied. The folder is the
-    one name a built-in has: system_carts/ ships it, every store seeds it."""
-    name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-    return name if name.startswith(BUILTIN_NS + ".") else None
+    cart is a built-in, never a cart a kid made, copied or installed. The
+    folder is the one name a built-in has: system_carts/ ships it, and the
+    store's seed writes it. Under a root the seed recorded (`seeded`), only
+    the roster's folders are built-ins; a folder of the namespace the seed
+    did not write (copied onto the card, say) is not."""
+    p = str(path).replace("\\", "/")
+    cut = p.rfind("/")
+    name = p[cut + 1:]
+    if not builtin_ns(name):
+        return None
+    roster = _SEEDED.get(p[:cut].rstrip("/")) if cut >= 0 else None
+    return name if roster is None or name in roster else None
 
 
 def cart_folder(name, ns=None):

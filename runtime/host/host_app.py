@@ -82,6 +82,7 @@ sys.modules.setdefault("players", _players)   # console.py does `from players im
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
+from . import moy_store_base as _store_base  # noqa: E402
 from . import moy_catalogue  # noqa: E402  (the store's carts-by-handle interface)
 sys.modules.setdefault("moy_catalogue", moy_catalogue)   # ONE index per process
 # The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
@@ -256,6 +257,7 @@ def _seed_system_carts(carts_dir):
              if os.path.isdir(SYSTEM_CARTS) else [])
     moy_carts.sweep_store(carts_dir, [{"title": _manifest_title(
         os.path.join(SYSTEM_CARTS, n))} for n in names])
+    _store_base.seeded(carts_dir, names)
     if names:
         moy_carts.seed_folders(SYSTEM_CARTS, carts_dir, record=False)
 

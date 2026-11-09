@@ -150,7 +150,7 @@ except ImportError:  # pragma: no cover
 try:
     from ticks import _ticks_ms, _ticks_diff
     from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
-                                cart_path)
+                                builtin_ns, cart_path)
     from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
     import moy_carts as _store
     import cart_files as _cart_files
@@ -158,7 +158,7 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.moy_store_base import (_sibling_path, _is_dir,
-                                        COVER_MAX_BYTES, cart_path)
+                                        COVER_MAX_BYTES, builtin_ns, cart_path)
     from runtime.moy_fs import (_exists, _mkdir, _read_recover, _write_atomic,
                                 _write_atomic_steps)
     from runtime import moy_carts as _store
@@ -381,8 +381,10 @@ def check_cart(c):
         if not isinstance(d, str) or not d:
             return "depends"
     folder = c["folder"]
-    if not plain_name(folder) or not folder.endswith(".moy"):
+    if not plain_name(folder) or not folder.endswith(".moy") or builtin_ns(folder):
         return "folder %r" % folder
+    if builtin_ns(c["id"]):
+        return "id %r" % c["id"]
     lic = c.get("licence")
     if not _sized(lic) or not isinstance(lic.get("url"), str):
         return "licence"

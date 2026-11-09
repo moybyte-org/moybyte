@@ -2,7 +2,7 @@
 SH end 0
 > sh mkdir -p /sd/moybyte/carts/jet.moy /sd/moybyte/carts/doom.moy /sd/moybyte/carts/mine.moy /sd/moybyte/apps/jet /sd/moybyte/apps/doom /sd/moybyte/system
 SH end 0
-> sh printf '{"title": "Jet", "id": "moybyte.jet"}' > /sd/moybyte/carts/jet.moy/manifest.json
+> sh printf '{"title": "Jet", "id": "kenny.jet"}' > /sd/moybyte/carts/jet.moy/manifest.json
 SH end 0
 > sh printf 'pass\n' > /sd/moybyte/carts/jet.moy/main.py
 SH end 0
@@ -16,19 +16,19 @@ SH end 0
 SH end 0
 > sh printf 'x' > /sd/moybyte/apps/doom/options.cfg
 SH end 0
-> sh printf '{"version": 1, "carts": {"jet.moy": {"id": "moybyte.jet", "index": "", "name": "Jet", "version": 3, "module": null, "files": {}}, "doom.moy": {"id": "id.doom", "index": "", "name": "Doom \\u00e9t\\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "moybyte.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files": {}}}}' > /sd/moybyte/installed.json
+> sh printf '{"version": 1, "carts": {"jet.moy": {"id": "kenny.jet", "index": "", "name": "Jet", "version": 3, "module": null, "files": {}}, "doom.moy": {"id": "id.doom", "index": "", "name": "Doom \\u00e9t\\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "kenny.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files": {}}}}' > /sd/moybyte/installed.json
 SH end 0
-> sh printf 'consent = {"moybyte.jet": {"perms": ["network"], "off": []}, "doom": {"perms": [], "off": []}}\ntheme = "dusk"\n' > /sd/moybyte/system/settings
+> sh printf 'consent = {"kenny.jet": {"perms": ["network"], "off": []}, "doom": {"perms": [], "off": []}}\ntheme = "dusk"\n' > /sd/moybyte/system/settings
 SH end 0
 > sh pkg list
-SH moybyte.jet 3 installed Jet
+SH kenny.jet 3 installed Jet
 SH id.doom 1 installed Doom été
 SH end 0
 > sh pkg list extra
 SH pkg: needs the console
 SH end 1
-> sh pkg remove -y moybyte.jet
-SH moybyte.jet removed
+> sh pkg remove -y kenny.jet
+SH kenny.jet removed
 SH end 0
 > sh pkg remove mine.moy nope
 SH pkg: mine.moy: not installed by pkg
@@ -38,8 +38,8 @@ SH end 1
 SH id.doom 1 installed Doom été
 SH end 0
 > sh cat /sd/moybyte/installed.json
-SH {"version": 1, "carts": {"doom.moy": {"id": "id.doom", "index": "", "name": "Doom \u00e9t\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "moybyte.gone", "index": "", "name": "Gone", "version": 2, "module": null, "fil
-SH es": {}}}}
+SH {"version": 1, "carts": {"doom.moy": {"id": "id.doom", "index": "", "name": "Doom \u00e9t\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "kenny.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files
+SH ": {}}}}
 SH end 0
 > sh ls /sd/moybyte/carts /sd/moybyte/apps
 SH /sd/moybyte/carts:
@@ -54,13 +54,13 @@ SH end 0
 SH id.doom removed
 SH end 0
 > sh cat /sd/moybyte/installed.json
-SH {"version": 1, "carts": {"gone.moy": {"id": "moybyte.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files": {}}}}
+SH {"version": 1, "carts": {"gone.moy": {"id": "kenny.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files": {}}}}
 SH end 0
 > sh settings
 SH consent = {}
 SH theme = "dusk"
 SH end 0
-> sh pkg install moybyte.jet
+> sh pkg install kenny.jet
 SH pkg: needs the console
 SH end 1
 > sh pkg remove

@@ -78,7 +78,7 @@ try:
                                 _has, _cwd, _enter, _leave, CART_EXT,
                                 cart_path, cart_folder,
                                 USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
-                                is_cart_id, THEME_NAME_MAX, theme_name_ok)
+                                is_cart_id, builtin_ns, THEME_NAME_MAX, theme_name_ok)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root,
                                         CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
@@ -92,7 +92,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         _cwd, _enter, _leave, CART_EXT,
                                         cart_path, cart_folder,
                                         USER_NS, BUILTIN_NS, VENDOR_KEY,
-                                        vendor, is_cart_id, THEME_NAME_MAX,
+                                        vendor, is_cart_id, builtin_ns, THEME_NAME_MAX,
                                         theme_name_ok)
 
 
@@ -505,13 +505,16 @@ def _compiled_sources(path):
 def _cart_id(man, path, broken):
     """A cart's id (#162, SPEC.md 3.1): the manifest's "id" when it is one,
     else its folder's name without the extension -- the rule, not a
-    migration."""
-    cid = None if broken else man.get("id")
-    if is_cart_id(cid):
-        return cid
+    migration. An id in the built-ins' namespace is a built-in's only in
+    its own folder: anywhere else the folder names the cart, so a manifest
+    copied from a built-in shares none of its grant, prefs or consent."""
     cut = max(path.rfind("/"), path.rfind("\\"))
     name = path[cut + 1:] if cut >= 0 else path
-    return name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+    folder = name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+    cid = None if broken else man.get("id")
+    if is_cart_id(cid) and (cid == folder or not builtin_ns(cid)):
+        return cid
+    return folder
 
 
 def _config_of(v):
@@ -1546,6 +1549,10 @@ def _whole_or_none(d, fn):
 
 
 def _unique_dir(root, base, ns=USER_NS):
+    """A free folder for a made cart, in `ns`; a made cart never takes the
+    built-ins' namespace (an author named after it makes USER_NS's)."""
+    if ns and slug(ns) == BUILTIN_NS:
+        ns = USER_NS
     d = cart_path(root, cart_folder(base, ns))
     if not _exists(d):
         return d

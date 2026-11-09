@@ -40,6 +40,7 @@ try:
     import iconsets as _iconsets
     import layout_base as _lb
     from chrome import _ticks_ms, _ticks_diff
+    from moy_store_base import builtin_name as _builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
@@ -47,6 +48,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import iconsets as _iconsets
     from runtime import layout_base as _lb
     from runtime.chrome import _ticks_ms, _ticks_diff
+    from runtime.moy_store_base import builtin_name as _builtin_name
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -1422,10 +1424,11 @@ class Launcher:
         if it.get("type") in PSEUDO_TILE_TYPES:
             return ("A new game",)
         kind = _cl.genre_word(it.get("genre")) or _KIND_NAME.get(it.get("type"), "App")
-        cid = it.get("id") or ""
+        path = it.get("path")
         if self.own_for is not None and self.own_for(it):
             src = "Yours"
-        elif cid.startswith("moybyte."):
+        elif (_builtin_name(path) is not None if path
+              else (it.get("id") or "").startswith("moybyte.")):
             src = "Built in"
         else:
             src = "Installed"
