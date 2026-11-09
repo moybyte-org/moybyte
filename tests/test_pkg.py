@@ -252,23 +252,23 @@ def _stage(tmp_path, man):
 
 
 def test_a_command_whose_name_is_taken_is_refused_at_install(tmp_path):
-    cmd = {"format": "moy-1", "id": "moybyte.hello", "title": "Hello",
+    cmd = {"format": "moy-1", "id": "kenny.hello", "title": "Hello",
            "moybyte": {"type": "command"}}
-    inst = Inst(str(tmp_path), shelf=[{"id": "moybyte.hello", "type": "command"}])
-    aid, perms, _lines = pkg.install_check(inst, _stage(tmp_path, cmd), "hello.moy",
+    inst = Inst(str(tmp_path), shelf=[{"id": "kenny.hello", "type": "command"}])
+    aid, perms, _lines = pkg.install_check(inst, _stage(tmp_path, cmd), "kenny.hello.moy",
                                            inst.carts())
     assert perms == [], "an update of the command that holds the name"
     inst.shelf = [{"id": "local.hello", "type": "command"}]
     with pytest.raises(ci.InstallError) as exc:
-        pkg.install_check(inst, _stage(tmp_path, cmd), "hello.moy", inst.carts())
+        pkg.install_check(inst, _stage(tmp_path, cmd), "kenny.hello.moy", inst.carts())
     assert exc.value.text == "Its command name is taken: hello is local.hello's command"
     for name in ("ls", "pkg", "cd"):
         with pytest.raises(ci.InstallError) as exc:
-            pkg.install_check(inst, _stage(tmp_path, dict(cmd, id="moybyte." + name)),
-                              name + ".moy", inst.carts())
+            pkg.install_check(inst, _stage(tmp_path, dict(cmd, id="kenny." + name)),
+                              "kenny.%s.moy" % name, inst.carts())
         assert exc.value.text == "Its command name is taken: the shell's own " + name
     game = dict(cmd, moybyte={"type": "game"})
-    pkg.install_check(inst, _stage(tmp_path, dict(game, id="moybyte.ls")), "ls.moy", ())
+    pkg.install_check(inst, _stage(tmp_path, dict(game, id="kenny.ls")), "kenny.ls.moy", ())
 
 
 def test_the_shells_own_names_are_the_c_tables():

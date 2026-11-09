@@ -122,6 +122,9 @@ typedef struct {
     moy_vol_here_t *here;       // NULL: every read is by full path
     const char *path;           // the folder, absolute
     const lst_t *lst;           // NULL when the folder would not list
+    const char **sib;           // the scan's: the store's cart folders, else NULL
+    const size_t *sib_n;
+    size_t sibs;
 } rd_t;
 
 // `name` in the folder: its path to open, and the volume it is on.
@@ -265,19 +268,49 @@ static int is_cart_id(const char *s, size_t n) {
     return dots == 1u && dot > 0u && dot + 1u < n;
 }
 
-// Whether a cart id may name the cart in `folder` (moy_carts._cart_id): one in
-// the built-ins' namespace only in its own folder, so a manifest copied from a
-// built-in shares none of its grant, prefs or consent.
+// Whether a cart id may name the cart in folder `r->path` (moy_store_base.id_in_folder):
+// the folder `<id>.moy` owns `<id>`, so an id names a cart in another folder
+// only where no folder of the store is named for it, and one in the
+// built-ins' namespace never does. A cart copied in under another app's id
+// shares none of its grant, prefs or consent. A scan asks its listing of the
+// store's folders; one folder read alone looks the owner up.
 #define BUILTIN_NS "moybyte."
-static int id_may_name(const char *id, size_t n, const char *folder, size_t fn) {
-    size_t ns = sizeof BUILTIN_NS - 1u;
-    if (n < ns || memcmp(id, BUILTIN_NS, ns) != 0) {
-        return 1;
-    }
+static int id_may_name(rd_t *r, const char *id, size_t n, const char *folder, size_t fn) {
     if (fn >= 4u && memcmp(folder + fn - 4u, MOY_CAT_EXT, 4u) == 0) {
         fn -= 4u;
     }
-    return fn == n && memcmp(id, folder, n) == 0;
+    if (fn == n && memcmp(id, folder, n) == 0) {
+        return 1;
+    }
+    size_t ns = sizeof BUILTIN_NS - 1u;
+    if (n >= ns && memcmp(id, BUILTIN_NS, ns) == 0) {
+        return 0;
+    }
+    if (r->sib != NULL) {
+        for (size_t i = 0; i < r->sibs; i++) {
+            if (r->sib_n[i] == n + 4u && memcmp(r->sib[i], id, n) == 0
+                && memcmp(r->sib[i] + n, MOY_CAT_EXT, 4u) == 0) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    size_t dir = (size_t)(folder - r->path);
+    if (dir == 0u) {
+        return 1;               // a bare folder name, in no store
+    }
+    char *owner = aalloc(&r->a, dir + n + 5u);
+    if (owner == NULL) {
+        return 0;
+    }
+    memcpy(owner, r->path, dir);
+    memcpy(owner + dir, id, n);
+    memcpy(owner + dir + n, MOY_CAT_EXT, 5u);
+    moy_vol_t v;
+    const char *rest;
+    moy_vol_stat_t st;
+    return !(moy_vol_at(owner, &v, &rest) == 0 && moy_vol_stat(&v, rest, &st) == 0
+             && st.is_dir);
 }
 
 static int is_str(moy_cat_json_t f, const char *s) {
@@ -1005,7 +1038,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     moy_cat_json_t id = field(man, mend, "id");
     size_t idn = 0;
     char *ids = broken == NULL ? str_of(&r->a, id, &idn) : NULL;
-    if (ids != NULL && is_cart_id(ids, idn) && id_may_name(ids, idn, e->folder, e->folder_n)) {
+    if (ids != NULL && is_cart_id(ids, idn) && id_may_name(r, ids, idn, e->folder, e->folder_n)) {
         e->id = ids;
         e->id_n = idn;
     } else {
@@ -1398,10 +1431,15 @@ static int load_payloads(rd_t *r, moy_cart_t *c, const char *man,
 
 // One folder, entered: its listing taken, its entry read and handed on.
 static int one(const char *path, const moy_vol_t *v, const char *vpath,
-               moy_cat_fn fn, moy_cat_note_fn note, void *ctx) {
+               const names_t *sibs, moy_cat_fn fn, moy_cat_note_fn note, void *ctx) {
     rd_t r;
     memset(&r, 0, sizeof r);
     r.path = path;
+    if (sibs != NULL) {
+        r.sib = sibs->name;
+        r.sib_n = sibs->n;
+        r.sibs = sibs->len;
+    }
     moy_vol_here_t h;
     lst_t lst = { &r.a, NULL, 0, 0 };
     int entered = v != NULL && moy_vol_enter(v, vpath, &h) == 0;
@@ -1465,7 +1503,7 @@ int moy_cat_scan(const char *root, moy_cat_fn fn, moy_cat_note_fn note,
             rc = MOY_ENOMEM;
             break;
         }
-        int r1 = one(path, &v, vpath, fn, note, ctx);
+        int r1 = one(path, &v, vpath, (const names_t *)&d, fn, note, ctx);
         if (r1 != 0 && r1 != MOY_FS_NONE) {
             rc = r1;
         }
@@ -1488,7 +1526,7 @@ int moy_cat_entry(const char *path, moy_cat_fn fn, moy_cat_note_fn note,
         afree(&r.a);
         return rc;
     }
-    return one(path, &v, rest, fn, note, ctx);
+    return one(path, &v, rest, NULL, fn, note, ctx);
 }
 
 int moy_cat_load(const char *path, moy_load_fn fn, moy_cat_note_fn note,

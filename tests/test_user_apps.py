@@ -485,6 +485,33 @@ def test_the_built_ins_namespace_is_the_seeds_alone(tmp_path):
     assert Path(made["path"]).name == "local.calc.moy"
 
 
+def test_a_copied_cart_cannot_take_another_apps_id(tmp_path):
+    """An id names a cart only where no other folder owns it: a cart copied
+    in claiming an installed app's id takes its own folder's name, and with
+    it a grant key, prefs and consent record of its own; an id no folder
+    owns stays the manifest's. A carts index installs a cart only into its
+    id's folder, so an installed app owns its id."""
+    from runtime import cart_index
+    carts = Path(tmp_path / "carts")
+    for folder, cid in (("ann.pong.moy", "ann.pong"), ("pong_copy.moy", "ann.pong"),
+                        ("solo.moy", "ann.solo")):
+        d = _write_cart(str(carts), folder[:-4], "def _draw():\n    cls(0)\n",
+                        perms=["prefs"])
+        man = json.loads((d / "manifest.json").read_text())
+        man["id"] = cid
+        (d / "manifest.json").write_text(json.dumps(man))
+    ws = build_ws(tmp_path)
+    ids = dict((Path(c["path"]).name, c["id"]) for c in ws.carts.all)
+    assert (ids["ann.pong.moy"], ids["pong_copy.moy"], ids["solo.moy"]) \
+        == ("ann.pong", "pong_copy", "ann.solo")
+    ws.consent.record("ann.pong", ["prefs"])
+    copy = next(c for c in ws.carts.all if c["path"].endswith("/pong_copy.moy"))
+    assert app_perms.app_id(copy) == "pong_copy" and ws.consent.get("pong_copy") is None
+    entry = {"id": "ann.pong", "name": "Pong", "folder": "ann.pong.moy",
+             "runtime": "python", "version": 1}
+    assert cart_index.check_cart(dict(entry, folder="pong.moy")) == "id 'ann.pong'"
+
+
 # ---------------------------------------------------------------------------
 # the canvas: fixed by default, responsive by opt-in
 # ---------------------------------------------------------------------------

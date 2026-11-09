@@ -78,7 +78,7 @@ try:
                                 _has, _cwd, _enter, _leave, CART_EXT,
                                 cart_path, cart_folder,
                                 USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
-                                is_cart_id, builtin_ns, THEME_NAME_MAX, theme_name_ok)
+                                is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX, theme_name_ok)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root,
                                         CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
@@ -92,7 +92,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         _cwd, _enter, _leave, CART_EXT,
                                         cart_path, cart_folder,
                                         USER_NS, BUILTIN_NS, VENDOR_KEY,
-                                        vendor, is_cart_id, builtin_ns, THEME_NAME_MAX,
+                                        vendor, is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX,
                                         theme_name_ok)
 
 
@@ -502,19 +502,16 @@ def _compiled_sources(path):
     return out
 
 
+# The listing of the store `_each` walks (name -> is a folder), while it
+# walks it: what `_cart_id` asks whether a folder owns an id, so the scan
+# looks no name up.
+_SCAN = [None]
+
+
 def _cart_id(man, path, broken):
-    """A cart's id (#162, SPEC.md 3.1): the manifest's "id" when it is one,
-    else its folder's name without the extension -- the rule, not a
-    migration. An id in the built-ins' namespace is a built-in's only in
-    its own folder: anywhere else the folder names the cart, so a manifest
-    copied from a built-in shares none of its grant, prefs or consent."""
-    cut = max(path.rfind("/"), path.rfind("\\"))
-    name = path[cut + 1:] if cut >= 0 else path
-    folder = name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
-    cid = None if broken else man.get("id")
-    if is_cart_id(cid) and (cid == folder or not builtin_ns(cid)):
-        return cid
-    return folder
+    """A cart's id (#162, SPEC.md 3.1): its manifest's as `id_in_folder`
+    rules, a broken manifest's none -- the rule, not a migration."""
+    return id_in_folder(None if broken else man.get("id"), path, _SCAN[0])
 
 
 def _config_of(v):
@@ -990,6 +987,7 @@ def _each(root, read, enter=False):
         return None
     here = _cwd() if enter and root[:1] == "/" else None
     carts = []
+    _SCAN[0] = names
     try:
         for name in sorted(names):
             if not (name.endswith(CART_EXT) and names[name]):
@@ -1003,6 +1001,7 @@ def _each(root, read, enter=False):
             if c:
                 carts.append(c)
     finally:
+        _SCAN[0] = None
         if here is not None:
             _leave(here)
     return carts

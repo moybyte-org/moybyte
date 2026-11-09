@@ -130,7 +130,8 @@ freely, every frame if need be.
 moy-spec's fields sit at the top level (SPEC.md §3.1 is their authority):
 `format`, `title`, `id` (`<author>.<name>`, #162: what your grant, prefs,
 consent and crash strikes are keyed by; without it, the folder's name less
-`.moy`), `version` (an integer; bump it when a seed cart changes, #47),
+`.moy`, which is also its name where another folder is named for that id:
+the folder `<id>.moy` owns it, `moy_store_base.id_in_folder`), `version` (an integer; bump it when a seed cart changes, #47),
 `runtime` (`python`, `lua`, `wasm`), `main`, `canvas` (`320x240`, the default,
 `160x120` or `128x128`), `fps`, `extensions`, `input` and `palette`
 (`docs/moy_cart_api.md` has how a Moybyte cart reads each).
@@ -1003,7 +1004,8 @@ wrote (`moy_store_base.builtin_name`, against the roster the seed records
 for its store, `seeded`). Only the seed writes the built-ins' namespace (a
 carts index naming a `moybyte.` folder or id is refused, a cart made under
 an author of that name is made as `local.`'s), and an id of that namespace
-names a cart only in its own folder, so a cart that copies a built-in's
+names a cart only in its own folder (any other id, only where no folder is
+named for it, §2), so a cart that copies a built-in's
 manifest, its id, title, marker and `"system": true` (which only
 `tools/gen_device_carts.py` reads, to pick the seed carts), is an ordinary
 user cart with its own grant key (`tests/test_user_apps.py`):

@@ -267,6 +267,34 @@ def is_cart_id(s):
     return _id_part(a) and _id_part(n)
 
 
+def id_in_folder(cid, path, folders=None):
+    """The id of the cart in the folder at `path` whose manifest says `cid`:
+    `cid` where it is a cart id (`is_cart_id`) that may name the cart, else
+    the folder's name without the extension. The folder `<id>.moy` owns the
+    id `<id>`: in any other folder an id names the cart only where no folder
+    of the store is named for it, and an id in the built-ins' namespace never
+    does. So a cart copied in under another app's id, a built-in's included,
+    shares none of its grant, prefs or consent record
+    (native/moy_store/moy_cat.c's id_may_name is the twin). `folders` is the
+    store's listing (name -> is a folder) where the caller holds it, else
+    the owner's folder is looked up; a bare folder name, in no store, has no
+    other folder to ask about."""
+    cut = max(path.rfind("/"), path.rfind("\\"))
+    name = path[cut + 1:] if cut >= 0 else path
+    folder = name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+    if not is_cart_id(cid) or cid == folder:
+        return folder
+    if builtin_ns(cid):
+        return folder
+    if folders is not None:
+        owned = folders.get(cid + CART_EXT)
+    else:
+        owned = cut >= 0 and _is_dir(path[:cut + 1] + cid + CART_EXT)
+    if owned:
+        return folder
+    return cid
+
+
 # The store's origin record: each root a seed ran on, and the folders its
 # roster names there (`seeded`, which moy_catalogue.seed and the host's seed
 # call). A built-in is known by where it came from, the firmware's seed, never

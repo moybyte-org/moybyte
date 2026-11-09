@@ -291,8 +291,36 @@ def _folders(root, rng, n):
         os.makedirs(os.path.join(root, name))      # a built-in's id names only its folder
         with open(os.path.join(root, name, "manifest.json"), "w") as f:
             f.write(json.dumps({"title": "X", "id": "moybyte.x"}))
+    # any id names a cart in another folder only where no folder is named for
+    # it: "ann.pong" is its folder's, "ann.solo" has no folder of its own
+    for name, cid in (("ann.pong.moy", "ann.pong"), ("copy.moy", "ann.pong"),
+                      ("pong2.moy", "ann.pong"), ("solo.moy", "ann.solo"),
+                      ("ann.file.moy", "ann.loose")):
+        os.makedirs(os.path.join(root, name))
+        with open(os.path.join(root, name, "manifest.json"), "w") as f:
+            f.write(json.dumps({"title": name, "id": cid}))
+        with open(os.path.join(root, name, "main.py"), "w") as f:
+            f.write("def _draw():\n    pass\n")
+    with open(os.path.join(root, "ann.loose.moy"), "w") as f:
+        f.write("a file, not a folder: it owns no id")
     with open(os.path.join(root, "loose.moy"), "w") as f:
         f.write("an archive")
+
+
+def test_an_id_names_a_cart_only_where_no_folder_is_named_for_it(tmp_path):
+    """The folder `<id>.moy` owns its id: a cart copied into another folder
+    claiming it takes its own folder's name, while an id no folder is named
+    for (a file of that name is no folder) stays the manifest's. The native
+    shelf reads the same ids, scanned and read alone (the twin test below)."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    _folders(root, random.Random(1), 4)
+    want = {"ann.pong.moy": "ann.pong", "copy.moy": "copy", "pong2.moy": "pong2",
+            "solo.moy": "ann.solo", "ann.file.moy": "ann.loose"}
+    shelf = dict((c["path"].rsplit("/", 1)[1], c["id"]) for c in moy_carts.scan(root))
+    assert dict((k, shelf[k]) for k in want) == want
+    one = dict((k, moy_carts.load(os.path.join(root, k))["id"]) for k in want)
+    assert one == want
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])

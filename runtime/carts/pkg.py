@@ -180,7 +180,7 @@ def install_check(inst, stage, folder, shelf):
     except (OSError, ValueError):
         man = {}
     man = man if isinstance(man, dict) else {}
-    cart = _perms.manifest_cart(man, folder)
+    cart = _perms.manifest_cart(man, folder, inst.root())
     consent = inst.consent()
     _g, _a, refusal = consent.check(cart, install=True)
     if refusal is not None:

@@ -383,7 +383,7 @@ def check_cart(c):
     folder = c["folder"]
     if not plain_name(folder) or not folder.endswith(".moy") or builtin_ns(folder):
         return "folder %r" % folder
-    if builtin_ns(c["id"]):
+    if builtin_ns(c["id"]) or folder != c["id"] + ".moy":
         return "id %r" % c["id"]
     lic = c.get("licence")
     if not _sized(lic) or not isinstance(lic.get("url"), str):

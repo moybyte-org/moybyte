@@ -57,9 +57,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime import moy_app as _moy_app
 try:
-    from moy_store_base import builtin_name, is_cart_id, vendor
+    from moy_store_base import builtin_name, id_in_folder, vendor
 except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_store_base import builtin_name, is_cart_id, vendor
+    from runtime.moy_store_base import builtin_name, id_in_folder, vendor
 
 ALL = ("python", "lua", "wasm", "elf")
 
@@ -368,14 +368,14 @@ def absent_names(absent, rec):
     return out
 
 
-def manifest_cart(man, folder):
+def manifest_cart(man, folder, root=None):
     """What the checks read of a cart, from its manifest `man` (a dict) and
-    its `folder` name: id, title, runtime, type, permissions, required,
-    native and entries, as the store's cart dict carries them."""
+    its `folder` name in the store `root`: id (`id_in_folder`'s, the
+    shelf's), title, runtime, type, permissions, required, native and
+    entries, as the store's cart dict carries them."""
     ven = vendor(man)
     cid = man.get("id") if isinstance(man, dict) else None
-    if not is_cart_id(cid):
-        cid = folder[:-4] if folder.endswith(".moy") else folder
+    cid = id_in_folder(cid, (root.rstrip("/") + "/" if root else "") + folder)
     perms = ven.get("permissions")
     req = ven.get("required")
     chips = ven.get("native")
