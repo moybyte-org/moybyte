@@ -116,6 +116,18 @@ def test_one_holder_and_its_end():
     assert N.owner() == b
 
 
+def test_the_next_holder_rides_the_ring_the_last_one_had():
+    """The bus keeps its one ring source on the kernel's table across
+    holders: eight opens do not take its eight ring slots."""
+    rings = set()
+    for _ in range(9):
+        pid = L.spawn("t.usb")
+        _as(pid, moybyte.usb.devices)
+        rings.add(N.source())
+        moybyte.end(pid)
+    assert len(rings) == 1
+
+
 def test_usb_needs_the_permission_and_is_absent_without_a_host():
     pid = L.spawn("t.usb")
     devices.grants = lambda p: ("ble",) if p == pid else None

@@ -207,6 +207,19 @@ def test_a_ring_source_names_where_its_records_came_from():
     assert again.ring()[5] & 0xFF == src & 0xFF
 
 
+def test_a_ring_sources_handle_names_it_until_it_closes():
+    """moy_input_source_name answers for a ring source as for a latch: a
+    driver keeps its ring while its handle still names it, and opens another
+    only when it does not (native/p4/moy_usb/moy_usb.c and its siblings)."""
+    t = mi.InputTable()
+    g = t.ring_source("usb", mi.PROV_FIFO, 8)
+    buf = ctypes.create_string_buffer(32)
+    assert mi._lib().moy_input_source_name(t._t, g.h, buf, 32) == mi.OK
+    assert buf.value == b"usb"
+    g.close()
+    assert mi._lib().moy_input_source_name(t._t, g.h, buf, 32) != mi.OK
+
+
 def test_a_reader_of_one_source_reads_it_alone_and_nothing_once_it_closes():
     """A lease's edges reach its own process's wake (moy_input_reader_only)."""
     t = mi.InputTable()

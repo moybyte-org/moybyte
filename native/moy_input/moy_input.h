@@ -278,6 +278,8 @@ uint8_t moy_input_nbuttons(const moy_input_t *t);
 // The source named `name` (1 .. MOY_INPUT_NAME bytes), made on first ask with
 // `player`; asking again returns the same handle and leaves its player alone.
 int moy_input_source(moy_input_t *t, const char *name, uint8_t player, uint32_t *h);
+// The name of source `h`, a latch's or a ring's; MOY_INPUT_STALE once a ring
+// has closed. A driver keeps its ring while its handle still names it.
 int moy_input_source_name(const moy_input_t *t, uint32_t h, char *out, size_t n);
 int moy_input_source_player(const moy_input_t *t, uint32_t h, uint8_t *player);
 int moy_input_set_player(moy_input_t *t, uint32_t h, uint8_t player);

@@ -455,7 +455,7 @@ int moy_input_source(moy_input_t *t, const char *name, uint8_t player, uint32_t 
 }
 
 int moy_input_source_name(const moy_input_t *t, uint32_t h, char *out, size_t n) {
-    int s = slot_of(t, h);
+    int s = any_slot_of(t, h);
     if (s < 0) {
         return MOY_INPUT_STALE;
     }
