@@ -194,6 +194,71 @@ def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
     moy_evq.close(peer)
 
 
+ALARM_SVC = '''
+local ids = {}
+moybyte.on("set", function(_, secs, tag)
+    ids[tag] = moybyte.at(os.time() + secs, function() print("rang " .. tag) end)
+    print("set " .. tag)
+end)
+moybyte.on("unset", function(_, tag) moybyte.cancel(ids[tag]); print("unset " .. tag) end)
+'''
+
+
+@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+def test_a_kernel_alarm_keeps_its_wall_time_through_a_clock_step_and_a_cancel_frees_it(
+        tmp_path, fresh):
+    """The wall clock steps (the board's NTP answer, moy_wifi.c's
+    sntp_sync_time, tells the kernel): an alarm keeps its wall time, rung
+    soon after a step forward past most of its wait, held through a step
+    back. A Lua service's cancel cancels the kernel's alarm."""
+    _cart(tmp_path / "carts", "t.alarm", "service.lua", ALARM_SVC, ("autostart", "alarms"))
+    ws = build_ws(tmp_path)
+    since = L.next()
+    pid = S.boot(ws)[0]
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "t.alarm", "", False) == moy_evq.OK
+
+    def ask(name, *args):
+        assert moy_evq.send(peer, "t.alarm", name, json.dumps(list(args)))[0] == 1
+
+    def until(text, secs):
+        t0 = time.monotonic()
+        while text not in _texts(since, pid):
+            if time.monotonic() - t0 >= secs:
+                return False
+            fresh.poll()
+            moy_evq.timers_run()
+            _lua_step()
+            time.sleep(0.005)
+        return True
+
+    try:
+        ask("set", 600, "far")
+        assert until("set far", 5) and moy_evq.timers(pid) == 1
+        assert not until("rang far", 0.3)
+        moy_evq.clock(598_500)      # ten minutes on, but 1.5 to 2.5 s
+        t0 = time.monotonic()
+        assert until("rang far", 5), "the alarm keeps its wall time"
+        assert time.monotonic() - t0 > 0.5, "the step moved it by the step, not past it"
+        assert moy_evq.timers(pid) == 0
+        ask("set", 1, "near")
+        assert until("set near", 5)
+        moy_evq.clock(-60_000)      # the clock set back a minute
+        assert not until("rang near", 2.5), "its wall time is a minute further off"
+        moy_evq.clock(60_000)
+        assert until("rang near", 3)
+        ask("set", 600, "gone")
+        assert until("set gone", 5) and moy_evq.timers(pid) == 1
+        ask("unset", "gone")
+        assert until("unset gone", 5)
+        assert moy_evq.timers(pid) == 0, "the cancel gave the kernel's slot back"
+        moy_evq.clock(600_000)
+        assert not until("rang gone", 0.3)
+    finally:
+        moy_evq.close(peer)
+        fresh.stop(pid)
+
+
 def test_a_python_service_is_stopped_and_started_again(tmp_path, fresh, monkeypatch):
     _cart(tmp_path / "carts", "t.py", "service.py", PY_SVC)
     ws = build_ws(tmp_path)

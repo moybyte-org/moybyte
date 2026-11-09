@@ -607,7 +607,9 @@ console's, heard as the system's message `"moybyte.at"`
 (`native/moycore/moycore_svc.c`, ALARMS), and so is a compiled program's
 on every tier (a wasm app's `moybyte_at(t)`, a WASI program's and a C
 program's `moy_at`): the call answers the alarm's id, and the program reads
-`"moybyte.at"` from `"system"` with that id as its one argument.
+`"moybyte.at"` from `"system"` with that id as its one argument. An alarm
+keeps its wall time when the clock steps (an NTP answer, the first one
+too), on every tier.
 
 **Timers** need no permission. A Python and a Lua program pass a function
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`, §7); a compiled program

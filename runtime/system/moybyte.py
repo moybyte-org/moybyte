@@ -73,8 +73,8 @@ one, `time.ticks_us()`.
                      `now`, from 1970 on every tier), and light the screen
                      from the idle ladder's sleep. Under the `alarms`
                      permission (OSError(EPERM) without it; the shell is not
-                     gated). An alarm set while the clock is not synced is on
-                     the clock as it reads then
+                     gated). It keeps its wall time when the clock steps
+                     (NTP's answer, the first one too)
   cancel(wid)        a wake undone
   lease(name, **cfg) a resource the board leases, held by this process until
                      it ends: "gpio<n>" a machine.Pin, "uart<n>" a
@@ -178,7 +178,8 @@ the kernel's instead (native/moy_kernel/moy_evq.h, TIMERS: they go off with
 no VM, through an S3's VM stop), TIMERS_MAX at once, FULL past them: a
 compiled program's every, after and cancel are C rows (native/moy_app/
 moy_app.c, timer_row), and its alarm the message half `at_message`, which
-turns its wall time into the kernel's.
+turns its wall time into the kernel's, the kernel moving it with each step
+of the wall clock (moy_evq_clock).
 
 THE REGISTRY (`WAKES`) is what the cooperative scheduler drives: once a frame
 it asks `due(now_ms, out)` for the wakes due (allocation-free, into a

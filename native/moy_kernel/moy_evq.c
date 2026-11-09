@@ -47,7 +47,8 @@ typedef struct {
 
 typedef struct {
     uint32_t id;                // 0: a free row
-    uint64_t due;               // ms, the timers' clock (now_ms)
+    uint64_t due;               // ms, the timers' clock (now_ms); an alarm's
+                                // moves with the wall clock (moy_evq_clock)
     uint32_t every;             // 0: once
     bool alarm;                 // posts MOY_EVQ_AT, and wakes the screen
 } evq_timer_t;
@@ -772,6 +773,20 @@ int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id) {
 
 int moy_evq_alarm(uint32_t pid, uint32_t ms, uint32_t *id) {
     return timer_add(pid, ms, 0u, true, id);
+}
+
+void moy_evq_clock(int64_t step_ms) {
+    MOY_SYNC_LOCK(&s_lock);
+    for (uint32_t i = 0; step_ms != 0 && i < MOY_EVQ_PROCS; i++) {
+        for (uint32_t k = 0; s_q[i] != NULL && k < MOY_EVQ_TIMERS; k++) {
+            evq_timer_t *t = &s_q[i]->tm[k];
+            if (t->id != 0u && t->alarm) {
+                int64_t due = (int64_t)t->due - step_ms;
+                t->due = due > 0 ? (uint64_t)due : 0u;
+            }
+        }
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
 }
 
 uint32_t moy_evq_woke(void) {

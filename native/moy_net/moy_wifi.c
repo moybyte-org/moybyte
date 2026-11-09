@@ -173,11 +173,22 @@ int moy_clock_server(const char *name) {
     return 0;
 }
 
+// The kernel's alarms keep their wall time across a step (moy_evq.h, TIMERS),
+// where the image takes moy_kernel.
+void moy_evq_clock(int64_t step_ms) __attribute__((weak));
+
 // lwIP's SNTP client sets the clock through this (ESP-IDF's is weak): the
-// answer, Unix time, on the board's epoch, and the mark.
+// answer, Unix time, on the board's epoch, and the mark; the step told to the
+// kernel's alarms.
 void sntp_sync_time(struct timeval *tv) {
     struct timeval t = {tv->tv_sec - CLOCK_EPOCH, tv->tv_usec};
+    struct timeval was;
+    gettimeofday(&was, NULL);
     settimeofday(&t, NULL);
+    if (moy_evq_clock != NULL) {
+        moy_evq_clock(((int64_t)t.tv_sec - was.tv_sec) * 1000
+                      + ((int64_t)t.tv_usec - was.tv_usec) / 1000);
+    }
     sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
     s_clk.at = (int64_t)tv->tv_sec;
     s_clk.mark = CLOCK_MARK;

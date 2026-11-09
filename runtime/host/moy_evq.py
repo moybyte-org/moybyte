@@ -82,6 +82,7 @@ _SIGS = (
     ("moy_evq_timer_cancel", [_U32, _U32], ctypes.c_bool),
     ("moy_evq_alarm", [_U32, _U32, ctypes.POINTER(_U32)], _I),
     ("moy_evq_woke", [], _U32),
+    ("moy_evq_clock", [ctypes.c_int64], None),
     ("moy_evq_timers", [_U32], _U32),
     ("moy_evq_timers_run", [], _U32),
     ("moy_vmq_vm_up", [], ctypes.c_bool),
@@ -237,6 +238,12 @@ def alarm(pid, ms):
     t = _U32(0)
     rc = _lib().moy_evq_alarm(pid, max(0, int(ms)), ctypes.byref(t))
     return rc, t.value
+
+
+def clock(step_ms):
+    """The wall clock stepped by `step_ms` (moy_evq.h, TIMERS): the alarms
+    keep their wall time. The board's NTP answer tells it; the host's tests do."""
+    _lib().moy_evq_clock(int(step_ms))
 
 
 def woke():
