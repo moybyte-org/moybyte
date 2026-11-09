@@ -1,3 +1,33 @@
+# Map (grep -n a name to jump there):
+#   open                     a handle by name and config: a lease or a device API
+#   close                    a handle given back; sweep closes a process's rest
+#   read                     what waits on a handle
+#   write                    bytes to a handle
+#   xfer                     a write, then a read, as one transfer
+#   set                      a handle configured again
+#   get                      one number from a handle
+#   sweep                    a process's end closes every handle it held
+#   words                    a cfg string of `key=value` words as a dict
+#   _Handle                  the base every handle's verbs default from
+#   _Lease                   the base of a lease row's handle (leases.py)
+#   _Gpio                    gpio<n>: modes, levels and edge events
+#   _Uart                    uart<n>
+#   _Spi                     spi<n>: full-duplex transfers
+#   _Pwm                     pwm<n>
+#   _Adc                     adc<n>
+#   _I2c                     i2c: register reads as a write then a read
+#   _lease                   the lease row a name opens, taken for a process
+#   _Http                    http: a fetch's body, kept or windowed
+#   _Lora                    lora: raw packets and LoRaWAN
+#   _Mic                     mic: the microphone's samples
+#   _Ring                    the base of the event-ring devices
+#   _Ble                     ble: GATT by handle
+#   _Usb                     usb: the USB host
+#   _Midi                    midi: the MIDI ports
+#   _Camera                  camera: a picture per read
+#   _media_roots             the folders a process's media handle plays from
+#   _Media                   media: the media service's stream by handle
+#   _Pins                    pins: the console's pins switched by handle
 """Leases and device APIs by handle: what a compiled program (a wasm app, a
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
