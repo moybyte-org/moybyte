@@ -54,11 +54,16 @@ _ROWS = ("damage.all", "damage.again",
          "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", "ui.held",
          "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last",
          "ui.held_all",
-         # the kernel's timers: native/moy_kernel/moy_evq.h's, counted by nothing here
-         "moybyte.every", "moybyte.after", "moybyte.cancel",
-         # the crypto rows: native/moy_net/moy_crypto.h's, counted by nothing here
+         # the kernel's messages, timers and log (native/moy_kernel/moy_evq.h,
+         # moy_log.h), counted by nothing here
+         "moybyte.send", "moybyte.every", "moybyte.after", "moybyte.cancel",
+         "moybyte.log", "moybyte.recv",
+         # the crypto rows: native/moy_net/moy_crypto.h's, and the device
+         # handles (native/moy_kernel/moy_dev.h), counted by nothing here
          "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256",
          "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519",
+         "moybyte.dev_open", "moybyte.dev_close", "moybyte.dev_read", "moybyte.dev_write",
+         "moybyte.dev_xfer", "moybyte.dev_set", "moybyte.dev_get",
          "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",

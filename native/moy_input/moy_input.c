@@ -115,6 +115,7 @@ struct moy_input {
     // the event rings and their readers, written under the lock
     moy_input_ring_t *ring[MOY_INPUT_RINGS];   // the latch sources', then the ring sources'
     uint8_t ev_used;                        // a bit a reader
+    uint8_t ev_kept;                        // ... a kernel reader, which a VM stop keeps
     uint32_t ev_kinds[MOY_EV_READERS];
     uint8_t ev_only[MOY_EV_READERS];        // the one source a reader reads, slot + 1; 0: every
     uint32_t ev_cur[MOY_EV_READERS][MOY_INPUT_RINGS];    // the seq each reads next
@@ -954,6 +955,7 @@ int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r) {
     for (uint8_t i = 0; i < MOY_EV_READERS; i++) {
         if (!(t->ev_used & (1u << i))) {
             t->ev_used |= (uint8_t)(1u << i);
+            t->ev_kept &= (uint8_t)~(1u << i);
             t->ev_kinds[i] = kinds & MOY_EV_ALL;
             t->ev_only[i] = 0;
             for (uint8_t s = 0; s < MOY_INPUT_RINGS; s++) {
@@ -998,8 +1000,18 @@ void moy_input_vm_stop(void) {
         return;
     }
     LOCK(t);
-    t->ev_used = 0;
+    t->ev_used &= t->ev_kept;
     UNLOCK(t);
+}
+
+int moy_input_reader_kept(moy_input_t *t, uint32_t kinds, int *r) {
+    int rc = moy_input_reader(t, kinds, r);
+    if (rc == MOY_INPUT_OK) {
+        LOCK(t);
+        t->ev_kept |= (uint8_t)(1u << *r);
+        UNLOCK(t);
+    }
+    return rc;
 }
 
 int moy_input_reader_free(moy_input_t *t, int r) {
@@ -1008,6 +1020,7 @@ int moy_input_reader_free(moy_input_t *t, int r) {
     }
     LOCK(t);
     t->ev_used &= (uint8_t)~(1u << r);
+    t->ev_kept &= (uint8_t)~(1u << r);
     UNLOCK(t);
     return MOY_INPUT_OK;
 }

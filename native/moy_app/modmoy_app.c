@@ -290,6 +290,24 @@ static mp_obj_t app_grant_id(mp_obj_t self, mp_obj_t h) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(app_grant_id_obj, app_grant_id);
 
+// grant_devs(h, perms): grant `h` holds the device permissions among `perms`
+// (an iterable of names), what a compiled program's device handles answer
+// under (moy_app_grant_devs).
+static mp_obj_t app_grant_devs(mp_obj_t self, mp_obj_t h, mp_obj_t perms) {
+    uint32_t mask = 0;
+    mp_obj_t it = mp_getiter(perms, NULL), x;
+    while ((x = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+        if (mp_obj_is_str(x)) {
+            size_t n;
+            const char *p = mp_obj_str_get_data(x, &n);
+            mask |= moy_app_dev_bit(p, n);
+        }
+    }
+    check(moy_app_grant_devs(app_of(self), grant_arg(h), mask));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(app_grant_devs_obj, app_grant_devs);
+
 static mp_obj_t app_count(mp_obj_t self) {
     return MP_OBJ_NEW_SMALL_INT(moy_app_grants(app_of(self)));
 }
@@ -568,6 +586,7 @@ static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_regrant), MP_ROM_PTR(&app_regrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&app_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant_id), MP_ROM_PTR(&app_grant_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_grant_devs), MP_ROM_PTR(&app_grant_devs_obj) },
     { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&app_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_damage_take), MP_ROM_PTR(&app_damage_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_damage_drop), MP_ROM_PTR(&app_damage_drop_obj) },

@@ -99,6 +99,7 @@ typedef struct {
     char id[MOY_APP_ID_MAX + 1];
     char ns[MOY_APP_ID_MAX + 1];
     moy_app_surface_t surf;     // written by the shell, zero until then
+    uint32_t devs;              // the device permissions it holds (moy_dev.h's MOY_DEV_P_*)
 } moy_grant_t;
 
 // A console's own state over `prefs` (NULL: prefs answer ABSENT), or NULL.
@@ -485,6 +486,16 @@ const char *moy_app_table_name(uint32_t row);
 // session thread reaches it through the hop (moy_wasm_on_vm).
 int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
                      size_t n, uint8_t *ans, size_t cap);
+// The same row run where it is called, on the caller's own task (a row of
+// how "here", native/os_calls.json): a row that only the VM's task can serve
+// answers NEEDS_VM, and the caller hops it (moy_app_role on the VM's task).
+int32_t moy_app_role_here(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                          size_t n, uint8_t *ans, size_t cap);
+// Grant `h`'s device permissions (moy_dev.h's MOY_DEV_P_* bits, which
+// moy_app_dev_bit gives a permission's): what its device handles answer
+// under. A grant is made holding none. OK, STALE.
+int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask);
+uint32_t moy_app_dev_bit(const char *perm, size_t n);
 typedef int32_t (*moy_app_door_fn)(uint32_t g, uint32_t row, const uint8_t *arg,
                                    size_t n, uint8_t *ans, size_t cap);
 // The door the shell rows cross: one a process, NULL for none.

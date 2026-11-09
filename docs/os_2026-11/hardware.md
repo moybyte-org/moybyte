@@ -128,10 +128,15 @@ permission's `pin_write`/`pin_read` take their pins through the same table
 
 **The compiled tiers' leases** (a compiled app, a WASI program, a native
 module) are the same objects held by HANDLE: the `moybyte.dev_*` rows
-(`native/os_calls.json`, ELF ordinals 103 to 109), served by the door's
-Python half as the calling process (`runtime/system/dev_handles.py`, which
-holds every name, key and answer, over `leases.LEASES.take` with the
-process's pid). `dev_open(name, cfg)` answers a handle, `cfg` words
+(`native/os_calls.json`, ELF ordinals 103 to 109, how "here"). The kinds
+whose driver has a C face safe on any task are the kernel's handle table's
+(`native/moy_kernel/moy_dev.h`: `gpio<n>` and `pins`), served on the calling
+program's own task under its grant's device permissions, so they answer with
+no VM and through an S3's VM stop; a pin's edges are read through an input
+reader the stop keeps. Every other kind is the door's Python half's, hopped
+to the VM's task and run as the calling process
+(`runtime/system/dev_handles.py`, which holds those names, keys and answers,
+over `leases.LEASES.take` with the process's pid). `dev_open(name, cfg)` answers a handle, `cfg` words
 `key=value`; `dev_read`, `dev_write`, `dev_xfer`, `dev_set` and `dev_get`
 act on it and `dev_close` gives it back. One table holds every tier's, so
 one holder a pin or a unit whatever the tiers: a Python object's resource

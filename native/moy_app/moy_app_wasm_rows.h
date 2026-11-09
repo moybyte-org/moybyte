@@ -311,38 +311,38 @@ static int32_t w_moybyte_x25519(void *e, const uint8_t *secret, uint32_t secret_
 static int32_t w_moybyte_dev_open(void *e, const uint8_t *name, uint32_t name_n,
                                   const uint8_t *cfg, uint32_t cfg_n) {
     span_t f[2] = { { name, name_n }, { cfg, cfg_n } };
-    return run(e, HOP, MOY_T_MOYBYTE_DEV_OPEN, f, 2, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_DEV_OPEN, f, 2, NULL, 0);
 }
 static int32_t w_moybyte_dev_close(void *e, int32_t h) {
     uint8_t q_h[4];
     span_t f[1] = { NUM(q_h, h) };
-    return run(e, HOP, MOY_T_MOYBYTE_DEV_CLOSE, f, 1, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_DEV_CLOSE, f, 1, NULL, 0);
 }
 static int32_t w_moybyte_dev_read(void *e, int32_t h, uint8_t *data, uint32_t data_cap) {
     uint8_t q_h[4], q_data[4];
     span_t f[2] = { NUM(q_h, h), NUM(q_data, data_cap) };
-    return run(e, HOP, MOY_T_MOYBYTE_DEV_READ, f, 2, data, data_cap);
+    return run(e, HERE, MOY_T_MOYBYTE_DEV_READ, f, 2, data, data_cap);
 }
 static int32_t w_moybyte_dev_write(void *e, int32_t h, const uint8_t *data, uint32_t data_n) {
     uint8_t q_h[4];
     span_t f[2] = { NUM(q_h, h), { data, data_n } };
-    return run(e, HOP, MOY_T_MOYBYTE_DEV_WRITE, f, 2, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_DEV_WRITE, f, 2, NULL, 0);
 }
 static int32_t w_moybyte_dev_xfer(void *e, int32_t h, const uint8_t *data, uint32_t data_n,
                                   uint8_t *into, uint32_t into_cap) {
     uint8_t q_h[4], q_into[4];
     span_t f[3] = { NUM(q_h, h), { data, data_n }, NUM(q_into, into_cap) };
-    return run(e, HOP, MOY_T_MOYBYTE_DEV_XFER, f, 3, into, into_cap);
+    return run(e, HERE, MOY_T_MOYBYTE_DEV_XFER, f, 3, into, into_cap);
 }
 static int32_t w_moybyte_dev_set(void *e, int32_t h, const uint8_t *cfg, uint32_t cfg_n) {
     uint8_t q_h[4];
     span_t f[2] = { NUM(q_h, h), { cfg, cfg_n } };
-    return run(e, HOP, MOY_T_MOYBYTE_DEV_SET, f, 2, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_DEV_SET, f, 2, NULL, 0);
 }
 static int32_t w_moybyte_dev_get(void *e, int32_t h, const uint8_t *what, uint32_t what_n) {
     uint8_t q_h[4];
     span_t f[2] = { NUM(q_h, h), { what, what_n } };
-    return run(e, HOP, MOY_T_MOYBYTE_DEV_GET, f, 2, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_DEV_GET, f, 2, NULL, 0);
 }
 static int32_t w_moybyte_ed25519_public(void *e, const uint8_t *secret, uint32_t secret_n,
                                         uint8_t *pub, uint32_t pub_cap) {

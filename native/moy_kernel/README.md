@@ -8,7 +8,9 @@ ladder (`moy_idle.h`), the PERF line (`moy_perf.h`), the dev channel
 (`moy_devch.h`), the OS log (`moy_log.h`, the ring every writer shares and
 the dev channel's `log` word reads), the scheduler's callback guard
 (`modmoy_guard.c`, the VM abort), the lease table (`moy_lease.h`, the
-resources a process holds raw), the process table (`moy_proc.h`, a row per
+resources a process holds raw, safe from any task under its one lock), a
+compiled program's device handles over it (`moy_dev.h`, served on the
+caller's own task), the process table (`moy_proc.h`, a row per
 Lua or compiled run the Player launches), the service model's three pieces
 (`moy_evq.h`, every process's event queue and the one wait; `moy_super.h`,
 the one supervisor of background callbacks; `moy_vmq.h`, the one queue of

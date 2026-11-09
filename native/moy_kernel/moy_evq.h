@@ -127,7 +127,9 @@ enum {
 // replaced): `app` its app id, `receives` the names its manifest lists, one
 // per line (NULL for none). OK, FULL, NOMEM.
 int moy_evq_open(uint32_t pid, const char *app, const char *receives, uint32_t flags);
-// Its queue closed: its events freed, its waiter woken. OK, STALE.
+// Its queue closed: its events freed, its waiter woken, and the process's
+// device handles closed (moy_dev_sweep, moy_dev.h): a queue's close is its
+// process's end. OK, STALE.
 int moy_evq_close(uint32_t pid);
 // Whether `pid` has a queue.
 bool moy_evq_has(uint32_t pid);

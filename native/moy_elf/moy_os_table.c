@@ -285,14 +285,14 @@ int32_t moy_os_moy_dev_open(const char *name, const char *cfg) {
         { name, 0u, 0, MOY_OS_ARG_STR },
         { cfg, 0u, 0, MOY_OS_ARG_OPT },
     };
-    return moy_os_call(186u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_open
+    return moy_os_call(186u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_open
 }
 
 int32_t moy_os_moy_dev_close(int32_t h) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, h, MOY_OS_ARG_INT },
     };
-    return moy_os_call(187u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.dev_close
+    return moy_os_call(187u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.dev_close
 }
 
 int32_t moy_os_moy_dev_read(int32_t h, void *data, size_t data_cap) {
@@ -300,7 +300,7 @@ int32_t moy_os_moy_dev_read(int32_t h, void *data, size_t data_cap) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { NULL, 0u, (int32_t)(data_cap < 0x7fffffffu ? data_cap : 0x7fffffffu), MOY_OS_ARG_INT },
     };
-    return moy_os_call(188u, MOY_OS_HOP, a, 2, data, data_cap);   // moybyte.dev_read
+    return moy_os_call(188u, MOY_OS_HERE, a, 2, data, data_cap);   // moybyte.dev_read
 }
 
 int32_t moy_os_moy_dev_write(int32_t h, const void *data, size_t data_len) {
@@ -308,7 +308,7 @@ int32_t moy_os_moy_dev_write(int32_t h, const void *data, size_t data_len) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { data, data_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(189u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_write
+    return moy_os_call(189u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_write
 }
 
 int32_t moy_os_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap) {
@@ -317,7 +317,7 @@ int32_t moy_os_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *
         { data, data_len, 0, MOY_OS_ARG_BYTES },
         { NULL, 0u, (int32_t)(into_cap < 0x7fffffffu ? into_cap : 0x7fffffffu), MOY_OS_ARG_INT },
     };
-    return moy_os_call(190u, MOY_OS_HOP, a, 3, into, into_cap);   // moybyte.dev_xfer
+    return moy_os_call(190u, MOY_OS_HERE, a, 3, into, into_cap);   // moybyte.dev_xfer
 }
 
 int32_t moy_os_moy_dev_set(int32_t h, const char *cfg) {
@@ -325,7 +325,7 @@ int32_t moy_os_moy_dev_set(int32_t h, const char *cfg) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { cfg, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(191u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_set
+    return moy_os_call(191u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_set
 }
 
 int32_t moy_os_moy_dev_get(int32_t h, const char *what) {
@@ -333,7 +333,7 @@ int32_t moy_os_moy_dev_get(int32_t h, const char *what) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { what, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(192u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_get
+    return moy_os_call(192u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_get
 }
 
 int32_t moy_os_moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap) {

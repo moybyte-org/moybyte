@@ -67,8 +67,16 @@
 // stages no moy_input, the Zero), on the host a stand-in whose edges
 // moy_lease_sim_level makes. The lease keeps it, so the drop closes it.
 //
-// Every call is the VM's task's; nothing here allocates but the offers, at the
-// first offer, and the table, at the first take (PSRAM on a board).
+// THE LOCK. A call is safe from any task but an ISR: the VM's, a compiled
+// program's own (its device handles, native/moy_kernel/moy_dev.h) and the
+// webhost's. The table's calls hold one recursive mutex for the whole call,
+// a drop's driver work included. Nothing here allocates but the offers, at
+// the first offer, and the table, at the first take (PSRAM on a board).
+//
+// THE PINS. moy_lease_pin_set drives a pin a lease holds as a GPIO: its mode
+// (MOY_PIN_MODE_*), its pull (MOY_PIN_PULL_*) and its level, each -1 to keep
+// it; moy_lease_pin_level reads it. On a board the GPIO matrix's, on the
+// host the stand-in's record (as runtime/host/lease_sim.py's Pin makes it).
 
 #ifndef MOY_LEASE_H
 #define MOY_LEASE_H
@@ -203,6 +211,16 @@ void moy_lease_wifi_reset(void);
 // Pin `pin` of lease `h` as an edge source of `depth` records; a `loop` pin is
 // an output too (moy_edge.h). *src is the ring source's handle.
 int moy_lease_edge(uint32_t h, int pin, uint32_t depth, bool loop, uint32_t *src);
+enum { MOY_PIN_MODE_IN = 0, MOY_PIN_MODE_OUT = 1, MOY_PIN_MODE_OD = 2 };
+enum { MOY_PIN_PULL_NONE = 0, MOY_PIN_PULL_UP = 1, MOY_PIN_PULL_DOWN = 2 };
+// BAD for a pin the board has no GPIO of (an output mode: no output).
+int moy_lease_pin_set(int pin, int mode, int pull, int level);
+int moy_lease_pin_level(int pin);
+// The table's lock, taken by a caller whose own state is over the leases
+// (moy_dev.h's handles) for the whole of its call; recursive, so the table's
+// calls inside it run as they do outside.
+void moy_lease_lock(void);
+void moy_lease_unlock(void);
 int moy_lease_edge_close(uint32_t h, int pin);
 
 // The pin as it reads back now: MOY_PIN_* bits.

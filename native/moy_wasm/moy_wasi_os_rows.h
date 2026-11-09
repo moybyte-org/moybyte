@@ -296,39 +296,39 @@ static int32_t w_os_x25519(wasm_exec_env_t e, const uint8_t *secret, uint32_t se
 static int32_t w_os_dev_open(wasm_exec_env_t e, const char *name, uint32_t name_n,
                              const char *cfg, uint32_t cfg_n) {
     const os_arg_t a[2] = { OS_O(name, name_n), OS_O(cfg, cfg_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_OPEN, OS_HOP, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_OPEN, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_dev_close(wasm_exec_env_t e, int32_t h) {
     const os_arg_t a[1] = { OS_I(h) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_CLOSE, OS_HOP, a, 1, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_CLOSE, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_dev_read(wasm_exec_env_t e, int32_t h, uint8_t *data, uint32_t data_cap) {
     const os_arg_t a[2] = { OS_I(h), OS_CAP(data_cap) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_READ, OS_HOP, a, 2, data, data_cap);
+    return os_role(e, MOY_T_MOYBYTE_DEV_READ, OS_HERE, a, 2, data, data_cap);
 }
 
 static int32_t w_os_dev_write(wasm_exec_env_t e, int32_t h, const uint8_t *data,
                               uint32_t data_n) {
     const os_arg_t a[2] = { OS_I(h), OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_WRITE, OS_HOP, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_WRITE, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_dev_xfer(wasm_exec_env_t e, int32_t h, const uint8_t *data, uint32_t data_n,
                              uint8_t *into, uint32_t into_cap) {
     const os_arg_t a[3] = { OS_I(h), OS_O((const char *)data, data_n), OS_CAP(into_cap) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_XFER, OS_HOP, a, 3, into, into_cap);
+    return os_role(e, MOY_T_MOYBYTE_DEV_XFER, OS_HERE, a, 3, into, into_cap);
 }
 
 static int32_t w_os_dev_set(wasm_exec_env_t e, int32_t h, const char *cfg, uint32_t cfg_n) {
     const os_arg_t a[2] = { OS_I(h), OS_O(cfg, cfg_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_SET, OS_HOP, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_SET, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_dev_get(wasm_exec_env_t e, int32_t h, const char *what, uint32_t what_n) {
     const os_arg_t a[2] = { OS_I(h), OS_O(what, what_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_GET, OS_HOP, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_GET, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_ed25519_public(wasm_exec_env_t e, const uint8_t *secret, uint32_t secret_n,

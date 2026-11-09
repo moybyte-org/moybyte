@@ -164,7 +164,7 @@ static int32_t run(void *e, int how, int row, const span_t *f, int nf, uint8_t *
     }
     int32_t r = -MOY_APP_NEEDS_VM;
     if (how == HERE) {
-        r = moy_app_role(a, g, (uint32_t)row, buf, n, ans, cap);
+        r = moy_app_role_here(a, g, (uint32_t)row, buf, n, ans, cap);
     }
     if (how == HERE && r != -MOY_APP_NEEDS_VM) {
         // answered on the caller's task

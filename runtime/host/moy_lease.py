@@ -19,7 +19,8 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
-PART = native_build.Part("lease", ("moy_lease.h", "moy_lease.c"), (_KERNEL,))
+PART = native_build.Part("lease", ("moy_lease.h", "moy_lease.c", "moy_dev.h", "moy_dev.c"),
+                         (_KERNEL,))
 
 GPIO, UART, SPI = 1, 2, 3
 WIFI = 8

@@ -217,6 +217,12 @@ def wasm_sig(r):
     return "(%s)i" % "".join("i" if t == "int" else "*~" for _n, t in params(r))
 
 
+def cap_packed(r):
+    """Whether a row's answer capacity crosses as a number field: a row the
+    door's Python half may serve (not a C row's alone)."""
+    return r.get("server") != "c" or bool(r.get("door"))
+
+
 def wasi_rows(src):
     """The rows a WASI program imports from moybyte.os."""
     return [r for r in src["rows"] if r.get("wasi")]
@@ -585,8 +591,10 @@ def check(src):
             if [n for n, t in params(r) if t == "cart"]:
                 raise TableError("%s: a cart has no C form" % name)
         if r.get("door"):
-            if r.get("server") == "c":
-                raise TableError("%s: the door's Python half serves no C row" % name)
+            if r.get("server") == "c" and r.get("how") != "here":
+                raise TableError("%s: the door's Python half serves a C row only where it "
+                                 "runs where it is called and passes what C does not own"
+                                 % name)
             if "in" not in r or len(outs) > 1 or (outs and params(r)[-1][1] != "out"):
                 raise TableError("%s: a door row's fields are its in, one answer last" % name)
         lua, py = r.get("lua") or [], list(r.get("py") or [])
@@ -757,7 +765,7 @@ def _call_body(r):
     has proven lies in the module's memory, so the number only tells the
     door what fits (an INT32_MAX ceiling keeps it a positive int32)."""
     src = r["src"]
-    cap_field = src.get("server") != "c"
+    cap_field = cap_packed(src)
     ins = [(n, t) for n, t in params(src) if t != "out" or cap_field]
     out = [n for n, t in params(src) if t == "out"]
     o = ["%s {" % kernel_proto(r)]
@@ -965,7 +973,7 @@ def gen_wasi_h(src):
                 elif typ == "out":
                     ps += ["uint8_t *%s" % name, "uint32_t %s_cap" % name]
                     out = (name, name + "_cap")
-                    if r.get("server") != "c":      # a door served in Python: _call_body's
+                    if cap_packed(r):               # a door served in Python: _call_body's
                         packs.append("OS_CAP(%s_cap)" % name)
                 else:
                     ps += ["const %s *%s" % ("uint8_t" if typ == "bytes" else "char", name),
@@ -1221,7 +1229,7 @@ def gen_wasm_h(src):
                 fields.append("NUM(q_%s, %s)" % (n, n))
             elif t == "out":
                 cps += ["uint8_t *%s" % n, "uint32_t %s_cap" % n]
-                if r["server"] != "c":
+                if cap_packed(r):
                     # the door's Python half is handed the answer's capacity
                     nums.append("q_" + n)
                     fields.append("NUM(q_%s, %s_cap)" % (n, n))

@@ -9,7 +9,9 @@
 // at once and answers "timed" with the timer's message (the system's
 // "moybyte.timer", its id) as it hears it, and a "rearm" sets one 10 ms off
 // that its timer's message sets again each time it answers "timed"; a "quit"
-// returns 7; a "spin" runs
+// returns 7; a "pin" opens gpio4 as an output driven high, reads it back,
+// drives it low, reads it again and answers "pinned" with the two levels
+// (or the failing answer and its errno), closing it; a "spin" runs
 // on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. A thread it makes sleeps until the process's end
 // sweeps it.
@@ -59,7 +61,8 @@ int main(int argc, char **argv) {
     (void)argc;
     pthread_t t;
     say("start", 0);
-    static const char *const hears[] = { "ping", "note", "quit", "spin", "wake", "rearm" };
+    static const char *const hears[] = { "ping", "note", "quit", "spin", "wake", "rearm",
+                                         "pin" };
     int rearm = 0;
     static char waker[MOY_EVQ_APP];
     for (unsigned i = 0; i < sizeof hears / sizeof hears[0]; i++) {
@@ -117,6 +120,21 @@ int main(int argc, char **argv) {
             if (rearm) {
                 rearm = moy_after(10) > 0;
             }
+        } else if (strcmp(m.ev.name, "pin") == 0) {
+            char b[48];
+            int h = (int)moy_dev_open("gpio4", "mode=out value=1");
+            int hi = h > 0 ? (int)moy_dev_get(h, "value") : -1;
+            int lo = h > 0 && moy_dev_set(h, "value=0") == 0 ? (int)moy_dev_get(h, "value") : -1;
+            int c = h > 0 ? (int)moy_dev_close(h) : -1;
+            if (h > 0 && hi >= 0 && lo >= 0 && c == 0) {
+                memcpy(b, "[1,1,0]", 8);
+                b[3] = (char)('0' + hi);
+                b[5] = (char)('0' + lo);
+            } else {
+                memcpy(b, "[0,0,0]", 8);
+                b[3] = (char)('0' + (errno % 10));
+            }
+            moy_send(m.ev.app, "pinned", b);
         } else if (strcmp(m.ev.name, "quit") == 0) {
             return 7;
         } else if (strcmp(m.ev.name, "spin") == 0) {

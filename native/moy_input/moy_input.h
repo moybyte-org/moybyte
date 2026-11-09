@@ -270,8 +270,10 @@ void moy_input_free(moy_input_t *t);
 // The drivers' table: all fifteen buttons, made on first call, never freed.
 moy_input_t *moy_input_kernel(void);
 // The VM's end (a stop, a soft reset): every reader of the kernel's table
-// freed. Only the VM's processes take one (modmoy_input's reader), and the
-// table outlives the VM, so a reader the ending VM held would stay taken.
+// the VM's processes took freed (modmoy_input's reader), since the table
+// outlives the VM and a reader the ending VM held would stay taken. A
+// kernel reader (moy_input_reader_kept: a compiled program's device handle,
+// native/moy_kernel/moy_dev.h) runs on through the stop.
 void moy_input_vm_stop(void);
 uint8_t moy_input_nbuttons(const moy_input_t *t);
 
@@ -363,6 +365,9 @@ bool moy_input_radio_up(const moy_input_t *t, uint8_t kind);
 // when MOY_EV_READERS are taken.
 int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r);
 int moy_input_reader_free(moy_input_t *t, int r);
+// A reader as moy_input_reader makes one, kept through a VM stop: the
+// kernel's own, freed by its taker.
+int moy_input_reader_kept(moy_input_t *t, uint32_t kinds, int *r);
 // Reader r reads source `h` alone (a lease's ring, routed to its process), or
 // every source again for h 0. Once that source closes the reader reads nothing.
 int moy_input_reader_only(moy_input_t *t, int r, uint32_t h);

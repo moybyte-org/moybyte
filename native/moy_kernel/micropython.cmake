@@ -5,7 +5,8 @@
 # the module `moy_log`), and the scheduler's callback guard (modmoy_guard.c,
 # the module `moy_guard`, built where the board's mpconfigboard.h turns on
 # MICROPY_ENABLE_VM_ABORT), and the lease table (moy_lease.c, the module
-# `moy_lease`, offering the board's MOY_LEASE_ROWS), and the process table
+# `moy_lease`, offering the board's MOY_LEASE_ROWS) with a compiled program's
+# device handles over it (moy_dev.c), and the process table
 # (moy_proc.c, the Player's rows), and the service model's event queues,
 # supervisor and VM call queue (moy_evq.c, moy_super.c, moy_vmq.c, the module
 # `moy_evq`). A board TAKES it in
@@ -36,6 +37,7 @@ target_sources(usermod_moy_kernel INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_guard.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_loop_board.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_lease.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_dev.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_lease.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_proc.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_evq.c

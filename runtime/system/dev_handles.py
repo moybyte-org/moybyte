@@ -32,8 +32,11 @@
 """Leases and device APIs by handle: what a compiled program (a wasm app, a
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
-`moybyte.dev_*`, served by the door's Python half as the calling process
-(runtime/shell/shell_servers.py, ConsoleCalls):
+`moybyte.dev_*`. The kernel's handle table serves the kinds it owns on the
+calling program's own task (native/moy_kernel/moy_dev.h: gpio<n> and pins,
+whose classes here answer only in an image without it); every other kind is
+served here, by the door's Python half as the calling process
+(runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
   open(name, cfg) -> h      a lease of row `name` (leases.py's names:
                             "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",

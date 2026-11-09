@@ -443,6 +443,94 @@ def test_an_elf_and_a_wasi_service_message_each_other_and_log_through_a_vm_stop(
     moy_evq.close(peer)
 
 
+def _two_ws(tmp_path, items):
+    """A console over compiled service carts: (built, folder, what to set in
+    its manifest's "moybyte") each."""
+    from runtime.host_app import build_workstation
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    for built, name, sets in items:
+        shutil.copytree(built, str(carts / name))
+        man_path = carts / name / "manifest.json"
+        man = json.loads(man_path.read_text())
+        man["moybyte"].update(sets)
+        man_path.write_text(json.dumps(man))
+    ws = build_workstation(str(carts))
+    if not all(t in ws.runtimes for t in ("elf", "wasm")):
+        pytest.skip("no ELF or wasm tier on this host")
+    return ws
+
+
+@pytest.fixture
+def pins():
+    """The Waveshare P4's lease rows offered by the host's stand-in."""
+    import sys
+    from runtime import leases
+    from runtime import moy_lease as N
+    from runtime.host import lease_sim
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import board_config
+    leases.stand_in(lease_sim, board_config.lease_spec(
+        os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
+    lease_sim.reset()
+    yield N
+    for p in list(leases.LEASES.held):
+        leases.LEASES.sweep(p)
+    N.reset()
+    leases.stand_in(None, None)
+
+
+def test_compiled_services_hold_device_handles_through_a_vm_stop(
+        tmp_path, elf_built, wasi_built, fresh, monkeypatch, pins):
+    """The device handles the kernel owns (native/moy_kernel/moy_dev.h) are
+    served on each program's own task: with the VM down, an ELF service
+    drives a gpio handle's pin and reads it back, and a WASI service reads
+    the edges a pin made during the stop from its handle, whose reader the
+    stop kept; each lease the kernel took is no VM's, and a service's end
+    closes its handles."""
+    from runtime import moy_input
+    N = pins
+    perms = ["full_access", "lease:gpio"]
+    ws = _two_ws(tmp_path, ((elf_built, "elf_svc.moy", {"permissions": perms}),
+                            (wasi_built, "wasi_svc.moy", {"permissions": ["lease:gpio"]})))
+    s = fresh
+    since = L.next()
+    elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
+    wasi = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+    peer_e, peer_w = L.spawn("peer"), L.spawn("peer")
+    assert moy_evq.open(peer_e, "elf.svc", "", False) == moy_evq.OK
+    assert moy_evq.listen(peer_e, "pinned", True) == moy_evq.OK
+    assert moy_evq.open(peer_w, "wasi.svc", "", False) == moy_evq.OK
+    assert _polled(s, lambda: all(any(t in ("listening", "started") for t in _texts(since, p))
+                                  for p in (elf, wasi)))
+    assert moy_evq.send(peer_w, "wasi.svc", "wake", '["edges"]')[0] == 1
+    assert _polled(s, lambda: "edges 0 errno 0" in _texts(since, wasi)), _texts(since, wasi)
+    assert N.held(N.VM) == 0, "the kernel's leases hold no VM stop off"
+    rec, door = _stop(ws, s)
+    moy_input._lib().moy_input_vm_stop()
+    N.sim_level(5, 1)
+    N.sim_level(5, 0)
+    assert moy_evq.send(peer_w, "wasi.svc", "wake", '["read"]')[0] == 1
+    assert moy_evq.send(peer_e, "elf.svc", "pin", "[]")[0] == 1
+    got = []
+    t0 = time.monotonic()
+    while not (got and "read" in "|".join(_texts(since, wasi))):
+        assert time.monotonic() - t0 < 5, (_texts(since, wasi), got)
+        _during(10)
+        m = moy_evq.take(peer_e)
+        if m is not None:
+            got.append(m)
+    assert got[0][2:] == ("pinned", "[1,1,0]"), got
+    assert "read 2 1 0 errno 0" in _texts(since, wasi), _texts(since, wasi)
+    assert N.held() == 1, "the WASI service's pin, the ELF one's closed"
+    s2, _started = _back(ws, rec, door, monkeypatch)
+    for p in (elf, wasi):
+        assert s2.stop(p)
+    assert N.held() == 0, "its end closed its handle"
+    moy_evq.close(peer_e)
+    moy_evq.close(peer_w)
+
+
 # -- on the VM a board runs ---------------------------------------------------------
 
 VM_STOP = """

@@ -1722,6 +1722,9 @@ class Player(PlayerDiag):
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
         app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
         g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True, owner=self.pid or 0)
+        devs = getattr(app, "grant_devs", None)
+        if devs is not None and self.granted:
+            devs(g, tuple(self.granted))        # its device handles' (moy_dev.h)
         app.stop_hold(app.run(g, roles))
 
     def _bind_play(self, run):

@@ -18,6 +18,21 @@ int moy_evq_send(uint32_t from, const char *app, const char *name, const char *a
 int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len) __attribute__((weak));
 void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
 
+// A compiled program's device handles (native/moy_kernel/moy_dev.h): weak,
+// for a build of the layer alone, where every one is the door's Python half's.
+int32_t moy_dev_open(uint32_t pid, uint32_t perms, const char *name, size_t n,
+                     const char *cfg, size_t cn) __attribute__((weak));
+int32_t moy_dev_close(uint32_t pid, int32_t h) __attribute__((weak));
+int32_t moy_dev_read(uint32_t pid, int32_t h, uint8_t *out, size_t cap) __attribute__((weak));
+int32_t moy_dev_write(uint32_t pid, int32_t h, const uint8_t *data, size_t n)
+    __attribute__((weak));
+int32_t moy_dev_xfer(uint32_t pid, int32_t h, const uint8_t *data, size_t n, uint8_t *out,
+                     size_t cap) __attribute__((weak));
+int32_t moy_dev_set(uint32_t pid, int32_t h, const char *cfg, size_t n) __attribute__((weak));
+int32_t moy_dev_get(uint32_t pid, int32_t h, const char *what, size_t n) __attribute__((weak));
+uint32_t moy_dev_perm_bit(const char *perm, size_t n) __attribute__((weak));
+#define DEV_PASS (-1000)            // moy_dev.h's MOY_DEV_PASS
+
 // moy_evq.h's and moy_log.h's numbers, which this layer does not include.
 enum { EVQ_STALE = 1, EVQ_FULL = 2, EVQ_NOMEM = 3, EVQ_RANGE = 7 };
 #define EVQ_NAME 24u
@@ -309,6 +324,7 @@ int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
     row->roles = roles;
     row->kind = (int8_t)kind;
     row->owner = owner;
+    row->devs = 0u;
     memcpy(row->ns, ns, ns_n);
     row->ns[ns_n] = '\0';
     row->ns_len = (uint8_t)ns_n;
@@ -1569,11 +1585,15 @@ void moy_app_door_bind(moy_app_door_fn fn) {
     s_door = fn;
 }
 
-// The packed arguments, read in order.
+// The packed arguments, read in order; the table row they were packed for,
+// and whether the call runs where it was made (how "here") rather than on
+// the VM's task.
 typedef struct {
     const uint8_t *p;
     size_t n, at;
     int bad;
+    uint32_t trow;
+    bool here;
 } args_t;
 
 static const uint8_t *arg_field(args_t *f, size_t *len) {
@@ -1676,6 +1696,10 @@ static int no_args(int row) {
         case MOY_ROW_CLIPBOARD_PUT_TEXT:
         case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL:
         case MOY_ROW_MOYBYTE_SEND: case MOY_ROW_MOYBYTE_LOG:
+        case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
+        case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
+        case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
+        case MOY_ROW_MOYBYTE_DEV_GET:
         case MOY_ROW_MOYBYTE_RANDOM: case MOY_ROW_MOYBYTE_SHA256:
         case MOY_ROW_MOYBYTE_HMAC_SHA256: case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
         case MOY_ROW_MOYBYTE_AES_GCM_OPEN: case MOY_ROW_MOYBYTE_X25519:
@@ -1787,6 +1811,88 @@ static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
     moy_log_write(level < 0 || level >= LOG_LEVELS ? LOG_INFO : level, pid, (const char *)t,
                   n < LOG_TEXT_MAX ? n : LOG_TEXT_MAX);
     return 0;
+}
+
+// A compiled process's device handles (moybyte.dev_*): the kernel's table
+// (moy_dev.h) for the kinds it owns, as the process the grant names under
+// the grant's device permissions, on the caller's own task; any other kind
+// or handle is the door's Python half's (runtime/system/dev_handles.py),
+// NEEDS_VM where the call runs where it was made, so the tier hops it, and
+// handed to the door on the VM's task.
+static int32_t dev_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
+                       size_t cap) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return -MOY_APP_STALE;
+    }
+    a->counts[row]++;
+    size_t n0, n1;
+    const uint8_t *p0 = NULL, *p1 = NULL;
+    int32_t hd = 0;
+    if (row == MOY_ROW_MOYBYTE_DEV_OPEN) {
+        p0 = arg_field(f, &n0);
+        p1 = arg_field(f, &n1);
+    } else {
+        hd = arg_int(f);
+        if (row == MOY_ROW_MOYBYTE_DEV_READ) {
+            (void)arg_int(f);                   // the answer's capacity, the door's
+        } else if (row != MOY_ROW_MOYBYTE_DEV_CLOSE) {
+            p0 = arg_field(f, &n0);
+            if (row == MOY_ROW_MOYBYTE_DEV_XFER) {
+                (void)arg_int(f);
+            }
+        }
+    }
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    int32_t r = DEV_PASS;
+    uint32_t pid = g->owner;
+    if (pid != 0u && moy_dev_open != NULL) {
+        switch (row) {
+            case MOY_ROW_MOYBYTE_DEV_OPEN:
+                r = moy_dev_open(pid, g->devs, (const char *)p0, n0, (const char *)p1, n1);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_CLOSE:
+                r = moy_dev_close(pid, hd);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_READ:
+                r = moy_dev_read(pid, hd, ans, cap);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_WRITE:
+                r = moy_dev_write(pid, hd, p0, n0);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_XFER:
+                r = moy_dev_xfer(pid, hd, p0, n0, ans, cap);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_SET:
+                r = moy_dev_set(pid, hd, (const char *)p0, n0);
+                break;
+            default:
+                r = moy_dev_get(pid, hd, (const char *)p0, n0);
+                break;
+        }
+    }
+    if (r != DEV_PASS) {
+        return r;
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
+}
+
+int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask) {
+    moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return MOY_APP_STALE;
+    }
+    g->devs = mask;
+    return MOY_APP_OK;
+}
+
+uint32_t moy_app_dev_bit(const char *perm, size_t n) {
+    return moy_dev_perm_bit != NULL ? moy_dev_perm_bit(perm, n) : 0u;
 }
 
 // The C rows a compiled app reaches through the door.
@@ -2032,6 +2138,11 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             }
             return timer_row(a, g, row, v);
         }
+        case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
+        case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
+        case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
+        case MOY_ROW_MOYBYTE_DEV_GET:
+            return dev_row(a, g, row, f, ans, cap);
         case MOY_ROW_MOYBYTE_SEND:
             return send_row(a, g, f);
         case MOY_ROW_MOYBYTE_RECV:
@@ -2095,8 +2206,8 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
     }
 }
 
-int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
-                     size_t n, uint8_t *ans, size_t cap) {
+static int32_t role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                    size_t n, uint8_t *ans, size_t cap, bool here) {
     if (row >= MOY_APP_TABLE_N || (n && arg == NULL) || (cap && ans == NULL)) {
         return -MOY_APP_BAD;
     }
@@ -2105,7 +2216,7 @@ int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *a
         if (n != 0u && no_args(c_row)) {
             return -MOY_APP_BAD;
         }
-        args_t f = {arg, n, 0u, 0};
+        args_t f = {arg, n, 0u, 0, row, here};
         int32_t v = door_c(a, g, c_row, &f, ans, cap);
         return f.bad ? -MOY_APP_BAD : v;
     }
@@ -2113,7 +2224,20 @@ int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *a
     if (rc != MOY_APP_OK) {
         return -rc;
     }
+    if (here) {
+        return -MOY_APP_NEEDS_VM;
+    }
     return s_door == NULL ? -MOY_APP_NEEDS_VM : s_door(g, row, arg, n, ans, cap);
+}
+
+int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                     size_t n, uint8_t *ans, size_t cap) {
+    return role(a, g, row, arg, n, ans, cap, false);
+}
+
+int32_t moy_app_role_here(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                          size_t n, uint8_t *ans, size_t cap) {
+    return role(a, g, row, arg, n, ans, cap, true);
 }
 
 // -- the counters -----------------------------------------------------------------------

@@ -40,7 +40,13 @@ The role table is data, and every verb has one of four servers:
   process's whose grant it is (the grant's owner, its pid), run where they
   are called (`how` "here"): on a compiled program's own task, never a hop,
   so they answer with no VM. A "here" row that answers `MOY_APP_NEEDS_VM`
-  is hopped as a "hop" row is. Lua's `send`, `log` and wakes are its own
+  is hopped as a "hop" row is. The device handles (`dev_open` to
+  `dev_get`) are such rows too: the kernel's handle table
+  (`native/moy_kernel/moy_dev.h`) serves the kinds it owns, as the grant's
+  owner under the grant's device permissions (`moy_app_grant_devs`, set from
+  the run's granted permissions), and any other kind or handle answers
+  `MOY_APP_NEEDS_VM` there and is handed to the door's Python half on the
+  VM's task (`door: true`, so its fields are the door's). Lua's `send`, `log` and wakes are its own
   forms of them (`lua_own`: a Lua service's C, a Lua app's prelude over the
   `moybyte` module).
   The store's rows (`files.*`, `prefs.*`) and the clipboard's write are C

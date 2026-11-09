@@ -1743,6 +1743,9 @@ def compiled_run(ws, p, cart):
     roles, kind = moy_app.policy(p.granted)
     app_id = moy_app.id_for(cart.get("id"), cart.get("title"))
     p.ctx = factory(app_id, roles, app_id, run=True, kind=kind, owner=p.pid)
+    devs = getattr(app, "grant_devs", None)
+    if devs is not None and p.granted:
+        devs(p.ctx.grant, tuple(p.granted))     # its device handles' (moy_dev.h)
     return app.run(p.ctx.grant, roles)
 
 

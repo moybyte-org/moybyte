@@ -990,7 +990,7 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, int how, const os_arg_t 
     }
     role_call_t c = { &w->run, row, buf, k, out, out != NULL ? cap : 0u, -MOY_APP_NEEDS_VM };
     if (how == OS_HERE) {
-        c.r = moy_app_role(c.run->a, c.run->g, c.row, c.arg, c.n, c.out, c.cap);
+        c.r = moy_app_role_here(c.run->a, c.run->g, c.row, c.arg, c.n, c.out, c.cap);
     }
     if (how == OS_HERE && c.r != -MOY_APP_NEEDS_VM) {
         // answered on the module's own thread

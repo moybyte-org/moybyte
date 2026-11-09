@@ -316,6 +316,7 @@ def make_system_api(ctx_factory, cart, canvas=None,
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)
     ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind, owner=owner or 0)
+    grant_devices(ctx, perms)
     if keep is not None:
         keep(ctx)
 
@@ -435,7 +436,17 @@ def service_api(ctx_factory, cart, perms, owner):
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)
     ctx = ctx_factory(app_id, roles, app_id, run=True, kind=kind, owner=owner)
+    grant_devices(ctx, perms)
     return ctx, roles, granted_names(ctx, roles, kind)
+
+
+def grant_devices(ctx, perms):
+    """The device permissions among `perms` held on run grant `ctx`'s
+    (moy_app_grant_devs): what the kernel's device handles of its compiled
+    process answer under (native/moy_kernel/moy_dev.h)."""
+    fn = getattr(getattr(ctx, "_app", None), "grant_devs", None)
+    if fn is not None and perms:
+        fn(ctx.grant, tuple(perms))
 
 
 # -- the responsive opt-in ---------------------------------------------------

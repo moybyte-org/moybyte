@@ -1002,7 +1002,7 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
             role_call_t c = { &p->run, row, buf, len, out, out != NULL ? cap : 0u,
                               -MOY_APP_NEEDS_VM };
             if (how == MOY_OS_HERE) {
-                c.r = moy_app_role(p->run.a, p->run.g, row, buf, len, c.out, c.cap);
+                c.r = moy_app_role_here(p->run.a, p->run.g, row, buf, len, c.out, c.cap);
             }
             if (how == MOY_OS_HERE && c.r != -MOY_APP_NEEDS_VM) {
                 // answered on the module's own thread

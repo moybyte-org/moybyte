@@ -541,8 +541,10 @@ own tasks is delivered, and files and the kernel's services answer; a call
 that needs Python (a console call, a role row the door serves) waits on the
 VM's queue and is answered once the VM is back (`native/moy_kernel/moy_vmq.h`,
 WITH NO VM), and a message to a Python process is not taken, its queue
-having closed with the VM. Its device handles are Python objects, closed at
-the pause. A soft reset carries no record, so it stops each such service as
+having closed with the VM. Its device handles the kernel owns (`gpio<n>`
+and `pins`, `native/moy_kernel/moy_dev.h`) answer on its own task, a pin's
+edges read through a reader the stop keeps; a call on a handle the console's
+Python serves waits for the VM as a role row the door serves does. A soft reset carries no record, so it stops each such service as
 a stop would and logs its exit (`moy_os_services_end`, the WASI tier's
 `moy_wasm_services_end`, the Lua services' `moycore_svc_vm_stop`). The
 shell's cron and at jobs are the console's alarms: the resume record carries

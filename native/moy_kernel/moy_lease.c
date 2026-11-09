@@ -263,6 +263,32 @@ int moy_lease_sim_get(int pin) {
     return gpio_get_level(pin);
 }
 
+int moy_lease_pin_set(int pin, int mode, int pull, int level) {
+    if (pin < 0 || !GPIO_IS_VALID_GPIO(pin)
+        || (mode > MOY_PIN_MODE_IN && !GPIO_IS_VALID_OUTPUT_GPIO(pin))) {
+        return MOY_LEASE_BAD;
+    }
+    if (level >= 0) {
+        gpio_set_level(pin, level ? 1u : 0u);
+    }
+    if (mode >= 0) {
+        esp_rom_gpio_pad_select_gpio((uint32_t)pin);
+        esp_rom_gpio_connect_out_signal((uint32_t)pin, SIG_GPIO_OUT_IDX, false, false);
+        gpio_set_direction(pin, mode == MOY_PIN_MODE_IN ? GPIO_MODE_INPUT
+                                : mode == MOY_PIN_MODE_OUT ? GPIO_MODE_INPUT_OUTPUT
+                                : GPIO_MODE_INPUT_OUTPUT_OD);
+    }
+    if (pull >= 0) {
+        gpio_set_pull_mode(pin, pull == MOY_PIN_PULL_UP ? GPIO_PULLUP_ONLY
+                                : pull == MOY_PIN_PULL_DOWN ? GPIO_PULLDOWN_ONLY : GPIO_FLOATING);
+    }
+    return MOY_LEASE_OK;
+}
+
+int moy_lease_pin_level(int pin) {
+    return pin >= 0 && GPIO_IS_VALID_GPIO(pin) ? gpio_get_level(pin) : 0;
+}
+
 #else // the host's stand-in
 
 static uint8_t s_state[MOY_LEASE_PIN_MAX];
@@ -309,6 +335,32 @@ void moy_lease_sim_level(int pin, int level) {
 
 int moy_lease_sim_get(int pin) {
     return pin >= 0 && pin < (int)MOY_LEASE_PIN_MAX ? s_level[pin] : 0;
+}
+
+// As the stand-in's Pin makes it (runtime/host/lease_sim.py): its state from
+// the mode and pull it keeps, a level driven only on an output.
+int moy_lease_pin_set(int pin, int mode, int pull, int level) {
+    if (pin < 0 || pin >= (int)MOY_LEASE_PIN_MAX) {
+        return MOY_LEASE_BAD;
+    }
+    if (mode < 0 && pull < 0) {
+        if (level >= 0 && (s_state[pin] & MOY_PIN_OUT)) {
+            moy_lease_sim_level(pin, level);
+        }
+        return MOY_LEASE_OK;
+    }
+    uint8_t st = s_state[pin];
+    uint8_t out = mode < 0 ? (uint8_t)(st & MOY_PIN_OUT)
+                  : mode > MOY_PIN_MODE_IN ? MOY_PIN_OUT : 0u;
+    uint8_t pu = pull < 0 ? (uint8_t)(st & (MOY_PIN_PU | MOY_PIN_PD))
+                 : pull == MOY_PIN_PULL_UP ? MOY_PIN_PU
+                 : pull == MOY_PIN_PULL_DOWN ? MOY_PIN_PD : 0u;
+    moy_lease_sim_pin(pin, (uint8_t)(MOY_PIN_IN | out | pu), level >= 0 ? level : s_level[pin]);
+    return MOY_LEASE_OK;
+}
+
+int moy_lease_pin_level(int pin) {
+    return moy_lease_sim_get(pin);
 }
 
 #endif
@@ -370,7 +422,7 @@ static moy_lease_row_t *row_of(uint32_t h) {
 
 static int table(void);
 
-int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
+static int take_u(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
                    uint8_t flags, uint32_t *h) {
     const moy_lease_offer_t *gpio = offer_of(MOY_LEASE_GPIO, 0);
     const moy_lease_offer_t *o = offer_of(cls, unit);
@@ -452,7 +504,7 @@ static uint32_t device_row(uint8_t cls) {
     return 0;
 }
 
-int moy_lease_hold(uint32_t owner, uint8_t cls) {
+static int hold_u(uint32_t owner, uint8_t cls) {
     if (!is_device(cls) || owner == 0) {
         return MOY_LEASE_BAD;
     }
@@ -477,7 +529,7 @@ int moy_lease_hold(uint32_t owner, uint8_t cls) {
     return MOY_LEASE_OK;
 }
 
-int moy_lease_let(uint32_t owner, uint8_t cls) {
+static int let_u(uint32_t owner, uint8_t cls) {
     uint32_t at = is_device(cls) ? device_row(cls) : 0u;
     if (at == 0 || row_of(at)->owner != owner) {
         return MOY_LEASE_STALE;
@@ -486,7 +538,7 @@ int moy_lease_let(uint32_t owner, uint8_t cls) {
     return MOY_LEASE_OK;
 }
 
-uint32_t moy_lease_holder(uint8_t cls) {
+static uint32_t holder_u(uint8_t cls) {
     uint32_t at = is_device(cls) ? device_row(cls) : 0u;
     return at != 0 ? row_of(at)->owner : 0u;
 }
@@ -544,7 +596,7 @@ uint32_t moy_lease_wifi_mask(void) {
     return mask;
 }
 
-int moy_lease_wifi_hold(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
+static int wifi_hold_u(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
     uint32_t bit = moy_lease_wifi_bit(tag, n);
     if (bit == 0u || owner == 0u) {
         return MOY_LEASE_BAD;
@@ -575,7 +627,7 @@ int moy_lease_wifi_hold(uint32_t owner, const char *tag, size_t n, uint32_t *mas
     return MOY_LEASE_OK;
 }
 
-int moy_lease_wifi_release(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
+static int wifi_release_u(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
     uint32_t bit = moy_lease_wifi_bit(tag, n);
     if (bit == 0u) {
         return MOY_LEASE_BAD;
@@ -605,7 +657,7 @@ int moy_lease_wifi_holder(uint32_t i, uint32_t *owner, uint32_t *tags) {
     return MOY_LEASE_STALE;
 }
 
-void moy_lease_wifi_reset(void) {
+static void wifi_reset_u(void) {
     for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
         if (wifi_at(s) != NULL) {
             moy_htab_release(s_tab, moy_htab_at(s_tab, s));
@@ -613,7 +665,7 @@ void moy_lease_wifi_reset(void) {
     }
 }
 
-int moy_lease_drop(uint32_t h) {
+static int drop_u(uint32_t h) {
     moy_lease_row_t *r = row_of(h);
     if (r == NULL) {
         return MOY_LEASE_STALE;
@@ -642,7 +694,7 @@ int moy_lease_drop(uint32_t h) {
     return MOY_LEASE_OK;
 }
 
-uint32_t moy_lease_sweep(uint32_t owner) {
+static uint32_t sweep_u(uint32_t owner) {
     uint32_t n = 0;
     for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
         uint32_t at = moy_htab_at(s_tab, s);
@@ -654,7 +706,7 @@ uint32_t moy_lease_sweep(uint32_t owner) {
     return n;
 }
 
-uint32_t moy_lease_vm_stop(void) {
+static uint32_t vm_stop_u(void) {
     uint32_t n = 0;
     for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
         uint32_t at = moy_htab_at(s_tab, s);
@@ -667,7 +719,7 @@ uint32_t moy_lease_vm_stop(void) {
     return n;
 }
 
-int moy_lease_get(uint32_t h, moy_lease_row_t *out) {
+static int get_u(uint32_t h, moy_lease_row_t *out) {
     const moy_lease_row_t *r = row_of(h);
     if (r == NULL) {
         return MOY_LEASE_STALE;
@@ -676,7 +728,7 @@ int moy_lease_get(uint32_t h, moy_lease_row_t *out) {
     return MOY_LEASE_OK;
 }
 
-bool moy_lease_live(uint32_t h) {
+static bool live_u(uint32_t h) {
     return row_of(h) != NULL;
 }
 
@@ -688,7 +740,7 @@ uint32_t moy_lease_at(uint32_t slot) {
     return s_tab != NULL ? moy_htab_at(s_tab, slot) : 0u;
 }
 
-uint32_t moy_lease_held(uint8_t flags) {
+static uint32_t held_u(uint8_t flags) {
     uint32_t n = 0;
     for (uint32_t s = 0; s < moy_lease_slots(); s++) {
         if (moy_htab_at(s_tab, s) != 0
@@ -699,7 +751,7 @@ uint32_t moy_lease_held(uint8_t flags) {
     return n;
 }
 
-uint32_t moy_lease_of_pin(int pin) {
+static uint32_t of_pin_u(int pin) {
     if (pin < 0 || pin >= (int)MOY_LEASE_PIN_MAX) {
         return 0;
     }
@@ -712,7 +764,7 @@ uint32_t moy_lease_of_pin(int pin) {
     return 0;
 }
 
-int moy_lease_edge(uint32_t h, int pin, uint32_t depth, bool loop, uint32_t *src) {
+static int edge_u(uint32_t h, int pin, uint32_t depth, bool loop, uint32_t *src) {
     moy_lease_row_t *r = row_of(h);
     if (r == NULL) {
         return MOY_LEASE_STALE;
@@ -740,7 +792,7 @@ int moy_lease_edge(uint32_t h, int pin, uint32_t depth, bool loop, uint32_t *src
     return rc;
 }
 
-int moy_lease_edge_close(uint32_t h, int pin) {
+static int edge_close_u(uint32_t h, int pin) {
     moy_lease_row_t *r = row_of(h);
     if (r == NULL) {
         return MOY_LEASE_STALE;
@@ -768,4 +820,181 @@ void moy_lease_reset(void) {
     memset(s_state, 0, sizeof(s_state));
     memset(s_level, 0, sizeof(s_level));
     #endif
+}
+
+// -- THE LOCK ----------------------------------------------------------------------
+//
+// The table's calls from any task: the VM's, a compiled program's own (its
+// device handles, moy_dev.h) and the webhost's. A recursive mutex, held
+// across a whole call, a drop's driver work included, so a call the drop
+// makes back into the table (a driver's lease end) runs under it; never in
+// an ISR. The browser has one thread and no lock.
+#if defined(LEASE_BOARD)
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+static StaticSemaphore_t s_mu_buf;
+static SemaphoreHandle_t volatile s_mu;
+static portMUX_TYPE s_mu_once = portMUX_INITIALIZER_UNLOCKED;
+
+static void lock(void) {
+    if (s_mu == NULL) {
+        portENTER_CRITICAL(&s_mu_once);
+        if (s_mu == NULL) {
+            s_mu = xSemaphoreCreateRecursiveMutexStatic(&s_mu_buf);
+        }
+        portEXIT_CRITICAL(&s_mu_once);
+    }
+    xSemaphoreTakeRecursive(s_mu, portMAX_DELAY);
+}
+
+static void unlock(void) {
+    xSemaphoreGiveRecursive(s_mu);
+}
+#elif !defined(__EMSCRIPTEN__) && defined(__has_include) && __has_include(<pthread.h>)
+#include <pthread.h>
+static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t s_owner;
+static int s_depth;             // the owner's nesting, 0 while none holds it
+
+static void lock(void) {
+    if (__atomic_load_n(&s_depth, __ATOMIC_ACQUIRE) > 0 && pthread_equal(s_owner, pthread_self())) {
+        s_depth++;
+        return;
+    }
+    pthread_mutex_lock(&s_mu);
+    s_owner = pthread_self();
+    __atomic_store_n(&s_depth, 1, __ATOMIC_RELEASE);
+}
+
+static void unlock(void) {
+    if (__atomic_sub_fetch(&s_depth, 1, __ATOMIC_RELEASE) == 0) {
+        pthread_mutex_unlock(&s_mu);
+    }
+}
+#else
+static void lock(void) {
+}
+
+static void unlock(void) {
+}
+#endif
+
+int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
+                   uint8_t flags, uint32_t *h) {
+    lock();
+    int r = take_u(owner, cls, unit, pins, flags, h);
+    unlock();
+    return r;
+}
+
+int moy_lease_drop(uint32_t h) {
+    lock();
+    int r = drop_u(h);
+    unlock();
+    return r;
+}
+
+uint32_t moy_lease_sweep(uint32_t owner) {
+    lock();
+    uint32_t r = sweep_u(owner);
+    unlock();
+    return r;
+}
+
+uint32_t moy_lease_vm_stop(void) {
+    lock();
+    uint32_t r = vm_stop_u();
+    unlock();
+    return r;
+}
+
+int moy_lease_get(uint32_t h, moy_lease_row_t *out) {
+    lock();
+    int r = get_u(h, out);
+    unlock();
+    return r;
+}
+
+bool moy_lease_live(uint32_t h) {
+    lock();
+    bool r = live_u(h);
+    unlock();
+    return r;
+}
+
+uint32_t moy_lease_held(uint8_t flags) {
+    lock();
+    uint32_t r = held_u(flags);
+    unlock();
+    return r;
+}
+
+uint32_t moy_lease_of_pin(int pin) {
+    lock();
+    uint32_t r = of_pin_u(pin);
+    unlock();
+    return r;
+}
+
+int moy_lease_hold(uint32_t owner, uint8_t cls) {
+    lock();
+    int r = hold_u(owner, cls);
+    unlock();
+    return r;
+}
+
+int moy_lease_let(uint32_t owner, uint8_t cls) {
+    lock();
+    int r = let_u(owner, cls);
+    unlock();
+    return r;
+}
+
+uint32_t moy_lease_holder(uint8_t cls) {
+    lock();
+    uint32_t r = holder_u(cls);
+    unlock();
+    return r;
+}
+
+int moy_lease_wifi_hold(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
+    lock();
+    int r = wifi_hold_u(owner, tag, n, mask);
+    unlock();
+    return r;
+}
+
+int moy_lease_wifi_release(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
+    lock();
+    int r = wifi_release_u(owner, tag, n, mask);
+    unlock();
+    return r;
+}
+
+void moy_lease_wifi_reset(void) {
+    lock();
+    wifi_reset_u();
+    unlock();
+}
+
+int moy_lease_edge(uint32_t h, int pin, uint32_t depth, bool loop, uint32_t *src) {
+    lock();
+    int r = edge_u(h, pin, depth, loop, src);
+    unlock();
+    return r;
+}
+
+int moy_lease_edge_close(uint32_t h, int pin) {
+    lock();
+    int r = edge_close_u(h, pin);
+    unlock();
+    return r;
+}
+
+void moy_lease_lock(void) {
+    lock();
+}
+
+void moy_lease_unlock(void) {
+    unlock();
 }

@@ -154,7 +154,9 @@ def test_the_doors_shell_rows_take_their_servers_arguments():
                "moybyte": ss.ConsoleCalls}
     for name, kinds in ss.DOOR_ARGS.items():
         r = rows[name]
-        assert r["server"] in ("shell", "call") + DOOR_ONLY or r["server"].startswith(PROC), name
+        # a C row run where it is called hands the door what C does not own
+        # (moybyte.dev_*, native/moy_kernel/moy_dev.h)
+        assert r["server"] in ("shell", "call", "c") + DOOR_ONLY or r["server"].startswith(PROC), name
         role, verb = name.split(".")
         params = list(inspect.signature(getattr(servers[role], verb)).parameters.values())[2:]
         assert len(params) >= len(kinds), (name, kinds)

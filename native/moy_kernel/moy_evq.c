@@ -305,6 +305,9 @@ static uint32_t held_timers(const q_t *q) {
     return n;
 }
 
+// A process's device handles (moy_dev.h): weak, for an image without them.
+uint32_t moy_dev_sweep(uint32_t pid) __attribute__((weak));
+
 int moy_evq_close(uint32_t pid) {
     MOY_SYNC_LOCK(&s_lock);
     int i = slot_of(pid);
@@ -325,6 +328,9 @@ int moy_evq_close(uint32_t pid) {
     }
     free(q->receives);
     free(q);
+    if (moy_dev_sweep != NULL) {
+        moy_dev_sweep(pid);         // the process ended: its device handles with it
+    }
     return MOY_EVQ_OK;
 }
 

@@ -34,7 +34,9 @@
 // handle, and a handle it was never given; a "wake" carrying ["rearm"] sets a
 // timer 10 ms off that its own message sets again, printing "rearmed" each
 // time; a "wake" carrying ["pass", app] sends that app a "ping" of its own,
-// printing how many took it; a "wake" carrying ["media", path]
+// printing how many took it; a "wake" carrying ["edges"] opens gpio5 as an
+// input and listens on both its edges, and one carrying ["read"] reads them
+// back, printing how many and each level; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
 // reads back, and leaves it playing; a "wake" carrying
@@ -76,7 +78,7 @@ int main(void) {
         moy_evq_ev_t ev;
         char b[sizeof(moy_evq_ev_t) + 256];
     } m;
-    int ticks = 0, pings = 0, ticker = 0, net = 0, rearm = 0;
+    int ticks = 0, pings = 0, ticker = 0, net = 0, rearm = 0, edges = -1;
     long next = now_ms() + TICK_MS;
     for (;;) {
         long left = next - now_ms();
@@ -119,6 +121,22 @@ int main(void) {
             memcpy(app, a, k);
             app[k] = 0;
             printf("passed %d\n", moy_send(app, "ping", "[\"wasi\"]"));
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"edges\"]") == 0) {
+            edges = (int)moy_dev_open("gpio5", "mode=in");
+            int r = edges > 0 ? (int)moy_dev_set(edges, "edges=both") : -1;
+            printf("edges %d errno %d\n", edges > 0 ? r : edges, r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"read\"]") == 0) {
+            unsigned char e[64];
+            int n = (int)moy_dev_read(edges, e, sizeof e);
+            printf("read %d", n < 0 ? n : n / 8);
+            for (int k = 0; k + 8 <= n; k += 8) {
+                printf(" %d", e[k + 4]);
+            }
+            printf(" errno %d\n", n < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "note") == 0) {
             int id = moy_notify("Service Wasi", m.b + sizeof m.ev);
