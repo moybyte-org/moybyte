@@ -274,12 +274,13 @@ builds with libc-wasi off (`native/moy_wasm/micropython.cmake`,
 A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`
 for the rest; a WASI program's `moybyte.os` (`send`, `on`: the service
-model's, below; `notify`, `award`, `progress` and the wakes `every`,
-`after`, `at`, `cancel` and `open_with`, the console calls a native service
-posts on the VM's queue, their natives generated from the source; `log`;
-the prefs, clipboard and device-handle (`dev_*`) rows, each its role table
-row for the grant the program's start made, hopped to the VM's task as a C
-program's is, `moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
+model's, below; `notify`, `award`, `progress`, the wakes `every`,
+`after`, `at`, `cancel`, `open_with` and `pick`, the console calls a native
+service posts on the VM's queue, their natives generated from the source;
+`log`; the files, `nav_open_app`, prefs, clipboard, device-handle (`dev_*`)
+and item rows and `share`, each its role table row for the grant the
+program's start made, hopped to the VM's task as a C program's is,
+`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
 row's types give, and the adapter's natives and the toolkit's are generated

@@ -896,7 +896,8 @@ static int32_t os_call(wasm_exec_env_t e, const char *name, const os_arg_t *a, i
     return os_console(e, name, buf, k);
 }
 
-// THE APP ROWS (moy_wasi_os_rows.h's bodies: prefs, the clipboard): each its
+// THE APP ROWS (moy_wasi_os_rows.h's bodies: files, nav, prefs, the clipboard,
+// the crypto rows, and the door rows the door's Python half serves): each its
 // role table row for the run's app run (moy_wasi_set_run), its fields packed
 // as the ROLE door takes them (moy_app.h's moy_app_role): a read of what the
 // clipboard writes where it is called, under the state's seqlock, any other

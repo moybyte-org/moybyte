@@ -76,6 +76,12 @@ CHIPS = ("esp32s3", "esp32p4", "host")
 THEME = "theme"
 WASM_APP = "moybyte.app"
 WASM_OS = "moybyte.os"
+# A WASI program's own files: WASI's path calls, which reach only the folder
+# its `files` permission names, beside its moybyte.os `files_*` rows; read
+# from its source, the C library's file calls.
+WASI_PREVIEW1 = "wasi_snapshot_preview1"
+WASI_FILE_CALLS = ("fopen", "freopen", "open", "opendir", "mkdir", "rmdir", "rename",
+                   "unlink", "remove", "stat", "access")
 # Answers a call only from the background: an app in front opens, shares and
 # picks without it (docs/app_api_v1.md section 6).
 BACKGROUND_ONLY = ("front",)
@@ -327,6 +333,9 @@ def _wasm_program(prog, cart, stem, app, man):
             data = _wat.assemble(_read(wat))
         mods = {"app": os_table.WASM_APP, "os": os_table.WASM_OS}
         for module, name in wasm_imports(data):
+            if module == WASI_PREVIEW1 and not app and name.startswith("path_"):
+                prog.used["%s.%s" % (module, name)] = ("files",)
+                continue
             if module == WASM_APP:
                 table = mods["app"]
             elif module == WASM_OS:
@@ -350,6 +359,7 @@ def _wasm_program(prog, cart, stem, app, man):
         else:
             prog.used = {"%s.%s" % (WASM_OS, n): p for n, p in os_table.WASM_OS.items()
                          if "moy_" + n in calls}
+            prog.used.update((n, ("files",)) for n in WASI_FILE_CALLS if n in calls)
     else:
         prog.missing = True
 

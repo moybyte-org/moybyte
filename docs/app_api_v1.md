@@ -118,7 +118,7 @@ this guide is each step in full.
 | permissions (§6) | its list; the prompt calls it trusted | its list, enforced | its list, enforced at load | its list | `full_access` and its list |
 | entry points (§7, §11) | `_init`, `_update`, `_draw`; a service's `moy_start`; a command's `main(argv)` | `_init`, `_update`, `_draw`; `moy_start` | the exports `_init`, `_update`, `_draw` | `_start` | `main` |
 | messages and timers (§8, §9) | `moybyte.on`, `send`, `every`, `after`, `at` | the same | `moybyte_on`, `moybyte_recv`, `moybyte_every` | `poll_oneoff` on `MOY_EVQ_FD`, `moybyte.os` | `poll` on `MOY_EVQ_FD`, `moy_on` |
-| files (§5) | `files` | `files`, `io`, `os` | `files_*` imports | WASI's own, in the granted folder | POSIX, in the granted folder |
+| files (§5) | `files` | `files`, `io`, `os` | `files_*` imports | WASI's own and `moybyte.os` `files_*`, in the granted folder | POSIX, in the granted folder |
 | build and test on the host (§12) | `tools/simulate_desktop.py --cart`; `tests/test_app_examples.py` | the same | `moy app build`, then the simulator | `moy app build`; the terminal | `moy app build --chip host`; the terminal |
 | example | `tests/fixtures/apps/shopping.moy` | `tests/fixtures/apps/echo_lua.moy` | `tests/fixtures/wasm/app_talk.moy` | `tests/fixtures/wasm/wasi_svc.moy` | `tests/fixtures/elf/elf_svc.moy` |
 
@@ -690,17 +690,17 @@ The calls a program reaches on more than one tier, each by its name there
 | `theme.set` | `appearance` | `ctx.theme.set`, `set_theme` | `set_theme` | `theme_set` |  |
 | `theme.set_variant` | `appearance` | `ctx.theme.set_variant` |  | `theme_set_variant` |  |
 | `theme.edit_file` | `appearance` | `ctx.theme.edit_file` |  | `theme_edit_file` |  |
-| `files.readable` | `files` | `ctx.files.readable` |  | `files_readable` | `moy_files_readable` |
-| `files.ready` | `files` | `ctx.files.ready`, `files.ready` | `files.ready` | `files_ready` | `moy_files_ready` |
-| `files.list` | `files` | `ctx.files.list`, `files.list` | `files.list` | `files_list` | `moy_files_list` |
-| `files.count` | `files` | `ctx.files.count` |  | `files_count` | `moy_files_count` |
-| `files.load` | `files` | `ctx.files.load`, `files.load`, `files.load_text` | `files.load`, `files.load_text` | `files_load` | `moy_files_load` |
-| `files.save` | `files` | `ctx.files.save`, `files.save`, `files.save_text` | `files.save`, `files.save_text` | `files_save` | `moy_files_save` |
-| `files.delete` | `files` | `ctx.files.delete`, `files.delete` | `files.delete` | `files_delete` | `moy_files_delete` |
-| `files.duplicate` | `files` | `ctx.files.duplicate`, `files.duplicate` | `files.duplicate` | `files_duplicate` | `moy_files_duplicate` |
-| `files.rename` | `files` | `ctx.files.rename`, `files.rename` | `files.rename` | `files_rename` | `moy_files_rename` |
-| `files.new_name` | `files` | `ctx.files.new_name`, `files.new_name` | `files.new_name` | `files_new_name` | `moy_files_new_name` |
-| `nav.open_app` | `launch`, `front` | `ctx.nav.open_app`, `open_app` | `open_app` | `nav_open_app` | `moy_nav_open_app` |
+| `files.readable` | `files` | `ctx.files.readable` |  | `files_readable`, `moybyte.os.files_readable` | `moy_files_readable` |
+| `files.ready` | `files` | `ctx.files.ready`, `files.ready` | `files.ready` | `files_ready`, `moybyte.os.files_ready` | `moy_files_ready` |
+| `files.list` | `files` | `ctx.files.list`, `files.list` | `files.list` | `files_list`, `moybyte.os.files_list` | `moy_files_list` |
+| `files.count` | `files` | `ctx.files.count` |  | `files_count`, `moybyte.os.files_count` | `moy_files_count` |
+| `files.load` | `files` | `ctx.files.load`, `files.load`, `files.load_text` | `files.load`, `files.load_text` | `files_load`, `moybyte.os.files_load` | `moy_files_load` |
+| `files.save` | `files` | `ctx.files.save`, `files.save`, `files.save_text` | `files.save`, `files.save_text` | `files_save`, `moybyte.os.files_save` | `moy_files_save` |
+| `files.delete` | `files` | `ctx.files.delete`, `files.delete` | `files.delete` | `files_delete`, `moybyte.os.files_delete` | `moy_files_delete` |
+| `files.duplicate` | `files` | `ctx.files.duplicate`, `files.duplicate` | `files.duplicate` | `files_duplicate`, `moybyte.os.files_duplicate` | `moy_files_duplicate` |
+| `files.rename` | `files` | `ctx.files.rename`, `files.rename` | `files.rename` | `files_rename`, `moybyte.os.files_rename` | `moy_files_rename` |
+| `files.new_name` | `files` | `ctx.files.new_name`, `files.new_name` | `files.new_name` | `files_new_name`, `moybyte.os.files_new_name` | `moy_files_new_name` |
+| `nav.open_app` | `launch`, `front` | `ctx.nav.open_app`, `open_app` | `open_app` | `nav_open_app`, `moybyte.os.nav_open_app` | `moy_nav_open_app` |
 | `prefs.get` | `prefs` | `ctx.prefs.get`, `prefs.get` | `prefs.get` | `prefs_get`, `moybyte.os.prefs_get` | `moy_prefs_get` |
 | `prefs.set` | `prefs` | `ctx.prefs.set`, `prefs.set` | `prefs.set` | `prefs_set`, `moybyte.os.prefs_set` | `moy_prefs_set` |
 | `prefs.clear` | `prefs` | `ctx.prefs.clear`, `prefs.clear` | `prefs.clear` | `prefs_clear`, `moybyte.os.prefs_clear` | `moy_prefs_clear` |
@@ -710,7 +710,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `clipboard.seq` | `clipboard` | `ctx.clipboard.seq`, `clipboard.seq` | `clipboard.seq` | `clipboard_seq`, `moybyte.os.clipboard_seq` | `moy_clipboard_seq` |
 | `moybyte.notify` | `notifications` | `moybyte.notify` | `moybyte.notify` | `moybyte_notify`, `moybyte.os.notify` | `moy_notify` |
 | `moybyte.open_with` | `front` | `moybyte.open_with` | `moybyte.open_with` | `moybyte_open_with`, `moybyte.os.open_with` | `moy_open_with` |
-| `moybyte.share` | `front` | `moybyte.share` | `moybyte.share` | `moybyte_share` | `moy_share` |
+| `moybyte.share` | `front` | `moybyte.share` | `moybyte.share` | `moybyte_share`, `moybyte.os.share` | `moy_share` |
 | `moybyte.send` | none | `moybyte.send` | `moybyte.send` | `moybyte_send`, `moybyte.os.send` | `moy_send` |
 | `moybyte.award` | none | `moybyte.award` | `moybyte.award` | `moybyte_award`, `moybyte.os.award` | `moy_award` |
 | `moybyte.progress` | none | `moybyte.progress` | `moybyte.progress` | `moybyte_progress`, `moybyte.os.progress` | `moy_progress` |
@@ -718,11 +718,11 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.every` | none | `moybyte.every` | `moybyte.every` | `moybyte_every`, `moybyte.os.every` | `moy_every` |
 | `moybyte.after` | none | `moybyte.after` | `moybyte.after` | `moybyte_after`, `moybyte.os.after` | `moy_after` |
 | `moybyte.cancel` | none | `moybyte.cancel` | `moybyte.cancel` | `moybyte_cancel`, `moybyte.os.cancel` | `moy_cancel` |
-| `moybyte.pick` | `front` | `moybyte.pick` | `moybyte.pick` | `moybyte_pick` | `moy_pick` |
+| `moybyte.pick` | `front` | `moybyte.pick` | `moybyte.pick` | `moybyte_pick`, `moybyte.os.pick` | `moy_pick` |
 | `moybyte.log` | none | `moybyte.log` | `moybyte.log` | `moybyte_log`, `moybyte.os.log` | `moy_log` |
 | `moybyte.recv` | none |  |  | `moybyte_recv` |  |
-| `moybyte.item_read` | none |  |  | `moybyte_item_read` | `moy_item_read` |
-| `moybyte.item_write` | none |  |  | `moybyte_item_write` | `moy_item_write` |
+| `moybyte.item_read` | none |  |  | `moybyte_item_read`, `moybyte.os.item_read` | `moy_item_read` |
+| `moybyte.item_write` | none |  |  | `moybyte_item_write`, `moybyte.os.item_write` | `moy_item_write` |
 | `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |
@@ -871,22 +871,26 @@ wasm a WASI program's `_start`; in C an ELF module's `main`
 `wasm32-wasip1` or Zig builds: files under its permissions, clocks, args, env,
 stdio; it imports `moybyte.os` for its messages (`send`, `on`), its
 notifications, badges and log lines (`notify`, `award`, `progress`, `log`),
-its wakes (`every`, `after`, `at`, `cancel`, §9), `open_with`, its
-prefs and the clipboard (`prefs_get`, `prefs_set`, `prefs_clear`,
-`clipboard_put_text`, `clipboard_text`, `clipboard_kind`,
-`clipboard_seq`), and its leases and devices by handle (`dev_open` to
-`dev_get`, above), and `sdk/include/moybyte/os.h` declares each under its C
-name, `moy_notify`, `moy_prefs_get` and the rest. A console call waits for
+its wakes (`every`, `after`, `at`, `cancel`, §9), the front's calls
+(`open_with`, `share`, `pick`, `nav_open_app`) and a picked item's
+(`item_read`, `item_write`), its prefs and the clipboard (`prefs_get`,
+`prefs_set`, `prefs_clear`, `clipboard_put_text`, `clipboard_text`,
+`clipboard_kind`, `clipboard_seq`), the files role's documents
+(`files_list` to `files_new_name`), and its leases and devices by handle
+(`dev_open` to `dev_get`, above), and `sdk/include/moybyte/os.h` declares
+each under its C name, `moy_notify`, `moy_prefs_get` and the rest. A console call waits for
 the console's answer: a service's at the scheduler's next poll, a
 foreground command's at its job's next step; a background command's answers
-AGAIN after 5 s, its door serving nothing while it runs. The prefs,
-clipboard and device rows are the role table's for a grant its start makes, over the
-roles its granted permissions name (`runtime/system/scheduler.py`,
-`compiled_run`), as a C program's are: a permission it lacks answers ACCES
-and a buffer too small RANGE. A WASI program has no window: `pick`, whose
-item is handed to the asking app's window, is not imported, nor is
-`share`, whose bytes are not a console call's JSON text; the files rows are
-WASI's own files (§5), under its `files` permission.
+AGAIN after 5 s, its door serving nothing while it runs. The files, nav,
+prefs, clipboard, device and item rows, and `share`, are the role table's
+for a grant its start makes, over the roles its granted permissions name
+(`runtime/system/scheduler.py`, `compiled_run`), as a C program's are: a
+permission it lacks answers ACCES and a buffer too small RANGE. The files
+rows reach the store's documents in the folder its `files` permission
+names, the folder its WASI files (§5) are rooted at. A WASI program has no
+window: its pick reaches it as the message `moy_open` (handle, mime, mode,
+name) on its event descriptor, which it listens on, as a C program's does
+(below), and the handle is its own process's.
 
 **A C program** is an ELF module built against the OS function table by
 `tools/elf_cart.py` with the SDK (`sdk/README.md`): a command's

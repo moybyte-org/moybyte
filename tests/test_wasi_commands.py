@@ -167,6 +167,24 @@ def test_files_are_made_written_listed_moved_and_removed(term, tmp_path):
     assert not (tmp_path / "files" / "Documents" / "probe.d").exists()
 
 
+def test_the_files_rows_save_list_load_rename_and_delete_in_its_folder(term, tmp_path):
+    """moybyte.os `files_*` (wasi_probe's `app`) are the files role's rows for
+    the command's own grant, the folder its `files` permission names: a
+    document saved, listed, loaded, renamed and deleted into the trash, a
+    kind outside its folder ACCES; with no permission every row is ACCES."""
+    _ws, app = term
+    files = tmp_path / "files"
+    assert out(app, "wasi.probe/probe app") == [
+        "files.ready 1", "files.save probe", "files.count 1", "files.list probe,",
+        "files.load # probe,", "files.load.other -1 errno 2", "files.rename moved",
+        "files.load.moved # probe,", "files.delete moved", "files.count.after 0"]
+    assert not (files / "Documents" / "moved.md").exists()
+    assert (files / ".Trash" / "docs" / "moved.md").read_text() == "# probe\n"
+    rows = ("ready", "save", "count", "list", "load", "load.other", "rename", "load.moved",
+            "delete", "count.after")
+    assert out(app, "wasi.bare/bare app") == ["files.%s -1 errno 2" % r for r in rows]
+
+
 def test_a_path_outside_its_folders_is_not_capable(term, tmp_path):
     _ws, app = term
     (tmp_path / "secret.txt").write_text("no")

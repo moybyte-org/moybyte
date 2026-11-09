@@ -1,5 +1,9 @@
 // probe: one WASI preview1 behaviour a verb, for the host and on-glass tests
-// of the compiled command tier (native/moy_wasm/moy_wasi.h).
+// of the compiled command tier (native/moy_wasm/moy_wasi.h). `app` calls the
+// files role's rows (moybyte.os, the store's named documents in the folder
+// its `files` permission names): a document saved, counted, listed, loaded,
+// renamed, loaded by its new name and deleted into the trash, and a kind
+// outside its folder, each answer printed with its errno.
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -8,6 +12,8 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "moybyte/os.h"
 
 __attribute__((import_module("moybyte.term"), import_name("term_size")))
 int term_size(unsigned *cols, unsigned *rows);
@@ -69,6 +75,38 @@ static int files(void) {
     return 0;
 }
 
+static void said(const char *what, int32_t r, char *buf) {
+    if (r < 0) {
+        printf("%s -1 errno %d\n", what, errno);
+        return;
+    }
+    if (buf == NULL) {
+        printf("%s %d\n", what, (int)r);
+        return;
+    }
+    for (int32_t i = 0; i < r; i++) {
+        if (buf[i] == 0 || buf[i] == '\n') {
+            buf[i] = ',';
+        }
+    }
+    printf("%s %.*s\n", what, (int)r, buf);
+}
+
+static int app(void) {
+    char buf[128], name[64];
+    said("files.ready", moy_files_ready(), NULL);
+    said("files.save", moy_files_save("docs", "probe", "# probe\n", 8, name, sizeof name), name);
+    said("files.count", moy_files_count("docs"), NULL);
+    said("files.list", moy_files_list("docs", buf, sizeof buf), buf);
+    said("files.load", moy_files_load("docs", "probe", buf, sizeof buf), buf);
+    said("files.load.other", moy_files_load("drawings", "x", buf, sizeof buf), NULL);
+    said("files.rename", moy_files_rename("docs", "probe", "Moved", name, sizeof name), name);
+    said("files.load.moved", moy_files_load("docs", "moved", buf, sizeof buf), buf);
+    said("files.delete", moy_files_delete("docs", "moved", buf, sizeof buf), buf);
+    said("files.count.after", moy_files_count("docs"), NULL);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     const char *verb = argc > 1 ? argv[1] : "args";
     if (strcmp(verb, "args") == 0) {
@@ -88,6 +126,9 @@ int main(int argc, char **argv) {
     }
     if (strcmp(verb, "files") == 0) {
         return files();
+    }
+    if (strcmp(verb, "app") == 0) {
+        return app();
     }
     if (strcmp(verb, "open") == 0 && argc > 2) {
         FILE *f = fopen(argv[2], "r");

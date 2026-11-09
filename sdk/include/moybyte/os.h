@@ -61,6 +61,127 @@ typedef struct {
 
 #include <errno.h>
 
+int32_t __moy_os_files_readable(void)
+    __attribute__((import_module("moybyte.os"), import_name("files_readable")));
+static inline int32_t moy_files_readable(void) {
+    int32_t r = __moy_os_files_readable();
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_ready(void)
+    __attribute__((import_module("moybyte.os"), import_name("files_ready")));
+static inline int32_t moy_files_ready(void) {
+    int32_t r = __moy_os_files_ready();
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_list(const char *kind, size_t kind_len, void *names, size_t names_cap)
+    __attribute__((import_module("moybyte.os"), import_name("files_list")));
+static inline int32_t moy_files_list(const char *kind, void *names, size_t names_cap) {
+    int32_t r = __moy_os_files_list(kind, kind ? __builtin_strlen(kind) : 0, names, names_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_count(const char *kind, size_t kind_len)
+    __attribute__((import_module("moybyte.os"), import_name("files_count")));
+static inline int32_t moy_files_count(const char *kind) {
+    int32_t r = __moy_os_files_count(kind, kind ? __builtin_strlen(kind) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_load(const char *kind, size_t kind_len, const char *name, size_t name_len, void *data, size_t data_cap)
+    __attribute__((import_module("moybyte.os"), import_name("files_load")));
+static inline int32_t moy_files_load(const char *kind, const char *name, void *data, size_t data_cap) {
+    int32_t r = __moy_os_files_load(kind, kind ? __builtin_strlen(kind) : 0, name, name ? __builtin_strlen(name) : 0, data, data_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_save(const char *kind, size_t kind_len, const char *name, size_t name_len, const void *data, size_t data_len, void *saved, size_t saved_cap)
+    __attribute__((import_module("moybyte.os"), import_name("files_save")));
+static inline int32_t moy_files_save(const char *kind, const char *name, const void *data, size_t data_len, void *saved, size_t saved_cap) {
+    int32_t r = __moy_os_files_save(kind, kind ? __builtin_strlen(kind) : 0, name, name ? __builtin_strlen(name) : 0, data, data_len, saved, saved_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_delete(const char *kind, size_t kind_len, const char *name, size_t name_len, void *trashed, size_t trashed_cap)
+    __attribute__((import_module("moybyte.os"), import_name("files_delete")));
+static inline int32_t moy_files_delete(const char *kind, const char *name, void *trashed, size_t trashed_cap) {
+    int32_t r = __moy_os_files_delete(kind, kind ? __builtin_strlen(kind) : 0, name, name ? __builtin_strlen(name) : 0, trashed, trashed_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_duplicate(const char *kind, size_t kind_len, const char *name, size_t name_len, void *copy, size_t copy_cap)
+    __attribute__((import_module("moybyte.os"), import_name("files_duplicate")));
+static inline int32_t moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap) {
+    int32_t r = __moy_os_files_duplicate(kind, kind ? __builtin_strlen(kind) : 0, name, name ? __builtin_strlen(name) : 0, copy, copy_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_rename(const char *kind, size_t kind_len, const char *name, size_t name_len, const char *title, size_t title_len, void *renamed, size_t renamed_cap)
+    __attribute__((import_module("moybyte.os"), import_name("files_rename")));
+static inline int32_t moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap) {
+    int32_t r = __moy_os_files_rename(kind, kind ? __builtin_strlen(kind) : 0, name, name ? __builtin_strlen(name) : 0, title, title ? __builtin_strlen(title) : 0, renamed, renamed_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_files_new_name(const char *kind, size_t kind_len, const char *title, size_t title_len, void *name, size_t name_cap)
+    __attribute__((import_module("moybyte.os"), import_name("files_new_name")));
+static inline int32_t moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap) {
+    int32_t r = __moy_os_files_new_name(kind, kind ? __builtin_strlen(kind) : 0, title, title ? __builtin_strlen(title) : 0, name, name_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_nav_open_app(const char *id, size_t id_len)
+    __attribute__((import_module("moybyte.os"), import_name("nav_open_app")));
+static inline int32_t moy_nav_open_app(const char *id) {
+    int32_t r = __moy_os_nav_open_app(id, id ? __builtin_strlen(id) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 int32_t __moy_os_prefs_get(const char *key, size_t key_len, void *json, size_t json_cap)
     __attribute__((import_module("moybyte.os"), import_name("prefs_get")));
 static inline int32_t moy_prefs_get(const char *key, void *json, size_t json_cap) {
@@ -160,6 +281,17 @@ static inline int32_t moy_open_with(const char *item, int32_t choose) {
     return (int)r;
 }
 
+int32_t __moy_os_share(const void *data, size_t data_len, const char *mime, size_t mime_len)
+    __attribute__((import_module("moybyte.os"), import_name("share")));
+static inline int32_t moy_share(const void *data, size_t data_len, const char *mime) {
+    int32_t r = __moy_os_share(data, data_len, mime, mime ? __builtin_strlen(mime) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 int32_t __moy_os_send(const char *app, size_t app_len, const char *name, size_t name_len, const char *args, size_t args_len)
     __attribute__((import_module("moybyte.os"), import_name("send")));
 static inline int moy_send(const char *app, const char *name, const char *args) {
@@ -237,10 +369,43 @@ static inline int32_t moy_cancel(int32_t id) {
     return (int)r;
 }
 
+int32_t __moy_os_pick(const char *mime, size_t mime_len, const char *mode, size_t mode_len)
+    __attribute__((import_module("moybyte.os"), import_name("pick")));
+static inline int32_t moy_pick(const char *mime, const char *mode) {
+    int32_t r = __moy_os_pick(mime, mime ? __builtin_strlen(mime) : 0, mode, mode ? __builtin_strlen(mode) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 int32_t __moy_os_log(int level, const char *text, size_t text_len)
     __attribute__((import_module("moybyte.os"), import_name("log")));
 static inline int moy_log(int level, const char *text) {
     int32_t r = __moy_os_log(level, text, text ? __builtin_strlen(text) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_item_read(int32_t item, void *data, size_t data_cap)
+    __attribute__((import_module("moybyte.os"), import_name("item_read")));
+static inline int32_t moy_item_read(int32_t item, void *data, size_t data_cap) {
+    int32_t r = __moy_os_item_read(item, data, data_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_item_write(int32_t item, const void *data, size_t data_len)
+    __attribute__((import_module("moybyte.os"), import_name("item_write")));
+static inline int32_t moy_item_write(int32_t item, const void *data, size_t data_len) {
+    int32_t r = __moy_os_item_write(item, data, data_len);
     if (r < 0) {
         errno = (int)-r;
         return -1;

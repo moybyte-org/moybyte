@@ -19,7 +19,14 @@
 // connection until the service ends; a "wake" carrying ["timers"] asks for
 // minute-long timers until the console answers FULL, printing how many it
 // got and that answer's errno, then cancels all but the first, which it keeps
-// until the service ends; a "bye" ends it, a "quit" returns
+// until the service ends; a "wake" carrying ["front"] listens
+// on "moy_open" (there, not at its start: beside its six names, a wake's
+// "moybyte.timer" and "moybyte.at" fill a process's eight) and asks for the
+// front three ways, printing each answer and its errno: the app "calc"
+// opened (nav_open_app, under `launch` and the front's gate), a document
+// shared and one picked; the pick reaches it as "moy_open" (handle, mime,
+// mode, name), whose item it reads, writes and reads again through its
+// handle, and a handle it was never given; a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -142,6 +149,31 @@ int main(void) {
                 undone += (int)moy_cancel(held[i]);
             }
             printf("uncap %d\n", undone);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"front\"]") == 0) {
+            int r = moy_on("moy_open", 1);
+            printf("on.moy_open %d errno %d\n", r, r < 0 ? errno : 0);
+            r = moy_nav_open_app("calc");
+            printf("nav.open_app %d errno %d\n", r, r < 0 ? errno : 0);
+            r = moy_share("# shared\n", 9, "text/markdown");
+            printf("share %d errno %d\n", r, r < 0 ? errno : 0);
+            r = moy_pick("text/markdown", "rw");
+            printf("pick %d errno %d\n", r, r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "moy_open") == 0) {
+            const char *args = m.b + sizeof m.ev;
+            int h = atoi(args + 1);
+            printf("moy_open %s\n", args);
+            char b[64];
+            int r = moy_item_read(h, b, sizeof b);
+            printf("item_read %.*s errno %d\n", r > 0 ? r - 1 : 0, b, r < 0 ? errno : 0);
+            r = moy_item_write(h, "# kept\n", 7);
+            printf("item_write %d errno %d\n", r, r < 0 ? errno : 0);
+            r = moy_item_read(h, b, sizeof b);
+            printf("item_read.again %.*s errno %d\n", r > 0 ? r - 1 : 0, b, r < 0 ? errno : 0);
+            r = moy_item_read(h + 1000, b, sizeof b);
+            printf("item_read.none %d errno %d\n", r, r < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0) {
             printf("after %d\n", (int)moy_after(0));

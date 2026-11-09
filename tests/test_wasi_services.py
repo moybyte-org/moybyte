@@ -12,6 +12,7 @@ command."""
 
 import json
 import os
+import re
 import shutil
 import time
 
@@ -325,6 +326,49 @@ def test_a_wasi_service_s_app_rows_answer_under_its_permissions(svc, perms):
         assert got == ["prefs.set -1 errno 2", "prefs.get  errno 2",
                        "clipboard.put_text -1 errno 2", "clipboard.text  errno 2",
                        "clipboard.short -1 errno 2", "open_with 0 errno 0"], got
+    assert s.stop(pid)
+
+
+@pytest.mark.parametrize("perms", [("launch", "front"), ()])
+def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms):
+    """moybyte.os `nav_open_app`, `share` and `pick` pass the front's gate
+    (runtime/system/front.py) as the service's process: `open_app` needs
+    `launch` (ACCES without), a document shared reaches the app that opens
+    it, and the picker goes up for a process holding `front`; the item
+    picked reaches the service as "moy_open" (moybyte.hand_item), its handle
+    what `item_read` and `item_write` take, and a handle it was never given
+    NOENT. In the background without `front`, the share and the pick wait
+    as the process's notification (its latest request), the picker not up."""
+    from runtime import intents as I
+    from runtime import notifications
+    ws, s, cart, peer = svc
+    notifications.NOTES.reset()
+    ws.carts_store.save_file("docs", "picked", "# picked\n", ws.carts_root)
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["front"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("pick ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    docs = ws.carts_store.list_files("docs", ws.carts_root)
+    if perms:
+        assert _texts(since, pid)[-3:] == [
+            "nav.open_app 1 errno 0", "share 1 errno 0", "pick 1 errno 0"]
+        assert "shared" in docs
+        assert I.INTENTS.picking is not None and I.INTENTS.picking[0] == pid
+        assert I.INTENTS.picked(I.INTENTS.picking[3].index("Documents/picked.md"))
+        assert _polled(s, lambda: any(t.startswith("item_read.none") for t in _texts(since, pid)))
+        got = _texts(since, pid)[-5:]
+        assert re.match(r'^moy_open \[[1-9][0-9]*, "text/markdown", "rw", "picked.md"\]$', got[0])
+        assert got[1:] == ["item_read # picked errno 0", "item_write 1 errno 0",
+                           "item_read.again # kept errno 0", "item_read.none -1 errno 44"], got
+        assert ws.carts_store.load_file("docs", "picked", ws.carts_root) == "# kept\n"
+    else:
+        assert _texts(since, pid)[-3:] == [
+            "nav.open_app -1 errno 2", "share 1 errno 0", "pick 1 errno 0"]   # WASI's ACCES
+        assert "shared" not in docs and I.INTENTS.picking is None
+        assert [(n.pid, n.summary) for n in notifications.NOTES.list
+                if n.then is not None] == [(pid, "Wants you to pick a file")]
     assert s.stop(pid)
 
 

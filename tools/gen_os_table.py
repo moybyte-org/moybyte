@@ -222,20 +222,23 @@ def wasi_rows(src):
 
 
 def wasi_call(r):
-    """Whether a "wasi" row is a console call: posted on the VM's queue and
-    answered by the scheduler's `_CALLS`, not served by the kernel or in C:
-    the moybyte module's own verb, so a row Python holds by name. A row it
-    does not (the device handles') is the door's Python half's alone."""
+    """Whether a "wasi" row is a console call: posted on the VM's queue as a
+    JSON array of texts and numbers and answered by the scheduler's
+    `_CALLS`, not served by the kernel or in C: the moybyte module's own
+    verb, so a row Python holds by name, over texts and numbers. A row it
+    does not hold (the device handles'), or one that carries bytes or an
+    answer's buffer (share, item_read), is the door's Python half's."""
     return ("c" not in r and role_of(r) == "moybyte" and r.get("server") != "c"
-            and bool(r.get("py")))
+            and bool(r.get("py")) and all(t in ("int", "str", "str?") for _n, t in params(r)))
 
 
 def wasi_role(r):
     """Whether a "wasi" row is an app row: its role table row run for the
     program's app run through the ROLE door, as a C program's is: any row
-    the kernel does not serve that is no console call (a moybyte row served
-    in C, and a console call row Python holds no name for, which the door's
-    Python half serves as the program's process)."""
+    the kernel does not serve that is no console call (a row served in C,
+    and a door row, which the door's Python half serves as the program's
+    process: the shell's servers' and the console calls no console call
+    carries)."""
     return "c" not in r and not wasi_call(r)
 
 
@@ -550,15 +553,11 @@ def check(src):
             raise TableError("%s's wasm or wasi: %r, %r" % (name, r.get("wasm"), r.get("wasi")))
         if r.get("wasi"):
             kernel = "c" in r and isinstance(r.get("elf"), int) and kind == "moybyte"
-            call = "c" not in r and "in" in r and role_of(r) == "moybyte" and (
-                r.get("server") == "call" or (r.get("server") == "python" and r.get("door")))
-            app = "c" not in r and (r.get("server") == "c" or (call and not wasi_call(r))) \
-                and bool(r.get("wasm"))
-            if not (kernel or call or app):
-                raise TableError("%s: a WASI import is a moybyte row the kernel serves, a "
-                                 "console call or an app row a compiled app imports" % name)
-            if call and wasi_call(r) and any(t not in ("int", "str", "str?") for _n, t in params(r)):
-                raise TableError("%s: a WASI console call takes texts and numbers" % name)
+            app = "c" not in r and bool(r.get("wasm")) and r.get("how") != "direct" and (
+                r.get("server") == "c" or bool(r.get("door")))
+            if not (kernel or app):
+                raise TableError("%s: a WASI import is a moybyte row the kernel serves, or a "
+                                 "row a compiled app imports served in C or by the door" % name)
             ps = parse(wasi_c(r))[2]
             if kernel and (parse(wasi_c(r))[0] not in ("int", "int32_t") or not all(
                     p.startswith("const char *") or p.startswith(("int ", "int32_t "))
