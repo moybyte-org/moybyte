@@ -119,12 +119,29 @@ void moy_app_vm_stop(void);
 // Grant `roles` to `id` as `cls`: OK and the handle, BAD (an empty or long id
 // or namespace, a kind out of range), FULL or NOMEM. A row of the same id,
 // class and owner is reused, its fields replaced: the same handle back. The
-// owner keeps two runs of one app apart: a service's grant is made with its
-// pid as the owner, so the app's foreground run, owner 0, holds a row of its
-// own and ending either leaves the other's.
+// owner keeps two runs of one app apart: a run's grant is made with its pid
+// as the owner (a foreground run's and a service's alike), so each run of an
+// app holds a row of its own and ending one leaves the others'.
 int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
                   uint32_t roles, int kind, const char *ns, size_t ns_n,
                   uint32_t owner, uint32_t *h);
+
+// The roles a foreground run holds beside its permissions' (the Player's
+// needs, runtime/shell/system_api.py): a run row holding the surface is a
+// foreground run's, and a service's holds neither.
+#define MOY_APP_RUN_BASE ((1u << MOY_ROLE_SURFACE) | (1u << MOY_ROLE_THEME))
+
+// The app `id`'s permissions changed: every live RUN row of it, whatever its
+// owner, recomputed from what its kind of run is now entitled to. A
+// foreground run's row (one holding the surface) gets `roles`, what its
+// permissions name for the app's tier, and MOY_APP_RUN_BASE; a service's
+// gets `svc`, what they name for its service's tier. Both take `kind`, the
+// files kind (moy_app_policy_roles). A run's next call answers from its
+// row, so a permission turned off is absent at it. The rows it recomputed,
+// or -BAD for an empty or long id, a mask past the roles or a kind out of
+// range.
+int moy_app_regrant(moy_appabi_t *a, const char *id, size_t n, uint32_t roles, uint32_t svc,
+                    int kind);
 int moy_app_end(moy_appabi_t *a, uint32_t h);      // OK or STALE
 int moy_app_grant_get(const moy_appabi_t *a, uint32_t h, const moy_grant_t **g);
 uint32_t moy_app_grants(const moy_appabi_t *a);    // live grants

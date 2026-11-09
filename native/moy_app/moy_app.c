@@ -302,6 +302,27 @@ int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
     return MOY_APP_OK;
 }
 
+int moy_app_regrant(moy_appabi_t *a, const char *id, size_t n, uint32_t roles, uint32_t svc,
+                    int kind) {
+    if (n == 0u || n > MOY_APP_ID_MAX || kind < -1 || kind >= (int)MOY_APP_KINDS
+        || roles >= (1u << MOY_ROLE_N) || svc >= (1u << MOY_ROLE_N)) {
+        return -MOY_APP_BAD;
+    }
+    int got = 0;
+    for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
+        uint32_t at = moy_htab_at(a->grants, s);
+        moy_grant_t *r = at != 0u ? grant_row(a, at) : NULL;
+        if (r == NULL || r->cls != MOY_GRANT_RUN || r->id_len != n
+            || memcmp(r->id, id, n) != 0) {
+            continue;
+        }
+        r->roles = (r->roles & (1u << MOY_ROLE_SURFACE)) != 0u ? roles | MOY_APP_RUN_BASE : svc;
+        r->kind = (int8_t)kind;
+        got++;
+    }
+    return got;
+}
+
 int moy_app_end(moy_appabi_t *a, uint32_t h) {
     return moy_htab_release(a->grants, h) == MOY_HTAB_OK ? MOY_APP_OK : MOY_APP_STALE;
 }

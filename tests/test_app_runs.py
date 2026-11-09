@@ -238,10 +238,10 @@ def test_a_lua_app_and_a_compiled_app_at_once_each_reach_only_their_own(tmp_path
 
 def test_a_permission_turned_off_is_absent_at_the_runs_next_call(tmp_path):
     """The run's copy of its grant names the grant row, which is the
-    authority at every call: Settings turning prefs off makes the app's next
-    grant (the same row: one per app id) hold no prefs, so a run made before
-    gets no value at its very next call, and a Lua state opened after has no
-    `prefs` at all (nil, as Python's None)."""
+    authority at every call: Settings turning prefs off recomputes every run
+    row of the app (app_perms.regrant), so a run made before gets no value at
+    its very next call, and a Lua state opened after has no `prefs` at all
+    (nil, as Python's None)."""
     _binding_or_skip()
     cart = _module(tmp_path)
     src = """
@@ -263,7 +263,7 @@ function _draw() cls(0) end
         ws.open()
         _frame(ws)
         assert ws.run.player._lua.get_global("NAME") == "nil"
-        assert ws.run.player._app_ctx.grant == g, "the app's grant is one row per app id"
+        assert ws.run.player._app_ctx.grant != g, "each run of an app holds a row of its own"
         assert calls.get("k") == DENIED, "a run kept a role Settings turned off"
     finally:
         c.close()

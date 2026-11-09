@@ -337,7 +337,10 @@ nothing (owner, 2026-11-03)**: accepting the prompt installs the app with
 every permission it lists, denying installs nothing. Any single permission
 can be turned off later in Settings (About → App permissions,
 `runtime/system/perms_ui.py`), and from the next launch the app sees it
-absent, or is refused with a message if it requires it. An update that adds
+absent, or is refused with a message if it requires it; a run already live,
+foreground or service, has every run grant of its app recomputed at once
+(`app_perms.regrant`), so its next call to a role the permission names
+answers `DENIED`. An update that adds
 a permission prompts again, all or nothing; one that adds none, and a cart
 that asks for nothing a game does not, install unasked.
 

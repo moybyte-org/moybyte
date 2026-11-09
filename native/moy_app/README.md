@@ -89,9 +89,12 @@ permissions name, which the Player makes (`app.run`) and the run's open
 copies into what owns the run (a Lua state's registry, a compiled run's
 per-run state in its engine's glue). Every call the run makes is answered
 from that copy and no other, so two runs at once are two grants. The grant
-row stays the authority: one app id has one RUN row, so a launch after
-Settings turned a permission off re-makes the row the earlier run's copy
-names, and that copy's next call to the role answers `DENIED`. A copy of a
+row stays the authority: each run holds a RUN row of its own, its pid the
+row's owner (a foreground run's and a service's alike), and when Settings
+turns a permission off or on every live RUN row of the app is recomputed
+from what its kind of run is now entitled to (`moy_app_regrant`, reached
+through `app_perms.regrant`), so a run's next call to a role turned off
+answers `DENIED`. A copy of a
 grant that ended answers `STALE`, and one whose state was freed reads as no
 run (`moy_app_run_live`, by the state's serial). A compiled app the kernel
 runs with no VM gets the run the Player held in the kernel's state across

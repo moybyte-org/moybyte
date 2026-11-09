@@ -473,16 +473,51 @@ def _entry(v):
     return {"perms": perms, "off": off}
 
 
+def regrant(ws, aid):
+    """App `aid`'s permissions changed (Settings' switch, `perm on|off`):
+    every live run grant of it, its foreground runs' and its services'
+    whatever their pids, recomputed from what its cart's permissions now
+    grant each kind of run (native/moy_app's moy_app_regrant), so a
+    permission turned off is absent at a running program's next call. The
+    one door a change of what an app may reach takes. The rows recomputed."""
+    app = getattr(ws, "app_abi", None)
+    consent = getattr(ws, "consent", None)
+    carts = getattr(ws, "carts", None)
+    if app is None or consent is None or carts is None:
+        return 0
+    cart = None
+    for c in carts.all or ():
+        if app_id(c) == aid:
+            cart = c
+            break
+    if cart is None:
+        return 0
+    roles, kind = _moy_app.policy(consent.check(cart)[0])
+    svc = roles
+    if cart.get("type") != "service":
+        try:
+            import scheduler
+        except ImportError:  # host: the runtime package
+            from runtime import scheduler
+        got = scheduler.entry_of(cart)
+        if got is not None and got[1] != tier_of(cart):
+            # its service runs on a tier of its own, which may grant less
+            own = dict(cart, runtime=got[1], native=True if got[1] == "elf" else None)
+            svc = _moy_app.policy(consent.check(own)[0])[0]
+    return app.regrant(aid, roles, svc, kind)
+
+
 class Consent:
     """The consent records over the console's system store (`Settings`),
     read once and written on every change, and the checks of this console:
     `services()` answers the services it holds."""
 
-    def __init__(self, store, services=None, key=KEY, saving=None):
+    def __init__(self, store, services=None, key=KEY, saving=None, changed=None):
         self._store = store
         self._services = services
         self._key = key
         self._saving = saving         # () -> the store's stepped save (SystemStore.save_steps)
+        self._changed = changed       # (aid) -> None: an app's permissions changed (`regrant`)
         self._d = None
 
     def check(self, cart, install=False):
@@ -570,6 +605,8 @@ class Consent:
             return
         self._all()[aid] = {"perms": rec["perms"], "off": off}
         self._put()
+        if self._changed is not None:
+            self._changed(aid)
 
     def is_on(self, aid, perm):
         rec = self.get(aid)

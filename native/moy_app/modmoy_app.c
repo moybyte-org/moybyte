@@ -6,6 +6,7 @@
 //   kernel(fresh)        a view of the kernel's (moy_app_kernel), whose rows
 //                        are the kernel's settings; `fresh` ends RUN grants
 //   app.grant(id, roles, kind=None, ns=None, run=False) -> handle
+//   app.regrant(id, roles, svc, kind=None) -> rows   every RUN row of `id` recomputed
 //   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
 //   app.surface_write(canvas, w, h, fs, cs, windowed, content, ox=0, oy=0)
 //   app.bind_pointer(pointer), app.theme_write(name, variant, colors) -> gen,
@@ -249,6 +250,27 @@ static mp_obj_t app_grant(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     return mp_obj_new_int_from_uint(h);
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(app_grant_obj, 3, app_grant);
+
+static mp_obj_t app_regrant(size_t n_args, const mp_obj_t *args) {
+    moy_appabi_t *a = app_of(args[0]);
+    size_t n;
+    const char *id = str_of(args[1], &n);
+    int kind = -1;
+    if (n_args > 4 && args[4] != mp_const_none) {
+        size_t kn;
+        const char *k = str_of(args[4], &kn);
+        kind = moy_app_kind_of(k, kn);
+        if (kind < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("unknown files kind"));
+        }
+    }
+    int got = moy_app_regrant(a, id, n, roles_mask(args[2]), roles_mask(args[3]), kind);
+    if (got < 0) {
+        check(-got);
+    }
+    return MP_OBJ_NEW_SMALL_INT(got);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_regrant_obj, 4, 5, app_regrant);
 
 static uint32_t grant_arg(mp_obj_t h) {
     mp_int_t v = mp_obj_get_int(h);
@@ -543,6 +565,7 @@ static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_write), MP_ROM_PTR(&app_theme_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_serve), MP_ROM_PTR(&app_serve_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant), MP_ROM_PTR(&app_grant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_regrant), MP_ROM_PTR(&app_regrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&app_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant_id), MP_ROM_PTR(&app_grant_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&app_count_obj) },

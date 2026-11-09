@@ -50,9 +50,11 @@ open picture, the clipboard's 4 KiB of text); a shell row calls the server the
 console registers for its role (runtime/shell/shell_servers.py) with the grant first.
 A shipped app's grant is idempotent by its id, so a start re-registering the
 app finds the row it had; a user app's (`run=True`) is its run's, ended when
-the run ends (`AppContext.end`). A service's run grant names its pid as the
-grant's `owner`, so it is a row apart from its app's foreground run's, over
-the same files kind and the same prefs namespace (runtime/system/scheduler.py).
+the run ends (`AppContext.end`). A run grant names the run's pid as the
+grant's `owner`, so a service's row is apart from its app's foreground run's,
+over the same files kind and the same prefs namespace
+(runtime/system/scheduler.py), and a permission Settings changes recomputes
+every one of them (`app_perms.regrant`).
 
 `ctx.files` and `ctx.carts` are deliberately two roles and not one. Apps use
 the first almost exclusively (a document is a user file); an app that writes a

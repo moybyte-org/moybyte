@@ -109,6 +109,7 @@ _SIGS = (
     ("moy_app_fresh", [_P], None),
     ("moy_app_grant", [_P, _PCHAR, _SIZE, c.c_uint8, _U32, c.c_int, _PCHAR,
                        _SIZE, _U32, _PU32], c.c_int),
+    ("moy_app_regrant", [_P, _PCHAR, _SIZE, _U32, _U32, c.c_int], c.c_int),
     ("moy_app_end", [_P, _U32], c.c_int),
     ("moy_app_grants", [_P], _U32),
     ("moy_app_perm_of", [c.c_int], _PCHAR),
@@ -429,6 +430,22 @@ def binding(sanitize=False):
                                      mask_of(roles), k, nsb, len(nsb), owner,
                                      c.byref(h)))
             return h.value
+
+        def regrant(self, app_id, roles, svc, kind=None):
+            """Every RUN row of `app_id` recomputed: a foreground run's from
+            `roles`, a service's from `svc`, both with files `kind`
+            (moy_app_regrant). The rows it recomputed."""
+            idb = _str(app_id)
+            k = -1
+            if kind is not None:
+                kb = _str(kind)
+                k = lib.moy_app_kind_of(kb, len(kb))
+                if k < 0:
+                    raise ValueError("unknown files kind")
+            got = lib.moy_app_regrant(self._p, idb, len(idb), mask_of(roles), mask_of(svc), k)
+            if got < 0:
+                _check(-got)
+            return got
 
         def end(self, h):
             return lib.moy_app_end(self._p, h) == OK

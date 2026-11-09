@@ -1185,7 +1185,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.app_guard = CrashGuard(self.system)
         self.consent = _app_perms.Consent(self.system,
                                           lambda: _app_perms.services(self),
-                                          saving=self.prefs.save_steps)
+                                          saving=self.prefs.save_steps,
+                                          changed=lambda aid: _app_perms.regrant(self, aid))
         self.wallpaper_guard = CrashGuard(self.system, key=WALLPAPER_KEY)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each

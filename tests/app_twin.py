@@ -268,6 +268,25 @@ class App:
                 return h
         raise OSError(_ENOSPC, "the grant table is full")
 
+    def regrant(self, app_id, roles, svc, kind=None):
+        mask, smask = set(), set()
+        for got, rs in ((mask, roles), (smask, svc)):
+            for r in rs:
+                if r not in _ROLES:
+                    raise ValueError("unknown app context role: " + str(r))
+                got.add(r)
+        if kind is not None and kind not in _KINDS:
+            raise ValueError("unknown files kind")
+        if not app_id or len(app_id.encode()) > ID_MAX:
+            raise ValueError("an argument the role refuses")
+        got = 0
+        for g in self._grants.values():
+            if g[0] == app_id and g[1]:
+                g[2] = mask | {"surface", "theme"} if "surface" in g[2] else set(smask)
+                g[3] = kind
+                got += 1
+        return got
+
     def end(self, h):
         if h not in self._grants:
             return False

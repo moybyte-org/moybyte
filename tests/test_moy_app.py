@@ -285,6 +285,37 @@ def run(sp, ap, say, mi, root):
     rows.delete("paint_doc_kind")
     say("tokens", list(ap.tokens()))
 
+    # -- a permission changed: every run row of the app recomputed, a
+    # foreground run's keeping its surface and theme, a service's neither
+    fg = app.grant("local.re", ("prefs", "clipboard", "surface", "theme"), run=True, owner=3)
+    svc = app.grant("local.re", ("prefs", "clipboard"), run=True, owner=4)
+    other = app.grant("local.re2", ("prefs",), run=True, owner=5)
+    say("regrant", app.regrant("local.re", ("clipboard",), ("clipboard", "nav")),
+        app.regrant("local.none", (), ()))
+    for h in (fg, svc, other):
+        for mk, call in ((ap.Prefs, lambda o: o.get("k")),
+                         (ap.Clipboard, lambda o: o.text()),
+                         (ap.Theme, lambda o: o.token(0))):
+            try:
+                call(mk(app, h))
+                say("held")
+            except ValueError as e:
+                say("not held", str(e))
+    say("regrant on", app.regrant("local.re", ("prefs", "clipboard"), ("prefs",)))
+    try:
+        ap.Prefs(app, svc).get("k")
+        say("held")
+    except ValueError as e:
+        say("not held", str(e))
+    for bad in (("", ()), ("x" * 64, ()), ("local.re", ("nope",))):
+        try:
+            app.regrant(bad[0], bad[1], ())
+            say("regranted", bad[0][:4])
+        except ValueError:
+            say("refused", bad[0][:4])
+    for h in (fg, svc, other):
+        app.end(h)
+
     # -- denied and stale
     n = app.grant("nav_only", ("nav",))
     for mk, call in ((ap.Prefs, lambda o: o.get("k")),
