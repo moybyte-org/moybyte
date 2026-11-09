@@ -239,7 +239,7 @@ VENDOR_KEY = "moybyte"
 VENDOR_FIELDS = ("type", "system", "order", "permissions", "required", "handles", "receives",
                  "achievements", "config", "edit", "targets", "app", "assets",
                  "graduated", "glass", "pictures", "animates", "native", "audio_ring",
-                 "entries")
+                 "entries", "wasi")
 
 
 def vendor(man):

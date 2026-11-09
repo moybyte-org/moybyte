@@ -806,6 +806,9 @@ def _load(path, whole, folder=None):
             # module `main.<chip>.elf` for each, beside the manifest
             # (tools/elf_cart.py); None for every other cart.
             "native": ven.get("native") if isinstance(ven.get("native"), list) else None,
+            # A compiled app that is a WASI command the Player runs, drawing
+            # with the toolkit it links (runtime/run/wasi_run.py).
+            "wasi": ven.get("wasi") is True,
             # The MIME types the cart's app opens (docs/os_2026-11/
             # between_apps.md section 1): what `open_with` and `share` route by.
             "handles": ven.get("handles", []),

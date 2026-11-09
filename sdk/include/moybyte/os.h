@@ -75,7 +75,7 @@ static inline int32_t moy_files_readable(void) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_ready(void)
@@ -86,7 +86,7 @@ static inline int32_t moy_files_ready(void) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_list(const char *kind, size_t kind_len, void *names, size_t names_cap)
@@ -97,7 +97,7 @@ static inline int32_t moy_files_list(const char *kind, void *names, size_t names
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_count(const char *kind, size_t kind_len)
@@ -108,7 +108,7 @@ static inline int32_t moy_files_count(const char *kind) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_load(const char *kind, size_t kind_len, const char *name, size_t name_len, void *data, size_t data_cap)
@@ -119,7 +119,7 @@ static inline int32_t moy_files_load(const char *kind, const char *name, void *d
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_save(const char *kind, size_t kind_len, const char *name, size_t name_len, const void *data, size_t data_len, void *saved, size_t saved_cap)
@@ -130,7 +130,7 @@ static inline int32_t moy_files_save(const char *kind, const char *name, const v
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_delete(const char *kind, size_t kind_len, const char *name, size_t name_len, void *trashed, size_t trashed_cap)
@@ -141,7 +141,7 @@ static inline int32_t moy_files_delete(const char *kind, const char *name, void 
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_duplicate(const char *kind, size_t kind_len, const char *name, size_t name_len, void *copy, size_t copy_cap)
@@ -152,7 +152,7 @@ static inline int32_t moy_files_duplicate(const char *kind, const char *name, vo
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_rename(const char *kind, size_t kind_len, const char *name, size_t name_len, const char *title, size_t title_len, void *renamed, size_t renamed_cap)
@@ -163,7 +163,7 @@ static inline int32_t moy_files_rename(const char *kind, const char *name, const
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_files_new_name(const char *kind, size_t kind_len, const char *title, size_t title_len, void *name, size_t name_cap)
@@ -174,7 +174,7 @@ static inline int32_t moy_files_new_name(const char *kind, const char *title, vo
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_nav_open_app(const char *id, size_t id_len)
@@ -185,7 +185,7 @@ static inline int32_t moy_nav_open_app(const char *id) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_prefs_get(const char *key, size_t key_len, void *json, size_t json_cap)
@@ -196,7 +196,7 @@ static inline int32_t moy_prefs_get(const char *key, void *json, size_t json_cap
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_prefs_set(const char *key, size_t key_len, const char *json, size_t json_len)
@@ -207,7 +207,7 @@ static inline int32_t moy_prefs_set(const char *key, const char *json) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_prefs_clear(const char *key, size_t key_len)
@@ -218,7 +218,7 @@ static inline int32_t moy_prefs_clear(const char *key) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_clipboard_put_text(const char *text, size_t text_len)
@@ -229,7 +229,7 @@ static inline int32_t moy_clipboard_put_text(const char *text) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_clipboard_text(void *text, size_t text_cap)
@@ -240,7 +240,7 @@ static inline int32_t moy_clipboard_text(void *text, size_t text_cap) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_clipboard_kind(void)
@@ -251,7 +251,7 @@ static inline int32_t moy_clipboard_kind(void) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_clipboard_seq(void)
@@ -262,7 +262,7 @@ static inline int32_t moy_clipboard_seq(void) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_notify(const char *summary, size_t summary_len, const char *body, size_t body_len)
@@ -273,7 +273,7 @@ static inline int32_t moy_notify(const char *summary, const char *body) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_open_with(const char *item, size_t item_len, int32_t choose)
@@ -284,7 +284,7 @@ static inline int32_t moy_open_with(const char *item, int32_t choose) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_share(const void *data, size_t data_len, const char *mime, size_t mime_len)
@@ -295,7 +295,7 @@ static inline int32_t moy_share(const void *data, size_t data_len, const char *m
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_send(const char *app, size_t app_len, const char *name, size_t name_len, const char *args, size_t args_len)
@@ -317,7 +317,7 @@ static inline int32_t moy_award(const char *id) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_progress(const char *id, size_t id_len, int32_t value)
@@ -328,7 +328,7 @@ static inline int32_t moy_progress(const char *id, int32_t value) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_on(const char *name, size_t name_len, int on)
@@ -350,7 +350,7 @@ static inline int32_t moy_every(int32_t ms) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_after(int32_t ms)
@@ -361,7 +361,7 @@ static inline int32_t moy_after(int32_t ms) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_cancel(int32_t id)
@@ -372,7 +372,7 @@ static inline int32_t moy_cancel(int32_t id) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_pick(const char *mime, size_t mime_len, const char *mode, size_t mode_len)
@@ -383,7 +383,7 @@ static inline int32_t moy_pick(const char *mime, const char *mode) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_log(int level, const char *text, size_t text_len)
@@ -405,7 +405,7 @@ static inline int32_t moy_item_read(int32_t item, void *data, size_t data_cap) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_item_write(int32_t item, const void *data, size_t data_len)
@@ -416,7 +416,7 @@ static inline int32_t moy_item_write(int32_t item, const void *data, size_t data
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_at(int32_t t)
@@ -427,7 +427,7 @@ static inline int32_t moy_at(int32_t t) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_service_start(void)
@@ -438,7 +438,7 @@ static inline int32_t moy_service_start(void) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_service_stop(void)
@@ -449,7 +449,7 @@ static inline int32_t moy_service_stop(void) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_service_running(void)
@@ -460,7 +460,7 @@ static inline int32_t moy_service_running(void) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_random(int32_t n, void *data, size_t data_cap)
@@ -471,7 +471,7 @@ static inline int32_t moy_random(int32_t n, void *data, size_t data_cap) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap)
@@ -482,7 +482,7 @@ static inline int32_t moy_sha256(const void *data, size_t data_len, void *digest
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap)
@@ -493,7 +493,7 @@ static inline int32_t moy_hmac_sha256(const void *key, size_t key_len, const voi
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap)
@@ -504,7 +504,7 @@ static inline int32_t moy_aes_gcm_seal(const void *key, size_t key_len, const vo
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap)
@@ -515,7 +515,7 @@ static inline int32_t moy_aes_gcm_open(const void *key, size_t key_len, const vo
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap)
@@ -526,7 +526,7 @@ static inline int32_t moy_x25519(const void *secret, size_t secret_len, const vo
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_dev_open(const char *name, size_t name_len, const char *cfg, size_t cfg_len)
@@ -537,7 +537,7 @@ static inline int32_t moy_dev_open(const char *name, const char *cfg) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_dev_close(int32_t h)
@@ -548,7 +548,7 @@ static inline int32_t moy_dev_close(int32_t h) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_dev_read(int32_t h, void *data, size_t data_cap)
@@ -559,7 +559,7 @@ static inline int32_t moy_dev_read(int32_t h, void *data, size_t data_cap) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_dev_write(int32_t h, const void *data, size_t data_len)
@@ -570,7 +570,7 @@ static inline int32_t moy_dev_write(int32_t h, const void *data, size_t data_len
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap)
@@ -581,7 +581,7 @@ static inline int32_t moy_dev_xfer(int32_t h, const void *data, size_t data_len,
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_dev_set(int32_t h, const char *cfg, size_t cfg_len)
@@ -592,7 +592,7 @@ static inline int32_t moy_dev_set(int32_t h, const char *cfg) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_dev_get(int32_t h, const char *what, size_t what_len)
@@ -603,7 +603,7 @@ static inline int32_t moy_dev_get(int32_t h, const char *what) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap)
@@ -614,7 +614,7 @@ static inline int32_t moy_ed25519_public(const void *secret, size_t secret_len, 
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap)
@@ -625,7 +625,7 @@ static inline int32_t moy_ed25519_sign(const void *secret, size_t secret_len, co
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len)
@@ -636,7 +636,7 @@ static inline int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const 
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_status_show(const char *icon, size_t icon_len, int32_t state, int32_t order)
@@ -647,7 +647,7 @@ static inline int32_t moy_status_show(const char *icon, int32_t state, int32_t o
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_status_state(int32_t item, int32_t state)
@@ -658,7 +658,7 @@ static inline int32_t moy_status_state(int32_t item, int32_t state) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_status_panel(int32_t item, const char *rows, size_t rows_len)
@@ -669,7 +669,7 @@ static inline int32_t moy_status_panel(int32_t item, const char *rows) {
         errno = (int)-r;
         return -1;
     }
-    return (int)r;
+    return (int32_t)r;
 }
 
 int32_t __moy_os_status_remove(int32_t item)
@@ -680,7 +680,51 @@ static inline int32_t moy_status_remove(int32_t item) {
         errno = (int)-r;
         return -1;
     }
+    return (int32_t)r;
+}
+
+int32_t __moy_os_screen(int *w, int *h)
+    __attribute__((import_module("moybyte.os"), import_name("screen")));
+static inline int moy_screen(int *w, int *h) {
+    int32_t r = __moy_os_screen(w, h);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
     return (int)r;
+}
+
+int32_t __moy_os_present(const void *px, size_t n)
+    __attribute__((import_module("moybyte.os"), import_name("present")));
+static inline int moy_present(const void *px, size_t n) {
+    int32_t r = __moy_os_present(px, n);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_ui_pull(uint32_t have, void *buf, size_t cap)
+    __attribute__((import_module("moybyte.os"), import_name("ui_pull")));
+static inline uint32_t moy_ui_pull(uint32_t have, void *buf, size_t cap) {
+    int32_t r = __moy_os_ui_pull(have, buf, cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return 0;
+    }
+    return (uint32_t)r;
+}
+
+int32_t __moy_os_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap)
+    __attribute__((import_module("moybyte.os"), import_name("ui_font_pull")));
+static inline uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap) {
+    int32_t r = __moy_os_ui_font_pull(gen, font, buf, cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return 0;
+    }
+    return (uint32_t)r;
 }
 
 #else

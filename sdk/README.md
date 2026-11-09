@@ -96,8 +96,11 @@ standing only where it lists the reason.
   a screen-sized buffer and puts a libmoy canvas over it, and `moy_present`
   hands the screen over. It includes `frame.h` and libmoy's `moy.h`.
 - `include/moybyte/ui.h` (generated): the public UI API for a native app
-  (a manifest of type `app`), every `ui` row under app.h's name and
-  signature, answered inline by the toolkit the app links:
+  (a manifest of type `app`) and a WASI app (type `app` with `"wasi": true`,
+  `runtime/run/wasi_run.py`), every `ui` row under app.h's name and
+  signature, answered inline by the toolkit the app links (for WASI the same
+  sources built for wasm32 by `tools/wasm_cart.py`'s `libmoyui`, the four
+  rows its `moybyte.os` imports):
   `src/moyui_link.c` and `native/moy_ui` with its RUN face, built into
   `libmoyui.a` (`tools/elf_cart.py`'s `libmoyui`, libmoy at RGB565 in it),
   which an app's module links before `libmoyos.a`. `moy_ui_link_frame`

@@ -14,6 +14,7 @@
 
 #include "moy_wasi.h"
 #include "moy_evq.h"
+#include "moy_screen_slot.h"
 #include "moy_sh_board.h"
 #include "moy_log.h"
 #include "moy_sh_prog.h"
@@ -198,6 +199,7 @@ static uint16_t wasi_errno(int e) {
         case EMFILE: return W_MFILE;
         case ENAMETOOLONG: return W_NAMETOOLONG;
         case ENOENT: return W_NOENT;
+        case ENODEV: return W_NODEV;
         case ENOMEM: return W_NOMEM;
         case ENOSPC: return W_NOSPC;
         case ENOSYS: return W_NOSYS;
@@ -778,6 +780,62 @@ static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint
     moy_log_write(level < 0 || level >= MOY_LOG_LEVELS ? MOY_LOG_INFO : level, w->pid, text,
                   text_n);
     return 0;
+}
+
+// THE SCREEN (screen, present): a WASI app in the Player draws a screen of
+// its own, handed over whole into its slot (moy_screen_slot.h), which its
+// runner opened (runtime/run/wasi_run.py). A present waits while the console
+// holds the last frame: not its wake's run, as a call's wait is not. THE
+// THEME (ui_pull, ui_font_pull): the console's theme block and the fonts it
+// names, for the toolkit the program links (moy_ui.h's moy_ui_theme_pull),
+// weak here, so an image without the toolkit answers none.
+
+uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap) __attribute__((weak));
+uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap)
+    __attribute__((weak));
+
+static int32_t w_os_screen(wasm_exec_env_t e, int32_t *wp, int32_t *hp) {
+    moy_wasi_t *w = os_run(e);
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst(e);
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    if (!wasm_runtime_validate_native_addr(inst, wp, sizeof(int32_t))
+        || !wasm_runtime_validate_native_addr(inst, hp, sizeof(int32_t))) {
+        return -(int32_t)W_FAULT;
+    }
+    int sw, sh, depth;
+    if (moy_screen_slot_size(w->pid, &sw, &sh, &depth) != 0) {
+        return -(int32_t)W_NODEV;
+    }
+    *wp = sw;
+    *hp = sh;
+    return 0;
+}
+
+static int32_t w_os_present(wasm_exec_env_t e, const void *px, uint32_t n) {
+    moy_wasi_t *w = os_run(e);
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    int64_t t0 = mono_us();
+    w->calling = 1;
+    int r = moy_screen_slot_present(w->pid, px, n);
+    w->calling = 0;
+    w->hopped_us += mono_us() - t0;
+    return r < 0 ? -(int32_t)wasi_errno(-r) : 0;
+}
+
+static int32_t w_os_ui_pull(wasm_exec_env_t e, int32_t have, void *buf, uint32_t cap) {
+    (void)e;
+    return moy_ui_theme_pull != NULL ? (int32_t)moy_ui_theme_pull((uint32_t)have, buf, cap) : 0;
+}
+
+static int32_t w_os_ui_font_pull(wasm_exec_env_t e, int32_t gen, int32_t font, void *buf,
+                                 uint32_t cap) {
+    (void)e;
+    return moy_ui_theme_font != NULL
+               ? (int32_t)moy_ui_theme_font((uint32_t)gen, (uint32_t)font, buf, cap) : 0;
 }
 
 // THE CONSOLE CALLS (moy_wasi_os_rows.h's bodies: notify, award, progress,

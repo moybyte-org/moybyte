@@ -1175,6 +1175,13 @@ class WasmRuntime:
         self.ws = ws
 
     def __call__(self, ns, src):
+        cart = getattr(self.ws, "cart", None) or {}
+        if cart.get("wasi"):
+            try:
+                from wasi_run import WasiApp
+            except ImportError:                      # the host: the runtime package
+                from runtime.wasi_run import WasiApp
+            return WasiApp(self, self.ws, cart, ns.get("_moy_app"))
         return WasmRun(self.ws, ns, src)
 
     def footprint(self, cart):
@@ -1348,6 +1355,15 @@ class WasmRuntime:
         """(linear memory bytes, its wakes' cost in us) of live service
         `pid`, or None once it has ended."""
         return _moy_wasm.service_info(pid)
+
+    def keep(self, pid):
+        """Service `pid` made a Player app's run (runtime/run/wasi_run.py):
+        the reap leaves its end to its stop. Whether there is one."""
+        return _moy_wasm.service_keep(pid)
+
+    def done(self, pid):
+        """Whether service `pid`'s `_start` has returned."""
+        return _moy_wasm.service_done(pid)
 
 
 def make_wasm_runtime(ws):

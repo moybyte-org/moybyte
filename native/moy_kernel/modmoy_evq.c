@@ -42,6 +42,7 @@
 #include "py/objstr.h"
 
 #include "moy_evq.h"
+#include "moy_screen_slot.h"
 #include "moy_super.h"
 #include "moy_vmq.h"
 
@@ -143,6 +144,50 @@ static mp_obj_t ev_queued(mp_obj_t pid) {
     return MP_OBJ_NEW_SMALL_INT(moy_evq_queued(mp_obj_get_int(pid)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ev_queued_obj, ev_queued);
+
+// The screen slots (moy_screen_slot.h). screen_open(pid, w, h, depth) -> 0
+// or an errno negated; screen_close(pid); screen_frame(pid, held, pressed,
+// ms, max_ms, words=None) -> the frame call's mask, `words` an array('i');
+// screen_pixels(pid) -> a memoryview of the slot's bytes, or None.
+static mp_obj_t ev_screen_open(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    return MP_OBJ_NEW_SMALL_INT(moy_screen_slot_open(
+        (uint32_t)mp_obj_get_int(args[0]), mp_obj_get_int(args[1]), mp_obj_get_int(args[2]),
+        mp_obj_get_int(args[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_screen_open_obj, 4, 4, ev_screen_open);
+
+static mp_obj_t ev_screen_close(mp_obj_t pid) {
+    moy_screen_slot_close((uint32_t)mp_obj_get_int(pid));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_screen_close_obj, ev_screen_close);
+
+static mp_obj_t ev_screen_frame(size_t n_args, const mp_obj_t *args) {
+    const int32_t *in = NULL;
+    int n_in = 0;
+    if (n_args > 5 && args[5] != mp_const_none) {
+        mp_buffer_info_t b;
+        mp_get_buffer_raise(args[5], &b, MP_BUFFER_READ);
+        in = (const int32_t *)b.buf;
+        n_in = (int)(b.len / sizeof(int32_t));
+    }
+    return MP_OBJ_NEW_SMALL_INT(moy_screen_slot_frame(
+        (uint32_t)mp_obj_get_int(args[0]), (uint32_t)mp_obj_get_int(args[1]),
+        (uint32_t)mp_obj_get_int(args[2]), (uint32_t)mp_obj_get_int(args[3]), in, n_in,
+        (uint32_t)mp_obj_get_int(args[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_screen_frame_obj, 5, 6, ev_screen_frame);
+
+static mp_obj_t ev_screen_pixels(mp_obj_t pid) {
+    int w = 0, h = 0, depth = 0;
+    const uint8_t *px = moy_screen_slot_pixels((uint32_t)mp_obj_get_int(pid), &w, &h, &depth);
+    if (px == NULL) {
+        return mp_const_none;
+    }
+    return mp_obj_new_memoryview('B', (size_t)w * (size_t)h * (size_t)depth, (void *)px);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_screen_pixels_obj, ev_screen_pixels);
 
 static mp_obj_t ev_ready(void) {
     return mp_obj_new_int_from_uint(moy_evq_ready());
@@ -319,6 +364,10 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_route), MP_ROM_PTR(&ev_route_obj) },
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&ev_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_queued), MP_ROM_PTR(&ev_queued_obj) },
+    { MP_ROM_QSTR(MP_QSTR_screen_open), MP_ROM_PTR(&ev_screen_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_screen_close), MP_ROM_PTR(&ev_screen_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_screen_frame), MP_ROM_PTR(&ev_screen_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_screen_pixels), MP_ROM_PTR(&ev_screen_pixels_obj) },
     { MP_ROM_QSTR(MP_QSTR_ready), MP_ROM_PTR(&ev_ready_obj) },
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&ev_step_obj) },
     { MP_ROM_QSTR(MP_QSTR_charge), MP_ROM_PTR(&ev_charge_obj) },

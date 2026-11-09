@@ -163,8 +163,10 @@ WASM_OS = {
     'prefs_clear': ('prefs',),
     'prefs_get': ('prefs',),
     'prefs_set': ('prefs',),
+    'present': (),
     'progress': (),
     'random': (),
+    'screen': (),
     'send': (),
     'service_running': (),
     'service_start': (),
@@ -175,6 +177,8 @@ WASM_OS = {
     'status_remove': (),
     'status_show': (),
     'status_state': (),
+    'ui_font_pull': (),
+    'ui_pull': (),
     'x25519': (),
 }
 

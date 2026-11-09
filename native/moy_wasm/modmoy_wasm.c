@@ -1790,6 +1790,7 @@ typedef struct wsvc {
     sess_t *sess;
     volatile bool returned;         // `_start` has returned on the session's thread
     bool stopped;                   // its stop answered for it: reaped unreported
+    bool kept;                      // a Player app's run: its end is its stop's, never the reap's
     int main;
     char err[ERR_MAX];
 } wsvc_t;
@@ -2032,6 +2033,9 @@ static mp_obj_t mod_service_reap(void)
             svc_watch(v);
             continue;
         }
+        if (v->kept && !v->stopped) {
+            continue;
+        }
         bool stopped = v->stopped;
         uint32_t pid = v->pid;
         int code = svc_end(v);
@@ -2057,6 +2061,26 @@ static mp_obj_t mod_service_info(mp_obj_t pid_in)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_info_obj, mod_service_info);
 
+// service_keep(pid) -> whether service `pid` is now a Player app's run
+// (runtime/run/wasi_run.py): the reap leaves its end to its stop.
+// service_done(pid) -> whether its `_start` has returned.
+static mp_obj_t mod_service_keep(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    if (v != NULL) {
+        v->kept = true;
+    }
+    return mp_obj_new_bool(v != NULL);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_keep_obj, mod_service_keep);
+
+static mp_obj_t mod_service_done(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    return mp_obj_new_bool(v == NULL || v->returned);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_done_obj, mod_service_done);
+
 
 static const mp_rom_obj_tuple_t mod_stack_obj = {
     {&mp_type_tuple}, 2,
@@ -2081,6 +2105,8 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_service_stop), MP_ROM_PTR(&mod_service_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_service_reap), MP_ROM_PTR(&mod_service_reap_obj) },
     { MP_ROM_QSTR(MP_QSTR_service_info), MP_ROM_PTR(&mod_service_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_keep), MP_ROM_PTR(&mod_service_keep_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_done), MP_ROM_PTR(&mod_service_done_obj) },
     // The key tail this build wants (after the wasm line), the compiled-code
     // format version and the fork commit the engine was vendored from
     // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP

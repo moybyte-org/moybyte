@@ -260,8 +260,11 @@ def wasi_role(r):
 
 
 def wasi_name(r):
-    """A "wasi" row's moybyte.os import name: a moybyte row's verb, any
-    other <role>_<verb>."""
+    """A "wasi" row's moybyte.os import name: a moybyte row's verb, a kernel
+    row named for its C function that name less its moy_, any other
+    <role>_<verb>."""
+    if "." not in r["name"]:
+        return r["name"][4:] if r["name"].startswith("moy_") else r["name"]
     return verb_of(r) if role_of(r) in (None, "moybyte") else "%s_%s" % (role_of(r), verb_of(r))
 
 
@@ -291,22 +294,34 @@ def wasi_c(r):
 
 
 def wasi_params(r):
-    """[(name, kind)] of a "wasi" row's import: "s" a text, "o" a buffer the
-    call writes, "b" bytes (each a pointer and a length in the import), "i" a
-    number; a kernel row's from its C prototype, any other's from its in."""
+    """[(name, kind, length's name)] of a "wasi" row's import: "s" a text,
+    "o" a buffer the call writes, "b" bytes (each a pointer and a length in
+    the import), "p" a word the call writes (a pointer), "i" a number; a
+    kernel row's from its C prototype, where a void pointer and the size_t
+    after it are one buffer ("b" or "o", its length's name third), any
+    other's from its in (None third)."""
     if "c" not in r:
         m = {"str": "s", "str?": "s", "int": "i", "out": "o", "bytes": "b"}
-        return [(n, m[t]) for n, t in params(r)]
+        return [(n, m[t], None) for n, t in params(r)]
     out = []
-    for p in parse(wasi_c(r))[2]:
-        name = _param_name(p)
-        out.append((name, "s" if p.startswith("const char *") else "i"))
+    ps = parse(wasi_c(r))[2]
+    i = 0
+    while i < len(ps):
+        p, name = ps[i], _param_name(ps[i])
+        if p.startswith(("const void *", "void *")):
+            out.append((name, "b" if p.startswith("const ") else "o", _param_name(ps[i + 1])))
+            i += 2
+            continue
+        kind = "s" if p.startswith("const char *") else "p" if p.startswith("int *") else "i"
+        out.append((name, kind, None))
+        i += 1
     return out
 
 
 def wasi_sig(r):
     """The WAMR signature string of a row's moybyte.os import."""
-    return "(%s)i" % "".join("i" if k == "i" else "*~" for _n, k in wasi_params(r))
+    m = {"i": "i", "p": "*"}
+    return "(%s)i" % "".join(m.get(k, "*~") for _n, k, _l in wasi_params(r))
 
 
 def door_kinds(r):
@@ -579,11 +594,15 @@ def check(src):
                 raise TableError("%s: a WASI import is a moybyte row the kernel serves, or a "
                                  "row a compiled app imports served in C or by the door" % name)
             ps = parse(wasi_c(r))[2]
-            if kernel and (parse(wasi_c(r))[0] not in ("int", "int32_t") or not all(
-                    p.startswith("const char *") or p.startswith(("int ", "int32_t "))
-                    for p in ps)):
-                raise TableError("%s: a WASI import takes texts and numbers, and answers a "
-                                 "number" % name)
+            if kernel and (parse(wasi_c(r))[0] not in ("int", "int32_t", "uint32_t") or not all(
+                    p.startswith(("const char *", "int ", "int32_t ", "uint32_t ", "int *"))
+                    or (p.startswith("size_t ") and i > 0
+                        and ps[i - 1].startswith(("const void *", "void *")))
+                    or (p.startswith(("const void *", "void *")) and i + 1 < len(ps)
+                        and ps[i + 1].startswith("size_t "))
+                    for i, p in enumerate(ps))):
+                raise TableError("%s: a WASI import takes texts, buffers with their lengths, "
+                                 "words it writes and numbers, and answers a number" % name)
         if r.get("wasm"):
             if not ("in" in r and "ret" in r and "how" in r):
                 raise TableError("%s: an import needs in, ret and how" % name)
@@ -862,16 +881,19 @@ def _wasi_import(r):
     ret, name, ps, _v = parse(wasi_c(r))
     verb = wasi_name(r)
     args, call = [], []
-    for n, k in wasi_params(r):
+    for n, k, ln in wasi_params(r):
         if k == "s":
             args += ["const char *%s" % n, "size_t %s_len" % n]
             call += [n, "%s ? __builtin_strlen(%s) : 0" % (n, n)]
         elif k == "o":
-            args += ["void *%s" % n, "size_t %s_cap" % n]
-            call += [n, "%s_cap" % n]
+            args += ["void *%s" % n, "size_t %s" % (ln or n + "_cap")]
+            call += [n, ln or "%s_cap" % n]
         elif k == "b":
-            args += ["const void *%s" % n, "size_t %s_len" % n]
-            call += [n, "%s_len" % n]
+            args += ["const void *%s" % n, "size_t %s" % (ln or n + "_len")]
+            call += [n, ln or "%s_len" % n]
+        elif k == "p":
+            args.append("int *%s" % n)
+            call.append(n)
         else:
             args.append(next(p for p in ps if _param_name(p) == n))
             call.append(n)
@@ -882,9 +904,9 @@ def _wasi_import(r):
             "    int32_t r = %s(%s);" % (imp, ", ".join(call)),
             "    if (r < 0) {",
             "        errno = (int)-r;",
-            "        return -1;",
+            "        return %s;" % r.get("fail", "-1"),
             "    }",
-            "    return (int)r;",
+            "    return (%s)r;" % ret,
             "}"]
 
 

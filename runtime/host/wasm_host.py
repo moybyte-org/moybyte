@@ -82,6 +82,10 @@ class WasmHostRuntime:
         self.ws = ws
 
     def __call__(self, ns, src):
+        cart = getattr(self.ws, "cart", None) or {}
+        if cart.get("wasi"):
+            from runtime.wasi_run import WasiApp
+            return WasiApp(self, self.ws, cart, ns.get("_moy_app"))
         return WasmHostRun(self.ws, ns, src)
 
     def missing(self, cart):
@@ -188,6 +192,17 @@ class WasmHostRuntime:
         `pid`, or None once it has ended."""
         from runtime import wasm_binding
         return wasm_binding.service_info(pid)
+
+    def keep(self, pid):
+        """Service `pid` made a Player app's run (runtime/run/wasi_run.py):
+        the reap leaves its end to its stop. Whether there is one."""
+        from runtime import wasm_binding
+        return wasm_binding.keep_service(pid)
+
+    def done(self, pid):
+        """Whether service `pid`'s `_start` has returned."""
+        from runtime import wasm_binding
+        return wasm_binding.service_done(pid)
 
     @staticmethod
     def _main(cart):

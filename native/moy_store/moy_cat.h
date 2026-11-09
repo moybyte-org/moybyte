@@ -84,6 +84,7 @@ typedef struct {
     moy_cat_int_t audio_ring;   // moybyte.audio_ring: the render-ahead ring's depth
     int graduated;
     int glass;                  // a per-glass wallpaper: moybyte.glass is JSON true
+    int wasi;                   // a WASI app the Player runs: moybyte.wasi is JSON true
     int icon_ok;                // the normalised icon: tile, w, h
     int64_t icon[3];
     size_t input_n;             // -1 cast: None; else the kinds, in order

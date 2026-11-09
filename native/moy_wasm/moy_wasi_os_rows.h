@@ -53,8 +53,10 @@
     X(prefs_clear, "(*~)i") \
     X(prefs_get, "(*~*~)i") \
     X(prefs_set, "(*~*~)i") \
+    X(present, "(*~)i") \
     X(progress, "(*~i)i") \
     X(random, "(i*~)i") \
+    X(screen, "(**)i") \
     X(send, "(*~*~*~)i") \
     X(service_running, "()i") \
     X(service_start, "()i") \
@@ -65,6 +67,8 @@
     X(status_remove, "(i)i") \
     X(status_show, "(*~ii)i") \
     X(status_state, "(ii)i") \
+    X(ui_font_pull, "(ii*~)i") \
+    X(ui_pull, "(i*~)i") \
     X(x25519, "(*~*~*~)i") \
 
 #endif // MOY_WASI_OS_ROWS_H

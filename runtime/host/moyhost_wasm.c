@@ -941,6 +941,7 @@ typedef struct wasi_svc {
     int returned;               /* `_start` has returned (atomic) */
     int main;                   /* moy_wasi_main's answer */
     int stopped;                /* its stop answered for it: reaped unreported */
+    int kept;                   /* a Player app's run: its end is its stop's, never the reap's */
     char err[256];
 } wasi_svc;
 
@@ -1091,6 +1092,7 @@ int hw_wasi_service_reap(uint32_t *pids, int32_t *codes, int n)
             }
             continue;
         }
+        if (v->kept && !v->stopped) continue;
         int stopped = v->stopped;
         uint32_t pid = v->pid;
         int code = svc_end(v);
@@ -1111,6 +1113,23 @@ int hw_wasi_service_info(uint32_t pid, uint32_t *mapped, uint32_t *cost_us)
     if (!v) return -1;
     moy_wasi_figures(v->w, mapped, cost_us);
     return 0;
+}
+
+/* Service `pid` made a Player app's run (runtime/run/wasi_run.py), whose end
+ * the reap leaves to its stop: 0, or -1 for no such service. */
+int hw_wasi_service_keep(uint32_t pid)
+{
+    wasi_svc *v = svc_of(pid);
+    if (!v) return -1;
+    v->kept = 1;
+    return 0;
+}
+
+/* Whether service `pid`'s `_start` has returned (1 for no such service). */
+int hw_wasi_service_done(uint32_t pid)
+{
+    wasi_svc *v = svc_of(pid);
+    return !v || svc_returned(v);
 }
 
 /* How many service records are live: what a test reads for a leak. */

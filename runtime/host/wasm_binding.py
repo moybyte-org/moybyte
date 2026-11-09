@@ -288,6 +288,10 @@ def _lib():
             d.hw_wasi_service_info.restype = _I
             d.hw_wasi_services.argtypes = []
             d.hw_wasi_services.restype = _I
+            d.hw_wasi_service_keep.argtypes = [ctypes.c_uint32]
+            d.hw_wasi_service_keep.restype = _I
+            d.hw_wasi_service_done.argtypes = [ctypes.c_uint32]
+            d.hw_wasi_service_done.restype = _I
             d.moy_wasm_natives.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
             d.moy_wasm_natives.restype = ctypes.POINTER(_NativeSymbol)
             if not d.hw_runtime():
@@ -451,6 +455,19 @@ def service_info(pid):
     if d.hw_wasi_service_info(int(pid), ctypes.byref(mapped), ctypes.byref(cost)) < 0:
         return None
     return mapped.value, cost.value
+
+
+def keep_service(pid):
+    """Service `pid` made a Player app's run, whose end the reap leaves to
+    its stop: whether there is one."""
+    d = _lib()
+    return d is not None and d.hw_wasi_service_keep(int(pid)) == 0
+
+
+def service_done(pid):
+    """Whether service `pid`'s `_start` has returned (True for none)."""
+    d = _lib()
+    return d is None or bool(d.hw_wasi_service_done(int(pid)))
 
 
 def services_live():

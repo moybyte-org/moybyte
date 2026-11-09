@@ -46,6 +46,7 @@ may be a Python or Lua script, which is copied as it is.
 """
 
 import argparse
+import glob
 import json
 import os
 import shutil
@@ -92,7 +93,9 @@ def assemble(src, stem="main"):
     with no flag of ours but the SDK's headers on a C program's include path
     (`moybyte/os.h`: the event descriptor and the moybyte.os imports) and,
     for a C cart that is no WASI program (an app or a game: no command or
-    service), clang's reactor model, so the exports it names (`_init`,
+    service, and no app whose manifest says `"wasi": true`, a WASI command
+    the Player runs, drawing with the toolkit it links: sdk/include/moybyte/
+    ui.h over `libmoyui`), clang's reactor model, so the exports it names (`_init`,
     `_update`, `_draw`) are its loop and no `_start` or `main` is linked,
     and its memory fixed at the manifest's `memory` pages, as a cart's is;
     its DWARF stripped (`strip_debug`). A `stem` other than main is an app's
@@ -116,11 +119,14 @@ def assemble(src, stem="main"):
                    "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"), "-O2",
                    "-I", os.path.join(ROOT, "sdk", "include"), "-o", out, c_src]
             man = manifest(src)
-            if stem == "main" and (man.get("moybyte") or {}).get("type") \
-                    not in ("command", "service"):
+            ven = man.get("moybyte") or {}
+            if stem == "main" and ven.get("type") not in ("command", "service") \
+                    and ven.get("wasi") is not True:
                 mem = "%d" % (int(man.get("memory") or 1) * 65536)
                 cmd[-3:-3] = ["-mexec-model=reactor", "-Wl,--initial-memory=" + mem,
                               "-Wl,--max-memory=" + mem]
+            if stem == "main" and ven.get("type") == "app" and ven.get("wasi") is True:
+                cmd += ["-Wl,--gc-sections", libmoyui(sdk)]
         elif os.path.isfile(rs_src):
             rustc = shutil.which("rustc")
             if rustc is None or not rust_wasip1():
@@ -134,6 +140,51 @@ def assemble(src, stem="main"):
         subprocess.run(cmd, check=True, capture_output=True, env=env)
         with open(out, "rb") as f:
             return strip_debug(f.read())
+
+
+def libmoyui(sdk):
+    """The toolkit a WASI app links (sdk/include/moybyte/ui.h): tools/elf_cart.py's
+    UI_SOURCES built for wasm32-wasip1 with wasi-sdk at `sdk`, once per
+    content, into .build/sdk/wasm32/."""
+    import hashlib
+    import subprocess
+    from tools import elf_cart
+    clang = os.path.join(sdk, "bin", "clang")
+    ar = os.path.join(sdk, "bin", "llvm-ar")
+    flags = ["--target=wasm32-wasip1", "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"),
+             "-O2", "-ffunction-sections", "-fdata-sections", "-DMOY_PIXEL_RGB565=1"]
+    h = hashlib.sha256(repr((clang, flags)).encode())
+    heads = []
+    for d in elf_cart.UI_DIRS + [elf_cart.LIBMOY, elf_cart.SDK_INCLUDE]:
+        heads += sorted(glob.glob(os.path.join(d, "**", "*.h"), recursive=True))
+    for p in elf_cart.UI_SOURCES + heads:
+        h.update(os.path.relpath(p, ROOT).encode())
+        with open(p, "rb") as f:
+            h.update(f.read())
+    out_dir = os.path.join(ROOT, ".build", "sdk", "wasm32", "ui-" + h.hexdigest()[:16])
+    lib = os.path.join(out_dir, "libmoyui.a")
+    if os.path.exists(lib):
+        return lib
+    tmp = out_dir + ".%d.tmp" % os.getpid()
+    os.makedirs(tmp, exist_ok=True)
+    inc = ["-I", elf_cart.SDK_INCLUDE, "-I", elf_cart.LIBMOY]
+    for d in elf_cart.UI_DIRS:
+        inc += ["-I", d]
+    env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+    objs = []
+    for src in elf_cart.UI_SOURCES:
+        o = os.path.join(tmp, "ui_%s_%s.o" % (os.path.basename(os.path.dirname(src)),
+                                               os.path.basename(src)[:-2]))
+        subprocess.run([clang] + flags + inc + ["-c", src, "-o", o], check=True,
+                       capture_output=True, env=env)
+        objs.append(o)
+    subprocess.run([ar, "rcs", os.path.join(tmp, "libmoyui.a")] + objs, check=True,
+                   capture_output=True, env=env)
+    if os.path.isdir(out_dir):
+        shutil.rmtree(tmp, ignore_errors=True)
+    else:
+        os.replace(tmp, out_dir)
+    return lib
 
 
 def strip_debug(blob):

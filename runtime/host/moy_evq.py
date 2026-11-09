@@ -19,7 +19,8 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
 PART = native_build.Part("evq", ("moy_sync.h", "moy_evq.h", "moy_evq.c", "moy_super.h",
-                                 "moy_super.c", "moy_vmq.h", "moy_vmq.c"), (_KERNEL,))
+                                 "moy_super.c", "moy_vmq.h", "moy_vmq.c", "moy_screen_slot.h",
+                                 "moy_screen_slot.c"), (_KERNEL,))
 
 OK, STALE, FULL, NOMEM, DENIED, DEAF, EMPTY, RANGE = range(8)
 FINE, WARNED, STRUCK, SUSPENDED = range(4)
@@ -45,6 +46,11 @@ class _Ev(ctypes.Structure):
 
 
 _SIGS = (
+    ("moy_screen_slot_open", [_U32, _I, _I, _I], _I),
+    ("moy_screen_slot_close", [_U32], None),
+    ("moy_screen_slot_frame", [_U32, _U32, _U32, _U32, ctypes.c_void_p, _I, _U32], _I),
+    ("moy_screen_slot_pixels", [_U32, ctypes.POINTER(_I), ctypes.POINTER(_I),
+                                ctypes.POINTER(_I)], ctypes.c_void_p),
     ("moy_evq_open", [_U32, _P, _P, _U32], _I),
     ("moy_evq_close", [_U32], _I),
     ("moy_evq_has", [_U32], _B),
@@ -162,6 +168,35 @@ def take(pid):
 
 def queued(pid):
     return _lib().moy_evq_queued(pid)
+
+
+def screen_open(pid, w, h, depth):
+    """Process `pid`'s screen slot (moy_screen_slot.h): 0 or an errno negated."""
+    return _lib().moy_screen_slot_open(int(pid), int(w), int(h), int(depth))
+
+
+def screen_close(pid):
+    _lib().moy_screen_slot_close(int(pid))
+
+
+def screen_frame(pid, held, pressed, ms, max_ms, words=None):
+    """moy_screen_slot_frame's mask; `words` an array('i') of input words."""
+    if words is None:
+        return _lib().moy_screen_slot_frame(int(pid), int(held), int(pressed), int(ms),
+                                            None, 0, int(max_ms))
+    return _lib().moy_screen_slot_frame(int(pid), int(held), int(pressed), int(ms),
+                                        words.buffer_info()[0], len(words), int(max_ms))
+
+
+def screen_pixels(pid):
+    """The slot's bytes as a writable view, for its life, or None."""
+    w, h, d = _I(), _I(), _I()
+    addr = _lib().moy_screen_slot_pixels(int(pid), ctypes.byref(w), ctypes.byref(h),
+                                         ctypes.byref(d))
+    if not addr:
+        return None
+    n = w.value * h.value * d.value
+    return memoryview((ctypes.c_uint8 * n).from_address(addr)).cast("B")
 
 
 def ready():

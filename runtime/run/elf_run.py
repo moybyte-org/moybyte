@@ -23,7 +23,8 @@ presented screen into the run's canvas through the one canvas class's
 it links (sdk/include/moybyte/ui.h): its screen is RGB565, drawn with
 `blit565`, and its frame message carries the input words the toolkit reads
 (moy_os.h's MOY_OS_FRAME_IN_*: the pointer, the key typed, the window and
-the canvas's byte order). A game whose main returns 0 quits; any other end is a stop
+the canvas's byte order); a key typed while the app has not read the last
+message waits for the next one (key_ring). A game whose main returns 0 quits; any other end is a stop
 the stop card reports, a signal by its name and, where the console keeps
 one (a P4's isolation), its fault record. The Player asks `footprint` and
 `memory` first, as it asks a compiled cart's runtime.
@@ -70,6 +71,64 @@ from array import array
 
 # moy_os.h's MOY_OS_FRAME_IN_*: an app's input words.
 IN_X, IN_Y, IN_PTR, IN_KEY, IN_WINDOW, IN_SWAP = range(6)
+IN_WORDS = 6
+
+
+def read_buttons(inp, masks, out):
+    """The buttons held and pressed this frame into out[0] and out[1], a bit
+    each in libmoy's moy_button order: through `masks`, the input's
+    button_masks bound once by the caller (None: it has none)."""
+    if masks is not None:
+        masks(MOY_BUTTONS, None, out)
+        return
+    held = pressed = 0
+    for i, name in enumerate(MOY_BUTTONS):
+        if inp.held(name):
+            held |= 1 << i
+        if inp.pressed(name):
+            pressed |= 1 << i
+    out[0] = held
+    out[1] = pressed
+
+
+# The keys typed that no frame message has carried yet, oldest first: a
+# frame posts no message while the app has not read the last, and a key is
+# one frame's, so it waits here for the next message (key_ring, key_sent).
+KEYS_HELD = 8
+
+
+def key_ring():
+    """An empty ring of typed keys: [first, count, the keys...]."""
+    return array("i", bytes(4 * (2 + KEYS_HELD)))
+
+
+def key_sent(ring):
+    """The ring's first key carried by a posted frame message."""
+    if ring[1]:
+        ring[0] = (ring[0] + 1) % KEYS_HELD
+        ring[1] -= 1
+
+
+def fill_words(ws, words, ptr, ring):
+    """An app's input words for this frame (IN_*), into the array('i')
+    `words`; `ptr` a four-item list pointer_state fills, `ring` the keys
+    typed and not yet sent (key_ring): this frame's joins it, and the
+    oldest is the word."""
+    inp = ws.input
+    try:
+        pointer_state(inp, ptr)
+    except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead app
+        ptr[2] = 0
+    words[IN_X] = int(ptr[0])
+    words[IN_Y] = int(ptr[1])
+    words[IN_PTR] = int(ptr[2])
+    key = int(getattr(inp, "last_key", 0) or 0)
+    if key and ring[1] < KEYS_HELD:
+        ring[2 + (ring[0] + ring[1]) % KEYS_HELD] = key
+        ring[1] += 1
+    words[IN_KEY] = ring[2 + ring[0]] if ring[1] else 0
+    words[IN_WINDOW] = 1 if getattr(ws, "windowed_chrome", False) else 0
+    words[IN_SWAP] = 1 if getattr(ws.run.canvas, "swapped565", False) else 0
 
 
 def stop_text(code, fault=None):
@@ -275,8 +334,9 @@ class ElfGame:
         self.pid = ws.run.player.pid
         self._w, self._h = canvas.w, canvas.h
         self._app = cart.get("type") == "app"
-        self._words = array("i", bytes(4 * 6)) if self._app else None
+        self._words = array("i", bytes(4 * IN_WORDS)) if self._app else None
         self._ptr = [0, 0, 0, 0]
+        self._keys = key_ring()
         why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
                            self._w, self._h, run, 2 if self._app else 1)
         if why is not None:
@@ -292,27 +352,11 @@ class ElfGame:
         self.update = self._update
         self.draw = self._draw
 
-    def _read(self, inp):
-        """The buttons into self._masks: (held, pressed), filled in place."""
-        out = self._masks
-        masks = self._mask_of
-        if masks is not None:
-            masks(MOY_BUTTONS, None, out)
-            return
-        held = pressed = 0
-        for i, name in enumerate(MOY_BUTTONS):
-            if inp.held(name):
-                held |= 1 << i
-            if inp.pressed(name):
-                pressed |= 1 << i
-        out[0] = held
-        out[1] = pressed
-
     def _update(self, dt):
         if not self._live:
             return
         out = self._masks
-        self._read(self._ws.input)
+        read_buttons(self._ws.input, self._mask_of, out)
         self._pressed |= out[1]
         self._shown = False             # the call lets the last frame go
         ms = int(dt * 1000)
@@ -321,31 +365,16 @@ class ElfGame:
             wait = WAIT_US_MAX
         words = self._words
         if words is not None:
-            self._fill(words)
+            fill_words(self._ws, words, self._ptr, self._keys)
         got = self._e.frame(self.pid, out[0], self._pressed, ms, wait, words)
         if got == ENDED or got < 0:
             self._end()
             return
         if got & FRAME_SENT:
             self._pressed = 0
+            key_sent(self._keys)
         if got & FRAME_SHOWN:
             self._shown = True
-
-    def _fill(self, words):
-        """An app's input words for this frame (IN_*)."""
-        ws = self._ws
-        inp = ws.input
-        p = self._ptr
-        try:
-            pointer_state(inp, p)
-        except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead app
-            p[2] = 0
-        words[IN_X] = int(p[0])
-        words[IN_Y] = int(p[1])
-        words[IN_PTR] = int(p[2])
-        words[IN_KEY] = int(getattr(inp, "last_key", 0) or 0)
-        words[IN_WINDOW] = 1 if getattr(ws, "windowed_chrome", False) else 0
-        words[IN_SWAP] = 1 if getattr(ws.run.canvas, "swapped565", False) else 0
 
     def _end(self):
         self._live = False

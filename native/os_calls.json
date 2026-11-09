@@ -292,10 +292,10 @@
     {"name": "moybyte.status_state", "server": "call", "perm": null, "in": ["item:int", "state:int"], "ret": "int", "how": "hop", "door": true, "wasm": true, "wasi": true, "elf": 114},
     {"name": "moybyte.status_panel", "server": "call", "perm": null, "in": ["item:int", "rows:str?"], "ret": "int", "how": "hop", "door": true, "wasm": true, "wasi": true, "elf": 115},
     {"name": "moybyte.status_remove", "server": "call", "perm": null, "in": ["item:int"], "ret": "int", "how": "hop", "door": true, "wasm": true, "wasi": true, "elf": 116},
-    {"name": "moy_screen", "kind": "moybyte", "elf": 117, "c": "int moy_screen(int *w, int *h)", "fail": "-1", "server": "kernel", "u": ["w?", "w?"]},
-    {"name": "moy_present", "kind": "moybyte", "elf": 118, "c": "int moy_present(const void *px, size_t n)", "fail": "-1", "server": "kernel", "u": ["r:n", "-"]},
-    {"name": "moy_ui_pull", "kind": "moybyte", "elf": 119, "c": "uint32_t moy_ui_pull(uint32_t have, void *buf, size_t cap)", "fail": "0", "server": "kernel", "u": ["-", "w:cap", "-"]},
-    {"name": "moy_ui_font_pull", "kind": "moybyte", "elf": 120, "c": "uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap)", "fail": "0", "server": "kernel", "u": ["-", "-", "w?:cap", "-"]}
+    {"name": "moy_screen", "kind": "moybyte", "elf": 117, "c": "int moy_screen(int *w, int *h)", "fail": "-1", "server": "kernel", "u": ["w?", "w?"], "wasi": true},
+    {"name": "moy_present", "kind": "moybyte", "elf": 118, "c": "int moy_present(const void *px, size_t n)", "fail": "-1", "server": "kernel", "u": ["r:n", "-"], "wasi": true},
+    {"name": "moy_ui_pull", "kind": "moybyte", "elf": 119, "c": "uint32_t moy_ui_pull(uint32_t have, void *buf, size_t cap)", "fail": "0", "server": "kernel", "u": ["-", "w:cap", "-"], "wasi": true},
+    {"name": "moy_ui_font_pull", "kind": "moybyte", "elf": 120, "c": "uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap)", "fail": "0", "server": "kernel", "u": ["-", "-", "w?:cap", "-"], "wasi": true}
   ],
   "permissions": [
     {"perm": "graphics", "grants": "floor", "prompt": null, "needs": null, "py": [], "doc": "nothing extra: the floor every cart has", "spec": true},

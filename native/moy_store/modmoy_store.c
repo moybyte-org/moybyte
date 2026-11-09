@@ -784,6 +784,7 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
                                                              strlen(MOY_CAT_FORMAT))));
     put(d, MP_QSTR_graduated, mp_obj_new_bool(e->graduated));
     put(d, MP_QSTR_glass, mp_obj_new_bool(e->glass));
+    put(d, MP_QSTR_wasi, mp_obj_new_bool(e->wasi));
     put(d, MP_QSTR_pictures, json_or(e->pictures, mp_const_none));
     put(d, MP_QSTR_native, json_or(e->native, mp_const_none));
     put(d, MP_QSTR_fps, json_or(e->fps, MP_OBJ_NEW_SMALL_INT(e->spec ? 30 : 0)));
