@@ -763,7 +763,7 @@ def test_musics_status_item_shows_while_any_clients_run_plays(media, tmp_path, m
     from ws_helpers import build_ws
     ws = build_ws(tmp_path)
     devices.grants = None
-    monkeypatch.setattr(dev_media, "_HEARD", [])
+    monkeypatch.setattr(dev_media, "_HEARD", [None])
     dev_media.listen(ws._music_follows)
     s = M.STREAM
     try:

@@ -131,7 +131,7 @@ _STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the C's jo
 _s = {"pid": 0, "wake": None, "every": 0, "file": None, "gen": 0, "eof": False,
       "sized": False, "radio": 0}
 _buf = [None]
-_HEARD = []                     # fn() told when the face finds a run (`listen`)
+_HEARD = [None]                 # the console's fn(), told when the face finds a run
 
 
 def _shares_media():
@@ -388,13 +388,15 @@ def _settle():
 def listen(fn):
     """`fn()` told each time the face finds a run: a client's play() that
     started one, or the run a VM stop left playing (`attach`). The
-    console's: Music's card and status item follow it (music_app.follow)."""
-    if fn not in _HEARD:
-        _HEARD.append(fn)
+    console's, one at a time: Music's card and status item follow it
+    (music_app.follow), and a console that boots takes the place of the one
+    before it."""
+    _HEARD[0] = fn
 
 
 def _tell():
-    for fn in _HEARD:
+    fn = _HEARD[0]
+    if fn is not None:
         try:
             fn()
         except Exception as exc:  # noqa: BLE001 -- a listener never stops the music

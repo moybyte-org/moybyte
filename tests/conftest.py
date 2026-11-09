@@ -374,6 +374,9 @@ def _processes_reset():
         for it in SI.ITEMS.slots:
             if it.pid:
                 SI.ITEMS._free(it)
+    DM = sys.modules.get("runtime.dev_media")
+    if DM is not None:
+        DM._HEARD[0] = None
     SL = sys.modules.get("runtime.shell_layout")
     if SL is not None:
         SL.ITEMS[0] = 0

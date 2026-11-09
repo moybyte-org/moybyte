@@ -512,7 +512,7 @@ static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
     moy_app_run_t run;
     const moy_app_run_t *rp = run_of(n_args > 6 ? args[6] : mp_const_none, &run);
     moy_os_module_t m;
-    if (load(args[0], (uint32_t)mp_obj_get_int(args[3]), &m, err, sizeof err) != 0) {
+    if (load(args[0], (uint32_t)mp_obj_get_int(args[3]), (uint32_t)mp_obj_get_int(args[1]), &m, err, sizeof err) != 0) {
         return mp_obj_new_str(err, strlen(err));
     }
     if (moy_os_game(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
