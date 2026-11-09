@@ -2,10 +2,11 @@
 // section 3): the imports a module built by wasi-sdk, Rust's
 // `wasm32-wasip1` or Zig makes from `wasi_snapshot_preview1`, plus what WASI
 // lacks: `moybyte.term`'s `term_size`, and `moybyte.os`'s `send`, `on`,
-// `log`, `notify`, `award` and `progress`, the rows of native/os_calls.json
-// a WASI program shares with an ELF module (moy_wasi_os_rows.h, generated;
-// sdk/include/moybyte/os.h declares them under their C names, moy_send and
-// the rest; the console calls are moy_wasi.c's THE CONSOLE CALLS). A command is its module's
+// `log`, `notify`, `award`, `progress`, `every`, `after`, `cancel` and
+// `at`, the rows of native/os_calls.json a WASI program shares with an ELF
+// module (moy_wasi_os_rows.h, generated; sdk/include/moybyte/os.h declares
+// them under their C names, moy_send and the rest; the console calls are
+// moy_wasi.c's THE CONSOLE CALLS). A command is its module's
 // `_start`, run in a shell session's process (moy_sh.h's spawn).
 //
 // THE EVENT DESCRIPTOR. The run's process is its background pid, else the

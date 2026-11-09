@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 84
+#define MOY_OS_VERSION 88
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -116,10 +116,54 @@ static inline int moy_on(const char *name, int on) {
     return (int)r;
 }
 
+int32_t __moy_os_every(int32_t ms)
+    __attribute__((import_module("moybyte.os"), import_name("every")));
+static inline int32_t moy_every(int32_t ms) {
+    int32_t r = __moy_os_every(ms);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_after(int32_t ms)
+    __attribute__((import_module("moybyte.os"), import_name("after")));
+static inline int32_t moy_after(int32_t ms) {
+    int32_t r = __moy_os_after(ms);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_cancel(int32_t id)
+    __attribute__((import_module("moybyte.os"), import_name("cancel")));
+static inline int32_t moy_cancel(int32_t id) {
+    int32_t r = __moy_os_cancel(id);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 int32_t __moy_os_log(int level, const char *text, size_t text_len)
     __attribute__((import_module("moybyte.os"), import_name("log")));
 static inline int moy_log(int level, const char *text) {
     int32_t r = __moy_os_log(level, text, text ? __builtin_strlen(text) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_at(int32_t t)
+    __attribute__((import_module("moybyte.os"), import_name("at")));
+static inline int32_t moy_at(int32_t t) {
+    int32_t r = __moy_os_at(t);
     if (r < 0) {
         errno = (int)-r;
         return -1;
@@ -168,6 +212,10 @@ int32_t moy_open_with(const char *item, int32_t choose);   // moybyte.open_with
 int32_t moy_share(const void *data, size_t data_len, const char *mime);   // moybyte.share
 int32_t moy_award(const char *id);   // moybyte.award
 int32_t moy_progress(const char *id, int32_t value);   // moybyte.progress
+int32_t moy_every(int32_t ms);   // moybyte.every
+int32_t moy_after(int32_t ms);   // moybyte.after
+int32_t moy_cancel(int32_t id);   // moybyte.cancel
+int32_t moy_at(int32_t t);   // moybyte.at
 
 #endif // __wasm__
 

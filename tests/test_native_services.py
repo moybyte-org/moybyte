@@ -52,7 +52,7 @@ def svc(tmp_path, built):
     s.reset()
     peer = L.spawn("peer")
     assert moy_evq.open(peer, "elf.svc", "", True) == moy_evq.OK
-    for name in ("pong", "noted"):
+    for name in ("pong", "noted", "timed"):
         assert moy_evq.listen(peer, name, True) == moy_evq.OK
     yield ws, s, cart, peer
     moy_evq.close(peer)
@@ -112,6 +112,19 @@ def test_its_app_calls_are_answered_on_the_vms_task(svc):
     n = [n for n in notifications.NOTES.list if n.summary == "Hello"]
     assert [(x.body, x.pid) for x in n] == [("from a service", pid)]
     notifications.NOTES.reset()
+
+
+def test_a_native_service_s_timer_is_the_system_s_message(svc):
+    """moy_after answers its timer's id, which goes off as the system's
+    message "moybyte.timer" on the service's event descriptor."""
+    ws, s, cart, peer = svc
+    pid = S.start_cart(ws, cart, s)
+    assert _polled(s, lambda: moy_evq.send(peer, "elf.svc", "wake", "[]")[0] == 1)
+    assert _polled(s, lambda: s.tick() >= 0 and moy_evq.queued(peer) == 1)
+    frm, app, name, args = moy_evq.take(peer)
+    assert (frm, app, name) == (pid, "elf.svc", "timed")
+    assert int(json.loads(args)[0]) > 0
+    assert s.stop(pid)
 
 
 def test_an_end_by_itself_is_reaped_into_its_restart_policy(svc):

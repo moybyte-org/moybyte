@@ -107,14 +107,16 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     notification under the permissions it was granted, a buffer too small
     ERANGE, a folder it was not granted and a role it lacks EACCES; award and
     progress reach the achievements process, which finds the badge it
-    declares."""
+    declares; a timer it makes is its own to cancel, once, and an alarm needs
+    "alarms"."""
     from runtime.notifications import NOTES
     _ws, app = term
     assert out(app, "elf.app/app; echo status $?") == [
         "prefs.set 0", "prefs.get 42", "clipboard.put_text 0", "clipboard.text from C",
         "clipboard.short -1 ERANGE", "files.save note", "files.load # hi", "",
         "files.list note,", "files.load.other -1 EACCES", "notify 1",
-        "nav.open_app -1 EACCES", "award 1", "progress 1", "status 0"]
+        "nav.open_app -1 EACCES", "award 1", "progress 1", "after 1", "every 1", "cancel 1",
+        "cancel.again 0", "cancel.every 1", "at -1 EACCES", "status 0"]
     assert [(n.app, n.summary, n.body) for n in NOTES.list if n.summary == "Hello"] == [
         ("App Calls", "Hello", "from C")]
     ws = _ws

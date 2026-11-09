@@ -222,6 +222,34 @@ def test_a_compiled_app_talks_to_a_service_notifies_awards_and_hears_its_alarm(t
     assert "heard moybyte.at from system [%s]" % at[0].split()[1] in lines, lines
 
 
+def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(talk):
+    """moybyte_after and moybyte_every answer their timer's id and go off as
+    the system's message "moybyte.timer" carrying it; moybyte_cancel ends a
+    timer of the app's own and no other process's."""
+    from runtime import moybyte
+    ws, pid, lines = talk()
+    once = [ln for ln in lines if ln.startswith("after ")]
+    rep = [ln for ln in lines if ln.startswith("every ")]
+    assert once and int(once[0].split()[1]) > 0, lines
+    assert rep and int(rep[0].split()[1]) > 0, lines
+    assert "heard moybyte.timer from system [%s]" % once[0].split()[1] in lines, lines
+    ticks = [ln for ln in lines if ln == "heard moybyte.timer from system [%s]"
+             % rep[0].split()[1]]
+    assert ticks and "cancel 1" in lines, lines
+    assert lines.count("cancel 1") == 1, "a tick after the cancel is a cancel of none"
+    assert int(rep[0].split()[1]) not in moybyte.WAKES.by_id
+    was = L.current()
+    L.current(moybyte.SHELL)
+    shell = moybyte.WAKES.after(60000, lambda: None)
+    try:
+        L.current(pid)
+        assert moybyte.cancel_message(shell) == 0, "another process's wake is not its own"
+        assert shell in moybyte.WAKES.by_id
+    finally:
+        L.current(was)
+        moybyte.WAKES.cancel(shell)
+
+
 def test_a_compiled_app_hears_an_item_handed_to_it_and_reads_it(talk):
     from runtime import intents
     ws, pid, _lines = talk()

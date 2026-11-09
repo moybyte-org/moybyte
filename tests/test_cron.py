@@ -207,10 +207,10 @@ def test_the_console_lights_the_screen_on_a_waking_alarm():
     assert [(r[3], r[4]) for r in L.read(seq, 9)] == [(7, "an alarm woke the screen")]
 
 
-def test_alarms_is_a_python_lua_and_wasm_permission_with_a_prompt():
+def test_alarms_is_every_tier_s_permission_with_a_prompt():
     from runtime import app_perms
     r = app_perms.row("alarms")
-    assert r[app_perms.TIERS] == ("python", "lua", "wasm") and r[app_perms.PROMPT]
+    assert r[app_perms.TIERS] == ("python", "lua", "wasm", "elf") and r[app_perms.PROMPT]
 
 
 # -- the crontab firing, and at's job in the log ---------------------------------------

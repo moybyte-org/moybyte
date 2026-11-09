@@ -115,10 +115,11 @@ enum {
     MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
     MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
     MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
-    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG,
-    MOY_T_MOYBYTE_RECV, MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
+    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY, MOY_T_MOYBYTE_AFTER,
+    MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG, MOY_T_MOYBYTE_RECV,
+    MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
 };
-#define MOY_APP_TABLE_N 174u
+#define MOY_APP_TABLE_N 177u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -290,6 +291,9 @@ enum {
     { "moybyte.award", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.progress", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.on", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.every", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.after", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.cancel", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.pick", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.log", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.recv", MOY_ROLE_MOYBYTE, -1 }, \

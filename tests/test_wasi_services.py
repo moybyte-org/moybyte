@@ -256,6 +256,37 @@ def test_a_wasi_service_notifies_under_its_permission_and_writes_the_log(svc, pe
     assert s.stop(pid)
 
 
+@pytest.mark.parametrize("perms", [("alarms",), ()])
+def test_a_wasi_service_s_timers_and_alarm_are_the_system_s_messages(svc, perms):
+    """moybyte.os `after`, `every` and `at` are console calls answered with
+    the wake's id, each heard on the event descriptor as the system's message
+    carrying it (a timer's "moybyte.timer", the alarm's "moybyte.at"); `cancel` ends its own timer; `at` needs
+    `alarms`."""
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", "[]")[0] == 1)
+    assert _polled(s, lambda: s.tick() >= 0 and any(t.startswith("cancel ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    texts = _texts(since, pid)
+    after = [int(t.split()[1]) for t in texts if t.startswith("after ")]
+    every = [int(t.split()[1]) for t in texts if t.startswith("every ")]
+    assert after and after[0] > 0 and every and every[0] > 0, texts
+    assert "moybyte.timer from system [%d]" % after[0] in _texts(since, pid)
+    assert "cancel 1" in _texts(since, pid), _texts(since, pid)
+    assert every[0] not in moybyte.WAKES.by_id
+    at = [t for t in _texts(since, pid) if t.startswith("at ")]
+    if perms:
+        wid = int(at[0].split()[1])
+        assert wid > 0, _texts(since, pid)
+        assert _polled(s, lambda: s.tick() >= 0
+                       and "moybyte.at from system [%d]" % wid in _texts(since, pid))
+    else:
+        assert at == ["at -1 errno 2"], at                         # WASI's ACCES
+    assert s.stop(pid)
+
+
 def test_the_fixture_is_a_service():
     with open(os.path.join(FIXTURE, "manifest.json")) as f:
         man = json.load(f)

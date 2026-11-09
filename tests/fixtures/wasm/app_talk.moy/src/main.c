@@ -5,9 +5,12 @@
 //
 // At _init it listens on "pong", pings the Echo service (local.echo), posts a
 // notification, awards the badge its manifest declares, sets an alarm that is
-// already due and writes the OS log. Every _update reads the messages queued
-// for it, one record each (moy_evq_ev_t, sdk/include/moybyte/os.h, its
-// arguments a JSON array after it), and logs what it heard; an item handed
+// already due, a timer that goes off once and one that repeats, and writes
+// the OS log. Every _update reads the messages queued for it, one record
+// each (moy_evq_ev_t, sdk/include/moybyte/os.h, its arguments a JSON array
+// after it), and logs what it heard: a timer is the system's message
+// "moybyte.timer" carrying its id, and the repeating one's first tick
+// cancels it; an item handed
 // to it (its window event moy_open, a message from the system carrying the
 // item's handle first) is read and its text logged. A notification refused
 // for want of the permission is logged with its answer.
@@ -29,6 +32,9 @@ int32_t moybyte_notify(const char *summary, uint32_t summary_n, const char *body
                        uint32_t body_n) APP(moybyte_notify);
 int32_t moybyte_award(const char *id, uint32_t id_n) APP(moybyte_award);
 int32_t moybyte_at(int32_t t) APP(moybyte_at);
+int32_t moybyte_after(int32_t ms) APP(moybyte_after);
+int32_t moybyte_every(int32_t ms) APP(moybyte_every);
+int32_t moybyte_cancel(int32_t id) APP(moybyte_cancel);
 int32_t moybyte_log(int32_t level, const char *text, uint32_t text_n) APP(moybyte_log);
 int32_t moybyte_item_read(int32_t item, char *data, uint32_t cap) APP(moybyte_item_read);
 void cls(int32_t c) MOY(cls);
@@ -74,6 +80,8 @@ static void say(void) {
     at = 0;
 }
 
+static int32_t ticker;
+
 EXPORT(_init) void init(void) {
     moybyte_on(S("pong"), 1);
     moybyte_on(S("moy_open"), 1);
@@ -88,6 +96,13 @@ EXPORT(_init) void init(void) {
     say();
     put(S("at "));
     put_int(moybyte_at(1));
+    say();
+    put(S("after "));
+    put_int(moybyte_after(0));
+    say();
+    ticker = moybyte_every(1);
+    put(S("every "));
+    put_int(ticker);
     say();
 }
 
@@ -129,6 +144,11 @@ EXPORT(_update) void update(float dt) {
         put(S(" "));
         put(m.b + sizeof m.ev, m.ev.n);
         say();
+        if (same(m.ev.name, "moybyte.timer") && first_int(m.b + sizeof m.ev) == ticker) {
+            put(S("cancel "));
+            put_int(moybyte_cancel(first_int(m.b + sizeof m.ev)));
+            say();
+        }
         if (same(m.ev.name, "moy_open")) {
             int32_t k = moybyte_item_read(first_int(m.b + sizeof m.ev), item, sizeof item);
             put(S("item "));

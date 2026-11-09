@@ -866,3 +866,43 @@ int32_t moy_progress(const char *id, int32_t value)
     return ((moy_os_fn_moy_progress *)__moy_os->fn[83])(id, value);
 }
 #endif
+
+#if MOY_OS_ROW(84)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_every(int32_t ms);
+MOY_OS_USED(84);
+int32_t moy_every(int32_t ms)
+{
+    return ((moy_os_fn_moy_every *)__moy_os->fn[84])(ms);
+}
+#endif
+
+#if MOY_OS_ROW(85)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_after(int32_t ms);
+MOY_OS_USED(85);
+int32_t moy_after(int32_t ms)
+{
+    return ((moy_os_fn_moy_after *)__moy_os->fn[85])(ms);
+}
+#endif
+
+#if MOY_OS_ROW(86)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_cancel(int32_t id);
+MOY_OS_USED(86);
+int32_t moy_cancel(int32_t id)
+{
+    return ((moy_os_fn_moy_cancel *)__moy_os->fn[86])(id);
+}
+#endif
+
+#if MOY_OS_ROW(87)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_at(int32_t t);
+MOY_OS_USED(87);
+int32_t moy_at(int32_t t)
+{
+    return ((moy_os_fn_moy_at *)__moy_os->fn[87])(t);
+}
+#endif

@@ -1,5 +1,6 @@
 // app: a native command's app calls (docs/app_api_v1.md's call table), each
-// printed with its answer, or with its errno where it fails.
+// printed with its answer, or with its errno where it fails; a timer's id
+// printed as 1 where it is one.
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -41,5 +42,12 @@ int main(void) {
     said("nav.open_app", moy_nav_open_app("calc"), NULL);
     said("award", moy_award("first"), NULL);
     said("progress", moy_progress("far", 3), NULL);
+    int32_t once = moy_after(60000), every = moy_every(60000);
+    said("after", once > 0 ? 1 : once, NULL);
+    said("every", every > 0 ? 1 : every, NULL);
+    said("cancel", moy_cancel(once), NULL);
+    said("cancel.again", moy_cancel(once), NULL);
+    said("cancel.every", moy_cancel(every), NULL);
+    said("at", moy_at(1), NULL);
     return 0;
 }

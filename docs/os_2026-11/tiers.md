@@ -98,14 +98,17 @@ costs are #227's.
   not rows; they and the POSIX rows (above) are the same C functions under
   two standard names, neither a second implementation. A row a compiled app
   imports whose server is the kernel's or Python's (`moybyte.on`, `log`,
-  `at`) is a row of the role table too, so its import has a door to cross.
+  `at`, `every`, `after`, `cancel`) is a row of the role table too, so its
+  import has a door to cross.
 - **A native module's app calls.** The app verbs a compiled app imports are
-  rows of this table too (ordinals 62 to 79, 82 and 83): the files role
+  rows of this table too (ordinals 62 to 79 and 82 to 87): the files role
   (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
   `delete`), prefs (`moy_prefs_get`, `set`, `clear`), the clipboard
   (`moy_clipboard_put_text`, `text`, `kind`, `seq`), `moy_nav_open_app`, and
   the console calls `moy_notify`, `moy_open_with`, `moy_share`, `moy_award`
-  and `moy_progress`. Each is
+  and `moy_progress`, and the wakes `moy_every`, `moy_after`, `moy_cancel`
+  and `moy_at`, each heard on the event descriptor as the system's message
+  carrying its id (`docs/app_api_v1.md` §9). Each is
   its role table row run through the ROLE door for the process's app run: a
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and
@@ -120,7 +123,7 @@ costs are #227's.
   are the spec's); only what no call serves states its own (a native module's
   run, a service's start). So `clipboard` is Python's, wasm's and ELF's,
   `network` Python's and ELF's (its sockets), `notifications` and `front`
-  every tier's, `alarms` Python's, Lua's and wasm's, and an install prompt
+  every tier's, `alarms` too, and an install prompt
   asks a cart only for what its tier can do (`tests/test_app_perms.py`).
 - **Trust** is the overview's §4 C row: an ELF that has loaded runs at the
   kernel's trust, and no permission binds it past its consent. The strike ledger and crash record are the floor, keyed for
@@ -266,8 +269,9 @@ builds with libc-wasi off (`native/moy_wasm/micropython.cmake`,
 A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`
 for the rest; a WASI program's `moybyte.os` (`send`, `on`: the service
-model's, below; `notify`, `award`, `progress`, the console calls a native
-service posts on the VM's queue; `log`); and an app's `moybyte.app`, its
+model's, below; `notify`, `award`, `progress` and the wakes `every`,
+`after`, `at`, `cancel`, the console calls a native service posts on the
+VM's queue, their natives generated from the source; `log`); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
 row's types give, and the adapter's natives and the toolkit's are generated
@@ -276,7 +280,8 @@ from it (`native/moy_app/moy_app_wasm_rows.h`,
 door and hopping to the VM's task, or, for a read of what the look and the
 clipboard write, reading in place under the seqlock, as its row's `how`
 says. The console calls are imported too (`moybyte_notify`, `open_with`,
-`share`, `pick`, `send`, `award`, `progress`, `at`, `log`), each the
+`share`, `pick`, `send`, `award`, `progress`, `at`, `every`, `after`,
+`cancel`, `log`), each the
 `moybyte` module's verb run as the app's process through the door
 (`runtime/shell/shell_servers.py`, ConsoleCalls), under the permission it
 names there. **A compiled app polls its messages (2026-11-08)**: `moybyte_on`
@@ -287,7 +292,7 @@ the frame's start would need room in the module's memory for three strings
 and a new call in each engine's glue (a board's, the host's, the browser's);
 the poll is one more generated import, cart-shaped as `btn` is (an app reads
 it in `_update`), and the same record a WASI or ELF service reads, so a
-compiled program parses messages one way. Its window events and an alarm are
-the system's messages (`_minimise`, `_restore`, `moy_action`, `moy_open`,
-`moybyte.at`), an item handed to it a handle its `moybyte_item_read` and
+compiled program parses messages one way. Its window events and its wakes are
+the system's messages (`_minimise`, `_restore`, `moy_action`, `moy_open`;
+`moybyte.at` and `moybyte.timer`, the wake's id), an item handed to it a handle its `moybyte_item_read` and
 `item_write` take (`runtime/system/moybyte.py`, `_compiled_events`).

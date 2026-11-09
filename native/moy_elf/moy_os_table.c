@@ -145,6 +145,34 @@ int32_t moy_os_moy_progress(const char *id, int32_t value) {
     return moy_os_call(166u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.progress
 }
 
+int32_t moy_os_moy_every(int32_t ms) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, ms, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(168u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.every
+}
+
+int32_t moy_os_moy_after(int32_t ms) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, ms, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(169u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.after
+}
+
+int32_t moy_os_moy_cancel(int32_t id) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, id, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(170u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.cancel
+}
+
+int32_t moy_os_moy_at(int32_t t) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, t, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(176u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.at
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -252,6 +280,10 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_on,
         (void *)moy_os_moy_award,
         (void *)moy_os_moy_progress,
+        (void *)moy_os_moy_every,
+        (void *)moy_os_moy_after,
+        (void *)moy_os_moy_cancel,
+        (void *)moy_os_moy_at,
     },
 };
 
@@ -340,4 +372,8 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_on",
     "moy_award",
     "moy_progress",
+    "moy_every",
+    "moy_after",
+    "moy_cancel",
+    "moy_at",
 };

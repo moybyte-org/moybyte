@@ -661,10 +661,12 @@ class ConsoleCalls:
 
     A compiled app's messages are its process's own event queue
     (native/moy_kernel/moy_evq.h), opened for it at its first `send`, `on`
-    or `at` as a native service's is (no Python wake serves it): `on` is the
+    or wake as a native service's is (no Python wake serves it): `on` is the
     kernel's listen, `recv` takes the oldest event as the event descriptor's
-    record (`moy_evq_ev_t`, its arguments, a NUL), and an alarm is the
-    system's message `moybyte.at` carrying its id."""
+    record (`moy_evq_ev_t`, its arguments, a NUL), and a wake is the
+    system's message carrying its id (an alarm's `moybyte.at`, a timer's,
+    `every` or `after`, `moybyte.timer`), which `cancel` takes for a wake of
+    the process's own."""
 
     def __init__(self, ws):
         self.__ws = ws
@@ -736,15 +738,26 @@ class ConsoleCalls:
         return 0 if rc == _E.OK else _DOOR_FULL if rc == _E.FULL else _DOOR_STALE
 
     def at(self, g, t):
-        pid = self._own(g)
-        if pid is None:
+        return self._wake(g, _moybyte.at_message, t)
+
+    def every(self, g, ms):
+        return self._wake(g, _moybyte.every_message, ms)
+
+    def after(self, g, ms):
+        return self._wake(g, _moybyte.after_message, ms)
+
+    def _wake(self, g, fn, v):
+        if self._own(g) is None:
             return _DOOR_STALE
         try:
-            wid = self._as(g, _moybyte.at_message, t)
-        except OSError:
-            return _DOOR_DENIED
-        _E.listen(pid, _moybyte.AT, True)
-        return wid
+            return self._as(g, fn, v)
+        except OSError as exc:
+            return _DOOR_DENIED if exc.args and exc.args[0] == _moybyte.EPERM else _DOOR_FULL
+
+    def cancel(self, g, wid):
+        if self.__ws.procs.pid_of(g) is None:
+            return _DOOR_STALE
+        return self._as(g, _moybyte.cancel_message, wid)
 
     def log(self, g, level, text):
         if self.__ws.procs.pid_of(g) is None:
@@ -845,6 +858,9 @@ DOOR_ARGS = {
     "moybyte.award": "s",
     "moybyte.progress": "si",
     "moybyte.on": "si",
+    "moybyte.every": "i",
+    "moybyte.after": "i",
+    "moybyte.cancel": "i",
     "moybyte.pick": "so",
     "moybyte.log": "is",
     "moybyte.recv": "i",

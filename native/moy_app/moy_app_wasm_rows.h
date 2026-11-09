@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 79
+#define MOY_APP_WASM_N 82
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -204,6 +204,21 @@ static int32_t w_moybyte_on(void *e, const uint8_t *name, uint32_t name_n, int32
     span_t f[2] = { { name, name_n }, NUM(q_on, on) };
     return run(e, HOP, MOY_T_MOYBYTE_ON, f, 2, NULL, 0);
 }
+static int32_t w_moybyte_every(void *e, int32_t ms) {
+    uint8_t q_ms[4];
+    span_t f[1] = { NUM(q_ms, ms) };
+    return run(e, HOP, MOY_T_MOYBYTE_EVERY, f, 1, NULL, 0);
+}
+static int32_t w_moybyte_after(void *e, int32_t ms) {
+    uint8_t q_ms[4];
+    span_t f[1] = { NUM(q_ms, ms) };
+    return run(e, HOP, MOY_T_MOYBYTE_AFTER, f, 1, NULL, 0);
+}
+static int32_t w_moybyte_cancel(void *e, int32_t id) {
+    uint8_t q_id[4];
+    span_t f[1] = { NUM(q_id, id) };
+    return run(e, HOP, MOY_T_MOYBYTE_CANCEL, f, 1, NULL, 0);
+}
 static int32_t w_moybyte_pick(void *e, const uint8_t *mime, uint32_t mime_n, const uint8_t *mode,
                               uint32_t mode_n) {
     span_t f[2] = { { mime, mime_n }, { mode, mode_n } };
@@ -310,6 +325,9 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "moybyte_award", FN(w_moybyte_award), "(*~)i", NULL },
     { "moybyte_progress", FN(w_moybyte_progress), "(*~i)i", NULL },
     { "moybyte_on", FN(w_moybyte_on), "(*~i)i", NULL },
+    { "moybyte_every", FN(w_moybyte_every), "(i)i", NULL },
+    { "moybyte_after", FN(w_moybyte_after), "(i)i", NULL },
+    { "moybyte_cancel", FN(w_moybyte_cancel), "(i)i", NULL },
     { "moybyte_pick", FN(w_moybyte_pick), "(*~*~)i", NULL },
     { "moybyte_log", FN(w_moybyte_log), "(i*~)i", NULL },
     { "moybyte_recv", FN(w_moybyte_recv), "(*~)i", NULL },
@@ -334,6 +352,7 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
     MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
     MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
-    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG,
-    MOY_T_MOYBYTE_RECV, MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
+    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY, MOY_T_MOYBYTE_AFTER,
+    MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG, MOY_T_MOYBYTE_RECV,
+    MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
 };

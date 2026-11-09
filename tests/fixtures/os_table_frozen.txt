@@ -87,3 +87,7 @@
 81 moy_on | int moy_on(const char *name, int on)
 82 moy_award | int32_t moy_award(const char *id)
 83 moy_progress | int32_t moy_progress(const char *id, int32_t value)
+84 moy_every | int32_t moy_every(int32_t ms)
+85 moy_after | int32_t moy_after(int32_t ms)
+86 moy_cancel | int32_t moy_cancel(int32_t id)
+87 moy_at | int32_t moy_at(int32_t t)

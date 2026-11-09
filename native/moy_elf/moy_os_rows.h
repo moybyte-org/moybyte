@@ -161,5 +161,9 @@ int moy_os_moy_send(const char *app, const char *name, const char *args);
 int moy_os_moy_on(const char *name, int on);
 int32_t moy_os_moy_award(const char *id);
 int32_t moy_os_moy_progress(const char *id, int32_t value);
+int32_t moy_os_moy_every(int32_t ms);
+int32_t moy_os_moy_after(int32_t ms);
+int32_t moy_os_moy_cancel(int32_t id);
+int32_t moy_os_moy_at(int32_t t);
 
 #endif // MOY_OS_ROWS_H

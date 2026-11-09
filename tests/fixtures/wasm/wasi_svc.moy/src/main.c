@@ -3,7 +3,10 @@
 // (WASI's poll_oneoff), with its next tick's deadline as the timeout, and
 // answers each "ping" with a "pong" carrying the same arguments, sent to the
 // app the ping came from; a "note" posts a notification and writes the OS
-// log, printing the notification's answer; a "bye" ends it, a "quit" returns
+// log, printing the notification's answer; a "wake" sets a timer that goes
+// off once, one that repeats and an alarm already due, heard as the system's
+// messages "moybyte.timer" and "moybyte.at" carrying the wake's id (the
+// repeating one cancelled at its first tick); a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -12,6 +15,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -28,7 +32,7 @@ static long now_ms(void) {
 
 int main(void) {
     if (moy_on("ping", 1) < 0 || moy_on("bye", 1) < 0 || moy_on("quit", 1) < 0
-        || moy_on("spin", 1) < 0 || moy_on("note", 1) < 0) {
+        || moy_on("spin", 1) < 0 || moy_on("note", 1) < 0 || moy_on("wake", 1) < 0) {
         printf("no queue: %d\n", errno);
         return 1;
     }
@@ -38,7 +42,7 @@ int main(void) {
         moy_evq_ev_t ev;
         char b[sizeof(moy_evq_ev_t) + 256];
     } m;
-    int ticks = 0, pings = 0;
+    int ticks = 0, pings = 0, ticker = 0;
     long next = now_ms() + TICK_MS;
     for (;;) {
         long left = next - now_ms();
@@ -70,6 +74,19 @@ int main(void) {
             printf("note %d errno %d\n", id, id < 0 ? errno : 0);
             fflush(stdout);
             moy_log(MOY_LOG_INFO, "noted");
+        } else if (strcmp(m.ev.name, "wake") == 0) {
+            printf("after %d\n", (int)moy_after(0));
+            ticker = (int)moy_every(TICK_MS);
+            printf("every %d\n", ticker);
+            int id = (int)moy_at(1);
+            printf("at %d errno %d\n", id, id < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strncmp(m.ev.name, "moybyte.", 8) == 0) {
+            printf("%s from %s %s\n", m.ev.name, m.ev.app, m.b + sizeof m.ev);
+            if (strcmp(m.ev.name, "moybyte.timer") == 0 && atoi(m.b + sizeof m.ev + 1) == ticker) {
+                printf("cancel %d\n", (int)moy_cancel(ticker));
+            }
+            fflush(stdout);
         } else if (strcmp(m.ev.name, "bye") == 0) {
             printf("bye after %d pings, %s\n", pings, ticks >= 2 ? "ticking" : "still");
             return 0;

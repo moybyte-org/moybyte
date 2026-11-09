@@ -14,6 +14,54 @@
     X(award, "(*~)i") \
     X(progress, "(*~i)i") \
     X(on, "(*~i)i") \
+    X(every, "(i)i") \
+    X(after, "(i)i") \
+    X(cancel, "(i)i") \
     X(log, "(i*~)i") \
+    X(at, "(i)i") \
 
 #endif // MOY_WASI_OS_ROWS_H
+
+// The console calls' natives, where moy_wasi.c defines MOY_WASI_OS_BODIES
+// after its os_call: each packs its arguments (os_arg_t: a text, a text
+// that may be empty, a number) as the JSON array the console's verb takes.
+#if defined(MOY_WASI_OS_BODIES) && !defined(MOY_WASI_OS_BODIES_DONE)
+#define MOY_WASI_OS_BODIES_DONE
+
+static int32_t w_os_notify(wasm_exec_env_t e, const char *summary, uint32_t summary_n,
+                           const char *body, uint32_t body_n) {
+    const os_arg_t a[2] = { OS_S(summary, summary_n), OS_O(body, body_n) };
+    return os_call(e, "moybyte.notify", a, 2);
+}
+
+static int32_t w_os_award(wasm_exec_env_t e, const char *id, uint32_t id_n) {
+    const os_arg_t a[1] = { OS_S(id, id_n) };
+    return os_call(e, "moybyte.award", a, 1);
+}
+
+static int32_t w_os_progress(wasm_exec_env_t e, const char *id, uint32_t id_n, int32_t value) {
+    const os_arg_t a[2] = { OS_S(id, id_n), OS_I(value) };
+    return os_call(e, "moybyte.progress", a, 2);
+}
+
+static int32_t w_os_every(wasm_exec_env_t e, int32_t ms) {
+    const os_arg_t a[1] = { OS_I(ms) };
+    return os_call(e, "moybyte.every", a, 1);
+}
+
+static int32_t w_os_after(wasm_exec_env_t e, int32_t ms) {
+    const os_arg_t a[1] = { OS_I(ms) };
+    return os_call(e, "moybyte.after", a, 1);
+}
+
+static int32_t w_os_cancel(wasm_exec_env_t e, int32_t id) {
+    const os_arg_t a[1] = { OS_I(id) };
+    return os_call(e, "moybyte.cancel", a, 1);
+}
+
+static int32_t w_os_at(wasm_exec_env_t e, int32_t t) {
+    const os_arg_t a[1] = { OS_I(t) };
+    return os_call(e, "moybyte.at", a, 1);
+}
+
+#endif // MOY_WASI_OS_BODIES

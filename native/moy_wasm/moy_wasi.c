@@ -730,7 +730,8 @@ static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint
     return 0;
 }
 
-// THE CONSOLE CALLS (notify, award, progress): each the console's verb of the
+// THE CONSOLE CALLS (moy_wasi_os_rows.h's bodies: notify, award, progress,
+// at, every, after, cancel): each the console's verb of the
 // row's name run as the run's process, its arguments a JSON array posted on
 // the VM's queue (moy_vmq.h) as a native service's are, and answered at the
 // console's next serve of it: a service's at the scheduler's poll, a
@@ -826,43 +827,49 @@ static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args,
     }
 }
 
-static int32_t w_os_notify(wasm_exec_env_t e, const char *summary, uint32_t summary_n,
-                           const char *body, uint32_t body_n) {
-    char a[CALL_ARGS];
+// A console call's argument: a text the module passed (`p`, `n` bytes; one
+// that may be empty, or must not be), or a number.
+typedef struct {
+    const char *p;
+    uint32_t n;
+    int32_t v;
+    char kind;                      // 's' a text, 'o' a text that may be empty, 'i' a number
+} os_arg_t;
+
+#define OS_S(p, n) { (p), (n), 0, 's' }
+#define OS_O(p, n) { (p), (n), 0, 'o' }
+#define OS_I(v) { NULL, 0u, (v), 'i' }
+
+// The console's verb `name` run as the run's process (os_console) over
+// arguments `a` packed as a JSON array; an empty text that must not be is
+// INVAL.
+static int32_t os_call(wasm_exec_env_t e, const char *name, const os_arg_t *a, int n) {
+    char buf[CALL_ARGS];
     size_t k = 0;
-    a[k++] = '[';
-    if (!json_str(a, sizeof a, &k, summary, summary_n) || k + 2 >= sizeof a) {
-        return -(int32_t)W_INVAL;
+    buf[k++] = '[';
+    for (int i = 0; i < n; i++) {
+        if (i) {
+            buf[k++] = ',';
+        }
+        if (a[i].kind == 'i') {
+            if (k + 13 >= sizeof buf) {
+                return -(int32_t)W_INVAL;
+            }
+            k += (size_t)snprintf(buf + k, sizeof buf - k, "%ld", (long)a[i].v);
+        } else if ((a[i].kind == 's' && a[i].n == 0)
+                   || !json_str(buf, sizeof buf, &k, a[i].p, a[i].n)) {
+            return -(int32_t)W_INVAL;
+        }
+        if (k + 2 >= sizeof buf) {
+            return -(int32_t)W_INVAL;
+        }
     }
-    a[k++] = ',';
-    if (!json_str(a, sizeof a, &k, body, body_n) || k + 1 >= sizeof a) {
-        return -(int32_t)W_INVAL;
-    }
-    a[k++] = ']';
-    return os_console(e, "moybyte.notify", a, k);
+    buf[k++] = ']';
+    return os_console(e, name, buf, k);
 }
 
-static int32_t w_os_award(wasm_exec_env_t e, const char *id, uint32_t id_n) {
-    char a[CALL_ARGS];
-    size_t k = 0;
-    a[k++] = '[';
-    if (id_n == 0 || !json_str(a, sizeof a, &k, id, id_n) || k + 1 >= sizeof a) {
-        return -(int32_t)W_INVAL;
-    }
-    a[k++] = ']';
-    return os_console(e, "moybyte.award", a, k);
-}
-
-static int32_t w_os_progress(wasm_exec_env_t e, const char *id, uint32_t id_n, int32_t value) {
-    char a[CALL_ARGS];
-    size_t k = 0;
-    a[k++] = '[';
-    if (id_n == 0 || !json_str(a, sizeof a, &k, id, id_n) || k + 16 >= sizeof a) {
-        return -(int32_t)W_INVAL;
-    }
-    k += (size_t)snprintf(a + k, sizeof a - k, ",%ld]", (long)value);
-    return os_console(e, "moybyte.progress", a, k);
-}
+#define MOY_WASI_OS_BODIES
+#include "moy_wasi_os_rows.h"
 
 // -- streams -------------------------------------------------------------------------
 

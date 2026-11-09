@@ -227,6 +227,7 @@ SHELL = 1
 FULL = -_E.FULL             # send's answer under BACKPRESSURE (moy_evq.h)
 ALARMS = "alarms"           # the permission `at` needs
 EPERM = 1
+EMFILE = 24
 ERR, WARNING, INFO = 3, 4, 6    # the OS log's severities `log` names most (syslog's)
 _ON, _EVERY, _AFTER, _MAIL, _RING, _ALARM = 0, 1, 2, 3, 4, 5
 # A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
@@ -633,22 +634,74 @@ def at(t, fn):
     return WAKES.alarm(t, fn, True)
 
 
-AT = "moybyte.at"           # the message an alarm of at_message posts
+# The messages a wake of a process whose callbacks are not the VM's posts it
+# (a Lua service's alarm, a compiled program's alarms and timers), from the
+# system, each carrying the wake's id: an alarm's AT, a timer's (`every`,
+# `after`) TIMER, two names of the MOY_EVQ_LISTEN a process listens on.
+AT, TIMER = "moybyte.at", "moybyte.timer"
+_EARS = {}                  # pid -> the names of those its process listens on
+
+
+def _ear(pid, name):
+    """Process `pid` listening on wake message `name`, once whatever the
+    wakes it asks for (the kernel's count of a name's listens is finite)."""
+    got = _EARS.get(pid)
+    if got is None:
+        got = _EARS[pid] = set()
+    if name in got:
+        return
+    if _E.listen(pid, name, True) != _E.OK:
+        raise OSError(EMFILE, "process %d hears no %s" % (pid, name))
+    got.add(name)
+
+
+def _ears_end(pid):
+    _EARS.pop(pid, None)
+
+
+ENDS.append(_ears_end)
+
+
+def _wake_message(name, make, v):
+    pid = _pid()
+    _ear(pid, name)
+    w = [0]
+    w[0] = make(v, lambda: WAKES.post(pid, name, (w[0],)))
+    return w[0]
 
 
 def at_message(t):
     """`at` for a process whose callbacks are not the VM's (a Lua service,
-    native/moycore/moycore_svc.c's ALARMS): the alarm posts it message AT
-    from the system, its one argument the alarm's id, which it answers."""
-    pid = _pid()
-    _may_alarm(pid)
-    w = [0]
-    w[0] = WAKES.alarm(t, lambda: WAKES.post(pid, AT, (w[0],)), True)
-    return w[0]
+    native/moycore/moycore_svc.c's ALARMS; a compiled program): the alarm
+    posts it message AT from the system, its one argument the alarm's id,
+    which it answers."""
+    _may_alarm(_pid())
+    return _wake_message(AT, lambda t, fn: WAKES.alarm(t, fn, True), t)
+
+
+def every_message(ms):
+    """`every` for a compiled program: each tick posts it message TIMER
+    from the system carrying the timer's id, which it answers. A tick its
+    queue cannot take is dropped."""
+    return _wake_message(TIMER, WAKES.every, ms)
+
+
+def after_message(ms):
+    """`after` for a compiled program: message TIMER with the timer's id."""
+    return _wake_message(TIMER, WAKES.after, ms)
 
 
 def cancel(wid):
     return WAKES.cancel(wid)
+
+
+def cancel_message(wid):
+    """`cancel` for a compiled program: a wake of its own process alone,
+    1 where one was cancelled, else 0."""
+    w = WAKES.by_id.get(wid)
+    if w is None or w[_OWNER] != _pid():
+        return 0
+    return int(WAKES.cancel(wid))
 
 
 def end(pid):

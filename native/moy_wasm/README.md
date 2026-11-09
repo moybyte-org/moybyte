@@ -103,9 +103,11 @@ product), with the owner's later calls dated where they land.
   permissions, its variables; and `moybyte.os`, the calls a WASI program
   shares with an ELF module: the service model's (`moy_send`, `moy_on`),
   beside its event descriptor (`moy_wasi.h`, THE EVENT DESCRIPTOR), the OS
-  log (`moy_log`), and the console calls `moy_notify`, `moy_award` and
-  `moy_progress`, posted on the VM's queue as a native service's are
-  (`moy_wasi.c`, THE CONSOLE CALLS). libc-wasi would reach the IDF's POSIX and VFS
+  log (`moy_log`), and the console calls `moy_notify`, `moy_award`,
+  `moy_progress` and the wakes (`moy_every`, `moy_after`, `moy_at`,
+  `moy_cancel`, each heard as the system's message carrying its id),
+  posted on the VM's queue as a native service's are (`moy_wasi.c`, THE
+  CONSOLE CALLS). libc-wasi would reach the IDF's POSIX and VFS
   past the session's pipes and the permissions, and brings a socket and
   thread layer; the table leaves the vendored runtime and the compiler as
   they are, so `MOY_WASM_FORMAT_VERSION` did not move and no installed

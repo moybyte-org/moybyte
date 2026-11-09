@@ -498,9 +498,22 @@ an id `moybyte.cancel` takes, refuses without the permission (Python's
 so a background app can wake its player
 (`docs/os_2026-11/between_apps.md` §3). A Lua service's alarm is the
 console's, heard as the system's message `"moybyte.at"`
-(`native/moycore/moycore_svc.c`, ALARMS), and so is a compiled app's:
-`moybyte_at(t)` answers the alarm's id, and the app reads `"moybyte.at"`
-from `"system"` with that id as its one argument.
+(`native/moycore/moycore_svc.c`, ALARMS), and so is a compiled program's
+on every tier (a wasm app's `moybyte_at(t)`, a WASI program's and a C
+program's `moy_at`): the call answers the alarm's id, and the program reads
+`"moybyte.at"` from `"system"` with that id as its one argument.
+
+**Timers** need no permission. A Python and a Lua program pass a function
+(`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`, §7); a compiled program
+asks for the timer (`moybyte_every(ms)` and `moybyte_after(ms)` in a wasm
+app, `moy_every` and `moy_after` in a WASI or C program), which answers its
+id, and hears each time it goes off as the system's message
+`"moybyte.timer"` carrying that id. `cancel` (`moybyte_cancel(id)`,
+`moy_cancel(id)`) ends a timer or an alarm of the program's own, answering 1,
+or 0 where it has none of that id. The program listens on those two names
+for itself at its first wake (`runtime/system/moybyte.py`, `_wake_message`),
+two of the eight names a process may listen on (`moy_evq.h`,
+`MOY_EVQ_LISTEN`); a tick its queue cannot take is dropped.
 
 ```python
 import moybyte, time
@@ -613,9 +626,9 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.award` | none | `moybyte.award` | `moybyte.award` | `moybyte_award`, `moybyte.os.award` | `moy_award` |
 | `moybyte.progress` | none | `moybyte.progress` | `moybyte.progress` | `moybyte_progress`, `moybyte.os.progress` | `moy_progress` |
 | `moybyte.on` | none | `moybyte.on` | `moybyte.on` | `moybyte_on`, `moybyte.os.on` | `moy_on` |
-| `moybyte.every` | none | `moybyte.every` | `moybyte.every` |  |  |
-| `moybyte.after` | none | `moybyte.after` | `moybyte.after` |  |  |
-| `moybyte.cancel` | none | `moybyte.cancel` | `moybyte.cancel` |  |  |
+| `moybyte.every` | none | `moybyte.every` | `moybyte.every` | `moybyte_every`, `moybyte.os.every` | `moy_every` |
+| `moybyte.after` | none | `moybyte.after` | `moybyte.after` | `moybyte_after`, `moybyte.os.after` | `moy_after` |
+| `moybyte.cancel` | none | `moybyte.cancel` | `moybyte.cancel` | `moybyte_cancel`, `moybyte.os.cancel` | `moy_cancel` |
 | `moybyte.pick` | `front` | `moybyte.pick` | `moybyte.pick` | `moybyte_pick` |  |
 | `moybyte.log` | none | `moybyte.log` | `moybyte.log` | `moybyte_log`, `moybyte.os.log` | `moy_log` |
 | `moybyte.recv` | none |  |  | `moybyte_recv` |  |
@@ -624,7 +637,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |
-| `moybyte.at` | `alarms` | `moybyte.at` | `moybyte.at` | `moybyte_at` |  |
+| `moybyte.at` | `alarms` | `moybyte.at` | `moybyte.at` | `moybyte_at`, `moybyte.os.at` | `moy_at` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -661,15 +674,17 @@ refused at load, the import named. The `ui` rows are every compiled app's
 (`native/moy_ui/moy_ui_wasm.h`), the same C a Python and a Lua app draw
 with; `tests/fixtures/wasm/app_ui.moy` imports every row. The console calls
 (`moybyte_notify`, `open_with`, `share`, `pick`, `send`, `award`,
-`progress`, `on`, `at`, `log`) are every compiled app's to import, each
+`progress`, `on`, `at`, `every`, `after`, `cancel`, `log`) are every
+compiled app's to import, each
 answered as the app's process under the permission the call names, as a
 Python app's is (`notifications`, `alarms`, the front's gate): a refused
 `notify` or `at` answers DENIED (`-4`), and `open_with`, `share` and
 `pick` answer 0 where Python's answer False. It hears what a Python app is called back for as
-messages from `"system"` it listens on with `moybyte_on`: `_minimise`,
-`_restore`, `moy_action` (id, key), `moybyte.at` (the alarm's id) and
-`moy_open` (the item's handle, its type, its mode and its name; a cancelled
-pick's handle 0), the item read and written by its handle with
+messages from `"system"`: `_minimise`, `_restore`, `moy_action` (id, key)
+and `moy_open`, which it listens on with `moybyte_on`, and its wakes,
+`moybyte.at` and `moybyte.timer` (the wake's id, §9), which it listens on
+by asking for one. `moy_open` carries the item's handle, its type, its
+mode and its name (a cancelled pick's handle 0), the item read and written by its handle with
 `moybyte_item_read(h, buf, cap)` and `moybyte_item_write(h, data)`. Each
 console call runs on the VM's task, a hop from a board's session thread. The app is
 cart-shaped: fullscreen, its loop the cart's, and on the desk a fixed canvas
@@ -688,12 +703,13 @@ wasm a WASI program's `_start`; in C an ELF module's `main`
 **A WASI program** (a command or a service) is any program wasi-sdk, Rust's
 `wasm32-wasip1` or Zig builds: files under its permissions, clocks, args, env,
 stdio; it imports `moybyte.os` for its messages (`send`, `on`), its
-notifications, badges and log lines (`notify`, `award`, `progress`, `log`;
+notifications, badges and log lines (`notify`, `award`, `progress`, `log`)
+and its wakes (`every`, `after`, `at`, `cancel`, §9), and
 `sdk/include/moybyte/os.h` declares each under its C name, `moy_notify` and
-the rest). A console call waits for the console's answer: a service's at the
+the rest. A console call waits for the console's answer: a service's at the
 scheduler's next poll, a foreground command's at its job's next step; a
 background command's answers AGAIN after 5 s, its door serving nothing
-while it runs. Prefs, the files and clipboard rows, alarms and the front's
+while it runs. Prefs, the files and clipboard rows and the front's
 calls are not imported (a WASI program's files are WASI's).
 
 **A C program** is an ELF module built against the OS function table by

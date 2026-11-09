@@ -208,10 +208,13 @@ _CALLS = {
     "moybyte.send": _moybyte.send,
     "moybyte.award": _moybyte.award,
     "moybyte.progress": _moybyte.progress,
+    "moybyte.every": _moybyte.every_message,
+    "moybyte.after": _moybyte.after_message,
+    "moybyte.cancel": _moybyte.cancel_message,
     "moybyte.pick": _moybyte.pick,
+    "moybyte.at": _moybyte.at_message,
 }
 # END GENERATED
-_CALLS["moybyte.at"] = _moybyte.at_message      # the alarm's console half (moycore_svc.c)
 
 try:
     import json as _json

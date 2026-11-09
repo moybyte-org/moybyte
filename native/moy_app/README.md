@@ -50,7 +50,8 @@ The role table is data, and every verb has one of four servers:
   names is that process's. A native command reaches them through the door; a
   Lua service and a WASI program through the VM's queue; a compiled app
   through its imports, which also reach the kernel's and Python's rows of the
-  `moybyte` role (`on`, `log`, `at`) and its own reads (`recv`,
+  `moybyte` role (`on`, `log`, and the wakes `at`, `every`, `after` and
+  `cancel`) and its own reads (`recv`,
   `item_read`, `item_write`) through the door. The door hands the Python
   half an answer buffer's capacity as a number field, so a read that does not
   fit keeps what it read (`recv`). An import of the `moybyte` role is admitted

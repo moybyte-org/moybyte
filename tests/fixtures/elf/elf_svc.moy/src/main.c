@@ -3,7 +3,9 @@
 // its next tick's deadline as the timeout, and answers each "ping" with a
 // "pong" carrying the same arguments, sent to the app the ping came from.
 // A "note" posts a notification (an app call, answered on the VM's task) and
-// answers "noted" with what it answered; a "quit" returns 7; a "spin" runs
+// answers "noted" with what it answered; a "wake" sets a timer that goes off
+// at once and answers "timed" with the timer's message (the system's
+// "moybyte.timer", its id) as it hears it; a "quit" returns 7; a "spin" runs
 // on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. A thread it makes sleeps until the process's end
 // sweeps it.
@@ -52,7 +54,8 @@ int main(int argc, char **argv) {
     (void)argc;
     pthread_t t;
     say("start", 0);
-    static const char *const hears[] = { "ping", "note", "quit", "spin" };
+    static const char *const hears[] = { "ping", "note", "quit", "spin", "wake" };
+    static char waker[MOY_EVQ_APP];
     for (unsigned i = 0; i < sizeof hears / sizeof hears[0]; i++) {
         if (moy_on(hears[i], 1) < 0) {
             return 1;
@@ -94,6 +97,11 @@ int main(int argc, char **argv) {
         } else if (strcmp(m.ev.name, "note") == 0) {
             int r = moy_notify("Hello", "from a service");
             moy_send(m.ev.app, "noted", r >= 0 ? "[1]" : "[-1]");
+        } else if (strcmp(m.ev.name, "wake") == 0) {
+            memcpy(waker, m.ev.app, sizeof waker);
+            say("after", moy_after(0) > 0);
+        } else if (strcmp(m.ev.name, "moybyte.timer") == 0 && waker[0]) {
+            moy_send(waker, "timed", m.b + sizeof m.ev);
         } else if (strcmp(m.ev.name, "quit") == 0) {
             return 7;
         } else if (strcmp(m.ev.name, "spin") == 0) {
