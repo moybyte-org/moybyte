@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   seed_builtins           a roster of cart dicts written to the store, by version
+#   _make_room              the version rule a seed is written by, everywhere
+#   seed_folders            cart folders seeded into the browser's store
+#   adopt_bundle            a served bundle taken whole on a first visit
+#   seed_packed             the packed roster, one cart inflated at a time
+#   prune_retired           the folders of seeds that no longer ship, once per store
+#   seed_any                the seed a board's boot runs
 """Seeding the `.moy` store: the built-in roster, its PACKED form, and the
 once-per-store sweep of seeds that no longer ship.
 
@@ -20,9 +28,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moyimg import _b64_decode
 try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, BUILTIN_NS, CART_EXT, VENDOR_KEY)
+    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, BUILTIN_NS, CART_EXT, VENDOR_KEY)
+    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
 try:
     from moy_fs import _native as _store
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -330,7 +338,7 @@ def seed_folders(src, root=CARTS_DIR):
         if not _make_room(d, version):
             continue
         wrote += _copy_cart(src + "/" + name, d, name, _RESEED_PRESERVE)
-        removed += [r for r in before if not _exists(root + "/" + r)]
+        removed += [r for r in before if not _exists(store_path(root, r))]
     return {"first": first, "wrote": wrote, "removed": removed}
 
 
