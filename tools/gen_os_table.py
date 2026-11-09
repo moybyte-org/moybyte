@@ -101,7 +101,7 @@ TIERS = ("python", "lua", "wasm", "elf")
 # served on these (the cart verbs, which this source does not hold).
 SPEC_TIERS = ("python", "lua", "wasm")
 
-ROW_FIELDS = {"name", "kind", "server", "perm", "in", "ret", "how", "door", "wasm", "wasi", "elf",
+ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "door", "wasm", "wasi", "elf",
               "lua", "py", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 PERM_FIELDS = {"perm", "grants", "prompt", "needs", "py", "tiers", "spec"}
@@ -297,11 +297,14 @@ def door_kinds(r):
 
 
 def perms_of(r, src):
-    """The permissions a row answers under: its role's grant, and the row's
-    own `perm` (a gate its server passes, as the nav verbs pass the front's)."""
+    """The permissions a row answers under: its role's grant, unless the row's
+    own `grant` is the floor (a read every app is given, as the theme's are),
+    and the row's own `perm` (a gate its server passes, as the nav verbs pass
+    the front's)."""
     out = []
     role = role_of(r)
-    if role is not None and grant_of(src, role) not in ("never", FLOOR_ROLE):
+    if (role is not None and r.get("grant") != FLOOR_ROLE
+            and grant_of(src, role) not in ("never", FLOOR_ROLE)):
         out = [p["perm"] for p in src["permissions"] if p["grants"] == "role:" + role]
     p = r.get("perm")
     if p is not None:
@@ -512,6 +515,11 @@ def check(src):
         if name in seen:
             raise TableError("row twice: %s" % name)
         seen.add(name)
+        if "grant" in r and (r["grant"] != FLOOR_ROLE or r.get("perm") is not None
+                             or role_of(r) is None
+                             or grant_of(src, role_of(r)) in ("never", FLOOR_ROLE)):
+            raise TableError("%s: a row's own grant is the floor, under a role a "
+                             "permission grants, and gates nothing" % name)
         kind = r.get("kind", "moybyte")
         if kind not in KINDS:
             raise TableError("%s's kind: %r" % (name, kind))

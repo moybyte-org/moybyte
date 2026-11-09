@@ -4,15 +4,15 @@
 -- the Lua language server: docs/app_api_v1.md section 10 has each call.
 
 theme = {}
---- theme.token(role: int): the row theme.token; needs appearance
+--- theme.token(role: int): the row theme.token
 function theme.token(...) end
---- theme.gen(): the row theme.gen; needs appearance
+--- theme.gen(): the row theme.gen
 function theme.gen(...) end
---- theme.light(): the row theme.light; needs appearance
+--- theme.light(): the row theme.light
 function theme.light(...) end
---- theme.name(): the row theme.name; needs appearance
+--- theme.name(): the row theme.name
 function theme.name(...) end
---- theme.variant(): the row theme.variant; needs appearance
+--- theme.variant(): the row theme.variant
 function theme.variant(...) end
 --- set_theme(name: str, variant: str?): the row theme.set; needs appearance
 function set_theme(...) end

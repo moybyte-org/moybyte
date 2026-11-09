@@ -71,6 +71,28 @@ def test_the_table_s_rules():
         gen_os_table.check(bad)             # an ordinal twice
 
 
+def test_a_row_s_floor_grant_drops_its_role_s_permission():
+    """Every app is handed the theme's reads (system_api.make_system_api and
+    the Player's grant of a compiled app), so they need no permission; setting
+    the look keeps the role's."""
+    src = gen_os_table.load()
+    rows = {r["name"]: r for r in src["rows"]}
+    for name in ("theme.colors", "theme.token", "theme.gen", "theme.light",
+                 "theme.name", "theme.variant"):
+        assert gen_os_table.perms_of(rows[name], src) == [], name
+    for name in ("theme.set", "theme.set_variant", "theme.edit_file"):
+        assert gen_os_table.perms_of(rows[name], src) == ["appearance"], name
+    for wrong in ({"grant": "never"}, {"perm": "files"}):
+        bad = json.loads(json.dumps(src))
+        next(r for r in bad["rows"] if r["name"] == "theme.gen").update(wrong)
+        with pytest.raises(gen_os_table.TableError):
+            gen_os_table.check(bad)
+    bad = json.loads(json.dumps(src))
+    next(r for r in bad["rows"] if r["name"] == "carts.readable")["grant"] = "floor"
+    with pytest.raises(gen_os_table.TableError):
+        gen_os_table.check(bad)             # under a role no permission grants
+
+
 def test_a_retired_row_answers_through_a_typed_stub():
     t = _table()
     t["rows"][2]["retired"] = "2027-01-01: an example"

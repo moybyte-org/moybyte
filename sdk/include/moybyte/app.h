@@ -21,15 +21,15 @@ extern "C" {
 
 #define MOYBYTE_APP_IMPORT(name) __attribute__((import_module("moybyte.app"), import_name(#name)))
 
-// theme.token: appearance
+// theme.token
 int32_t theme_token(int32_t role) MOYBYTE_APP_IMPORT(theme_token);
-// theme.gen: appearance
+// theme.gen
 int32_t theme_gen(void) MOYBYTE_APP_IMPORT(theme_gen);
-// theme.light: appearance
+// theme.light
 int32_t theme_light(void) MOYBYTE_APP_IMPORT(theme_light);
-// theme.name: appearance
+// theme.name
 int32_t theme_name(void *name, uint32_t name_cap) MOYBYTE_APP_IMPORT(theme_name);
-// theme.variant: appearance
+// theme.variant
 int32_t theme_variant(void *variant, uint32_t variant_cap) MOYBYTE_APP_IMPORT(theme_variant);
 // theme.set: appearance
 int32_t theme_set(const char *name, uint32_t name_n, const char *variant,

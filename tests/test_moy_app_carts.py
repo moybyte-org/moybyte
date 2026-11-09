@@ -59,11 +59,6 @@ LISTED = {
     # tests/test_wasi_commands.py sets this service's permissions per test and
     # pins the calls they refuse.
     "tests/fixtures/wasm/wasi_svc.moy": (r"^main uses moybyte\.os\.",),
-    # The theme's reads reach every compiled app (runtime/run/player.py hands a
-    # run the theme beside its roles); the table puts the role under
-    # "appearance", whose verbs set the look.
-    "tests/fixtures/wasm/app_roles.moy": (r"^main uses moybyte\.app\.theme_(gen|token), "
-                                          r"which needs \"appearance\"",),
 }
 
 
