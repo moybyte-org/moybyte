@@ -7,6 +7,7 @@
 //                      name a line)
 //   close(pid), has(pid), app(pid)
 //   listen(pid, name, on)                    OK, STALE or FULL
+//   hears(pid, name)                         whether its queue listens on it
 //   post(to, frm, name, args)                one message (args a JSON array
 //                      text): OK, STALE, DEAF, DENIED, FULL, NOMEM
 //   send(frm, app, name, args) -> (took, denied)   took -STALE: no queue,
@@ -70,6 +71,11 @@ static mp_obj_t ev_listen(mp_obj_t pid, mp_obj_t name, mp_obj_t on) {
                                                mp_obj_is_true(on)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ev_listen_obj, ev_listen);
+
+static mp_obj_t ev_hears(mp_obj_t pid, mp_obj_t name) {
+    return mp_obj_new_bool(moy_evq_hears(mp_obj_get_int(pid), mp_obj_str_get_str(name)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ev_hears_obj, ev_hears);
 
 static mp_obj_t ev_post(size_t n, const mp_obj_t *a) {
     (void)n;
@@ -252,6 +258,7 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_has), MP_ROM_PTR(&ev_has_obj) },
     { MP_ROM_QSTR(MP_QSTR_app), MP_ROM_PTR(&ev_app_obj) },
     { MP_ROM_QSTR(MP_QSTR_listen), MP_ROM_PTR(&ev_listen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hears), MP_ROM_PTR(&ev_hears_obj) },
     { MP_ROM_QSTR(MP_QSTR_post), MP_ROM_PTR(&ev_post_obj) },
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&ev_send_obj) },
     { MP_ROM_QSTR(MP_QSTR_route), MP_ROM_PTR(&ev_route_obj) },

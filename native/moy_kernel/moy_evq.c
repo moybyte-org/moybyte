@@ -354,6 +354,14 @@ int moy_evq_listen(uint32_t pid, const char *name, bool on) {
     return rc;
 }
 
+bool moy_evq_hears(uint32_t pid, const char *name) {
+    MOY_SYNC_LOCK(&s_lock);
+    int i = slot_of(pid);
+    bool got = i >= 0 && listens(s_q[i], name);
+    MOY_SYNC_UNLOCK(&s_lock);
+    return got;
+}
+
 // The sender's app copied into `app` under the lock: false where a process
 // that is not the system has no queue.
 static bool sender(uint32_t from, char *app) {

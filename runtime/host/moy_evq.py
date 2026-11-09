@@ -50,6 +50,7 @@ _SIGS = (
     ("moy_evq_has", [_U32], _B),
     ("moy_evq_app", [_U32], _P),
     ("moy_evq_listen", [_U32, _P, _B], _I),
+    ("moy_evq_hears", [_U32, _P], _B),
     ("moy_evq_post", [_U32, _U32, _P, _P, _SZ], _I),
     ("moy_evq_send", [_U32, _P, _P, _P, _SZ, ctypes.POINTER(_U32)], _I),
     ("moy_evq_route", [_P, _P, _SZ], _I),
@@ -115,6 +116,10 @@ def app(pid):
 
 def listen(pid, name, on):
     return _lib().moy_evq_listen(pid, _b(name), bool(on))
+
+
+def hears(pid, name):
+    return bool(_lib().moy_evq_hears(pid, _b(name)))
 
 
 def post(to, frm, name, args):

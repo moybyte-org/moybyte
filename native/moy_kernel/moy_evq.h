@@ -117,6 +117,8 @@ const char *moy_evq_app(uint32_t pid);
 // `pid` listens on `name` (counted: each `on` one, each cancel one less), or
 // stops. OK, STALE, FULL where it listens on MOY_EVQ_LISTEN names already.
 int moy_evq_listen(uint32_t pid, const char *name, bool on);
+// Whether `pid`'s queue listens on `name` (false for no queue).
+bool moy_evq_hears(uint32_t pid, const char *name);
 
 // Message `name` with `args` (a JSON array, n bytes) from process `from` to
 // process `to`, under the rule. OK, STALE (either has no queue; pid 0 and 1

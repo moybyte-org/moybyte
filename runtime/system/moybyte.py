@@ -642,27 +642,15 @@ def at(t, fn):
 # system, each carrying the wake's id: an alarm's AT, a timer's (`every`,
 # `after`) TIMER, two names of the MOY_EVQ_LISTEN a process listens on.
 AT, TIMER = "moybyte.at", "moybyte.timer"
-_EARS = {}                  # pid -> the names of those its process listens on
 
 
 def _ear(pid, name):
     """Process `pid` listening on wake message `name`, once whatever the
-    wakes it asks for (the kernel's count of a name's listens is finite)."""
-    got = _EARS.get(pid)
-    if got is None:
-        got = _EARS[pid] = set()
-    if name in got:
-        return
-    if _E.listen(pid, name, True) != _E.OK:
+    wakes it asks for (the kernel's count of a name's listens is finite).
+    The queue answers whether it listens already: a queue closed in C and
+    its pid reused carries nothing over."""
+    if not _E.hears(pid, name) and _E.listen(pid, name, True) != _E.OK:
         raise OSError(EMFILE, "process %d hears no %s" % (pid, name))
-    got.add(name)
-
-
-def _ears_end(pid):
-    _EARS.pop(pid, None)
-
-
-ENDS.append(_ears_end)
 
 
 def _wake_message(name, make, v):

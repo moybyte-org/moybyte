@@ -130,6 +130,19 @@ def test_a_wake_runs_as_the_process_that_made_it(sched):
     assert sched.wakes.count(pid) == 0         # an `after` is spent
 
 
+def test_a_reused_pid_hears_its_timer_whatever_its_queue_s_last_owner(sched):
+    """A queue closed in C (a compiled program's end, moy_os's proc_end) is
+    no ENDS sweep: a pid reused under a fresh queue that asks for a timer
+    still listens on its message, so the tick reaches it."""
+    pid = _app("t.reused")
+    for _ in range(2):
+        assert moy_evq.open(pid, "t.reused", "", False) == moy_evq.OK
+        wid = _as(pid, lambda: moybyte.after_message(0))
+        sched.tick(0)
+        assert moy_evq.take(pid)[2:] == (moybyte.TIMER, "[%d]" % wid)
+        assert moy_evq.close(pid) == moy_evq.OK
+
+
 def _busy(us):
     t0 = time.perf_counter()
     while (time.perf_counter() - t0) * 1e6 < us:
