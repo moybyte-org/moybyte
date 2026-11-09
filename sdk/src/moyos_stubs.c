@@ -1026,3 +1026,33 @@ int32_t moy_service_running(void)
     return ((moy_os_fn_moy_service_running *)__moy_os->fn[99])();
 }
 #endif
+
+#if MOY_OS_ROW(100)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_pick(const char *mime, const char *mode);
+MOY_OS_USED(100);
+int32_t moy_pick(const char *mime, const char *mode)
+{
+    return ((moy_os_fn_moy_pick *)__moy_os->fn[100])(mime, mode);
+}
+#endif
+
+#if MOY_OS_ROW(101)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_item_read(int32_t item, void *data, size_t data_cap);
+MOY_OS_USED(101);
+int32_t moy_item_read(int32_t item, void *data, size_t data_cap)
+{
+    return ((moy_os_fn_moy_item_read *)__moy_os->fn[101])(item, data, data_cap);
+}
+#endif
+
+#if MOY_OS_ROW(102)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_item_write(int32_t item, const void *data, size_t data_len);
+MOY_OS_USED(102);
+int32_t moy_item_write(int32_t item, const void *data, size_t data_len)
+{
+    return ((moy_os_fn_moy_item_write *)__moy_os->fn[102])(item, data, data_len);
+}
+#endif

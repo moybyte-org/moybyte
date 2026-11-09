@@ -103,3 +103,6 @@
 97 moy_service_start | int32_t moy_service_start(void)
 98 moy_service_stop | int32_t moy_service_stop(void)
 99 moy_service_running | int32_t moy_service_running(void)
+100 moy_pick | int32_t moy_pick(const char *mime, const char *mode)
+101 moy_item_read | int32_t moy_item_read(int32_t item, void *data, size_t data_cap)
+102 moy_item_write | int32_t moy_item_write(int32_t item, const void *data, size_t data_len)

@@ -562,8 +562,6 @@ def check(src):
                 raise TableError("%s: the door's Python half serves no C row" % name)
             if "in" not in r or len(outs) > 1 or (outs and params(r)[-1][1] != "out"):
                 raise TableError("%s: a door row's fields are its in, one answer last" % name)
-            if outs and "c" not in r and isinstance(r.get("elf"), int):
-                raise TableError("%s: the OS table's door hands no answer's capacity" % name)
         lua, py = r.get("lua") or [], list(r.get("py") or [])
         if role_of(r) in ctx_roles(src):
             py.append(r["name"])
@@ -721,14 +719,24 @@ _ARG = {"int": "MOY_OS_ARG_INT", "str": "MOY_OS_ARG_STR", "str?": "MOY_OS_ARG_OP
 
 
 def _call_body(r):
+    """A door row's body: its fields packed for the role door. A door
+    served in Python is handed an answer's capacity as a number field, as
+    the wasm adapter hands it (gen_wasm_h); the C side still writes at
+    most `cap` bytes into the buffer, which the row's `w:<name>_cap` rule
+    has proven lies in the module's memory, so the number only tells the
+    door what fits (an INT32_MAX ceiling keeps it a positive int32)."""
     src = r["src"]
-    ins = [(n, t) for n, t in params(src) if t != "out"]
+    cap_field = src.get("server") != "c"
+    ins = [(n, t) for n, t in params(src) if t != "out" or cap_field]
     out = [n for n, t in params(src) if t == "out"]
     o = ["%s {" % kernel_proto(r)]
     if ins:
         o.append("    const moy_os_arg_t a[%d] = {" % len(ins))
         for n, t in ins:
-            if t == "int":
+            if t == "out":
+                o.append("        { NULL, 0u, (int32_t)(%s_cap < 0x7fffffffu ? %s_cap : 0x7fffffffu),"
+                         " MOY_OS_ARG_INT }," % (n, n))
+            elif t == "int":
                 o.append("        { NULL, 0u, %s, %s }," % (n, _ARG[t]))
             elif t == "bytes":
                 o.append("        { %s, %s_len, 0, %s }," % (n, n, _ARG[t]))

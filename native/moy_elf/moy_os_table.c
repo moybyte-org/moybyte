@@ -256,6 +256,30 @@ int32_t moy_os_moy_service_running(void) {
     return moy_os_call(179u, MOY_OS_HOP, NULL, 0, NULL, 0u);   // moybyte.service_running
 }
 
+int32_t moy_os_moy_pick(const char *mime, const char *mode) {
+    const moy_os_arg_t a[2] = {
+        { mime, 0u, 0, MOY_OS_ARG_STR },
+        { mode, 0u, 0, MOY_OS_ARG_OPT },
+    };
+    return moy_os_call(171u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.pick
+}
+
+int32_t moy_os_moy_item_read(int32_t item, void *data, size_t data_cap) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, item, MOY_OS_ARG_INT },
+        { NULL, 0u, (int32_t)(data_cap < 0x7fffffffu ? data_cap : 0x7fffffffu), MOY_OS_ARG_INT },
+    };
+    return moy_os_call(174u, MOY_OS_HOP, a, 2, data, data_cap);   // moybyte.item_read
+}
+
+int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, item, MOY_OS_ARG_INT },
+        { data, data_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(175u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.item_write
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -379,6 +403,9 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_service_start,
         (void *)moy_os_moy_service_stop,
         (void *)moy_os_moy_service_running,
+        (void *)moy_os_moy_pick,
+        (void *)moy_os_moy_item_read,
+        (void *)moy_os_moy_item_write,
     },
 };
 
@@ -483,4 +510,7 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_service_start",
     "moy_service_stop",
     "moy_service_running",
+    "moy_pick",
+    "moy_item_read",
+    "moy_item_write",
 };

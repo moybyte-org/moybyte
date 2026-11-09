@@ -101,7 +101,7 @@ costs are #227's.
   `at`, `every`, `after`, `cancel`) is a row of the role table too, so its
   import has a door to cross.
 - **A native module's app calls.** The app verbs a compiled app imports are
-  rows of this table too (ordinals 62 to 79 and 82 to 93): the files role
+  rows of this table too (ordinals 62 to 79 and 82 to 102): the files role
   (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
   `delete`, `duplicate`, `rename`, `new_name`), prefs (`moy_prefs_get`, `set`, `clear`), the clipboard
   (`moy_clipboard_put_text`, `text`, `kind`, `seq`), `moy_nav_open_app`, and
@@ -109,7 +109,10 @@ costs are #227's.
   and `moy_progress`, and the wakes `moy_every`, `moy_after`, `moy_cancel`
   and `moy_at`, each heard on the event descriptor as the system's message
   carrying its id (`docs/app_api_v1.md` §9), and the app's own service,
-  `moy_service_start`, `stop` and `running` (§7 there). Each is
+  `moy_service_start`, `stop` and `running` (§7 there), and `moy_pick` with
+  the item rows `moy_item_read` and `moy_item_write`: a pick's answer is the
+  system's message `moy_open` (handle, type, mode, name; a cancel's handle 0)
+  on the event descriptor, as a compiled app hears it. Each is
   its role table row run through the ROLE door for the process's app run: a
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and
@@ -298,4 +301,6 @@ it in `_update`), and the same record a WASI or ELF service reads, so a
 compiled program parses messages one way. Its window events and its wakes are
 the system's messages (`_minimise`, `_restore`, `moy_action`, `moy_open`;
 `moybyte.at` and `moybyte.timer`, the wake's id), an item handed to it a handle its `moybyte_item_read` and
-`item_write` take (`runtime/system/moybyte.py`, `_compiled_events`).
+`item_write` take (`runtime/system/moybyte.py`: `hand_item`, which hands an
+item to any process with a queue, a native command's and a service's too, and
+`_compiled_events`).

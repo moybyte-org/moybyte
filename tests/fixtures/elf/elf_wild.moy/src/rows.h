@@ -97,6 +97,9 @@ static const wild_row_t WILD_ROWS[] = {
     { 94, "moy_aes_gcm_seal", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
     { 95, "moy_aes_gcm_open", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
     { 96, "moy_x25519", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
+    { 100, "moy_pick", 2, { A_STR, A_STR0 }, { -1, -1 } },
+    { 101, "moy_item_read", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
+    { 102, "moy_item_write", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
 };
 
 #define WILD_NROWS (sizeof WILD_ROWS / sizeof WILD_ROWS[0])

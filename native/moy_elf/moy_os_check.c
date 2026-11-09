@@ -471,6 +471,25 @@ static int u_check_96(const moy_u_space_t *u, const void *secret, size_t secret_
         && U_BUF(shared, u_n((size_t)shared_cap, 1), MOY_U_W);
 }
 
+// 100 moy_pick
+_Static_assert(U_REGS(const char *) + U_REGS(const char *) <= 7, "moy_pick's registers");
+static int u_check_100(const moy_u_space_t *u, const char *mime, const char *mode) {
+    return U_STR(mime)
+        && U_STR0(mode);
+}
+
+// 101 moy_item_read
+_Static_assert(U_REGS(int32_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_item_read's registers");
+static int u_check_101(const moy_u_space_t *u, int32_t item, void *data, size_t data_cap) {
+    return U_BUF(data, u_n((size_t)data_cap, 1), MOY_U_W);
+}
+
+// 102 moy_item_write
+_Static_assert(U_REGS(int32_t) + U_REGS(const void *) + U_REGS(size_t) <= 7, "moy_item_write's registers");
+static int u_check_102(const moy_u_space_t *u, int32_t item, const void *data, size_t data_len) {
+    return U_BUF(data, u_n((size_t)data_len, 1), MOY_U_R);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -540,6 +559,9 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 94: fn = (u_check_fn *)(void *)u_check_94; break;
     case 95: fn = (u_check_fn *)(void *)u_check_95; break;
     case 96: fn = (u_check_fn *)(void *)u_check_96; break;
+    case 100: fn = (u_check_fn *)(void *)u_check_100; break;
+    case 101: fn = (u_check_fn *)(void *)u_check_101; break;
+    case 102: fn = (u_check_fn *)(void *)u_check_102; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

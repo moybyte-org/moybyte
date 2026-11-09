@@ -65,12 +65,14 @@ try:
     import iconsets as _iconsets
     import system_api as _system_api
     import text_modes as _text_modes
+    import moybyte as _moybyte
 except ImportError:  # host: the runtime package
     from runtime.intents import INTENTS as _INTENTS
     from runtime import intents as _intents
     from runtime import iconsets as _iconsets
     from runtime import system_api as _system_api
     from runtime import text_modes as _text_modes
+    from runtime import moybyte as _moybyte
 try:
     from status_items import ITEMS as _ITEMS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -358,14 +360,20 @@ class Notices:
             return ()
 
     def _intent_hand(self, pid, g):
-        """A pick to the running app that asked: its `moy_open(h)`, True where
-        it took it (None, a cancel, reaches it too)."""
+        """A pick to the process that asked: the running app's `moy_open(h)`
+        where its run defines one (a compiled app's posts it), any other
+        process's the message `moy_open` (moybyte.hand_item: a native
+        command's or a service's). True where it took it (None, a cancel,
+        reaches it too)."""
+        if pid is None:
+            return False
         pl = self.run.player
-        if pid is None or pl is None or pl.pid != pid or pl.cart_error is not None:
-            return False
-        if (pl.ns or {}).get("moy_open") is None:
-            return False
-        return pl.window_event("moy_open", g)
+        if pl is not None and pl.pid == pid:
+            if pl.cart_error is not None:
+                return False
+            if (pl.ns or {}).get("moy_open") is not None:
+                return pl.window_event("moy_open", g)
+        return _moybyte.hand_item(pid, g)
 
     def _intent_read(self, kind, name):
         h = self.store

@@ -697,11 +697,11 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.every` | none | `moybyte.every` | `moybyte.every` | `moybyte_every`, `moybyte.os.every` | `moy_every` |
 | `moybyte.after` | none | `moybyte.after` | `moybyte.after` | `moybyte_after`, `moybyte.os.after` | `moy_after` |
 | `moybyte.cancel` | none | `moybyte.cancel` | `moybyte.cancel` | `moybyte_cancel`, `moybyte.os.cancel` | `moy_cancel` |
-| `moybyte.pick` | `front` | `moybyte.pick` | `moybyte.pick` | `moybyte_pick` |  |
+| `moybyte.pick` | `front` | `moybyte.pick` | `moybyte.pick` | `moybyte_pick` | `moy_pick` |
 | `moybyte.log` | none | `moybyte.log` | `moybyte.log` | `moybyte_log`, `moybyte.os.log` | `moy_log` |
 | `moybyte.recv` | none |  |  | `moybyte_recv` |  |
-| `moybyte.item_read` | none |  |  | `moybyte_item_read` |  |
-| `moybyte.item_write` | none |  |  | `moybyte_item_write` |  |
+| `moybyte.item_read` | none |  |  | `moybyte_item_read` | `moy_item_read` |
+| `moybyte.item_write` | none |  |  | `moybyte_item_write` | `moy_item_write` |
 | `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |
@@ -733,9 +733,10 @@ hears `_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`,
 the item a table whose `read()` answers its text and whose `write(text)`
 writes it back under an `"rw"` grant. Python-only rows (`status`, `lease`,
 the device APIs) are `runtime/system/moybyte.py`'s. The rows with only a
-wasm name (`moybyte.recv`, `item_read`, `item_write`) are what a compiled
-app reads where a Python or a Lua one is called back: its messages (§8) and
-an item handed to it. Standard names come first on every tier: Python's
+wasm and C names (`moybyte.recv`, `item_read`, `item_write`) are what a
+compiled app or a native module reads where a Python or a Lua one is called
+back: its messages (§8; a native module reads them from its event
+descriptor) and an item handed to it. Standard names come first on every tier: Python's
 `open`, `os`, `time`, `socket`, `requests`, `asyncio` and `logging`; POSIX
 in C; WASI preview1 in wasm; Lua's `io` and `os`.
 
@@ -814,7 +815,15 @@ WASI's own files (§5), under its `files` permission.
 `main(argc, argv)`, or a service's loop. Its manifest names its chips
 (`"native": ["esp32s3", "esp32p4"]`) and asks for `full_access`;
 `native/moy_elf/README.md` is the tier and `tests/fixtures/elf/elf_app.moy`
-calls the app rows.
+calls the app rows. `moy_pick(mime, mode)` puts the console's picker up for
+it as a compiled app's `pick` does (a command holds no `front` unless it asks,
+so its pick waits as a notification); the item picked reaches it as the
+message `moy_open` on its event descriptor, which it listens on with
+`moy_on`: its arguments the handle, the type, the mode and the name (a
+cancelled pick's handle 0), the handle what `moy_item_read(h, buf, cap)` and
+`moy_item_write(h, data, len)` take until the process ends
+(`runtime/system/moybyte.py`, `hand_item`, which hands an item to any
+process that is not the app on screen).
 
 ## 11. Lifecycle
 

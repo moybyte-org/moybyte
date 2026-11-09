@@ -177,5 +177,8 @@ int32_t moy_os_moy_x25519(const void *secret, size_t secret_len, const void *pee
 int32_t moy_os_moy_service_start(void);
 int32_t moy_os_moy_service_stop(void);
 int32_t moy_os_moy_service_running(void);
+int32_t moy_os_moy_pick(const char *mime, const char *mode);
+int32_t moy_os_moy_item_read(int32_t item, void *data, size_t data_cap);
+int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len);
 
 #endif // MOY_OS_ROWS_H

@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 100
+#define MOY_OS_VERSION 103
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -415,6 +415,9 @@ int32_t moy_x25519(const void *secret, size_t secret_len, const void *peer, size
 int32_t moy_service_start(void);   // moybyte.service_start
 int32_t moy_service_stop(void);   // moybyte.service_stop
 int32_t moy_service_running(void);   // moybyte.service_running
+int32_t moy_pick(const char *mime, const char *mode);   // moybyte.pick
+int32_t moy_item_read(int32_t item, void *data, size_t data_cap);   // moybyte.item_read
+int32_t moy_item_write(int32_t item, const void *data, size_t data_len);   // moybyte.item_write
 
 #endif // __wasm__
 

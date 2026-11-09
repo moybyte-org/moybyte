@@ -127,6 +127,47 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     assert not ws.ach.has("elf.app", "far")
 
 
+def test_a_native_command_picks_an_item_and_hears_it_as_a_message(term):
+    """`moy_pick` from C (tests/fixtures/elf/elf_app.moy, `app pick`): a
+    command holds no `front`, so its pick waits as a notification, whose
+    act puts the console's picker up; the document picked reaches the
+    process as the message `moy_open` on its event descriptor
+    (moybyte.hand_item), its handle what moy_item_read and moy_item_write
+    take -- a short buffer ERANGE, a write the store keeps -- and a cancelled
+    pick hands handle 0, which reads ENOENT."""
+    from runtime import moy_sh
+    from runtime import intents as I
+    from runtime.notifications import NOTES
+    ws, app = term
+    ws.carts_store.save_file("docs", "picked", "# picked\n", ws.carts_root)
+    app.face.take()
+    before = app.face.lines()
+    app.face.set_line("elf.app/app pick; echo status $?")
+    app.face.submit()
+    answers = [lambda: I.INTENTS.picked(I.INTENTS.picking[3].index("Documents/picked.md")),
+               ws.confirm.cancel]
+    t0 = time.monotonic()
+    while app.face.busy() and time.monotonic() - t0 < 20:
+        moy_sh.jobs()
+        asked = [n for n in NOTES.list if n.then is not None and n.app == "App Calls"]
+        if asked:
+            assert asked[0].summary == "Wants you to pick a file"
+            assert NOTES.act(asked[0].id)
+            assert I.INTENTS.picking is not None and ws.confirm.open
+            answers.pop(0)()
+        time.sleep(0.002)
+    assert not answers, "both picks reached the picker"
+    app.face.take()
+    lines = [re.sub("\x1b\\[[0-9;]*m", "", ln) for ln in app.face.lines()][len(before):]
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("on "))
+    assert lines[at:] == [
+        "on 0", "pick 1", 'open "text/markdown", "rw", "picked.md"]',
+        "item_read # picked", "", "item_read.short -1 ERANGE", "item_write 1",
+        "item_read.again # kept", "", "pick.again 1",
+        "cancelled [0, null, null, null]", "item_read.none -1 ENOENT", "status 0"]
+    assert ws.carts_store.load_file("docs", "picked", ws.carts_root) == "# kept\n"
+
+
 def test_the_crypto_rows_answer_a_native_command(term):
     """The crypto rows from C (tests/fixtures/elf/elf_crypto.moy): the known
     answers, and each length refused an errno, never a crash."""

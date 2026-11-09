@@ -1024,35 +1024,43 @@ def _intents_end(pid):
 ENDS.append(_intents_end)
 
 
-# A compiled app's window events (runtime/run/player.py, for a wasm app that
-# declares the moybyte.app extension): each a message from the system its
-# process hears where it listens on its name, as it hears any other, and a
-# granted item a handle its item_read and item_write take
-# (runtime/shell/shell_servers.py, ConsoleCalls).
+# An item handed to a process: the message `moy_open` its queue takes, and
+# a granted item a handle its item_read and item_write take
+# (runtime/shell/shell_servers.py, ConsoleCalls) until its process ends. A
+# compiled app (runtime/run/player.py, a wasm app that declares the
+# moybyte.app extension) hears its window events as messages the same way.
 _ITEMS = {}                 # pid -> {handle: grant}
 _ITEM_NEXT = [1]
 
 
+def hand_item(pid, g):
+    """Grant `g` to process `pid` as the message `moy_open` (handle, mime,
+    mode, name), a handle its item calls take; None, a cancelled pick, as
+    (0, None, None, None). True where its queue took it (it listens on
+    `moy_open`)."""
+    if g is None:
+        return WAKES.post(pid, "moy_open", (0, None, None, None))
+    h = _ITEM_NEXT[0]
+    _ITEM_NEXT[0] = h + 1
+    held = _ITEMS.setdefault(pid, {})
+    held[h] = g
+    if WAKES.post(pid, "moy_open", (h, g.mime, g.mode, g.name)):
+        return True
+    del held[h]
+    return False
+
+
 def _compiled_events(ns, pid):
     """`_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`
-    of the run of process `pid` into its namespace `ns`, each posted to it:
-    `moy_open` as (handle, mime, mode, name), a cancelled pick's as
-    (0, None, None, None)."""
+    of the run of process `pid` into its namespace `ns`, each posted to it,
+    `moy_open` by `hand_item`."""
     def post(name, *args):
         WAKES.post(pid, name, args)
-
-    def give(g):
-        if g is None:
-            return post("moy_open", 0, None, None, None)
-        h = _ITEM_NEXT[0]
-        _ITEM_NEXT[0] = h + 1
-        _ITEMS.setdefault(pid, {})[h] = g
-        post("moy_open", h, g.mime, g.mode, g.name)
 
     ns["_minimise"] = lambda: post("_minimise")
     ns["_restore"] = lambda: post("_restore")
     ns["moy_action"] = lambda nid, key: post("moy_action", nid, key)
-    ns["moy_open"] = give
+    ns["moy_open"] = lambda g: hand_item(pid, g)
 
 
 def _items_end(pid):

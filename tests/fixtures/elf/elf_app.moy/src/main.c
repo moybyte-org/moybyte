@@ -1,9 +1,14 @@
 // app: a native command's app calls (docs/app_api_v1.md's call table), each
 // printed with its answer, or with its errno where it fails; a timer's id
-// printed as 1 where it is one.
+// printed as 1 where it is one. `app pick` picks instead: a document it
+// hears as `moy_open` on its event descriptor, read, written and read
+// again through its handle, then a pick the user cancels (handle 0).
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "moybyte/os.h"
 
@@ -18,7 +23,48 @@ static void said(const char *what, int32_t r, const char *buf) {
     }
 }
 
-int main(void) {
+// The next `moy_open` the process hears: its handle, its arguments in
+// `args`; -1 where none came within ten seconds.
+static int32_t opened(char *args, size_t cap) {
+    static union {
+        moy_evq_ev_t ev;
+        char b[sizeof(moy_evq_ev_t) + 256];
+    } m;
+    for (int waits = 0; waits < 100; waits++) {
+        struct pollfd p = { MOY_EVQ_FD, POLLIN, 0 };
+        if (poll(&p, 1, 100) <= 0) {
+            continue;
+        }
+        ssize_t got = read(MOY_EVQ_FD, &m, sizeof m);
+        if (got <= 0 || strcmp(m.ev.name, "moy_open") != 0) {
+            continue;
+        }
+        snprintf(args, cap, "%.*s", (int)m.ev.n, m.b + sizeof m.ev);
+        return (int32_t)strtol(args + 1, NULL, 10);
+    }
+    return -1;
+}
+
+static int pick(void) {
+    char buf[256], args[256];
+    said("on", moy_on("moy_open", 1), NULL);
+    said("pick", moy_pick("text/markdown", "rw"), NULL);
+    int32_t h = opened(args, sizeof args);
+    printf("open %s\n", h > 0 ? strchr(args, ',') + 2 : "none");
+    said("item_read", moy_item_read(h, buf, sizeof buf), buf);
+    said("item_read.short", moy_item_read(h, buf, 2), NULL);
+    said("item_write", moy_item_write(h, "# kept\n", 7), NULL);
+    said("item_read.again", moy_item_read(h, buf, sizeof buf), buf);
+    said("pick.again", moy_pick("text/markdown", "r"), NULL);
+    printf("cancelled %s\n", opened(args, sizeof args) == 0 ? args : "no");
+    said("item_read.none", moy_item_read(0, buf, sizeof buf), NULL);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "pick") == 0) {
+        return pick();
+    }
     char buf[256];
     int32_t r = moy_prefs_set("level", "42");
     said("prefs.set", r, NULL);
