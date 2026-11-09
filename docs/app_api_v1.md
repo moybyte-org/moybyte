@@ -169,6 +169,7 @@ absent (`runtime/carts/moy_store_base.py`, `VENDOR_KEY`):
 | `entries` | the cart's entry points beside `main`: `{"service": file}`, its own service's program | §7 |
 | `achievements` | the badges a game declares | §9 |
 | `native` | the chips a C cart carries a module for (`["esp32s3", "esp32p4"]`) | §10 |
+| `wasi` | `true`: an app that is a WASI command the Player runs, drawing with the toolkit it links (`sdk/include/moybyte/ui.h`) | `runtime/run/wasi_run.py`, `docs/ui_api_2026-10.md` |
 | `audio_ring` | a compiled cart's audio ring depth in frames | `docs/os_2026-11/hardware.md` §2 |
 | `config`, `edit` | the "Make it mine" values `cfg(key)` reads and the Editor's rows that change them | `runtime/carts/moy_carts.py`, `NEW_TEMPLATE` |
 | `assets` | a cart's scenes, in order | `docs/moy_cart_api.md`, Scenes |
