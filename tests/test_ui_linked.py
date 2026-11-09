@@ -43,12 +43,18 @@ def _pixels(ws):
 def _shot(drv):
     """The canvas once the app has caught up: a native or WASI app draws on a
     task of its own (a WASI one interpreted on the host), so a frame may show
-    its last screen; frames until STEADY in a row draw the same."""
+    its last screen; frames until STEADY presented in a row (every frame, for
+    the Python app) draw the same. The app presents once a frame message, so
+    the run of STEADY reaches past the message that carried the input."""
     last = _pixels(drv.ws)
     same = 0
-    for _ in range(60):
+    for _ in range(600):
+        app = drv.ws.run.player._lua
+        before = getattr(app, "presented", None)
         _frame(drv)
         now = _pixels(drv.ws)
+        if before is not None and app.presented == before:
+            continue
         same = same + 1 if now == last else 0
         if same >= STEADY:
             return now
@@ -70,6 +76,7 @@ def _script(ws):
         shots.append(_shot(drv))
     drv.press("down")
     _frame(drv)
+    _shot(drv)                          # the field focused before a key reaches it
     for ch in TYPED:
         drv.type_char(ord(ch))
         _frame(drv)

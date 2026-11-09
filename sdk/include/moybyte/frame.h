@@ -59,7 +59,9 @@ static inline const char *moy_game_num_(const char *s, int32_t *out) {
 // The console's next frame into *f: 1, or 0 once the program is stopped.
 // Every other message read on the way goes to `other` (NULL: dropped).
 // Frames that queued while the program was busy are read as one: the last
-// one's held buttons and input words, every one's presses.
+// one's held buttons and input words, every one's presses and milliseconds.
+// A frame carrying a key or a pointer state ends the read, so a later one
+// never writes over its input words.
 static inline int moy_game_frame(moy_frame_t *f,
                                  void (*other)(const moy_evq_ev_t *ev, const char *args)) {
     static union {
@@ -67,7 +69,7 @@ static inline int moy_game_frame(moy_frame_t *f,
         char b[sizeof(moy_evq_ev_t) + 256];
     } m;
     int got = 0;
-    uint32_t pressed = 0;
+    uint32_t pressed = 0, ms = 0;
     for (;;) {
         struct pollfd p = { MOY_EVQ_FD, POLLIN, 0 };
         if (poll(&p, 1, got ? 0 : -1) < 0) {
@@ -79,6 +81,7 @@ static inline int moy_game_frame(moy_frame_t *f,
         if (!(p.revents & POLLIN)) {
             if (got) {
                 f->pressed = pressed;
+                f->ms = ms;
                 return 1;
             }
             continue;
@@ -99,9 +102,14 @@ static inline int moy_game_frame(moy_frame_t *f,
             }
             f->held = (uint32_t)v[0];
             pressed |= (uint32_t)v[1];
-            f->ms = (uint32_t)v[2];
+            ms += (uint32_t)v[2];
             memcpy(f->in, v + 3, sizeof f->in);
             got = 1;
+            if (f->in[MOY_FRAME_KEY] != 0 || f->in[MOY_FRAME_PTR] != 0) {
+                f->pressed = pressed;
+                f->ms = ms;
+                return 1;
+            }
         } else if (other != NULL) {
             other(&m.ev, args);
         }

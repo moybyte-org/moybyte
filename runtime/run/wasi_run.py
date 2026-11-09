@@ -59,7 +59,9 @@ class WasiApp:
         self._ptr = [0, 0, 0, 0]
         self._keys = key_ring()
         self._pressed = 0
+        self._ms = 0                    # the time since the last frame message
         self._shown = False
+        self.presented = 0              # the frames it has presented
         self._live = True
         self.draw_next = True
         self.init = None
@@ -80,14 +82,17 @@ class WasiApp:
         self._pressed |= out[1]
         self._shown = False             # the call lets the last frame go
         fill_words(self._ws, self._words, self._ptr, self._keys)
-        ms = int(dt * 1000)
-        got = _E.screen_frame(self.pid, out[0], self._pressed, ms,
-                              ms if ms < WAIT_MS_MAX else WAIT_MS_MAX, self._words)
+        tick = int(dt * 1000)
+        self._ms += tick
+        got = _E.screen_frame(self.pid, out[0], self._pressed, self._ms,
+                              tick if tick < WAIT_MS_MAX else WAIT_MS_MAX, self._words)
         if got > 0 and got & SENT:
             self._pressed = 0
+            self._ms = 0
             key_sent(self._keys)
         if got > 0 and got & SHOWN:
             self._shown = True
+            self.presented += 1
         if self._rt.done(self.pid):
             self._end()
 

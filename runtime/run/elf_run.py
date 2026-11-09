@@ -345,7 +345,9 @@ class ElfGame:
         self._masks = [0, 0]
         self._mask_of = getattr(ws.input, "button_masks", None)
         self._pressed = 0
+        self._ms = 0                    # the time since the last frame message
         self._shown = False
+        self.presented = 0              # the frames it has presented
         self._live = True
         self.draw_next = True
         self.init = None
@@ -359,22 +361,25 @@ class ElfGame:
         read_buttons(self._ws.input, self._mask_of, out)
         self._pressed |= out[1]
         self._shown = False             # the call lets the last frame go
-        ms = int(dt * 1000)
-        wait = ms * 1000
+        tick = int(dt * 1000)
+        self._ms += tick
+        wait = tick * 1000
         if wait > WAIT_US_MAX:
             wait = WAIT_US_MAX
         words = self._words
         if words is not None:
             fill_words(self._ws, words, self._ptr, self._keys)
-        got = self._e.frame(self.pid, out[0], self._pressed, ms, wait, words)
+        got = self._e.frame(self.pid, out[0], self._pressed, self._ms, wait, words)
         if got == ENDED or got < 0:
             self._end()
             return
         if got & FRAME_SENT:
             self._pressed = 0
+            self._ms = 0
             key_sent(self._keys)
         if got & FRAME_SHOWN:
             self._shown = True
+            self.presented += 1
 
     def _end(self):
         self._live = False
