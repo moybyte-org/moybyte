@@ -77,15 +77,23 @@ nor those docs will warn you about:
   EMPTY-batch POST — because a board running firmware older than that marker
   still ACCEPTS the batch, and reading it as "static host" would quietly strand a
   kid's edits in a browser.
+- **The page's JavaScript does I/O; the console's rules are the VM's**
+  (owner, 2026-11-08): what is seeded, skipped and named, and the `.moy`
+  archive, run in the VM (`moy_seed.seed_folders`, `moy_pack` through
+  `web_boot`), and the VM is up before the store is seeded. A rule that must
+  run before it is exported from the wasm's C, never copied into JavaScript.
+  `tests/test_web_io_ratchet.py` files every `moy_store.mjs` name; the
+  mirrors it lists only shrink (the audit: `docs/moycore_direction.md` §3).
 - **The substrate is OPFS, not IndexedDB**: the ops ARE file writes at paths, so a
   cart folder stays a cart folder. No OPFS (private window, blocked site data,
   `file://`) runs in memory and **the page says so**; a quota failure requeues, and
   after three gives up ONCE and says that too. A returning browser's shelf is
   OPFS's, never the bundle's -- except the bundle's SYSTEM carts, which reach
-  it as a board's built-ins reach its SD (`moy_store.systemSeeds`, #47): one
-  the store has never had (a new app, a new seed game) is seeded whole, and one
-  whose bundled manifest `version` is newer replaces the store's copy, its
-  `pmem.json` and `config.json` kept. Without the first, nobody who had visited
+  it as a board's built-ins reach its SD (#47), decided in the VM
+  (`moy_seed.seed_folders`, the worker's `seedCarts` only moving the bytes):
+  one the store has never had (a new app, a new seed game) is seeded whole,
+  and one whose bundled manifest `version` is newer replaces the store's copy,
+  its `pmem.json` and `config.json` kept, by the board's own `_make_room`. Without the first, nobody who had visited
   before a system cart shipped would ever see it; without the second, an app
   kept from an older console runs its old manifest on the new one (Notes'
   `files:docs` after the folders took their names: no `files`, a NameError).

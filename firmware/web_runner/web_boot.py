@@ -728,13 +728,44 @@ def start_edit(name, tab=None):
         ws.ach.mute = was
 
 
-def import_p8_json(path, name, out_dir):
-    """Convert a dropped PICO-8 cart at `path` into a `.moy` folder (#194).
+def import_p8_json(path, name, root):
+    """Convert a dropped PICO-8 cart at `path` into a `.moy` folder (#194) in
+    the store `root`, named by the store's import rule
+    (moy_carts.import_base): web_p8's report, with the folder as `dir`.
 
     Lazily imported so the console boots without the converter in RAM: a session
     that never drops a cart never pays for it."""
     import web_p8
-    return web_p8.import_p8_json(path, name, out_dir)
+    out_dir = moy_carts.import_target(root, moy_carts.import_base(name))
+    r = json.loads(web_p8.import_p8_json(path, name, out_dir))
+    r["dir"] = out_dir.rsplit("/", 1)[-1]
+    return json.dumps(r)
+
+
+def import_archive_json(path, name, root):
+    """A dropped `.moy` archive at `path` onto the shelf `root`
+    (moy_carts.import_archive), the archive removed after: {"dir": the
+    folder it landed in} or {"error": why not}."""
+    import os
+    try:
+        got = moy_carts.import_archive(path, root, name=name)
+    except Exception as exc:  # noqa: BLE001 -- a bad zip is a message
+        got = exc
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    if isinstance(got, Exception):
+        return json.dumps({"error": str(got) or "not a zip file"})
+    if got is None:
+        return json.dumps({"error": "nothing in that zip looked like a cart"})
+    return json.dumps({"dir": got.rsplit("/", 1)[-1]})
+
+
+def export_cart(path, dest):
+    """The cart folder at `path` packed to `dest` as a `.moy` archive
+    (moy_carts.pack, the wire's skip rule): the number of files."""
+    return moy_carts.pack(path, dest)
 
 
 def _cart_title():

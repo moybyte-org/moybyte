@@ -1794,7 +1794,7 @@ try:
                           SYSTEM_DIR, SETTINGS_NAME, system_store_path, parse_settings,
                           settings_text, load_system, save_system, save_system_steps)
     from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, adopt,
-                          import_archive)
+                          import_archive, import_base, import_target)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
                                   _wifi_networks, load_wifi, save_wifi, remember_wifi,
@@ -1802,17 +1802,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                   system_store_path, parse_settings, settings_text,
                                   load_system, save_system, save_system_steps)
     from runtime.moy_pack import (save_package, rename_package, pack_skip, pack, unpack,
-                                  adopt, import_archive)
+                                  adopt, import_archive, import_base, import_target)
 try:
     from moy_seed import (
-        seed_builtins,
+        seed_builtins, seed_folders,
         _SEED_WBITS, unpack_seed, seed_packed, is_packed,
         RETIRED, RETIRED_GEN, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,
         embedded_floor)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_seed import (
-        seed_builtins,
+        seed_builtins, seed_folders,
         _SEED_WBITS, unpack_seed, seed_packed, is_packed,
         RETIRED, RETIRED_GEN, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,

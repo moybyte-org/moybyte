@@ -1,5 +1,4 @@
-// A cart as it travels (moy_pack.h has the contract; moy_store.mjs's zipStore
-// and unzip are the codec this mirrors).
+// A cart as it travels (moy_pack.h has the contract).
 
 #include <string.h>
 

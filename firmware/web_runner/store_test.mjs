@@ -7,7 +7,6 @@
 // here, and Chrome only has to prove the real substrate behaves like the fake
 // (tests/test_web_persist_e2e.py). Both write paths are exercised: Chrome uses
 // the sync access handle, a browser without one falls back to createWritable.
-import { deflateRawSync } from "node:zlib";
 import * as store from "./moy_store.mjs";
 import { crash, fakeNav } from "./fake_opfs.mjs";
 
@@ -446,52 +445,6 @@ for (const sync of [true, false]) {
        await store.readRecord(s1) === '{"version": 1, "carts": {}}');
 }
 
-// ---- a returning browser gets the bundle's system carts as a board would ----
-{
-    const local = { "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true}}',
-                    "star.moy/main.py": "old code",
-                    "star.moy/old.lua": "gone",
-                    "star.moy/pmem.json": "[7]",
-                    "star.moy/journal/journal.jsonl": "{}",
-                    "same.moy/manifest.json": '{"title":"Same","moybyte":{"system":true},"version":3}',
-                    "same.moy/main.py": "kid's edit",
-                    "mine.moy/manifest.json": '{"title":"Mine"}' };
-    const bundle = {
-        "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true},"version":9}',
-        "star.moy/main.py": "new code",
-        "star.moy/pmem.json": "[]",
-        "star.moy/config.json": "{}",
-        "same.moy/manifest.json": '{"title":"Same","moybyte":{"system":true},"version":3}',
-        "same.moy/main.py": "seed",
-        "moybyte.get_carts.moy/manifest.json": '{"title":"Get Carts","moybyte":{"system":true}}',
-        "moybyte.get_carts.moy/main.py": "pass",
-        "moybyte.get_carts.moy/cover.png": { b: "AAAA" },
-        "demo.moy/manifest.json": '{"title":"Demo"}',
-        "demo.moy/main.py": "x",
-        "loose.moy/manifest.json": '{"title":"Loose","system":true}',
-        "loose.moy/main.py": "x",
-    };
-    const got = store.systemSeeds(local, bundle);
-    const added = Object.keys(got.add);
-    ok("a system cart the store lacks comes from the bundle, whole",
-       ["moybyte.get_carts.moy/cover.png", "moybyte.get_carts.moy/main.py",
-        "moybyte.get_carts.moy/manifest.json"].every((k) => added.includes(k)),
-       JSON.stringify(added));
-    ok("one whose bundled version is newer is replaced, its manifest last",
-       got.add["star.moy/main.py"] === "new code"
-       && added[added.length - 1] === "star.moy/manifest.json", JSON.stringify(added));
-    ok("its saves stay, and tuning it never had comes with it",
-       !("star.moy/pmem.json" in got.add) && "star.moy/config.json" in got.add);
-    ok("the old version's other files go, the saves stay",
-       got.drop.sort().join() === "star.moy/journal/journal.jsonl,star.moy/old.lua",
-       JSON.stringify(got.drop));
-    ok("one at the same version is never touched, and a non-system cart never added",
-       !("same.moy/main.py" in got.add) && !("demo.moy/main.py" in got.add)
-       && !got.drop.some((r) => r.startsWith("same.moy/")));
-    ok("a top-level \"system\" is not Moybyte's field and reads as absent",
-       !("loose.moy/main.py" in got.add));
-}
-
 // The two predicates are two QUESTIONS, and the answers differ on exactly one
 // thing. Pinned here because a single predicate is what this used to be, and
 // collapsing them again would either ship a board somebody else's history or
@@ -506,54 +459,6 @@ ok("both still refuse thumbs and the crash-safety artifacts",
 ok("safeSegments takes the predicate it is given",
    store.safeSegments("a.moy/journal/journal.jsonl") === null
    && (store.safeSegments("a.moy/journal/journal.jsonl", store.skipLocal) || []).length === 3);
-
-// ---- the .moy zip -----------------------------------------------------------
-const files = [
-    { name: "star.moy/manifest.json", data: enc.encode('{"title":"Star"}') },
-    { name: "star.moy/main.py", data: enc.encode("def _draw():\n    cls(0)\n") },
-];
-const zip = store.zipStore(files);
-const back = await store.unzip(zip);
-ok("a stored zip round-trips its names", back.map((f) => f.name).join(",")
-   === files.map((f) => f.name).join(","), back.map((f) => f.name).join(","));
-ok("a stored zip round-trips its bytes",
-   dec.decode(back[1].data) === "def _draw():\n    cls(0)\n", dec.decode(back[1].data));
-ok("the top directory is the cart folder", store.zipTopDir(back) === "star.moy");
-ok("a flat zip has no top directory",
-   store.zipTopDir([{ name: "manifest.json" }, { name: "main.py" }]) === null);
-
-// DEFLATED input: most real zips are, so read support is not optional even
-// though we only ever WRITE stored entries.
-function deflatedZip(name, text) {
-    const nameB = enc.encode(name), data = deflateRawSync(Buffer.from(text));
-    const crc = store.crc32(enc.encode(text)), usize = enc.encode(text).length;
-    const local = new Uint8Array(30 + nameB.length);
-    const lv = new DataView(local.buffer);
-    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true);
-    lv.setUint16(8, 8, true); lv.setUint32(14, crc, true);
-    lv.setUint32(18, data.length, true); lv.setUint32(22, usize, true);
-    lv.setUint16(26, nameB.length, true);
-    local.set(nameB, 30);
-    const cen = new Uint8Array(46 + nameB.length);
-    const cv = new DataView(cen.buffer);
-    cv.setUint32(0, 0x02014b50, true); cv.setUint16(6, 20, true);
-    cv.setUint16(10, 8, true); cv.setUint32(16, crc, true);
-    cv.setUint32(20, data.length, true); cv.setUint32(24, usize, true);
-    cv.setUint16(28, nameB.length, true); cv.setUint32(42, 0, true);
-    cen.set(nameB, 46);
-    const end = new Uint8Array(22);
-    const ev = new DataView(end.buffer);
-    ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, 1, true); ev.setUint16(10, 1, true);
-    ev.setUint32(12, cen.length, true);
-    ev.setUint32(16, local.length + data.length, true);
-    const out = new Uint8Array(local.length + data.length + cen.length + end.length);
-    let at = 0;
-    for (const p of [local, data, cen, end]) { out.set(p, at); at += p.length; }
-    return out;
-}
-const defl = await store.unzip(deflatedZip("x.moy/main.py", "hello deflate\n"));
-ok("a DEFLATED zip reads too", defl.length === 1 && dec.decode(defl[0].data) === "hello deflate\n",
-   defl.length ? dec.decode(defl[0].data) : "no entries");
 
 // ---- a compiled cart's written files (moy-spec SPEC.md 16.12) -----------------
 {
@@ -601,60 +506,6 @@ ok("a DEFLATED zip reads too", defl.length === 1 && dec.decode(defl[0].data) ===
     let refused = false;
     try { await store.commitWritten(w, "..", "x", OLD); } catch (e) { refused = true; }
     ok("a written path that is not one name in one folder is refused", refused);
-}
-
-// ---- naming -----------------------------------------------------------------
-const have = { "star.moy": 1, "star_2.moy": 1 };
-ok("an imported cart takes the store's duplicate-naming rule",
-   store.uniqueCartDir((n) => n in have, "star") === "star_3.moy",
-   store.uniqueCartDir((n) => n in have, "star"));
-ok("a free name is taken as is", store.uniqueCartDir(() => false, "star") === "star.moy");
-ok("a zip file name becomes a legal folder base, under the local author",
-   store.cartBase("My Game!.moy.zip") === "local.my_game", store.cartBase("My Game!.moy.zip"));
-ok("a zip named for a cart's id keeps it",
-   store.cartBase("kenny.Star Catcher.moy.zip") === "kenny.star_catcher",
-   store.cartBase("kenny.Star Catcher.moy.zip"));
-
-// ---- a theme lands under its own name (theming phase 6 step 8) --------------
-{
-    const enc = (o) => new TextEncoder().encode(JSON.stringify(o));
-    const pkg = (top, name) => [
-        { name: top + "/manifest.json", data: enc({ format: "moy-1", title: "Sunset",
-            runtime: "theme", main: "theme.json", moybyte: { type: "theme" } }) },
-        { name: top + "/theme.json", data: enc({ format: 1, name }) }];
-    const t = store.themeOf(pkg("sunset.moy", "sunset"), "sunset.moy");
-    ok("a theme archive is read as a theme", t && t.name === "sunset" && t.file === "theme.json",
-       JSON.stringify(t));
-    ok("a cart archive is no theme", store.themeOf([{ name: "x.moy/manifest.json",
-        data: enc({ moybyte: { type: "game" } }) }], "x.moy") === null);
-    ok("a theme whose name is not the grammar takes its folder's",
-       store.themeOf(pkg("Night Owl.moy", "Bad Name"), "Night Owl.moy").name === "night_owl");
-    ok("a free theme name is its folder",
-       store.uniqueThemeDir(() => false, "sunset").dir === "sunset.moy");
-    const taken = { "sunset.moy": 1 };
-    const u = store.uniqueThemeDir((n) => n in taken, "sunset");
-    ok("a taken theme name takes the next _2 stem", u.dir === "sunset_2.moy" && u.name === "sunset_2",
-       JSON.stringify(u));
-    const long = "a".repeat(24);
-    const l = store.uniqueThemeDir((n) => n === long + ".moy", long);
-    ok("the _2 stem stays inside the name's 24", l.name.length === 24 && store.themeName(l.name),
-       l.name);
-    const back = JSON.parse(new TextDecoder().decode(
-        store.renamedTheme(enc({ format: 1, name: "sunset", colors: {} }), "sunset_2")));
-    ok("theme.json's name is rewritten to the folder's", back.name === "sunset_2" && back.format === 1);
-    const pretty = new TextEncoder().encode(
-        JSON.stringify({ format: 1, name: "dusk", colors: {} }, null, 2) + "\n");
-    const dusk = store.themeOf([pkg("dusk.moy", "dusk")[0],
-        { name: "dusk.moy/theme.json", data: pretty }], "dusk.moy");
-    ok("a theme landing under its own name keeps theme.json byte for byte",
-       store.landedTheme(pretty, dusk, "dusk") === pretty && !dusk.renamed, JSON.stringify(dusk));
-    ok("a theme landing under a _2 stem has theme.json rewritten",
-       JSON.parse(new TextDecoder().decode(store.landedTheme(pretty, dusk, "dusk_2"))).name
-           === "dusk_2");
-    const owl = store.themeOf(pkg("night_owl.moy", "Bad Name"), "night_owl.moy");
-    ok("a theme named for its folder has theme.json rewritten, even unmoved",
-       owl.renamed && JSON.parse(new TextDecoder().decode(
-           store.landedTheme(pkg("x", "Bad Name")[1].data, owl, "night_owl"))).name === "night_owl");
 }
 
 // ---- a channel's site keeps its own storage ---------------------------------

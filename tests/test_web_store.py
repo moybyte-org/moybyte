@@ -234,7 +234,7 @@ def test_the_mode_is_decided_before_anything_is_written():
     # The console boots AFTER the store is seeded: web_boot rebases each watcher
     # on whatever it finds, so a late seed would ship the whole store as changes.
     body = worker[worker.index("async function init("):]
-    assert body.index("initStore({") < body.index("mp.runPython")
+    assert body.index("initStore({") < body.index("import web_boot")
 
 
 def test_get_carts_layout_agrees_across_languages():

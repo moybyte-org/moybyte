@@ -10,11 +10,11 @@ the core, so `moy_carts` re-exports these names rather than the reverse.
 import json
 
 try:
-    from moy_fs import (_exists, _mkdir, _read, _read_recover, _remove,
-                        _write, _write_atomic, _write_bytes)
+    from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
+                        _remove, _write, _write_atomic, _write_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, _read, _read_recover, _remove,
-                                _write, _write_atomic, _write_bytes)
+    from runtime.moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
+                                _remove, _write, _write_atomic, _write_bytes)
 try:
     from moyimg import _b64_decode
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -73,6 +73,24 @@ def _prune_for_reseed(path):
         _remove(p)
 
 
+def _make_room(d, version):
+    """Whether a seed at `version` is written into the cart folder `d`, the
+    folder made ready for it when it is: one that is absent takes it, one
+    whose manifest reads at `version` or newer does not, an older one is
+    pruned to the kid's saves and tuning, and one with no manifest that reads
+    (a seed a power cut stopped: nothing in it is the kid's) is removed."""
+    if not _exists(d):
+        return True
+    whole = _has_manifest(d)
+    if whole and version <= _cart_version(d):
+        return False
+    if whole:
+        _prune_for_reseed(d)
+    else:
+        _rmtree(d)
+    return True
+
+
 def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
     """Write missing/outdated built-in carts to SD as editable .moy folders.
 
@@ -113,14 +131,8 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
         name = cart_folder(cart["title"], ns)
         d = cart_path(root, name)
         seed_ver = int(cart.get("version", 0))
-        if _exists(d):
-            whole = _has_manifest(d)
-            if whole and seed_ver <= _cart_version(d):
-                continue
-            if whole:
-                _prune_for_reseed(d)   # newer built-in: its saves + tuning stay
-            else:
-                _rmtree(d)             # a seed the power cut: nothing is the kid's
+        if not _make_room(d, seed_ver):
+            continue
         _mkdir(d)
         manifest = {
             # This manifest is REGENERATED, not copied, so every field a built-in
@@ -233,6 +245,93 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
         _write_atomic(d + "/manifest.json", json.dumps(manifest))
         wrote.append(name)
     return wrote
+
+
+# -- a store of RECORD seeded from cart folders --------------------------------
+#
+# A browser on a static host keeps its carts in its own storage, and that store
+# is the RECORD, like the Zero's: a seed game the kid deleted stays deleted. The
+# page hands the VM the served bundle as folders, and this decides what of it
+# the store takes: everything when the store has no cart yet (a first visit),
+# else only the SYSTEM carts (manifest `moybyte.system`) and a torn seed of
+# any, by the rules a board seeds its built-ins by (`_make_room`). The page writes what this reports into
+# its storage, removals first and in the order given.
+
+_PACK_SKIP = ("thumbs", "__pycache__")
+
+
+def _is_system(man):
+    ven = man.get(VENDOR_KEY) if isinstance(man, dict) else None
+    return isinstance(ven, dict) and ven.get("system") is True
+
+
+def _folder_files(path, rel, out, depth=0):
+    """Each file under the folder at `path` as `rel/<its path>`, sorted."""
+    if depth > 6:
+        return out
+    names = _listing(path) or {}
+    for n in sorted(names):
+        if n in _PACK_SKIP:
+            continue
+        if names[n]:
+            _folder_files(path + "/" + n, rel + "/" + n, out, depth + 1)
+        else:
+            out.append(rel + "/" + n)
+    return out
+
+
+def _copy_cart(src, d, rel, keep):
+    """The cart folder `src` copied into `d`, each of `keep` already there left
+    as it is and the manifest last: the store-relative paths written."""
+    files = _folder_files(src, "", [])
+    files = [f for f in files if f != "/manifest.json"] + (
+        ["/manifest.json"] if "/manifest.json" in files else [])
+    _mkdir(d)
+    wrote = []
+    for f in files:
+        name = f[1:]
+        if name in keep and _exists(d + "/" + name):
+            continue
+        segs = name.split("/")
+        for k in range(1, len(segs)):
+            _mkdir(d + "/" + "/".join(segs[:k]))
+        _write_bytes(d + "/" + name, _read_bytes(src + f, 1 << 30))
+        wrote.append(rel + f)
+    return wrote
+
+
+def seed_folders(src, root=CARTS_DIR):
+    """The cart folders under `src` seeded into the store of record `root`:
+    {"first": whether the store had no cart, "wrote": the store-relative paths
+    written, each cart's manifest last, "removed": those a re-seed removed}."""
+    have = _listing(root) or {}
+    first = not any(have[n] and n.endswith(CART_EXT) for n in have)
+    wrote, removed = [], []
+    names = _listing(src) or {}
+    for name in sorted(names):
+        if not (names[name] and name.endswith(CART_EXT)):
+            continue
+        try:
+            man = json.loads(_read(src + "/" + name + "/manifest.json"))
+        except (OSError, ValueError):
+            continue                  # not a manifest anything reads: not a cart
+        if not isinstance(man, dict):
+            continue
+        d = cart_path(root, name)
+        there = _exists(d)
+        # A non-system cart after the first visit: only a torn seed of one.
+        if not (first or _is_system(man) or (there and not _has_manifest(d))):
+            continue
+        before = _folder_files(d, name, []) if there else []
+        try:
+            version = int(man.get("version", 0))
+        except (TypeError, ValueError):
+            version = 0
+        if not _make_room(d, version):
+            continue
+        wrote += _copy_cart(src + "/" + name, d, name, _RESEED_PRESERVE)
+        removed += [r for r in before if not _exists(root + "/" + r)]
+    return {"first": first, "wrote": wrote, "removed": removed}
 
 
 # -- the PACKED seed roster (2026-08-30) -------------------------------------

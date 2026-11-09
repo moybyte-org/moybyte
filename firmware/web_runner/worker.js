@@ -77,8 +77,10 @@ import { loadMicroPython } from "./micropython.mjs";
 import * as store from "./moy_store.mjs";
 
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
-// The p8 drop's two Python entry points (#194), bound at boot like the rest.
-let importP8Json = null, editCart = null, openCart = null, stateJson = null;
+// The drop's and the export's Python entry points (#194), bound at boot like
+// the rest.
+let importP8Json = null, importArchiveJson = null, exportCart = null;
+let editCart = null, openCart = null, stateJson = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
 let fbAddr = null, fbLen = null;
@@ -609,30 +611,19 @@ async function seedRoot(root, data, site) {
                 mp.FS.writeFile(RECORD_VFS, rec);
             }
         }
+        if (root.id === "carts") return await seedCarts(root, s, data);
         if (await store.isEmpty(s)) {
             // First visit: the served bundle is the seed AND the baseline, so
-            // the shelf is never empty and the first sweep has nothing to say.
-            // On a static host the files bundle is empty, which correctly seeds
-            // an empty files store the kid's first drawing then persists into.
+            // the first sweep has nothing to say. On a static host the bundle
+            // of every other root is empty, which correctly seeds an empty
+            // store the kid's first drawing then persists into.
             writeStore(root.vfs, data);
             await store.seed(s, data);
             return "seed";
         }
-        // The local store WINS over the served bundle: it is the kid's work, and
-        // the bundle is only ever the factory seed. "load" (vs "seed") is the
-        // evidence that a reload READ FROM local rather than re-seeding fresh.
-        // What the bundle still brings is its system carts as a board seeds
-        // its built-ins: one this store has never had, and one whose bundled
-        // version is newer, its saves and tuning kept (store.systemSeeds).
-        const local = await store.readAll(s);
-        const sys = root.id === "carts" ? store.systemSeeds(local, data) : { add: {}, drop: [] };
-        for (const rel of sys.drop) {
-            await store.removeFile(s, rel);
-            delete local[rel];
-        }
-        if (Object.keys(sys.add).length) await store.seed(s, sys.add);
-        writeStore(root.vfs, local);
-        writeStore(root.vfs, sys.add);
+        // The local store WINS over the served bundle: it is the kid's work.
+        // "load" (vs "seed") is the evidence that a reload READ FROM local.
+        writeStore(root.vfs, await store.readAll(s));
         return "load";
     } catch (e) {
         writeStore(root.vfs, data);
@@ -640,6 +631,28 @@ async function seedRoot(root, data, site) {
         console.log("[moy] persist: OPFS failed for " + root.id + " -- " + e);
         return "none";
     }
+}
+
+// The carts store of record, and what of the served bundle it takes. The
+// VM decides (moy_seed.seed_folders: everything on a first visit, else the
+// system carts a board would seed and a torn seed of any); this only moves
+// bytes: OPFS into the VFS, the bundle into a staging folder the VM reads,
+// and back into OPFS what the VM wrote and removed, in its order -- each
+// cart's manifest last, so a reload part-way is seeded again.
+const SEED_VFS = "/seed";
+async function seedCarts(root, s, data) {
+    writeStore(root.vfs, await store.readAll(s));
+    writeStore(SEED_VFS, data);
+    mp.runPython("import moy_seed, json\n_moy_seeded = json.dumps(moy_seed.seed_folders("
+                 + JSON.stringify(SEED_VFS) + ", " + JSON.stringify(root.vfs) + "))\n"
+                 + "moy_seed._rmtree(" + JSON.stringify(SEED_VFS) + ")\n");
+    const got = JSON.parse(mp.globals.get("_moy_seeded"));
+    mp.runPython("del _moy_seeded");
+    for (const rel of got.removed) await store.removeFile(s, rel);
+    const wrote = {};
+    for (const rel of got.wrote) wrote[rel] = mp.FS.readFile(root.vfs + "/" + rel);
+    await store.seed(s, wrote);
+    return got.first ? "seed" : "load";
 }
 
 // Decide the world and seed EVERY registered root. Runs BEFORE the console
@@ -752,55 +765,36 @@ function cartNames() {
     return out.sort();
 }
 
-// The cart as it sits in the VFS RIGHT NOW -- the live shelf, not the local
-// store, which lags it by up to one sweep. Skip-filtered at every level, so an
-// exported zip carries exactly what a board would have been sent.
-function walkVfs(path, prefix, out, depth) {
-    if (depth > 6) return;
-    for (const name of mp.FS.readdir(path)) {
-        if (name === "." || name === ".." || store.skipName(name)) continue;
-        const full = path + "/" + name;
-        const rel = prefix + "/" + name;
-        if (vfsIsDir(full)) walkVfs(full, rel, out, depth + 1);
-        else out.push({ name: rel, data: mp.FS.readFile(full) });
-    }
+// A dropped `.moy` zip onto the shelf, unpacked, named and adopted by the
+// VM (web_boot.import_archive_json over moy_carts.import_archive: a theme
+// under its own name, a cart under the store's import rule), then a re-scan
+// WITHOUT rebasing the watcher: the imported files stay pending, so the very
+// next sweep writes them to the local store like any other commit.
+async function importZip(name, buf) {
+    if (!importArchiveJson) throw new Error("this console cannot import zips");
+    mkdirs(P8_TMP);
+    const tmp = P8_TMP + "/drop.zip";
+    mp.FS.writeFile(tmp, new Uint8Array(buf));
+    const r = JSON.parse(importArchiveJson(tmp, name, CARTS_ROOT));
+    if (r.error) throw new Error(r.error);
+    if (rescan) rescan();
+    return { dir: r.dir };
 }
 
-// Unzip into the store under a collision-safe name, then re-scan the shelf
-// WITHOUT rebasing the watcher: the imported files must stay pending so the
-// very next sweep writes them to the local store like any other commit. A
-// theme package lands under its own name (`store.themeOf`), its theme.json
-// byte for byte; a taken one under the next `_2` stem, its theme.json's
-// `name` rewritten to match.
-async function importZip(name, buf) {
-    const entries = await store.unzip(new Uint8Array(buf));
-    if (!entries.length) throw new Error("no files in that zip");
-    const top = store.zipTopDir(entries);
-    const exists = (n) => vfsExists(CARTS_ROOT + "/" + n);
-    const theme = store.themeOf(entries, top);
-    let dir, rename = null;
-    if (theme) {
-        const t = store.uniqueThemeDir(exists, theme.name);
-        dir = t.dir;
-        rename = t.name;
-    } else {
-        dir = store.uniqueCartDir(exists, store.cartBase(top || name));
+// The cart as it sits in the VFS RIGHT NOW (the live shelf, not the local
+// store, which lags it by up to one sweep), packed by the VM with the wire's
+// skip rule: an exported zip carries exactly what a board would be sent.
+function exportZip(cart) {
+    if (!exportCart) throw new Error("this console cannot export carts");
+    mkdirs(P8_TMP);
+    const tmp = P8_TMP + "/export.zip";
+    try {
+        if (!vfsIsDir(CARTS_ROOT + "/" + cart) || !exportCart(CARTS_ROOT + "/" + cart, tmp))
+            throw new Error("no such cart");
+        return mp.FS.readFile(tmp);
+    } finally {
+        try { mp.FS.unlink(tmp); } catch (e) { /* none written */ }
     }
-    let n = 0;
-    for (const e of entries) {
-        const rel = top ? e.name.slice(top.length + 1) : e.name;
-        if (!rel) continue;
-        const parts = store.safeSegments(dir + "/" + rel);
-        if (!parts) continue;                 // traversal, or a skip-listed name
-        const full = CARTS_ROOT + "/" + parts.join("/");
-        mkdirs(full.slice(0, full.lastIndexOf("/")));
-        mp.FS.writeFile(full, rel === (theme && theme.file)
-            ? store.landedTheme(e.data, theme, rename) : e.data);
-        n++;
-    }
-    if (!n) throw new Error("nothing in that zip looked like a cart");
-    if (rescan) rescan();
-    return { dir, n };
 }
 
 // -- the PICO-8 drop (#194) --------------------------------------------------
@@ -846,18 +840,8 @@ function isP8Drop(name, buf) {
     return b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
 }
 
-// The store's own folder rule, over a p8 file name. `cartBase` strips `.zip`
-// and `.moy` (it was written for the zip path), so the p8 suffixes come off
-// here -- otherwise `celeste.p8.png` becomes the folder `celeste_p8_png.moy`.
-function p8Base(name) {
-    return store.cartBase(String(name || "cart")
-        .replace(/\.p8\.png$/i, "").replace(/\.p8$/i, ""));
-}
-
 async function importP8(name, buf) {
     if (!importP8Json) throw new Error("this console cannot import PICO-8 carts");
-    const dir = store.uniqueCartDir((n) => vfsExists(CARTS_ROOT + "/" + n),
-                                    p8Base(name));
     mkdirs(P8_TMP);
     // One fixed path rather than the dropped name: the name is attacker-shaped
     // text (it came off a file a browser handed us) and the converter only ever
@@ -865,13 +849,13 @@ async function importP8(name, buf) {
     // what upstream titles the cart from when its Lua has no title comment.
     const tmp = P8_TMP + "/drop";
     mp.FS.writeFile(tmp, new Uint8Array(buf));
-    const r = JSON.parse(importP8Json(tmp, name, CARTS_ROOT + "/" + dir));
+    const r = JSON.parse(importP8Json(tmp, name, CARTS_ROOT));
     if (!r.ok) return { ok: false, report: r.report || ["that cart could not be imported"] };
     // Same rule as importZip: do NOT rebase the sync watcher. An import is a
     // CHANGE, so the new files must stay pending and reach the local store on
     // the next sweep like any other commit.
     if (rescan) rescan();
-    return { ok: true, dir, title: r.title, report: r.report };
+    return { ok: true, dir: r.dir, title: r.title, report: r.report };
 }
 
 // THE SIGN-IN (native/moy_net/moy_seal.h; the threat model is
@@ -1225,11 +1209,11 @@ async function init(search, coarse, channel, scheme, signin) {
     }
     const files = filesRes.json, system = systemRes.json;
     const carts = cartsRes.json;
-    let boot = "";
     if (mods) {
         mkdirs("/modules");
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
-        boot = "import sys\nsys.path.insert(0, '/modules')\n";
+        // Before the seed, which is the VM's too.
+        mp.runPython("import sys\nsys.path.insert(0, '/modules')\n");
     }
     await initStore({ carts: carts, files: files, system: system, apps: appsRes.json });
     // Music's songs: the serving board's music folder, or this browser's.
@@ -1274,7 +1258,7 @@ async function init(search, coarse, channel, scheme, signin) {
     // every write it later makes.
     const gpioPins = await probeGpio();
     const updateDoc = await probeUpdate();
-    mp.runPython(boot + "import web_boot\n"
+    mp.runPython("import web_boot\n"
         // BEFORE boot(): the mode is what decides whether the carts watcher
         // sweeps the journal, and boot() is where that watcher is built.
         // `mode || ""` and not `mode`: JSON.stringify(null) is the token `null`,
@@ -1304,7 +1288,8 @@ async function init(search, coarse, channel, scheme, signin) {
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "services_json, carts_poll_json, carts_event_json, "
-        + "import_p8_json, edit_cart, open_cart, state_json, "
+        + "import_p8_json, import_archive_json, export_cart, "
+        + "edit_cart, open_cart, state_json, "
         + "term_enable, term_poll_json, term_feed, term_state");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
@@ -1321,6 +1306,8 @@ async function init(search, coarse, channel, scheme, signin) {
     cartsEvent = mp.globals.get("carts_event_json");
     if (keep) cartsSay({ room: [keep.usage, keep.quota] });
     importP8Json = mp.globals.get("import_p8_json");
+    importArchiveJson = mp.globals.get("import_archive_json");
+    exportCart = mp.globals.get("export_cart");
     editCart = mp.globals.get("edit_cart");
     openCart = mp.globals.get("open_cart");
     stateJson = mp.globals.get("state_json");
@@ -2297,10 +2284,7 @@ self.onmessage = async (ev) => {
             // A failed export is a MESSAGE, never the fatal {t:"error"} the
             // outer catch would send -- the console is fine, the ask was not.
             try {
-                const files = [];
-                walkVfs(CARTS_ROOT + "/" + m.cart, m.cart, files, 0);
-                if (!files.length) throw new Error("no such cart");
-                const zip = store.zipStore(files);
+                const zip = exportZip(m.cart);
                 self.postMessage({ t: "exported", name: m.cart + ".zip",
                                    buf: zip.buffer }, [zip.buffer]);
             } catch (e) {
@@ -2330,7 +2314,7 @@ self.onmessage = async (ev) => {
                 } else {
                     const r = await importZip(m.name, m.buf);
                     self.postMessage({ t: "imported", ok: true,
-                        s: "imported " + r.dir + " (" + r.n + " files)" });
+                        s: "imported " + r.dir + " into your carts" });
                 }
                 if (assets) self.postMessage({ t: "assets", json: assets() });
             } catch (e) {

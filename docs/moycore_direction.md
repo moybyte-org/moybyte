@@ -136,6 +136,32 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   reopen it. The `lua_Alloc` internal-SRAM-first policy and the `-O2` pins on
   the VM carry.
 
+- **The browser's JavaScript does I/O; the decisions are the VM's** (owner,
+  2026-11-08). A rule copied into JavaScript drifts from its Python or C twin:
+  Notes' NameError came from the page's own re-seed rule. The VM is loaded
+  before the store is seeded (only the web MODE is decided first, by the
+  `GET /sync` probe), so a rule that seems to run "before the console" runs in
+  the VM anyway, and one that truly cannot is exported from the wasm's C,
+  never copied. `tests/test_web_io_ratchet.py` files every name in
+  `moy_store.mjs` as plumbing or as a remaining mirror; the mirrors only
+  shrink. The audit (2026-11-09):
+
+  | JavaScript rule | twin | divergence | now |
+  |---|---|---|---|
+  | `systemSeeds`, `cartVersion`, `RESEED_PRESERVE` | `moy_seed.seed_builtins` (`moy_seed.c`) | a torn local copy was diffed as version 0, where a board rewrites it whole | the VM's: `moy_seed.seed_folders` over the board's `_make_room`; the worker's `seedCarts` moves bytes |
+  | `zipStore`, `crc32`, `walkVfs` | `moy_pack.pack` (`moy_pack.c`) | none | the VM's: export runs `web_boot.export_cart` |
+  | `unzip`, `inflateRaw`, `zipTopDir` | `moy_pack.unpack` (`moy_pack.c`) | the C refuses a member over `MOY_SEED_MAX`; the page had no cap | the VM's: `web_boot.import_archive_json` |
+  | `cartBase`, `uniqueCartDir`, `p8Base` | `moy_pack.import_archive` | Python named an import `Hop.moy`, the page `local.hop.moy` | the VM's: `moy_pack.import_base`/`import_target`, the page's rule kept |
+  | `themeOf`, `uniqueThemeDir`, `landedTheme`, `renamedTheme` | `moy_pack._theme_of` | a fallback name's runs of other characters | the VM's: `import_archive` |
+  | `SKIP_*`, `skipName`; `SITE_SKIP_*`, `skipLocal` | `moy_sync._skip` and its site list, C `moy_store_skip` | none (`tests/test_web_store.py`) | mirror: filters the OPFS walk and the op apply |
+  | `BINARY_*`, `isBinary` | `moy_sync.BINARY_*` | none (`tests/test_web_store.py`) | mirror: `readAll`'s `{b:}` values |
+  | `ROOTS`, `rootById` | `moy_sync.SYNC_ROOTS` | none (`tests/test_web_store.py`) | mirror: `initStore` iterates it |
+  | `safeSegments`, `localParts` | `moy_sync_apply.c`'s path rule | not compared | mirror: the OPFS write guard |
+  | `isEmpty` (roots other than carts) | `seed_folders`' `first` | none | mirror: a first visit adopts the served bundle |
+  | `probeMode` | the boards' `GET /sync` | none | JavaScript's: it decides what the VFS is seeded from |
+
+  `web_boot.py` holds no copy: it reads `moy_sync`'s registry and skip rules.
+
 ## 4. Open rows
 
 - **The exit-time state read-back is unpinned.** camera/clip/pal ownership moves

@@ -721,21 +721,6 @@ print("import", moy_carts.import_archive(D + "/browser.zip", D + "/shelf/carts")
 print("import", moy_carts.import_archive(D + "/browser.zip", D + "/shelf/carts")[len(D):])
 '''
 
-NODE_DRIVER = r'''
-import * as store from "@MJS@";
-import fs from "fs";
-const mode = process.argv[2];
-if (mode === "zip") {
-    const files = JSON.parse(fs.readFileSync(process.argv[3], "utf8")).map(
-        (f) => ({ name: f[0], data: Buffer.from(f[1], "base64") }));
-    fs.writeFileSync(process.argv[4], store.zipStore(files));
-} else {
-    const entries = await store.unzip(new Uint8Array(fs.readFileSync(process.argv[3])));
-    console.log(JSON.stringify(entries.map((e) => [e.name, Buffer.from(e.data).toString("base64")])));
-}
-'''
-
-
 def _cart_tree(d):
     files = {
         "manifest.json": b'{"title": "Hop", "main": "main.py"}',
@@ -753,16 +738,14 @@ def _cart_tree(d):
 
 
 def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
-    """moy_pack against firmware/web_runner/moy_store.mjs: the C archive is the
-    twin's byte for byte and unzips in the browser's reader to the cart less
-    what the wire skips; the browser's zipStore, a deflated zip and one with no
+    """moy_pack, which the browser's export and import run in its VM: the C
+    archive is the twin's byte for byte and a zip reader reads it as the cart
+    less what the wire skips; a stored zip, a deflated one and one with no
     top folder unpack in the C to the same files; adopt and the import put a
-    cart on the shelf under the browser's naming rule."""
-    import base64
+    cart on the shelf under the store's import rule (moy_pack.import_base)."""
     import shutil
     import zipfile
-    if shutil.which("node") is None:
-        pytest.skip("node not installed")
+    from runtime import moy_carts
     exe = _vm()
     src = str(tmp_path / "src" / "hop.moy")
     files = _cart_tree(src)
@@ -770,14 +753,7 @@ def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
             if not (k.endswith((".bak", ".tmp")) or k.startswith(("journal", "thumbs")))}
     with_history = dict(kept, **{"hop.moy/" + k: v for k, v in files.items()
                                  if k.startswith("journal")})
-    lst = str(tmp_path / "files.json")
-    with open(lst, "w") as f:
-        json.dump([[k, base64.b64encode(v).decode()] for k, v in sorted(kept.items())], f)
-    mjs = str(tmp_path / "drv.mjs")
-    with open(mjs, "w") as f:
-        f.write(NODE_DRIVER.replace("@MJS@", os.path.join(
-            ROOT, "firmware", "web_runner", "moy_store.mjs")))
-    subprocess.run(["node", mjs, "zip", lst, str(tmp_path / "browser.zip")], check=True)
+    moy_carts.pack(src, str(tmp_path / "browser.zip"))
     with zipfile.ZipFile(str(tmp_path / "deflated.zip"), "w", zipfile.ZIP_DEFLATED) as z:
         for k, v in kept.items():
             z.writestr(k, v)
@@ -802,12 +778,11 @@ def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
             a = f.read()
         with open(str(tmp_path / (t.replace("vm", "cp") + ".moy")), "rb") as f:
             assert a == f.read()
-        got = json.loads(subprocess.run(["node", mjs, "unzip", str(tmp_path / (t + ".moy"))],
-                                        capture_output=True, text=True, check=True).stdout)
-        assert {k: base64.b64decode(v) for k, v in got} == want
+        with zipfile.ZipFile(str(tmp_path / (t + ".moy"))) as z:
+            assert {i.filename: z.read(i) for i in z.infolist()} == want
     for name in ("browser", "deflated", "flat"):
         for t in ("vm", "cp"):
             assert _tree(str(tmp_path / ("%s-%s" % (t, name)))) == {
                 k[len("hop.moy/"):]: v for k, v in kept.items()}
-    assert "import /shelf/carts/hop.moy" in outs["vm"]
-    assert "import /shelf/carts/hop_2.moy" in outs["vm"]
+    assert "import /shelf/carts/local.hop.moy" in outs["vm"]
+    assert "import /shelf/carts/local.hop_2.moy" in outs["vm"]
