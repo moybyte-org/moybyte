@@ -101,14 +101,15 @@ costs are #227's.
   `at`, `every`, `after`, `cancel`) is a row of the role table too, so its
   import has a door to cross.
 - **A native module's app calls.** The app verbs a compiled app imports are
-  rows of this table too (ordinals 62 to 79 and 82 to 90): the files role
+  rows of this table too (ordinals 62 to 79 and 82 to 93): the files role
   (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
   `delete`, `duplicate`, `rename`, `new_name`), prefs (`moy_prefs_get`, `set`, `clear`), the clipboard
   (`moy_clipboard_put_text`, `text`, `kind`, `seq`), `moy_nav_open_app`, and
   the console calls `moy_notify`, `moy_open_with`, `moy_share`, `moy_award`
   and `moy_progress`, and the wakes `moy_every`, `moy_after`, `moy_cancel`
   and `moy_at`, each heard on the event descriptor as the system's message
-  carrying its id (`docs/app_api_v1.md` §9). Each is
+  carrying its id (`docs/app_api_v1.md` §9), and the app's own service,
+  `moy_service_start`, `stop` and `running` (§7 there). Each is
   its role table row run through the ROLE door for the process's app run: a
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and

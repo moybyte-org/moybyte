@@ -27,6 +27,9 @@
     X(cancel, "(i)i") \
     X(log, "(i*~)i") \
     X(at, "(i)i") \
+    X(service_start, "()i") \
+    X(service_stop, "()i") \
+    X(service_running, "()i") \
     X(random, "(i*~)i") \
     X(sha256, "(*~*~)i") \
     X(hmac_sha256, "(*~*~*~)i") \
@@ -118,6 +121,18 @@ static int32_t w_os_cancel(wasm_exec_env_t e, int32_t id) {
 static int32_t w_os_at(wasm_exec_env_t e, int32_t t) {
     const os_arg_t a[1] = { OS_I(t) };
     return os_call(e, "moybyte.at", a, 1);
+}
+
+static int32_t w_os_service_start(wasm_exec_env_t e) {
+    return os_call(e, "moybyte.service_start", NULL, 0);
+}
+
+static int32_t w_os_service_stop(wasm_exec_env_t e) {
+    return os_call(e, "moybyte.service_stop", NULL, 0);
+}
+
+static int32_t w_os_service_running(wasm_exec_env_t e) {
+    return os_call(e, "moybyte.service_running", NULL, 0);
 }
 
 static int32_t w_os_random(wasm_exec_env_t e, int32_t n, uint8_t *data, uint32_t data_cap) {

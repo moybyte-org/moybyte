@@ -354,7 +354,8 @@ def prompt(cart, rec=None):
     """The install prompt's lines for `cart`, or None when there is nothing
     to ask: no permission it lists has a line that `rec` does not already
     hold, and it is not a Python app installed for the first time. A
-    service's lines end with BACKGROUND: what it is granted, it uses with no
+    service's lines, and an app's that declares its own service, end with
+    BACKGROUND: what it is granted, it uses with no
     window open."""
     perms = (cart.get("permissions") if cart else None) or ()
     want = asked(perms, tier_of(cart))
@@ -365,11 +366,20 @@ def prompt(cart, rec=None):
     if not new and not (python and first):
         return None
     lines = [line(p) for p in want]
-    if lines and cart.get("type") == "service":
+    if lines and (cart.get("type") == "service" or _has_service(cart)):
         lines.append(BACKGROUND)
     if python:
         lines.append(TRUSTED)
     return lines
+
+
+def _has_service(cart):
+    """An app cart declaring its own service (scheduler.entry_of)."""
+    try:
+        import scheduler
+    except ImportError:  # host: the runtime package
+        from runtime import scheduler
+    return scheduler.entry_of(cart) is not None
 
 
 def _entry(v):

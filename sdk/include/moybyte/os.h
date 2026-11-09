@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 97
+#define MOY_OS_VERSION 100
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -116,7 +116,7 @@ static inline int32_t moy_clipboard_text(void *text, size_t text_cap) {
     return (int)r;
 }
 
-int32_t __moy_os_clipboard_kind()
+int32_t __moy_os_clipboard_kind(void)
     __attribute__((import_module("moybyte.os"), import_name("clipboard_kind")));
 static inline int32_t moy_clipboard_kind(void) {
     int32_t r = __moy_os_clipboard_kind();
@@ -127,7 +127,7 @@ static inline int32_t moy_clipboard_kind(void) {
     return (int)r;
 }
 
-int32_t __moy_os_clipboard_seq()
+int32_t __moy_os_clipboard_seq(void)
     __attribute__((import_module("moybyte.os"), import_name("clipboard_seq")));
 static inline int32_t moy_clipboard_seq(void) {
     int32_t r = __moy_os_clipboard_seq();
@@ -259,6 +259,39 @@ static inline int32_t moy_at(int32_t t) {
     return (int)r;
 }
 
+int32_t __moy_os_service_start(void)
+    __attribute__((import_module("moybyte.os"), import_name("service_start")));
+static inline int32_t moy_service_start(void) {
+    int32_t r = __moy_os_service_start();
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_service_stop(void)
+    __attribute__((import_module("moybyte.os"), import_name("service_stop")));
+static inline int32_t moy_service_stop(void) {
+    int32_t r = __moy_os_service_stop();
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_service_running(void)
+    __attribute__((import_module("moybyte.os"), import_name("service_running")));
+static inline int32_t moy_service_running(void) {
+    int32_t r = __moy_os_service_running();
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 int32_t __moy_os_random(int32_t n, void *data, size_t data_cap)
     __attribute__((import_module("moybyte.os"), import_name("random")));
 static inline int32_t moy_random(int32_t n, void *data, size_t data_cap) {
@@ -379,6 +412,9 @@ int32_t moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_
 int32_t moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap);   // moybyte.aes_gcm_seal
 int32_t moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap);   // moybyte.aes_gcm_open
 int32_t moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap);   // moybyte.x25519
+int32_t moy_service_start(void);   // moybyte.service_start
+int32_t moy_service_stop(void);   // moybyte.service_stop
+int32_t moy_service_running(void);   // moybyte.service_running
 
 #endif // __wasm__
 

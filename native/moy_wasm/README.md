@@ -105,8 +105,9 @@ product), with the owner's later calls dated where they land.
   beside its event descriptor (`moy_wasi.h`, THE EVENT DESCRIPTOR), the OS
   log (`moy_log`), and the console calls `moy_notify`, `moy_award`,
   `moy_progress` and the wakes (`moy_every`, `moy_after`, `moy_at`,
-  `moy_cancel`, each heard as the system's message carrying its id) and
-  `moy_open_with`, posted on the VM's queue as a native service's are
+  `moy_cancel`, each heard as the system's message carrying its id),
+  `moy_open_with` and the app's own service (`moy_service_start`, `stop`,
+  `running`), posted on the VM's queue as a native service's are
   (`moy_wasi.c`, THE CONSOLE CALLS), and the prefs and clipboard rows, run
   for the grant the program's start made (THE APP ROWS). libc-wasi would reach the IDF's POSIX and VFS
   past the session's pipes and the permissions, and brings a socket and

@@ -349,6 +349,7 @@ def _processes_reset():
         sched = S.SCHED
         w = sched.wakes
         w.ended, w.opener, w.goal = sched._ended, sched._open, sched._goal
+        w.service = sched.own
         for pid in [p.pid for p in sched.procs.values() if p.state == S.EXITED]:
             del sched.procs[pid]
 

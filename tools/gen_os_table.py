@@ -818,7 +818,7 @@ def _wasi_import(r):
             args.append(next(p for p in ps if _param_name(p) == n))
             call.append(n)
     imp = "__moy_os_%s" % verb
-    return ["int32_t %s(%s)" % (imp, ", ".join(args)),
+    return ["int32_t %s(%s)" % (imp, ", ".join(args) or "void"),
             '    __attribute__((import_module("%s"), import_name("%s")));' % (WASI_OS, verb),
             "static inline %s {" % wasi_c(r),
             "    int32_t r = %s(%s);" % (imp, ", ".join(call)),
@@ -945,8 +945,10 @@ def gen_wasi_h(src):
                 ps += ["const char *%s" % name, "uint32_t %s_n" % name]
                 packs.append("OS_%s(%s, %s_n)" % ("O" if typ == "str?" else "S", name, name))
         o += _c_decl("static int32_t w_os_%s" % verb_of(r), ps, " {")
-        o.append("    const os_arg_t a[%d] = { %s };" % (len(packs), ", ".join(packs)))
-        o.append('    return os_call(e, "%s", a, %d);' % (r["name"], len(packs)))
+        if packs:
+            o.append("    const os_arg_t a[%d] = { %s };" % (len(packs), ", ".join(packs)))
+        o.append('    return os_call(e, "%s", %s, %d);' % (r["name"], "a" if packs else "NULL",
+                                                       len(packs)))
         o += ["}", ""]
     o += ["#endif // MOY_WASI_OS_BODIES", ""]
     return "\n".join(o)

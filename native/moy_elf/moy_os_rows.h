@@ -174,5 +174,8 @@ int32_t moy_os_moy_hmac_sha256(const void *key, size_t key_len, const void *data
 int32_t moy_os_moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap);
 int32_t moy_os_moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap);
 int32_t moy_os_moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap);
+int32_t moy_os_moy_service_start(void);
+int32_t moy_os_moy_service_stop(void);
+int32_t moy_os_moy_service_running(void);
 
 #endif // MOY_OS_ROWS_H

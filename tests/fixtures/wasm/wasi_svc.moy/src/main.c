@@ -3,7 +3,8 @@
 // (WASI's poll_oneoff), with its next tick's deadline as the timeout, and
 // answers each "ping" with a "pong" carrying the same arguments, sent to the
 // app the ping came from; a "note" posts a notification and writes the OS
-// log, printing the notification's answer; a "wake" sets a timer that goes
+// log, printing the notification's answer and what moy_service_running
+// answers (its own pid where it is its app's own service); a "wake" sets a timer that goes
 // off once, one that repeats and an alarm already due, heard as the system's
 // messages "moybyte.timer" and "moybyte.at" carrying the wake's id (the
 // repeating one cancelled at its first tick), then writes and reads back a
@@ -76,6 +77,9 @@ int main(void) {
             printf("note %d errno %d\n", id, id < 0 ? errno : 0);
             fflush(stdout);
             moy_log(MOY_LOG_INFO, "noted");
+            int r = moy_service_running();
+            printf("service_running %d errno %d\n", r, r < 0 ? errno : 0);
+            fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0) {
             printf("after %d\n", (int)moy_after(0));
             ticker = (int)moy_every(TICK_MS);

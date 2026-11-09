@@ -743,7 +743,9 @@ draws it on change, and hands it the powers its `permissions` name.
 Everything an app adds to this page (the manifest's `moybyte` fields, the
 `ui` verbs' place, files, prefs, the editor handle, permissions and consent,
 services, messages, the tiers) is `docs/app_api_v1.md`, the app author's
-guide.
+guide. An app's background service lives in the same cart, named by
+`"moybyte": {"entries": {"service": file}}` beside `main`, and the app starts
+it with `moybyte.service_start()` (its §7).
 
 ## Scripts — a cart with no folder
 

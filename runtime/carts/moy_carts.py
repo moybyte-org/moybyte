@@ -814,6 +814,11 @@ def _load(path, whole, folder=None):
             # manifest has them; None without the field. Its queue's open
             # takes the strings (scheduler._open).
             "receives": ven.get("receives"),
+            # The cart's entry points beside `main` (docs/app_api_v1.md
+            # section 7): {"service": its service's program}, as the manifest
+            # has them; None without the field. scheduler.entry_of reads it
+            # strictly where it is used.
+            "entries": ven.get("entries"),
             # The badges the cart declares (docs/moy_cart_api.md,
             # "Achievements"), as the manifest has them; None without the
             # field. runtime/system/achievements.py's `declared` reads it

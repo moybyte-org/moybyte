@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 91
+#define MOY_APP_WASM_N 94
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -267,6 +267,15 @@ static int32_t w_moybyte_at(void *e, int32_t t) {
     span_t f[1] = { NUM(q_t, t) };
     return run(e, HOP, MOY_T_MOYBYTE_AT, f, 1, NULL, 0);
 }
+static int32_t w_moybyte_service_start(void *e) {
+    return run(e, HOP, MOY_T_MOYBYTE_SERVICE_START, NULL, 0, NULL, 0);
+}
+static int32_t w_moybyte_service_stop(void *e) {
+    return run(e, HOP, MOY_T_MOYBYTE_SERVICE_STOP, NULL, 0, NULL, 0);
+}
+static int32_t w_moybyte_service_running(void *e) {
+    return run(e, HOP, MOY_T_MOYBYTE_SERVICE_RUNNING, NULL, 0, NULL, 0);
+}
 static int32_t w_moybyte_random(void *e, int32_t n, uint8_t *data, uint32_t data_cap) {
     uint8_t q_n[4];
     span_t f[1] = { NUM(q_n, n) };
@@ -389,6 +398,9 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "moybyte_item_read", FN(w_moybyte_item_read), "(i*~)i", NULL },
     { "moybyte_item_write", FN(w_moybyte_item_write), "(i*~)i", NULL },
     { "moybyte_at", FN(w_moybyte_at), "(i)i", NULL },
+    { "moybyte_service_start", FN(w_moybyte_service_start), "()i", NULL },
+    { "moybyte_service_stop", FN(w_moybyte_service_stop), "()i", NULL },
+    { "moybyte_service_running", FN(w_moybyte_service_running), "()i", NULL },
     { "moybyte_random", FN(w_moybyte_random), "(i*~)i", NULL },
     { "moybyte_sha256", FN(w_moybyte_sha256), "(*~*~)i", NULL },
     { "moybyte_hmac_sha256", FN(w_moybyte_hmac_sha256), "(*~*~*~)i", NULL },
@@ -416,6 +428,7 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_MOYBYTE_AWARD, MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY,
     MOY_T_MOYBYTE_AFTER, MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG,
     MOY_T_MOYBYTE_RECV, MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
+    MOY_T_MOYBYTE_SERVICE_START, MOY_T_MOYBYTE_SERVICE_STOP, MOY_T_MOYBYTE_SERVICE_RUNNING,
     MOY_T_MOYBYTE_RANDOM, MOY_T_MOYBYTE_SHA256, MOY_T_MOYBYTE_HMAC_SHA256,
     MOY_T_MOYBYTE_AES_GCM_SEAL, MOY_T_MOYBYTE_AES_GCM_OPEN, MOY_T_MOYBYTE_X25519,
 };

@@ -3,12 +3,15 @@
 // its next tick's deadline as the timeout, and answers each "ping" with a
 // "pong" carrying the same arguments, sent to the app the ping came from.
 // A "note" posts a notification (an app call, answered on the VM's task) and
-// answers "noted" with what it answered; a "wake" sets a timer that goes off
+// answers "noted" with what it answered, then "owned" with what
+// moy_service_running answers ("absent": -1 with errno ENOENT, the answer a
+// `type: service` cart's process gets); a "wake" sets a timer that goes off
 // at once and answers "timed" with the timer's message (the system's
 // "moybyte.timer", its id) as it hears it; a "quit" returns 7; a "spin" runs
 // on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. A thread it makes sleeps until the process's end
 // sweeps it.
+#include <errno.h>
 #include <poll.h>
 #include <pthread.h>
 #include <string.h>
@@ -97,6 +100,9 @@ int main(int argc, char **argv) {
         } else if (strcmp(m.ev.name, "note") == 0) {
             int r = moy_notify("Hello", "from a service");
             moy_send(m.ev.app, "noted", r >= 0 ? "[1]" : "[-1]");
+            int own = moy_service_running();
+            moy_send(m.ev.app, "owned", own < 0 && errno == ENOENT ? "[\"absent\"]"
+                                       : own > 0 ? "[\"running\"]" : "[\"other\"]");
         } else if (strcmp(m.ev.name, "wake") == 0) {
             memcpy(waker, m.ev.app, sizeof waker);
             say("after", moy_after(0) > 0);

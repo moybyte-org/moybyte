@@ -329,11 +329,14 @@ def _svc_name(cart):
 
 
 def _svc_rows(ws):
-    """[(name, cart, Proc or None)]: every service cart, with its live or last row."""
-    S = _sched().SCHED
+    """[(name, cart, Proc or None)]: every service cart and every app cart
+    declaring its own service, by the cart's one name, with its live or last
+    row."""
+    sch = _sched()
+    S = sch.SCHED
     out = []
     for cart in ws.carts.all:
-        if cart.get("type") != "service":
+        if cart.get("type") != "service" and sch.entry_of(cart) is None:
             continue
         name = _svc_name(cart)
         p = S.find(name)

@@ -730,6 +730,20 @@ class ConsoleCalls:
             return _DOOR_STALE
         return self._as(g, _moybyte.progress, ach_id, value)
 
+    def service_start(self, g):
+        return self._service(g, _moybyte.service_start)
+
+    def service_stop(self, g):
+        return self._service(g, _moybyte.service_stop)
+
+    def service_running(self, g):
+        return self._service(g, _moybyte.service_running)
+
+    def _service(self, g, fn):
+        if self.__ws.procs.pid_of(g) is None:
+            return _DOOR_STALE
+        return self._as(g, fn)
+
     def on(self, g, name, on):
         pid = self._own(g)
         if pid is None:
@@ -869,6 +883,9 @@ DOOR_ARGS = {
     "moybyte.item_read": "ii",
     "moybyte.item_write": "ib",
     "moybyte.at": "i",
+    "moybyte.service_start": "",
+    "moybyte.service_stop": "",
+    "moybyte.service_running": "",
 }
 # END GENERATED
 

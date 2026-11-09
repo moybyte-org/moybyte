@@ -52,7 +52,7 @@ def svc(tmp_path, built):
     s.reset()
     peer = L.spawn("peer")
     assert moy_evq.open(peer, "elf.svc", "", True) == moy_evq.OK
-    for name in ("pong", "noted", "timed"):
+    for name in ("pong", "noted", "owned", "timed"):
         assert moy_evq.listen(peer, name, True) == moy_evq.OK
     yield ws, s, cart, peer
     moy_evq.close(peer)
@@ -109,6 +109,9 @@ def test_its_app_calls_are_answered_on_the_vms_task(svc):
     assert _polled(s, lambda: moy_evq.send(peer, "elf.svc", "note", "[]")[0] == 1)
     assert _polled(s, lambda: moy_evq.queued(peer) == 1)
     assert moy_evq.take(peer) == (pid, "elf.svc", "noted", "[1]")
+    assert _polled(s, lambda: moy_evq.queued(peer) == 1)
+    # its own app declares no service: a `type: service` cart's call is ABSENT
+    assert moy_evq.take(peer) == (pid, "elf.svc", "owned", '["absent"]')
     n = [n for n in notifications.NOTES.list if n.summary == "Hello"]
     assert [(x.body, x.pid) for x in n] == [("from a service", pid)]
     notifications.NOTES.reset()

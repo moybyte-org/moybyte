@@ -6,6 +6,7 @@
 #   snd_open                 a process's sound stream (snd, snd_close, snd_counts)
 #   notify                   a notification (status: a status-bar item)
 #   send                     a message to an app (open_with, share, pick)
+#   service_start            this app's own service (service_stop, service_running)
 #   log                      a line of the OS log
 #   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519)
 #   __getattr__              the device APIs (http, ble, camera, ...) by name
@@ -55,6 +56,16 @@ one, `time.ticks_us()`.
                      unchanged value or a found badge. Either may be called
                      every frame, allocating nothing; each answers what its
                      badge's last send answered (1 for a found badge)
+  service_start()    start this app's own service (its manifest's
+                     `"entries": {"service": file}`, docs/app_api_v1.md
+                     section 7), from any process of the app: its pid where
+                     it runs, else 0 with its start asked, which the
+                     console runs at its next tick, never inside this call
+  service_stop()     its stop asked, run at the next tick: 1 where it runs
+                     or its start was asked, else 0
+  service_running()  its pid while it runs, else 0
+                     Each answers ABSENT (-8) where the app declares no
+                     service; the last start or stop asked wins
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
@@ -248,6 +259,7 @@ _RADIO_KINDS = (1 << NET) | (1 << BLE)
 
 SHELL = 1
 FULL = -_E.FULL             # send's answer under BACKPRESSURE (moy_evq.h)
+ABSENT = -8                 # service_*'s answer where the app declares no service
 ALARMS = "alarms"           # the permission `at` needs
 EPERM = 1
 EMFILE = 24
@@ -291,6 +303,8 @@ class Wakes:
                                     # (the scheduler's: its app and `receives`)
         self.goal = None            # fn(pid, badge id) -> its goal in the
                                     # manifest of the app pid runs, or None
+        self.service = None         # fn(pid, verb) -> service_<verb>'s answer
+                                    # (the scheduler's `own`)
         self._rbuf = None
 
     def bind(self, table):
@@ -845,6 +859,23 @@ def open_with(item, choose=False):
 
 def send(app, name, *args):
     return WAKES.send(_pid(), app, name, args)
+
+
+def _service(verb):
+    fn = WAKES.service
+    return fn(_pid(), verb) if fn is not None else ABSENT
+
+
+def service_start():
+    return _service("start")
+
+
+def service_stop():
+    return _service("stop")
+
+
+def service_running():
+    return _service("running")
 
 
 ACHIEVEMENTS = "moybyte.achievements"

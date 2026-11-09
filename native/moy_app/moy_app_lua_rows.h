@@ -51,5 +51,8 @@
     X("award") \
     X("progress") \
     X("pick") \
+    X("service_start") \
+    X("service_stop") \
+    X("service_running") \
 
 #endif // MOY_APP_LUA_ROWS_H

@@ -996,3 +996,33 @@ int32_t moy_x25519(const void *secret, size_t secret_len, const void *peer, size
     return ((moy_os_fn_moy_x25519 *)__moy_os->fn[96])(secret, secret_len, peer, peer_len, shared, shared_cap);
 }
 #endif
+
+#if MOY_OS_ROW(97)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_service_start(void);
+MOY_OS_USED(97);
+int32_t moy_service_start(void)
+{
+    return ((moy_os_fn_moy_service_start *)__moy_os->fn[97])();
+}
+#endif
+
+#if MOY_OS_ROW(98)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_service_stop(void);
+MOY_OS_USED(98);
+int32_t moy_service_stop(void)
+{
+    return ((moy_os_fn_moy_service_stop *)__moy_os->fn[98])();
+}
+#endif
+
+#if MOY_OS_ROW(99)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_service_running(void);
+MOY_OS_USED(99);
+int32_t moy_service_running(void)
+{
+    return ((moy_os_fn_moy_service_running *)__moy_os->fn[99])();
+}
+#endif

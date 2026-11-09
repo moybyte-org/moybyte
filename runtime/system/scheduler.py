@@ -108,6 +108,19 @@ kept while a service on a task of its own listens on "net" or "ble"), and
 wakes its task; a stepped one is stepped at the next poll, or at once by the
 frame start (`mail`) where the OS's own `send` posted it.
 
+AN APP'S OWN SERVICE (`"moybyte": {"entries": {"service": file}}`,
+docs/app_api_v1.md section 7). An app cart names its service's program
+beside its main, and its service is the cart's own: one id, one consent,
+one storage. `as_service` makes the cart a start takes from it (its type
+SERVICE, its main the entry, its tier the entry's extension's: .py, .lua, a
+WASI .wasm, an ELF .elf, which a native console runs as `<stem>.<chip>.elf`),
+and `start_cart`, `wants_autostart` and `boot` take the app cart as they
+take a service cart. `own(pid, verb)` is moybyte's `service_start`,
+`service_stop` and `service_running`: the caller's own app's service,
+never another's, its start or stop ASKED and run at the next tick by the
+shell (`_asked`, a plain wake), so it never runs inside the caller's
+callback, the VM's queue or a compiled call: the last ask wins.
+
 COMPILED SERVICES (a native cart, `"moybyte": {"native": [chips]}`, and a
 wasm cart with no source, `"runtime": "wasm"`). The start hands the cart to
 its tier's runtime (`ws.runtimes["elf"]`, runtime/run/elf_run.py;
@@ -213,6 +226,9 @@ _CALLS = {
     "moybyte.cancel": _moybyte.cancel_message,
     "moybyte.pick": _moybyte.pick,
     "moybyte.at": _moybyte.at_message,
+    "moybyte.service_start": _moybyte.service_start,
+    "moybyte.service_stop": _moybyte.service_stop,
+    "moybyte.service_running": _moybyte.service_running,
 }
 # END GENERATED
 
@@ -272,6 +288,10 @@ COMPILED = {"elf": "native", "wasm": "wasm"}    # the tiers whose services start
 NEVER, ON_CRASH, ALWAYS = "never", "on-crash", "always"
 POLICIES = (NEVER, ON_CRASH, ALWAYS)
 RESTART_KEY = "service_restart"     # system/settings: {service id: policy}
+
+ENTRY = "service"                   # the entry `entries` names a service by
+ENTRY_TIERS = {"py": "python", "lua": "lua", "wasm": "wasm", "elf": "elf"}
+ABSENT = -8                         # `own`'s answer where the app has no service
 
 try:
     from crash_guard import CrashGuard as _CG
@@ -395,9 +415,12 @@ class Scheduler:
         self.room = None            # fn(held) -> why services holding `held` do not
                                     # fit beside the running set, or None (`attach`)
         self._fns = []              # the handlers of the message being served
+        self.ws = None              # the console an app's own service starts on (`attach`)
+        self.asked = {}             # service id -> [its wake, "start" or "stop", its app cart]
         self.wakes.ended = self._ended
         self.wakes.opener = self._open
         self.wakes.goal = self._goal
+        self.wakes.service = self.own
 
     # -- the tick ---------------------------------------------------------
 
@@ -744,7 +767,7 @@ class Scheduler:
             import app_perms
         except ImportError:  # host: the runtime package
             from runtime import app_perms
-        name = cart.get("id") or cart.get("title") or "service"
+        name = _svc_name(cart)
         running = self.find(name)
         if running is not None:
             return running.pid
@@ -1178,6 +1201,78 @@ class Scheduler:
         if asked or p.kind != SERVICE or not self._unasked(p, code):
             _let_go(p)
 
+    # -- an app's own service ----------------------------------------------
+
+    def own(self, pid, verb):
+        """moybyte's `service_<verb>` as process `pid` (AN APP'S OWN
+        SERVICE): its app's service, from any process of the app. "start"
+        answers its pid where it runs, else 0 with its start asked; "stop"
+        1 with its stop asked where it runs or its start was asked, else 0;
+        "running" its pid while it lives, else 0. ABSENT where the caller's
+        app declares no service or no console is attached."""
+        app = self._own_cart(pid)
+        if app is None:
+            return ABSENT
+        name = _svc_name(app)
+        p = self.find(name)
+        if p is not None and p.state == STOPPING:
+            p = None
+        got = self.asked.get(name)
+        if verb == "running":
+            return p.pid if p is not None else 0
+        if verb == "start":
+            if p is None or got is not None:
+                self._ask(name, "start", app)
+            return p.pid if p is not None else 0
+        if p is None and (got is None or got[1] != "start"):
+            return 0
+        self._ask(name, "stop", app)
+        return 1
+
+    def _own_cart(self, pid):
+        """The app cart, as the shelf holds it, whose service process `pid`
+        may start: its own app's, declaring one; None else."""
+        p = self.procs.get(pid)
+        cart = None
+        if p is not None:
+            cart = p.origin if p.origin is not None else p.cart
+        if cart is None and self.cart_of is not None and pid != SHELL:
+            cart = self.cart_of(pid)
+        if cart is None or self.ws is None:
+            return None
+        path = cart.get("path")
+        carts = getattr(self.ws, "carts", None)
+        for c in (carts.all if carts is not None and path else ()):
+            if c.get("path") == path:
+                cart = c
+                break
+        if cart.get("type") == SERVICE or entry_of(cart) is None:
+            return None
+        return cart
+
+    def _ask(self, name, verb, app):
+        got = self.asked.get(name)
+        if got is not None:
+            got[1] = verb
+            return
+        self.asked[name] = [self._plain_wake(self.wakes.after, 0,
+                                             lambda: self._asked(name)), verb, app]
+
+    def _asked(self, name):
+        """The last start or stop asked of service `name`, run as the shell."""
+        got = self.asked.pop(name, None)
+        if got is None:
+            return
+        verb, app = got[1], got[2]
+        p = self.find(name)
+        if verb == "stop":
+            if p is not None and p.state != STOPPING:
+                self.stop(p.pid)
+            return
+        if p is None and self.ws is not None:
+            self.forgive(name)
+            start_cart(self.ws, app, self)
+
     # -- restart policies ---------------------------------------------------
 
     def policy(self, name):
@@ -1306,6 +1401,10 @@ class Scheduler:
         self.down.clear()
         self.svc_mail = False
         self.store = None
+        self.ws = None
+        for got in self.asked.values():
+            self.plain_cancel(got[0])
+        self.asked.clear()
         self._n = self._i = 0
         self.resumed = ()
 
@@ -1330,6 +1429,68 @@ def _stepped():
 
 def src_of(cart):
     return cart.get("src") or ""
+
+
+def _svc_name(cart):
+    """The name a service row of `cart` runs under: its cart's id."""
+    return cart.get("id") or cart.get("title") or "service"
+
+
+def entry_of(cart):
+    """The service entry app `cart` declares (`"moybyte": {"entries":
+    {"service": file}}`): (its file, its tier), None where it declares
+    none or one that does not read: a file in the cart's folder, never
+    above it, of a tier ENTRY_TIERS names."""
+    got = cart.get("entries") if cart else None
+    f = got.get(ENTRY) if isinstance(got, dict) else None
+    if not isinstance(f, str) or not f or f[0] == "/" or ".." in f.split("/"):
+        return None
+    tier = ENTRY_TIERS.get(f.rsplit(".", 1)[-1]) if "." in f else None
+    return (f, tier) if tier is not None else None
+
+
+def _elf_chips(path, stem):
+    """The chips app folder `path` carries an ELF module `<stem>.<chip>.elf` for."""
+    import os
+    head = stem + "."
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return []
+    return [n[len(head):-4] for n in sorted(names)
+            if n.startswith(head) and n.endswith(".elf") and "." not in n[len(head):-4]]
+
+
+def as_service(cart):
+    """App `cart`'s service as a start takes it (AN APP'S OWN SERVICE): the
+    cart with its type SERVICE, its main the entry and its tier the entry's,
+    its source the entry's text (a Python or Lua one, read from its folder),
+    and its id, title, permissions, `receives` and path the app's. None where
+    it declares no service or a Python or Lua entry does not read."""
+    got = entry_of(cart)
+    if got is None:
+        return None
+    f, tier = got
+    run = dict(cart)
+    run["type"] = SERVICE
+    run["main"] = f
+    run["src_before"] = []
+    run["src_after"] = []
+    run["native"] = None
+    if tier == "elf":
+        run["native"] = _elf_chips(cart.get("path") or "", f[:-4]) or None
+        run["src"] = ""
+        return run if run["native"] else None
+    run["runtime"] = tier
+    if tier in COMPILED:
+        run["src"] = ""
+        return run
+    try:
+        with open("%s/%s" % (cart.get("path"), f)) as fh:
+            run["src"] = fh.read()
+    except (OSError, TypeError):
+        return None
+    return run
 
 
 def _env_text(env):
@@ -1362,17 +1523,22 @@ def tick(slack_us=0):
     return SCHED.tick(slack_us)
 
 
-def prepared(ws, cart):
+def prepared(ws, cart, service=False):
     """What a launch of `cart` on console `ws` runs under: (the cart with
     its source, read from the store when the shelf holds it slim, its
     consent record, the console's services, its namespace's names: a
     system process's, `ws.service_env`), or None where it has no source
-    (a compiled cart's is its module, which its runtime reads)."""
+    (a compiled cart's is its module, which its runtime reads). Where
+    `service`, an app cart's is its own service's (`as_service`)."""
     carts = getattr(ws, "carts", None)
     full = carts.rehydrate(cart) if carts is not None else cart
     run = dict(full)
     if carts is not None:
         carts.reslim(cart)
+    if service and run.get("type") != SERVICE:
+        run = as_service(run)
+        if run is None:
+            return None
     try:
         import app_perms
     except ImportError:  # host: the runtime package
@@ -1414,6 +1580,7 @@ def attach(ws, sched=None):
     """The console whose settings hold the restart policies and whose
     processes' app ids and carts stamp their event queues (`_open`)."""
     sched = sched or SCHED
+    sched.ws = ws
     sched.store = getattr(ws, "system", None)
     procs = getattr(ws, "procs", None)
     sched.app_of = getattr(procs, "app_id", None)
@@ -1427,7 +1594,7 @@ def start_cart(ws, cart, sched=None):
     on `sched` (SCHED)."""
     sched = sched or SCHED
     attach(ws, sched)
-    got = prepared(ws, cart)
+    got = prepared(ws, cart, True)
     if got is None:
         _log(ERR, None, "service %s: no source" % (cart.get("id") or cart.get("title")))
         return None
@@ -1436,8 +1603,9 @@ def start_cart(ws, cart, sched=None):
 
 
 def wants_autostart(ws, cart):
-    """A service cart asking for `autostart`, its consent not turned off."""
-    if cart.get("type") != "service":
+    """A service cart, or an app cart declaring its own service, asking for
+    `autostart`, its consent not turned off."""
+    if cart.get("type") != SERVICE and entry_of(cart) is None:
         return False
     if "autostart" not in (cart.get("permissions") or ()):
         return False

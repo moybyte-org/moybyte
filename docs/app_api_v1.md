@@ -18,6 +18,7 @@ generated or held by code, this guide points at it rather than copying it:
 | Python's `moybyte` verbs, each with its signature | `runtime/system/moybyte.py`'s header |
 | a Python app's globals per permission | `runtime/shell/system_api.py` |
 | how the OS runs processes, and why | `docs/os_2026-11/processes.md`, `tiers.md`, `between_apps.md` |
+| an app's own service: its `entries` and the calls that start it | §7, `runtime/system/scheduler.py` (AN APP'S OWN SERVICE) |
 | which board runs which tier | `docs/os_2026-11.md` §5 |
 
 Two worked examples run in the host suite, `tests/test_app_examples.py`: a
@@ -133,6 +134,7 @@ absent (`runtime/carts/moy_store_base.py`, `VENDOR_KEY`):
 | `animates` | `true`: draw every frame (a clock, a meter); an app draws on change otherwise | §3 |
 | `handles` | the MIME types it opens (`"text/markdown"`, `"image/*"`) | §5 |
 | `receives` | the message names another app may send it | §8 |
+| `entries` | the cart's entry points beside `main`: `{"service": file}`, its own service's program | §7 |
 | `achievements` | the badges a game declares | §9 |
 | `native` | the chips a C cart carries a module for (`["esp32s3", "esp32p4"]`) | §10 |
 | `audio_ring` | a compiled cart's audio ring depth in frames | `docs/os_2026-11/hardware.md` §2 |
@@ -425,6 +427,46 @@ and returns when the descriptor reads end of file, its stop. A timer is a
 deadline, never a per-frame tick: **no background process gets a frame**.
 A Python service with no wakes left has exited (0).
 
+**An app's own service: one cart, one id.** An app (`"type": "app"`) names
+its service's program beside its `main`, and the service is the cart's own:
+its id, its permissions and its one install prompt, its storage, its
+`receives`, its row under the cart's title in the task manager and under its
+id in `service` and `ps`:
+
+```json
+"moybyte": {"type": "app", "permissions": ["prefs", "autostart"],
+            "entries": {"service": "service.lua"}}
+```
+
+`entries` is the smallest shape every tier fits: one key, `service`, and a
+file in the cart's folder whose extension is its tier, whatever the app's
+own: `.py` Python, `.lua` Lua, `.wasm` a WASI program (its `_start` is the
+loop, and a board runs its compiled form, `<stem>.<chip>.f<format>.aot`, as
+it does a cart's `main.wasm`), `.elf` a native module, which a board runs
+as `<stem>.<chip>.elf`, the chips those the folder carries. The app's own
+entry is `main`. An entry that does not read (another key, an absolute or
+`..` path, another extension) is absent. A `"type": "service"` cart is still
+a service of its own, with its own id.
+
+From any process of the app, on every tier (the call table, §10):
+
+| call | answers |
+|---|---|
+| `moybyte.service_start()` | the service's pid where it runs, else 0 with its start asked |
+| `moybyte.service_stop()` | 1 with its stop asked where it runs or its start was asked, else 0 |
+| `moybyte.service_running()` | its pid while it runs, else 0 |
+
+A start or a stop is ASKED: the console runs it at its next tick, as the
+shell, never inside the caller's call, and the last one asked wins. Each
+answers `ABSENT` (`moybyte.ABSENT`, -8) where the caller's app declares no
+service: the calls name no app, so no app reaches another's, and a
+`"type": "service"` cart's own process is answered ABSENT too. They need no
+permission beyond the cart's. A compiled app imports them as
+`moybyte_service_start` (`moybyte.app`), a WASI program as
+`moybyte.os.service_start`, a C program calls `moy_service_start`
+(`sdk/include/moybyte/os.h`), which answers -1 with `errno` set where the
+others answer ABSENT (`ENOENT` on the native tier).
+
 **Its storage is its app's.** A service holds the roles its permissions
 grant, as a foreground run of the same app does: the same files folder, the
 same prefs namespace. Each write lands whole or not at all; ordering two
@@ -441,8 +483,8 @@ that stops polling. `runtime/system/scheduler.py`'s header is the ladder.
 
 **Start, stop, restart.** A service runs from its start until it is stopped,
 exits, crashes, or strikes out. It starts by `autostart` (the permission: at
-the console's first drawn frame, which the user can turn off), from the
-terminal (`service start NAME`, `stop`, `restart`, `status`) or the task
+the console's first drawn frame, which the user can turn off), by its app's
+`service_start()`, from the terminal (`service start NAME`, `stop`, `restart`, `status`) or the task
 manager. A stop runs `moy_stop()` (a compiled service: end of file) and
 kills what is still running after `MOY_SERVICE_STOP_MS` (2 s). The restart
 policy is the user's, never the manifest's: `never` (the default),
@@ -658,6 +700,9 @@ The calls a program reaches on more than one tier, each by its name there
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |
 | `moybyte.at` | `alarms` | `moybyte.at` | `moybyte.at` | `moybyte_at`, `moybyte.os.at` | `moy_at` |
+| `moybyte.service_start` | none | `moybyte.service_start` | `moybyte.service_start` | `moybyte_service_start`, `moybyte.os.service_start` | `moy_service_start` |
+| `moybyte.service_stop` | none | `moybyte.service_stop` | `moybyte.service_stop` | `moybyte_service_stop`, `moybyte.os.service_stop` | `moy_service_stop` |
+| `moybyte.service_running` | none | `moybyte.service_running` | `moybyte.service_running` | `moybyte_service_running`, `moybyte.os.service_running` | `moy_service_running` |
 | `moybyte.random` | none | `moybyte.random` | `moybyte.random` | `moybyte_random`, `moybyte.os.random` | `moy_random` |
 | `moybyte.sha256` | none | `moybyte.sha256` | `moybyte.sha256` | `moybyte_sha256`, `moybyte.os.sha256` | `moy_sha256` |
 | `moybyte.hmac_sha256` | none | `moybyte.hmac_sha256` | `moybyte.hmac_sha256` | `moybyte_hmac_sha256`, `moybyte.os.hmac_sha256` | `moy_hmac_sha256` |

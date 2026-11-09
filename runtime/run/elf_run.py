@@ -21,6 +21,8 @@ is let go when no native process holds it.
 A native cart carries one module a chip, `main.<chip>.elf` beside its
 manifest (tools/elf_cart.py), and its manifest's `"moybyte": {"native":
 [chips]}` names them; a cart with none for this console does not run here.
+An app's service entry `<stem>.elf` (scheduler.as_service) is a module
+`<stem>.<chip>.elf` a chip, the chips those the folder carries.
 A module that carries a signature must verify; one with none runs only when
 its consent admits it (`app_perms.run_admits_unsigned`, the engine's UNSIGNED
 flag), the one rule the compiled tier's AOT modules follow too.
@@ -71,11 +73,21 @@ class ElfRuntime:
                 | (getattr(self.engine, "UNSIGNED", 2) if unsigned else 0))
 
     def module(self, cart):
-        """The path of the cart's module for this console, or None."""
+        """The path of the cart's module for this console, or None: its
+        main's stem (`main` of `main.<chip>.elf`, `svc` of an app's service
+        entry `svc.elf`) and this console's chip."""
         chip = self.engine.CHIP
-        if chip not in (cart.get("native") or ()):
+        chips = cart.get("native") or ()
+        if chip not in chips:
             return None
-        path = "%s/main.%s.elf" % (cart["path"], chip)
+        main = cart.get("main") or ""
+        stem = "main"
+        if main.endswith(".elf"):
+            stem = main[:-4]
+            head, _, tail = stem.rpartition(".")
+            if head and tail in chips:
+                stem = head
+        path = "%s/%s.%s.elf" % (cart["path"], stem, chip)
         try:
             open(path, "rb").close()
         except OSError:
