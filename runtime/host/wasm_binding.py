@@ -268,7 +268,7 @@ def _lib():
             d.hw_interp_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
             d.hw_interp_footprint.restype = None
             d.hw_wasi_start.argtypes = [_C, _I, ctypes.POINTER(_C), _C, ctypes.c_uint32,
-                                        ctypes.c_uint32, _P, _I]
+                                        ctypes.c_uint32, _C, _P, _I]
             d.hw_wasi_start.restype = _I
             d.hw_wasi_step.argtypes = [ctypes.c_uint32, _P, _I]
             d.hw_wasi_step.restype = _I
@@ -276,7 +276,7 @@ def _lib():
             d.hw_wasi_stop.restype = _I
             d.hw_wasi_live.argtypes = []
             d.hw_wasi_live.restype = _I
-            d.hw_wasi_service.argtypes = [_C, ctypes.c_uint32, _C, _P, _I]
+            d.hw_wasi_service.argtypes = [_C, ctypes.c_uint32, _C, _C, _P, _I]
             d.hw_wasi_service.restype = _I
             d.hw_wasi_service_stop.argtypes = [ctypes.c_uint32]
             d.hw_wasi_service_stop.restype = _I
@@ -338,13 +338,14 @@ def table():
     return tuple(rows[i].symbol.decode("utf-8") for i in range(n.value))
 
 
-def run_command(path, argv, roots=(), bg_pid=0, budget_ms=0):
+def run_command(path, argv, roots=(), bg_pid=0, budget_ms=0, run=None):
     """A WASI command (native/moy_wasm/moy_wasi.h): the module at `path` run
     as `argv` in the shell session running on this thread, reaching the
-    `roots` (folders relative to the store) its permissions grant, to its
-    end. (its exit status, None), or (TRAPPED, why) when it trapped and
-    (REFUSED, why) when it would not run."""
-    got = start_command(path, argv, roots, bg_pid, budget_ms)
+    `roots` (folders relative to the store) its permissions grant, its app
+    rows answered for `run` (the bytes of a moy_app_run_t, moy_app's `run`;
+    None for none), to its end. (its exit status, None), or (TRAPPED, why)
+    when it trapped and (REFUSED, why) when it would not run."""
+    got = start_command(path, argv, roots, bg_pid, budget_ms, run)
     if got[1] is not None:
         return got
     got = (RUNNING, None)
@@ -353,7 +354,7 @@ def run_command(path, argv, roots=(), bg_pid=0, budget_ms=0):
     return got
 
 
-def start_command(path, argv, roots=(), bg_pid=0, budget_ms=0):
+def start_command(path, argv, roots=(), bg_pid=0, budget_ms=0, run=None):
     """`run_command`'s run started, its `_start` on a thread of its own:
     (0, None), or (REFUSED, why). `step_command` serves it and
     `stop_command` ends it; one runs at a time."""
@@ -364,7 +365,7 @@ def start_command(path, argv, roots=(), bg_pid=0, budget_ms=0):
     joined = b"".join(r.encode() + b"\0" for r in roots) + b"\0"
     err = ctypes.create_string_buffer(256)
     if d.hw_wasi_start(path.encode(), len(argv), args, joined, int(bg_pid), int(budget_ms),
-                       err, len(err)) < 0:
+                       _run_bytes(run), err, len(err)) < 0:
         return REFUSED, err.value.decode("utf-8", "replace")
     return 0, None
 
@@ -396,15 +397,22 @@ def command_live():
     return bool(d is not None and d.hw_wasi_live())
 
 
-def start_service(path, pid, app_id):
+def _run_bytes(run):
+    """A moy_app_run_t's bytes for the C, or None for none."""
+    return None if run is None else bytes(run)
+
+
+def start_service(path, pid, app_id, run=None):
     """A WASI service (native/moy_wasm/moy_wasi.h, A SERVICE): the module at
     `path` run as process `pid`, its argv `app_id`, its `_start` on a thread
-    of its own. None, or why it did not start."""
+    of its own, its app rows answered for `run` (as `run_command`'s). None,
+    or why it did not start."""
     d = _lib()
     if d is None:
         return "no host wasm binding (%s)" % (why_unavailable() or "?")
     err = ctypes.create_string_buffer(256)
-    if d.hw_wasi_service(path.encode(), int(pid), (app_id or "").encode(), err, len(err)) < 0:
+    if d.hw_wasi_service(path.encode(), int(pid), (app_id or "").encode(), _run_bytes(run),
+                         err, len(err)) < 0:
         return err.value.decode("utf-8", "replace")
     return None
 

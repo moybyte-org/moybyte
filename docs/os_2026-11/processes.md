@@ -260,7 +260,8 @@ own with no shell session: a session of its own on a board, a thread of
 its own on the host (several at once, apart from the door's one command
 job). Its stdout
 and stderr are the OS log's lines under its pid, its stdin and env are
-empty, and a path answers NOTCAPABLE; it imports no app call. A compiled
+empty, and a path answers NOTCAPABLE; its app calls are the rows a WASI
+program imports (`docs/app_api_v1.md` §10), for the grant its start made. A compiled
 program's `moy_send` posts from its own thread; the door notices one that
 reached the VM's processes after each step of a command
 (`sh_door._noticed`), the VM's wake after a service's, and the frame's

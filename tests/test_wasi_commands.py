@@ -77,6 +77,7 @@ def term(tmp_path, built):
     if svc.exists():                    # the service fixture, run here as a command
         man = json.loads((svc / "manifest.json").read_text())
         man["moybyte"]["type"] = "command"
+        man["moybyte"]["permissions"] = ["prefs", "clipboard"]
         (svc / "manifest.json").write_text(json.dumps(man))
     ws = build_workstation(str(carts))
     app = ws.terminal_app
@@ -277,6 +278,13 @@ def test_a_program_blocks_in_poll_on_its_event_descriptor(term):
         assert moy_evq.send(peer, "wasi.svc", "note", '["x"]')[0] == 1
         assert _steps(lambda: (app.face.take(), "note -1 errno 2" in app.face.lines())[1]), \
             app.face.lines()
+        # its app rows, answered for the grant its run was made: the prefs and
+        # the clipboard it asks for
+        assert moy_evq.send(peer, "wasi.svc", "wake", "[]")[0] == 1
+        assert _steps(lambda: (app.face.take(), "open_with 0 errno 0" in app.face.lines())[1]), \
+            app.face.lines()
+        assert "prefs.get 42 errno 0" in app.face.lines()
+        assert "clipboard.text from wasi errno 0" in app.face.lines()
         assert moy_evq.send(peer, "wasi.svc", "bye", "[]")[0] == 1
         assert _steps(lambda: not app.face.busy())
         assert app.face.status() == 0

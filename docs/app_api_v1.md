@@ -612,15 +612,15 @@ The calls a program reaches on more than one tier, each by its name there
 | `files.rename` | `files` | `ctx.files.rename`, `files.rename` | `files.rename` |  |  |
 | `files.new_name` | `files` | `ctx.files.new_name`, `files.new_name` | `files.new_name` |  |  |
 | `nav.open_app` | `launch`, `front` | `ctx.nav.open_app`, `open_app` | `open_app` | `nav_open_app` | `moy_nav_open_app` |
-| `prefs.get` | `prefs` | `ctx.prefs.get`, `prefs.get` | `prefs.get` | `prefs_get` | `moy_prefs_get` |
-| `prefs.set` | `prefs` | `ctx.prefs.set`, `prefs.set` | `prefs.set` | `prefs_set` | `moy_prefs_set` |
-| `prefs.clear` | `prefs` | `ctx.prefs.clear`, `prefs.clear` | `prefs.clear` | `prefs_clear` | `moy_prefs_clear` |
-| `clipboard.put_text` | `clipboard` | `ctx.clipboard.put_text`, `clipboard.put_text` | `clipboard.put_text` | `clipboard_put_text` | `moy_clipboard_put_text` |
-| `clipboard.text` | `clipboard` | `ctx.clipboard.text`, `clipboard.text` | `clipboard.text` | `clipboard_text` | `moy_clipboard_text` |
-| `clipboard.kind` | `clipboard` | `ctx.clipboard.kind`, `clipboard.kind` | `clipboard.kind` | `clipboard_kind` | `moy_clipboard_kind` |
-| `clipboard.seq` | `clipboard` | `ctx.clipboard.seq`, `clipboard.seq` | `clipboard.seq` | `clipboard_seq` | `moy_clipboard_seq` |
+| `prefs.get` | `prefs` | `ctx.prefs.get`, `prefs.get` | `prefs.get` | `prefs_get`, `moybyte.os.prefs_get` | `moy_prefs_get` |
+| `prefs.set` | `prefs` | `ctx.prefs.set`, `prefs.set` | `prefs.set` | `prefs_set`, `moybyte.os.prefs_set` | `moy_prefs_set` |
+| `prefs.clear` | `prefs` | `ctx.prefs.clear`, `prefs.clear` | `prefs.clear` | `prefs_clear`, `moybyte.os.prefs_clear` | `moy_prefs_clear` |
+| `clipboard.put_text` | `clipboard` | `ctx.clipboard.put_text`, `clipboard.put_text` | `clipboard.put_text` | `clipboard_put_text`, `moybyte.os.clipboard_put_text` | `moy_clipboard_put_text` |
+| `clipboard.text` | `clipboard` | `ctx.clipboard.text`, `clipboard.text` | `clipboard.text` | `clipboard_text`, `moybyte.os.clipboard_text` | `moy_clipboard_text` |
+| `clipboard.kind` | `clipboard` | `ctx.clipboard.kind`, `clipboard.kind` | `clipboard.kind` | `clipboard_kind`, `moybyte.os.clipboard_kind` | `moy_clipboard_kind` |
+| `clipboard.seq` | `clipboard` | `ctx.clipboard.seq`, `clipboard.seq` | `clipboard.seq` | `clipboard_seq`, `moybyte.os.clipboard_seq` | `moy_clipboard_seq` |
 | `moybyte.notify` | `notifications` | `moybyte.notify` | `moybyte.notify` | `moybyte_notify`, `moybyte.os.notify` | `moy_notify` |
-| `moybyte.open_with` | `front` | `moybyte.open_with` | `moybyte.open_with` | `moybyte_open_with` | `moy_open_with` |
+| `moybyte.open_with` | `front` | `moybyte.open_with` | `moybyte.open_with` | `moybyte_open_with`, `moybyte.os.open_with` | `moy_open_with` |
 | `moybyte.share` | `front` | `moybyte.share` | `moybyte.share` | `moybyte_share` | `moy_share` |
 | `moybyte.send` | none | `moybyte.send` | `moybyte.send` | `moybyte_send`, `moybyte.os.send` | `moy_send` |
 | `moybyte.award` | none | `moybyte.award` | `moybyte.award` | `moybyte_award`, `moybyte.os.award` | `moy_award` |
@@ -703,14 +703,22 @@ wasm a WASI program's `_start`; in C an ELF module's `main`
 **A WASI program** (a command or a service) is any program wasi-sdk, Rust's
 `wasm32-wasip1` or Zig builds: files under its permissions, clocks, args, env,
 stdio; it imports `moybyte.os` for its messages (`send`, `on`), its
-notifications, badges and log lines (`notify`, `award`, `progress`, `log`)
-and its wakes (`every`, `after`, `at`, `cancel`, §9), and
-`sdk/include/moybyte/os.h` declares each under its C name, `moy_notify` and
-the rest. A console call waits for the console's answer: a service's at the
-scheduler's next poll, a foreground command's at its job's next step; a
-background command's answers AGAIN after 5 s, its door serving nothing
-while it runs. Prefs, the files and clipboard rows and the front's
-calls are not imported (a WASI program's files are WASI's).
+notifications, badges and log lines (`notify`, `award`, `progress`, `log`),
+its wakes (`every`, `after`, `at`, `cancel`, §9), `open_with`, and its
+prefs and the clipboard (`prefs_get`, `prefs_set`, `prefs_clear`,
+`clipboard_put_text`, `clipboard_text`, `clipboard_kind`,
+`clipboard_seq`), and `sdk/include/moybyte/os.h` declares each under its C
+name, `moy_notify`, `moy_prefs_get` and the rest. A console call waits for
+the console's answer: a service's at the scheduler's next poll, a
+foreground command's at its job's next step; a background command's answers
+AGAIN after 5 s, its door serving nothing while it runs. The prefs and
+clipboard rows are the role table's for a grant its start makes, over the
+roles its granted permissions name (`runtime/system/scheduler.py`,
+`compiled_run`), as a C program's are: a permission it lacks answers ACCES
+and a buffer too small RANGE. A WASI program has no window: `pick`, whose
+item is handed to the asking app's window, is not imported, nor is
+`share`, whose bytes are not a console call's JSON text; the files rows are
+WASI's own files (§5), under its `files` permission.
 
 **A C program** is an ELF module built against the OS function table by
 `tools/elf_cart.py` with the SDK (`sdk/README.md`): a command's

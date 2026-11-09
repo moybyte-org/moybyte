@@ -36,9 +36,9 @@ A service blocks in `poll` on `MOY_EVQ_FD` with its nearest deadline as the
 timeout, reads each message it is woken for, and returns when the
 descriptor reads end of file (its stop); `tests/fixtures/elf/elf_svc.moy`
 is the example. A WASI program built by wasi-sdk includes the same header:
-under `__wasm__` it declares `moy_send`, `moy_on`, `moy_notify`,
-`moy_award`, `moy_progress`, `moy_every`, `moy_after`, `moy_cancel`,
-`moy_at` and `moy_log` (and its levels) as its
+under `__wasm__` it declares the rows a WASI program imports (`moy_send`,
+`moy_on`, `moy_notify`, `moy_log` and its levels, the wakes, `moy_prefs_*`,
+`moy_clipboard_*` and `moy_open_with`; `docs/app_api_v1.md` §10) as its
 `moybyte.os` imports (`tests/fixtures/wasm/wasi_svc.moy`, built by
 `tools/wasm_cart.py`, which puts `include/` on its include path).
 

@@ -9,7 +9,15 @@
 #define MOY_WASI_OS_ROWS_H
 
 #define MOY_WASI_OS_ROWS(X) \
+    X(prefs_get, "(*~*~)i") \
+    X(prefs_set, "(*~*~)i") \
+    X(prefs_clear, "(*~)i") \
+    X(clipboard_put_text, "(*~)i") \
+    X(clipboard_text, "(*~)i") \
+    X(clipboard_kind, "()i") \
+    X(clipboard_seq, "()i") \
     X(notify, "(*~*~)i") \
+    X(open_with, "(*~i)i") \
     X(send, "(*~*~*~)i") \
     X(award, "(*~)i") \
     X(progress, "(*~i)i") \
@@ -22,16 +30,58 @@
 
 #endif // MOY_WASI_OS_ROWS_H
 
-// The console calls' natives, where moy_wasi.c defines MOY_WASI_OS_BODIES
-// after its os_call: each packs its arguments (os_arg_t: a text, a text
-// that may be empty, a number) as the JSON array the console's verb takes.
+// The natives of the rows the kernel does not serve, where moy_wasi.c
+// defines MOY_WASI_OS_BODIES after its os_call and os_role: a console
+// call packs its arguments (os_arg_t: a text, a text that may be empty, a
+// number) as the JSON array the console's verb takes; an app row packs its
+// fields (os_arg_t: a text or bytes, a number) for its role table row.
 #if defined(MOY_WASI_OS_BODIES) && !defined(MOY_WASI_OS_BODIES_DONE)
 #define MOY_WASI_OS_BODIES_DONE
+
+static int32_t w_os_prefs_get(wasm_exec_env_t e, const char *key, uint32_t key_n, uint8_t *json,
+                              uint32_t json_cap) {
+    const os_arg_t a[1] = { OS_O(key, key_n) };
+    return os_role(e, MOY_T_PREFS_GET, false, a, 1, json, json_cap);
+}
+
+static int32_t w_os_prefs_set(wasm_exec_env_t e, const char *key, uint32_t key_n,
+                              const char *json, uint32_t json_n) {
+    const os_arg_t a[2] = { OS_O(key, key_n), OS_O(json, json_n) };
+    return os_role(e, MOY_T_PREFS_SET, false, a, 2, NULL, 0);
+}
+
+static int32_t w_os_prefs_clear(wasm_exec_env_t e, const char *key, uint32_t key_n) {
+    const os_arg_t a[1] = { OS_O(key, key_n) };
+    return os_role(e, MOY_T_PREFS_CLEAR, false, a, 1, NULL, 0);
+}
+
+static int32_t w_os_clipboard_put_text(wasm_exec_env_t e, const char *text, uint32_t text_n) {
+    const os_arg_t a[1] = { OS_O(text, text_n) };
+    return os_role(e, MOY_T_CLIPBOARD_PUT_TEXT, false, a, 1, NULL, 0);
+}
+
+static int32_t w_os_clipboard_text(wasm_exec_env_t e, uint8_t *text, uint32_t text_cap) {
+    return os_role(e, MOY_T_CLIPBOARD_TEXT, true, NULL, 0, text, text_cap);
+}
+
+static int32_t w_os_clipboard_kind(wasm_exec_env_t e) {
+    return os_role(e, MOY_T_CLIPBOARD_KIND, true, NULL, 0, NULL, 0);
+}
+
+static int32_t w_os_clipboard_seq(wasm_exec_env_t e) {
+    return os_role(e, MOY_T_CLIPBOARD_SEQ, true, NULL, 0, NULL, 0);
+}
 
 static int32_t w_os_notify(wasm_exec_env_t e, const char *summary, uint32_t summary_n,
                            const char *body, uint32_t body_n) {
     const os_arg_t a[2] = { OS_S(summary, summary_n), OS_O(body, body_n) };
     return os_call(e, "moybyte.notify", a, 2);
+}
+
+static int32_t w_os_open_with(wasm_exec_env_t e, const char *item, uint32_t item_n,
+                              int32_t choose) {
+    const os_arg_t a[2] = { OS_S(item, item_n), OS_I(choose) };
+    return os_call(e, "moybyte.open_with", a, 2);
 }
 
 static int32_t w_os_award(wasm_exec_env_t e, const char *id, uint32_t id_n) {

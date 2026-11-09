@@ -61,10 +61,98 @@ typedef struct {
 
 #include <errno.h>
 
+int32_t __moy_os_prefs_get(const char *key, size_t key_len, void *json, size_t json_cap)
+    __attribute__((import_module("moybyte.os"), import_name("prefs_get")));
+static inline int32_t moy_prefs_get(const char *key, void *json, size_t json_cap) {
+    int32_t r = __moy_os_prefs_get(key, key ? __builtin_strlen(key) : 0, json, json_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_prefs_set(const char *key, size_t key_len, const char *json, size_t json_len)
+    __attribute__((import_module("moybyte.os"), import_name("prefs_set")));
+static inline int32_t moy_prefs_set(const char *key, const char *json) {
+    int32_t r = __moy_os_prefs_set(key, key ? __builtin_strlen(key) : 0, json, json ? __builtin_strlen(json) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_prefs_clear(const char *key, size_t key_len)
+    __attribute__((import_module("moybyte.os"), import_name("prefs_clear")));
+static inline int32_t moy_prefs_clear(const char *key) {
+    int32_t r = __moy_os_prefs_clear(key, key ? __builtin_strlen(key) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_clipboard_put_text(const char *text, size_t text_len)
+    __attribute__((import_module("moybyte.os"), import_name("clipboard_put_text")));
+static inline int32_t moy_clipboard_put_text(const char *text) {
+    int32_t r = __moy_os_clipboard_put_text(text, text ? __builtin_strlen(text) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_clipboard_text(void *text, size_t text_cap)
+    __attribute__((import_module("moybyte.os"), import_name("clipboard_text")));
+static inline int32_t moy_clipboard_text(void *text, size_t text_cap) {
+    int32_t r = __moy_os_clipboard_text(text, text_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_clipboard_kind()
+    __attribute__((import_module("moybyte.os"), import_name("clipboard_kind")));
+static inline int32_t moy_clipboard_kind(void) {
+    int32_t r = __moy_os_clipboard_kind();
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_clipboard_seq()
+    __attribute__((import_module("moybyte.os"), import_name("clipboard_seq")));
+static inline int32_t moy_clipboard_seq(void) {
+    int32_t r = __moy_os_clipboard_seq();
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 int32_t __moy_os_notify(const char *summary, size_t summary_len, const char *body, size_t body_len)
     __attribute__((import_module("moybyte.os"), import_name("notify")));
 static inline int32_t moy_notify(const char *summary, const char *body) {
     int32_t r = __moy_os_notify(summary, summary ? __builtin_strlen(summary) : 0, body, body ? __builtin_strlen(body) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_open_with(const char *item, size_t item_len, int32_t choose)
+    __attribute__((import_module("moybyte.os"), import_name("open_with")));
+static inline int32_t moy_open_with(const char *item, int32_t choose) {
+    int32_t r = __moy_os_open_with(item, item ? __builtin_strlen(item) : 0, choose);
     if (r < 0) {
         errno = (int)-r;
         return -1;

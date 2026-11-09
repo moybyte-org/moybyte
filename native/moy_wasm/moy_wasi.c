@@ -19,6 +19,8 @@
 #include "moy_sh_prog.h"
 #include "moy_super.h"
 #include "moy_vmq.h"
+#include "moy_app.h"
+#include "moy_app_rows.h"
 #include "moy_wasi_os_rows.h"
 
 _Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_RUNNING == MOY_SH_PROG_RUNNING,
@@ -48,8 +50,8 @@ enum {
     W_OK = 0, W_2BIG = 1, W_ACCES = 2, W_AGAIN = 6, W_BADF = 8, W_BUSY = 10, W_EXIST = 20,
     W_FAULT = 21, W_FBIG = 22, W_INTR = 27, W_INVAL = 28, W_IO = 29, W_ISDIR = 31,
     W_LOOP = 32, W_MFILE = 33, W_MSGSIZE = 35, W_NAMETOOLONG = 37, W_NOENT = 44, W_NOMEM = 48,
-    W_NOSPC = 51, W_NOSYS = 52, W_NOTDIR = 54, W_NOTEMPTY = 55, W_NOTSOCK = 57,
-    W_NOTSUP = 58, W_PERM = 63, W_PIPE = 64, W_ROFS = 69, W_SPIPE = 70, W_XDEV = 75,
+    W_NODEV = 43, W_NOSPC = 51, W_NOSYS = 52, W_NOTDIR = 54, W_NOTEMPTY = 55, W_NOTSOCK = 57,
+    W_NOTSUP = 58, W_PERM = 63, W_PIPE = 64, W_RANGE = 68, W_ROFS = 69, W_SPIPE = 70, W_XDEV = 75,
     W_NOTCAPABLE = 76,
 };
 
@@ -95,6 +97,7 @@ struct moy_wasi {
     wfd_t fd[MOY_WASI_FDS];
     moy_sh_prog_t prog;         // the roots, the background streams, the run's end
     uint32_t pid;               // its process, whose queue MOY_EVQ_FD reads (0: none)
+    moy_app_run_t run;          // its app run, its app rows' grant (no state: none)
     int64_t woke_us;            // when its last poll of the descriptor returned (0: none yet)
     int64_t hopped_us;          // what its calls waited for the session's task since
     // A service's (moy_wasi_service): written on its thread, read by the
@@ -866,6 +869,108 @@ static int32_t os_call(wasm_exec_env_t e, const char *name, const os_arg_t *a, i
     }
     buf[k++] = ']';
     return os_console(e, name, buf, k);
+}
+
+// THE APP ROWS (moy_wasi_os_rows.h's bodies: prefs, the clipboard): each its
+// role table row for the run's app run (moy_wasi_set_run), its fields packed
+// as the ROLE door takes them (moy_app.h's moy_app_role): a read of what the
+// clipboard writes where it is called, under the state's seqlock, any other
+// on the VM's task, a command's through its session's hop and a service's
+// as a hop on the VM's queue (moy_vmq.h), which the scheduler's poll serves.
+// A run with no app run answers ACCES, as a permission it lacks does.
+typedef struct {
+    const moy_app_run_t *run;
+    uint32_t row;
+    const uint8_t *arg;
+    size_t n;
+    uint8_t *out;
+    size_t cap;
+    int32_t r;
+} role_call_t;
+
+static void role_body(void *arg) {
+    role_call_t *c = arg;
+    c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->out, c->cap);
+}
+
+static void le32(uint8_t *q, uint32_t v) {
+    q[0] = (uint8_t)v;
+    q[1] = (uint8_t)(v >> 8);
+    q[2] = (uint8_t)(v >> 16);
+    q[3] = (uint8_t)(v >> 24);
+}
+
+static int32_t role_errno(int32_t r) {
+    switch (-r) {
+        case MOY_APP_DENIED: case MOY_APP_STALE: return W_ACCES;
+        case MOY_APP_FULL: return W_RANGE;
+        case MOY_APP_NOMEM: return W_NOMEM;
+        case MOY_APP_ABSENT: return W_NOENT;
+        case MOY_APP_NOSTORE: return W_NODEV;
+        case MOY_APP_IO: return W_IO;
+        case MOY_APP_NEEDS_VM: return W_AGAIN;
+        default: return W_INVAL;
+    }
+}
+
+static int32_t os_role(wasm_exec_env_t e, uint32_t row, bool seq, const os_arg_t *a, int n,
+                       uint8_t *out, uint32_t cap) {
+    moy_wasi_t *w = os_run(e);
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    if (!moy_app_run_live(&w->run)) {
+        return -(int32_t)W_ACCES;
+    }
+    uint8_t buf[CALL_ARGS];
+    size_t k = 0;
+    for (int i = 0; i < n; i++) {
+        uint32_t len = a[i].kind == 'i' ? 4u : a[i].n;
+        if (len && a[i].kind != 'i' && a[i].p == NULL) {
+            return -(int32_t)W_FAULT;
+        }
+        if (k + 4u + len > sizeof buf) {
+            return -(int32_t)W_2BIG;
+        }
+        le32(buf + k, len);
+        if (a[i].kind == 'i') {
+            le32(buf + k + 4, (uint32_t)a[i].v);
+        } else if (len) {
+            memcpy(buf + k + 4, a[i].p, len);
+        }
+        k += 4u + len;
+    }
+    role_call_t c = { &w->run, row, buf, k, out, out != NULL ? cap : 0u, -MOY_APP_NEEDS_VM };
+    if (seq) {
+        for (;;) {
+            uint32_t q = moy_app_seq_begin(w->run.a);
+            if (!(q & 1u)) {
+                role_body(&c);
+                if (moy_app_seq_end(w->run.a, q)) {
+                    break;
+                }
+            }
+        }
+    } else if (w->hop != NULL) {
+        int64_t t0 = mono_us();
+        if (w->hop(role_body, &c) != 0) {
+            c.r = -MOY_APP_NEEDS_VM;
+        }
+        w->hopped_us += mono_us() - t0;
+    } else {
+        uint32_t waited = 0;
+        if (moy_vmq_hop(w->pid, role_body, &c, &waited) != MOY_VMQ_OK) {
+            c.r = -MOY_APP_NEEDS_VM;
+        }
+        w->hopped_us += waited;
+    }
+    return c.r < 0 ? -role_errno(c.r) : c.r;
+}
+
+void moy_wasi_set_run(moy_wasi_t *w, const moy_app_run_t *run) {
+    if (w != NULL && run != NULL) {
+        w->run = *run;
+    }
 }
 
 #define MOY_WASI_OS_BODIES

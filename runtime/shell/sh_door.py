@@ -557,7 +557,8 @@ class ShellDoor:
         native module's `main` through the native runtime's
         (native/moy_elf/moy_os.h), a process of its own holding what its
         consent grants, the folder its `files` permission names its only
-        files. Its exit code, or in the background its pid (the code kept for
+        files, its app calls answered for a grant of its own
+        (`compiled_run`). Its exit code, or in the background its pid (the code kept for
         `status`). In the foreground with a `job` it is a job the door steps
         (`_compiled_steps`): RUNNING. Its process has an event queue (its app
         id and its manifest's `receives`), which the program reads as its
@@ -588,8 +589,8 @@ class ShellDoor:
         p.granted = tuple(granted)
         S._open(pid, False)
         roots = wasi_roots(granted)
-        net = ("network" in granted, _sched.compiled_run(self.ws, p, run)) \
-            if tier == "elf" else ()
+        app = _sched.compiled_run(self.ws, p, run)
+        net = ("network" in granted, app) if tier == "elf" else (app,)
         if job is not None and not bg and hasattr(rt, "start"):
             self.v_stop(job)
             code, why = self._as_pid(pid, rt.start, run, argv, roots, pid, COMMAND_MS, *net)
@@ -603,7 +604,7 @@ class ShellDoor:
                                          pid if bg else 0, COMMAND_MS, *net)
             else:
                 code, why = self._as_pid(pid, rt.command, run, argv, roots, pid if bg else 0,
-                                         COMMAND_MS)
+                                         COMMAND_MS, app)
         except BaseException:
             self._compiled_gone(pid)
             raise

@@ -6,7 +6,9 @@
 // log, printing the notification's answer; a "wake" sets a timer that goes
 // off once, one that repeats and an alarm already due, heard as the system's
 // messages "moybyte.timer" and "moybyte.at" carrying the wake's id (the
-// repeating one cancelled at its first tick); a "bye" ends it, a "quit" returns
+// repeating one cancelled at its first tick), then writes and reads back a
+// pref and the clipboard and opens an item no app opens, printing each
+// answer and its errno; a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -80,6 +82,19 @@ int main(void) {
             printf("every %d\n", ticker);
             int id = (int)moy_at(1);
             printf("at %d errno %d\n", id, id < 0 ? errno : 0);
+            char b[64];
+            int r = moy_prefs_set("level", "42");
+            printf("prefs.set %d errno %d\n", r, r < 0 ? errno : 0);
+            r = moy_prefs_get("level", b, sizeof b);
+            printf("prefs.get %.*s errno %d\n", r > 0 ? r : 0, b, r < 0 ? errno : 0);
+            r = moy_clipboard_put_text("from wasi");
+            printf("clipboard.put_text %d errno %d\n", r, r < 0 ? errno : 0);
+            r = moy_clipboard_text(b, sizeof b);
+            printf("clipboard.text %.*s errno %d\n", r > 0 ? r : 0, b, r < 0 ? errno : 0);
+            r = moy_clipboard_text(b, 2);
+            printf("clipboard.short %d errno %d\n", r, r < 0 ? errno : 0);
+            r = moy_open_with("nothing/opens", 0);
+            printf("open_with %d errno %d\n", r, r < 0 ? errno : 0);
             fflush(stdout);
         } else if (strncmp(m.ev.name, "moybyte.", 8) == 0) {
             printf("%s from %s %s\n", m.ev.name, m.ev.app, m.b + sizeof m.ev);

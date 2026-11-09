@@ -212,7 +212,19 @@ def wasi_rows(src):
 def wasi_call(r):
     """Whether a "wasi" row is a console call: posted on the VM's queue and
     answered by the scheduler's `_CALLS`, not served by the kernel."""
-    return "c" not in r
+    return "c" not in r and role_of(r) == "moybyte"
+
+
+def wasi_role(r):
+    """Whether a "wasi" row is an app row: its role table row run for the
+    program's app run through the ROLE door, as a C program's is."""
+    return "c" not in r and role_of(r) != "moybyte"
+
+
+def wasi_name(r):
+    """A "wasi" row's moybyte.os import name: a moybyte row's verb, any
+    other <role>_<verb>."""
+    return verb_of(r) if role_of(r) in (None, "moybyte") else "%s_%s" % (role_of(r), verb_of(r))
 
 
 def console_calls(src):
@@ -240,8 +252,12 @@ def wasi_c(r):
 
 
 def wasi_params(r):
-    """[(name, kind)] of a "wasi" row's C prototype: "s" a text (a pointer and
-    a length in the import), "i" a number."""
+    """[(name, kind)] of a "wasi" row's import: "s" a text, "o" a buffer the
+    call writes, "b" bytes (each a pointer and a length in the import), "i" a
+    number; a kernel row's from its C prototype, any other's from its in."""
+    if "c" not in r:
+        m = {"str": "s", "str?": "s", "int": "i", "out": "o", "bytes": "b"}
+        return [(n, m[t]) for n, t in params(r)]
     out = []
     for p in parse(wasi_c(r))[2]:
         name = _param_name(p)
@@ -251,7 +267,7 @@ def wasi_params(r):
 
 def wasi_sig(r):
     """The WAMR signature string of a row's moybyte.os import."""
-    return "(%s)i" % "".join("*~" if k == "s" else "i" for _n, k in wasi_params(r))
+    return "(%s)i" % "".join("i" if k == "i" else "*~" for _n, k in wasi_params(r))
 
 
 def door_kinds(r):
@@ -510,15 +526,16 @@ def check(src):
             kernel = "c" in r and isinstance(r.get("elf"), int) and kind == "moybyte"
             call = "c" not in r and "in" in r and role_of(r) == "moybyte" and (
                 r.get("server") == "call" or (r.get("server") == "python" and r.get("door")))
-            if not (kernel or call):
-                raise TableError("%s: a WASI import is a moybyte row the kernel serves, or "
-                                 "a console call" % name)
+            app = "c" not in r and r.get("server") == "c" and bool(r.get("wasm"))
+            if not (kernel or call or app):
+                raise TableError("%s: a WASI import is a moybyte row the kernel serves, a "
+                                 "console call or an app row a compiled app imports" % name)
             if call and any(t not in ("int", "str", "str?") for _n, t in params(r)):
                 raise TableError("%s: a WASI console call takes texts and numbers" % name)
             ps = parse(wasi_c(r))[2]
-            if parse(wasi_c(r))[0] not in ("int", "int32_t") or not all(
+            if kernel and (parse(wasi_c(r))[0] not in ("int", "int32_t") or not all(
                     p.startswith("const char *") or p.startswith(("int ", "int32_t "))
-                    for p in ps):
+                    for p in ps)):
                 raise TableError("%s: a WASI import takes texts and numbers, and answers a "
                                  "number" % name)
         if r.get("wasm"):
@@ -783,14 +800,20 @@ def _wasi_import(r):
     """A WASI program's side of a "wasi" row: its moybyte.os import, and the
     function by the row's C name over it (each text a pointer and a length)."""
     ret, name, ps, _v = parse(wasi_c(r))
-    verb = verb_of(r)
+    verb = wasi_name(r)
     args, call = [], []
-    for p, (n, k) in zip(ps, wasi_params(r)):
+    for n, k in wasi_params(r):
         if k == "s":
             args += ["const char *%s" % n, "size_t %s_len" % n]
             call += [n, "%s ? __builtin_strlen(%s) : 0" % (n, n)]
+        elif k == "o":
+            args += ["void *%s" % n, "size_t %s_cap" % n]
+            call += [n, "%s_cap" % n]
+        elif k == "b":
+            args += ["const void *%s" % n, "size_t %s_len" % n]
+            call += [n, "%s_len" % n]
         else:
-            args.append(p)
+            args.append(next(p for p in ps if _param_name(p) == n))
             call.append(n)
     imp = "__moy_os_%s" % verb
     return ["int32_t %s(%s)" % (imp, ", ".join(args)),
@@ -877,14 +900,38 @@ def gen_wasi_h(src):
          "#ifndef MOY_WASI_OS_ROWS_H", "#define MOY_WASI_OS_ROWS_H", "",
          "#define MOY_WASI_OS_ROWS(X) \\"]
     for r in wasi_rows(src):
-        o.append('    X(%s, "%s") \\' % (verb_of(r), wasi_sig(r)))
+        o.append('    X(%s, "%s") \\' % (wasi_name(r), wasi_sig(r)))
     o += ["", "#endif // MOY_WASI_OS_ROWS_H", "",
-          "// The console calls' natives, where moy_wasi.c defines MOY_WASI_OS_BODIES",
-          "// after its os_call: each packs its arguments (os_arg_t: a text, a text",
-          "// that may be empty, a number) as the JSON array the console's verb takes.",
+          "// The natives of the rows the kernel does not serve, where moy_wasi.c",
+          "// defines MOY_WASI_OS_BODIES after its os_call and os_role: a console",
+          "// call packs its arguments (os_arg_t: a text, a text that may be empty, a",
+          "// number) as the JSON array the console's verb takes; an app row packs its",
+          "// fields (os_arg_t: a text or bytes, a number) for its role table row.",
           "#if defined(MOY_WASI_OS_BODIES) && !defined(MOY_WASI_OS_BODIES_DONE)",
           "#define MOY_WASI_OS_BODIES_DONE", ""]
     for r in wasi_rows(src):
+        if wasi_role(r):
+            ps, packs, out = ["wasm_exec_env_t e"], [], ("NULL", "0")
+            for name, typ in params(r):
+                if typ == "int":
+                    ps.append("int32_t %s" % name)
+                    packs.append("OS_I(%s)" % name)
+                elif typ == "out":
+                    ps += ["uint8_t *%s" % name, "uint32_t %s_cap" % name]
+                    out = (name, name + "_cap")
+                else:
+                    ps += ["const %s *%s" % ("uint8_t" if typ == "bytes" else "char", name),
+                           "uint32_t %s_n" % name]
+                    packs.append("OS_O((const char *)%s, %s_n)" % (name, name)
+                                 if typ == "bytes" else "OS_O(%s, %s_n)" % (name, name))
+            o += _c_decl("static int32_t w_os_%s" % wasi_name(r), ps, " {")
+            if packs:
+                o.append("    const os_arg_t a[%d] = { %s };" % (len(packs), ", ".join(packs)))
+            o.append("    return os_role(e, MOY_T_%s, %s, %s, %d, %s, %s);" % (
+                upper(r["name"]), "true" if r["how"] == "seq" else "false",
+                "a" if packs else "NULL", len(packs), out[0], out[1]))
+            o += ["}", ""]
+            continue
         if not wasi_call(r):
             continue
         ps, packs = ["wasm_exec_env_t e"], []
@@ -1344,7 +1391,7 @@ def gen_doc(src):
             continue
         cname = cnames.get(r["name"]) or (parse(r["c"])[1] if "c" in r else None)
         imported = ([ident(r["name"])] if r.get("wasm") else []) + (
-            ["%s.%s" % (WASI_OS, verb_of(r))] if r.get("wasi") else [])
+            ["%s.%s" % (WASI_OS, wasi_name(r))] if r.get("wasi") else [])
         if not (cname or imported or r.get("lua")):
             continue
         perms = perms_of(r, src)

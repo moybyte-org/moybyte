@@ -1257,12 +1257,13 @@ class WasmRuntime:
 
     RUNNING = -100                       # moy_wasi.h's MOY_WASI_RUNNING
 
-    def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0):
+    def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0, run=None):
         """A WASI command cart run as `argv` in the shell session the door's
         crossing runs in (runtime/shell/sh_door.py, native/moy_wasm/moy_wasi.h),
-        to its end, the task's watchdog fed while it runs: (exit status,
-        None), or -1 (a trap) or -3 (it did not run) and the reason."""
-        got = self._start(cart, argv, roots, bg_pid, budget_ms)
+        its app rows answered for `run` (compiled_run's), to its end, the
+        task's watchdog fed while it runs: (exit status, None), or -1 (a
+        trap) or -3 (it did not run) and the reason."""
+        got = self._start(cart, argv, roots, bg_pid, budget_ms, run)
         if got[1] is not None:
             return got
         got = (self.RUNNING, None)
@@ -1270,12 +1271,12 @@ class WasmRuntime:
             got = _moy_wasm.command_step(1000)
         return got
 
-    def start(self, cart, argv, roots=(), pid=0, budget_ms=0):
+    def start(self, cart, argv, roots=(), pid=0, budget_ms=0, run=None):
         """`command`'s run started in the foreground and left running, as the
         shell door's job (moy_wasi.h's "IN STEPS"): (0, None), or (-3, why).
         `step` serves it and `cancel` ends it; one runs at a time."""
         del pid
-        return self._start(cart, argv, roots, 0, budget_ms)
+        return self._start(cart, argv, roots, 0, budget_ms, run)
 
     def step(self, pid, max_ms):
         """The run's calls served for `max_ms` at most: (RUNNING, None), or
@@ -1288,7 +1289,7 @@ class WasmRuntime:
         del pid
         return _moy_wasm.command_stop()
 
-    def _start(self, cart, argv, roots, bg_pid, budget_ms):
+    def _start(self, cart, argv, roots, bg_pid, budget_ms, run):
         """The run started: (0, None), or (-3, why)."""
         start = getattr(_moy_wasm, "command_start", None)
         if start is None:
@@ -1296,7 +1297,7 @@ class WasmRuntime:
         joined = "".join(r + "\0" for r in roots) or None
         argv = tuple(argv)
         return self._launch(cart, lambda path, sha, interp, unsigned_ok: start(
-            path, sha, interp, unsigned_ok, argv, joined, bg_pid, budget_ms))
+            path, sha, interp, unsigned_ok, argv, joined, bg_pid, budget_ms, run))
 
     def _launch(self, cart, start):
         """`start(path, want_sha, interp, allow_unsigned)` on the cart's
@@ -1323,14 +1324,13 @@ class WasmRuntime:
     def service(self, cart, pid, run=None):
         """The cart started as service `pid` (native/moy_wasm/moy_wasi.h, A
         SERVICE): its `_start` on a task of its own, its argv the cart's id;
-        its module chosen as `command`'s is. `run`, the app grant
-        compiled_run made, has no import to reach it: a WASI program imports
-        no app call. None, or why it did not start."""
-        del run
+        its module chosen as `command`'s is, its app rows answered for
+        `run`, the app grant compiled_run made. None, or why it did not
+        start."""
         app_id = cart.get("id") or ""
 
         def start(path, sha, interp, unsigned_ok):
-            why = _moy_wasm.service_start(path, sha, interp, unsigned_ok, pid, app_id)
+            why = _moy_wasm.service_start(path, sha, interp, unsigned_ok, pid, app_id, run)
             return (0, None) if why is None else (-3, why)
         return self._launch(cart, start)[1]
 

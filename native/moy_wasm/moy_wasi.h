@@ -2,11 +2,12 @@
 // section 3): the imports a module built by wasi-sdk, Rust's
 // `wasm32-wasip1` or Zig makes from `wasi_snapshot_preview1`, plus what WASI
 // lacks: `moybyte.term`'s `term_size`, and `moybyte.os`'s `send`, `on`,
-// `log`, `notify`, `award`, `progress`, `every`, `after`, `cancel` and
-// `at`, the rows of native/os_calls.json a WASI program shares with an ELF
-// module (moy_wasi_os_rows.h, generated; sdk/include/moybyte/os.h declares
-// them under their C names, moy_send and the rest; the console calls are
-// moy_wasi.c's THE CONSOLE CALLS). A command is its module's
+// `log`, `notify`, `award`, `progress`, `every`, `after`, `cancel`, `at`,
+// `open_with` and the prefs and clipboard rows, the rows of
+// native/os_calls.json a WASI program shares with an ELF module
+// (moy_wasi_os_rows.h, generated; sdk/include/moybyte/os.h declares them
+// under their C names, moy_send and the rest; the console calls are
+// moy_wasi.c's THE CONSOLE CALLS, the prefs and clipboard its THE APP ROWS). A command is its module's
 // `_start`, run in a shell session's process (moy_sh.h's spawn).
 //
 // THE EVENT DESCRIPTOR. The run's process is its background pid, else the
@@ -95,6 +96,7 @@
 #include <stdint.h>
 
 #include "wasm_export.h"
+#include "moy_app_run.h"
 #include "moy_sh.h"
 
 #define MOY_WASI_MODULE "wasi_snapshot_preview1"
@@ -126,6 +128,11 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
 // Where the session may be touched: the descriptors the program left open
 // closed, its last background line logged, the record freed.
 void moy_wasi_free(moy_wasi_t *w);
+// The app run a program's app rows are answered for (moy_wasi_os_rows.h's
+// prefs and clipboard imports: the grant its start made for its process,
+// over the roles its granted permissions name), set before its `_start`
+// runs; a run with none answers those rows ACCES.
+void moy_wasi_set_run(moy_wasi_t *w, const moy_app_run_t *run);
 
 // The natives (WAMR's NativeSymbol rows) for WASI's module, and for
 // moybyte.term and moybyte.os together (`term`), copied into `store`

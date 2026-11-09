@@ -218,10 +218,9 @@ in the store, with the same events in, the same store and the same
 notifications out. Its wasm parameter is an xfail: the scheduler starts a
 WASI service (§3), whose ABI is the event descriptor (owner, 2026-11-08:
 WASI's `poll_oneoff`, built in `native/moy_wasm/moy_wasi.h`), and a WASI
-program notifies and hears its messages, but the process also keeps its
-prefs, which a WASI program imports no row for, and asks the console for
-`game(app)` and `clock_day()`, the calls only a Lua or Python service is
-handed.
+program notifies, keeps its prefs and hears its messages, but the process
+also asks the console for `game(app)` and `clock_day()`, the calls only a
+Lua or Python service is handed.
 
 ## 3. wasm and WASI
 
@@ -270,8 +269,11 @@ A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`
 for the rest; a WASI program's `moybyte.os` (`send`, `on`: the service
 model's, below; `notify`, `award`, `progress` and the wakes `every`,
-`after`, `at`, `cancel`, the console calls a native service posts on the
-VM's queue, their natives generated from the source; `log`); and an app's `moybyte.app`, its
+`after`, `at`, `cancel` and `open_with`, the console calls a native service
+posts on the VM's queue, their natives generated from the source; `log`;
+the prefs and clipboard rows, each its role table row for the grant the
+program's start made, hopped to the VM's task as a C program's is,
+`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
 row's types give, and the adapter's natives and the toolkit's are generated

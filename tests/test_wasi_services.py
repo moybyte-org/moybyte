@@ -287,6 +287,34 @@ def test_a_wasi_service_s_timers_and_alarm_are_the_system_s_messages(svc, perms)
     assert s.stop(pid)
 
 
+@pytest.mark.parametrize("perms", [("prefs", "clipboard"), ()])
+def test_a_wasi_service_s_app_rows_answer_under_its_permissions(svc, perms):
+    """moybyte.os `prefs_*` and `clipboard_*` are the role table's rows for
+    the service's own grant (the one its start made): a pref written and read
+    back, the clipboard's text, a buffer too small RANGE, and each refused
+    ACCES without its permission; `open_with` is the console call, 0 where no
+    app opens the item."""
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", "[]")[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("open_with ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    got = [t for t in _texts(since, pid) if t.split(" ")[0] in (
+        "prefs.set", "prefs.get", "clipboard.put_text", "clipboard.text", "clipboard.short",
+        "open_with")]
+    if perms:
+        assert got == ["prefs.set 0 errno 0", "prefs.get 42 errno 0",
+                       "clipboard.put_text 0 errno 0", "clipboard.text from wasi errno 0",
+                       "clipboard.short -1 errno 68", "open_with 0 errno 0"], got
+    else:
+        assert got == ["prefs.set -1 errno 2", "prefs.get  errno 2",
+                       "clipboard.put_text -1 errno 2", "clipboard.text  errno 2",
+                       "clipboard.short -1 errno 2", "open_with 0 errno 0"], got
+    assert s.stop(pid)
+
+
 def test_the_fixture_is_a_service():
     with open(os.path.join(FIXTURE, "manifest.json")) as f:
         man = json.load(f)

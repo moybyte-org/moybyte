@@ -1620,6 +1620,21 @@ static mp_obj_t cmd_end(void)
     return cmd_answer(status, err);
 }
 
+// A program's app run from its argument: the bytes of a moy_app_run_t
+// (moy_app's `run`), None for none.
+static const moy_app_run_t *run_arg(mp_obj_t o)
+{
+    if (o == mp_const_none) {
+        return NULL;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
+    if (b.len != sizeof(moy_app_run_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("not a run"));
+    }
+    return (const moy_app_run_t *)b.buf;
+}
+
 static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
 {
     const char *path = mp_obj_str_get_str(args[0]);
@@ -1633,7 +1648,7 @@ static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
     const char *roots = args[5] == mp_const_none ? NULL : mp_obj_str_get_data(args[5], &roots_n);
     uint32_t bg_pid = (uint32_t)mp_obj_get_int(args[6]);
     uint32_t budget = (uint32_t)mp_obj_get_int(args[7]);
-    (void)n_args;
+    const moy_app_run_t *run = n_args > 8 ? run_arg(args[8]) : NULL;
     (void)roots_n;
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
@@ -1657,6 +1672,7 @@ static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
         heap_caps_free(c);
         mp_raise_type(&mp_type_MemoryError);
     }
+    moy_wasi_set_run(c->w, run);
     c->ops = (moy_wasm_ops){
         .user = c, .runtime_up = cmd_up, .loaded = cmd_loaded, .bound = cmd_bound,
         .call = cmd_call, .unbound = cmd_unbound,
@@ -1695,7 +1711,7 @@ static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
     moy_wasm_session_use(was);
     return cmd_answer(0, "");
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_start_obj, 8, 8, mod_command_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_start_obj, 8, 9, mod_command_start);
 
 static mp_obj_t mod_command_step(mp_obj_t max_ms_in)
 {
@@ -1908,6 +1924,7 @@ static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
         heap_caps_free(v);
         mp_raise_type(&mp_type_MemoryError);
     }
+    moy_wasi_set_run(v->w, n_args > 6 ? run_arg(args[6]) : NULL);
     v->ops = (moy_wasm_ops){
         .user = v, .runtime_up = svc_up, .loaded = cmd_loaded, .bound = svc_bound,
         .call = svc_call, .unbound = svc_unbound,
@@ -1945,7 +1962,7 @@ static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
     moy_wasm_session_use(was);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_start_obj, 6, 6, mod_service_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_start_obj, 6, 7, mod_service_start);
 
 static mp_obj_t mod_service_stop(mp_obj_t pid_in)
 {

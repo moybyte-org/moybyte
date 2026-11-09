@@ -842,7 +842,8 @@ static int wasi_load(const char *path, uint8_t **bytes, wasm_module_t *module,
 /* The run started: 0 with `_start` running, or -3 with the reason in `err`
  * (a module that would not load or run here, or a command already running). */
 int hw_wasi_start(const char *path, int argc, const char **argv, const char *roots,
-                  uint32_t bg_pid, uint32_t budget_ms, char *err, int errlen)
+                  uint32_t bg_pid, uint32_t budget_ms, const moy_app_run_t *run, char *err,
+                  int errlen)
 {
     moy_sh_t *s = moy_sh_running();
     if (!s) {
@@ -866,6 +867,7 @@ int hw_wasi_start(const char *path, int argc, const char **argv, const char *roo
     } else if (!(j->w = moy_wasi_new(s, argc, argv, roots, bg_pid, budget_ms, job_hop))) {
         put_err(err, errlen, "out of memory", "no record for the command");
     } else {
+        moy_wasi_set_run(j->w, run);
         g_job = j;
         if (pthread_create(&j->tid, NULL, job_main, j) == 0) {
             ok = 1;
@@ -1012,7 +1014,8 @@ static int svc_wait(wasi_svc *v, int64_t us)
 
 /* Service `pid` started from the module `path`, its argv `id`: 0, or -3
  * with the reason in `err`. Its event queue is the scheduler's. */
-int hw_wasi_service(const char *path, uint32_t pid, const char *id, char *err, int errlen)
+int hw_wasi_service(const char *path, uint32_t pid, const char *id, const moy_app_run_t *run,
+                    char *err, int errlen)
 {
     if (svc_of(pid)) {
         put_err(err, errlen, "a service runs as that process", NULL);
@@ -1034,6 +1037,7 @@ int hw_wasi_service(const char *path, uint32_t pid, const char *id, char *err, i
         svc_free(v);
         return -3;
     }
+    moy_wasi_set_run(v->w, run);
     if (pthread_create(&v->tid, NULL, svc_main, v) != 0) {
         put_err(err, errlen, "no thread for the service", NULL);
         svc_free(v);

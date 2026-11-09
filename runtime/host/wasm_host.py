@@ -133,22 +133,22 @@ class WasmHostRuntime:
 
     RUNNING = -100                       # moy_wasi.h's MOY_WASI_RUNNING
 
-    def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0):
+    def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0, run=None):
         """A WASI command cart run as `argv` in the shell session running on
-        this thread (runtime/shell/sh_door.py), to its end: (exit status,
-        None), or a negative kind and the reason (`wasm_binding.TRAPPED`,
-        `REFUSED`). The host interprets the cart's own main.wasm, as it does
-        a cart."""
+        this thread (runtime/shell/sh_door.py), its app rows answered for
+        `run` (compiled_run's), to its end: (exit status, None), or a
+        negative kind and the reason (`wasm_binding.TRAPPED`, `REFUSED`).
+        The host interprets the cart's own main.wasm, as it does a cart."""
         from runtime import wasm_binding
-        return wasm_binding.run_command(self._main(cart), argv, roots, bg_pid, budget_ms)
+        return wasm_binding.run_command(self._main(cart), argv, roots, bg_pid, budget_ms, run)
 
-    def start(self, cart, argv, roots=(), pid=0, budget_ms=0):
+    def start(self, cart, argv, roots=(), pid=0, budget_ms=0, run=None):
         """`command`'s run started in the foreground and left running, as
         the shell door's job (moy_wasi.h's "IN STEPS"): (0, None), or
         (REFUSED, why). `step` serves it and `cancel` ends it."""
         del pid
         from runtime import wasm_binding
-        return wasm_binding.start_command(self._main(cart), argv, roots, 0, budget_ms)
+        return wasm_binding.start_command(self._main(cart), argv, roots, 0, budget_ms, run)
 
     def step(self, pid, max_ms):
         """The run's calls served for `max_ms` at most: (RUNNING, None), or
@@ -166,12 +166,10 @@ class WasmHostRuntime:
     def service(self, cart, pid, run=None):
         """The cart's main.wasm started as service `pid` (native/moy_wasm/
         moy_wasi.h, A SERVICE): its `_start` on a thread of its own, its
-        argv the cart's id. `run`, the app grant compiled_run made, has no
-        import to reach it: a WASI program imports no app call. None, or why
-        it did not start."""
-        del run
+        argv the cart's id, its app rows answered for `run`, the app grant
+        compiled_run made. None, or why it did not start."""
         from runtime import wasm_binding
-        return wasm_binding.start_service(self._main(cart), pid, cart.get("id") or "")
+        return wasm_binding.start_service(self._main(cart), pid, cart.get("id") or "", run)
 
     def stop(self, pid):
         """Service `pid` stopped: its descriptor hung up, killed (137) past
