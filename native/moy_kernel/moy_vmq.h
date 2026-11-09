@@ -45,6 +45,11 @@ enum {
 // until it has run: OK, FULL. *waited_us (may be NULL) is how long it waited,
 // which a supervisor does not charge to the process.
 int moy_vmq_hop(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us);
+// The same, wake(ctx) called once the hop is queued (NULL: none): a VM-task
+// wait that serves the poster's hops (an ELF game's frame call) woken for it
+// at once.
+int moy_vmq_hop_wake(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us,
+                     void (*wake)(void *), void *ctx);
 
 // Console call `name` with `args` (a JSON array, n bytes) posted for process
 // `pid`: OK with *ticket, FULL, NOMEM.

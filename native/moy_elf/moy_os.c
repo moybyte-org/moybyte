@@ -890,6 +890,12 @@ typedef struct {
     int32_t r;
 } role_call_t;
 
+// A game's frame call, woken for a hop just queued: it serves the hop at
+// once instead of at its next look.
+static void hop_queued(void *arg) {
+    sem_give(&((moy_os_proc_t *)arg)->fb_shown);
+}
+
 // fn(arg) on the VM's task for service `p`, the calling thread waiting until
 // it has run (moy_vmq_hop): its wait is moved out of the wake that made it.
 // False when the queue is full, fn not run.
@@ -898,7 +904,7 @@ static bool vm_hop(moy_os_proc_t *p, void (*fn)(void *), void *arg) {
     lock();
     p->hopping++;
     unlock();
-    int rc = moy_vmq_hop(p->pid, fn, arg, &waited);
+    int rc = moy_vmq_hop_wake(p->pid, fn, arg, &waited, p->game ? hop_queued : NULL, p);
     lock();
     p->hopping--;
     if (p->woke_us != 0) {

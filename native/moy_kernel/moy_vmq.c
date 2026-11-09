@@ -97,6 +97,11 @@ static int slot_of(uint32_t ticket) {
 }
 
 int moy_vmq_hop(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us) {
+    return moy_vmq_hop_wake(pid, fn, arg, waited_us, NULL, NULL);
+}
+
+int moy_vmq_hop_wake(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us,
+                     void (*wake)(void *), void *ctx) {
     int64_t t = now_us();
     MOY_SYNC_LOCK(&s_lock);
     int i = claim(HOP, pid);
@@ -112,6 +117,9 @@ int moy_vmq_hop(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us
         return MOY_VMQ_FULL;
     }
     moy_evq_want(MOY_EVQ_WANT_POLL);
+    if (wake != NULL) {
+        wake(ctx);
+    }
     while (__atomic_load_n(&s_slot[i].kind, __ATOMIC_ACQUIRE) != HOP_DONE) {
         moy_sync_wait(&s_done[i], seen, 1000u);
         seen = __atomic_load_n(&s_done[i], __ATOMIC_ACQUIRE);
