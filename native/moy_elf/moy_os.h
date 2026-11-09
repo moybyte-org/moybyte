@@ -222,6 +222,10 @@ typedef struct {
 } moy_os_stats_t;
 void moy_os_stats(moy_os_stats_t *out);
 
+// The least free stack, in bytes, of any live thread's kernel stack (its
+// FreeRTOS task's high-water mark), or UINT32_MAX with none: a board's.
+uint32_t moy_os_stack_low(void);
+
 // The last native faults since boot, newest first, n at most: a P4's U-mode
 // module killed where it stood (moy_umode.h). cause is the core's mcause code,
 // or 0x100 (no such row) or 0x200 | the row (a row given memory outside the

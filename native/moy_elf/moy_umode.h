@@ -113,6 +113,9 @@ void moy_u_drop(moy_u_proc_t *p, uint32_t lo);
 // NUL-terminated string inside it.
 int moy_u_ok(const moy_u_space_t *s, const void *p, size_t n, uint32_t perm);
 int moy_u_str(const moy_u_space_t *s, const char *p);
+// The bytes readable from p to the end of its region of the process (0:
+// outside it): what a row reading a text in place may read at most.
+size_t moy_u_room(const moy_u_space_t *s, const void *p);
 
 // The row check for `row` over its argument registers (moy_os_check.c).
 int moy_os_check(const moy_u_space_t *s, uint32_t row, const uint32_t *a);

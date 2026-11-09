@@ -150,7 +150,30 @@ traps; what the rest rests on:
 - **A row's arguments are checked by the row's rule** (`os_table.json`'s `u`;
   `tools/gen_os_table.py` refuses a pointer parameter without one) against
   the calling thread's process before the row runs. A pointer outside it ends
-  the process, as does an ecall past the table.
+  the process, as does an ecall past the table, or any ecall from BIND, which
+  has no rows. The thread counts as in a row from before the check
+  (`moy_os_u_row`), so memory the check passed is not freed under the row by
+  another thread's `munmap` or end. What another thread could change after the
+  check is read once: a length read through a pointer (`accept`, `recvfrom`,
+  `getsockopt`, `getsockname`, `getpeername`) is copied and the buffer checked
+  again by the copy, a path is copied before the session's task reads it
+  (`fcall`), a door row's texts are measured once, a text a row reads in place
+  (a log line, a message's names, an environment key) is read no further than
+  the end of its region (`text_len`, `moy_u_room`), and `getaddrinfo`'s answer
+  is the process's only once it is in the process's memory.
+- **A handle names its own process's object, never a reused slot's next one.**
+  A `pthread_t`, a `DIR` and a mutex's id carry their slot's 16-bit
+  generation; a descriptor and a socket are the process's own numbers, reused
+  lowest-first as POSIX says, and a number the process does not hold is
+  `EBADF`. An object a row is using outlives another thread's end of it: a
+  socket closed under a `recv` is shut down and closed by the row's end, a
+  mutex waited on refuses its destroy (`EBUSY`), a `readdir` holds the table's
+  lock against a `closedir`, and a join claims its thread against a second
+  join, a detach and a reap.
+- **What a dead process held is scrubbed.** The module's block, each thread's
+  U stack and BIND's stack are zeroed when taken and when let go, and a
+  mapping when made and when let go (`u_scrub_free`), so no process reads
+  what the heap's last holder left, the console's or another process's.
 - **The module's code runs on the process's threads in U-mode**, BIND alone
   on the loading task (its fault refuses the module); the constructors run on
   the first thread before `main`. A service's wait (`moy_evq_wait`, inside
@@ -162,8 +185,16 @@ traps; what the rest rests on:
   signal a POSIX shell names (SIGSEGV for memory, SIGILL, SIGBUS, SIGTRAP,
   SIGSYS for no such row). Its other threads park at their next way into
   U-mode (a tick at most), and `proc_end` frees once every thread is parked or
-  deleted. Memory an extent lets go while another thread may be in a row, or
-  on another core, is freed at the process's end.
+  deleted. A thread is deleted where it stands only in the module's code:
+  `proc_end` suspends it, looks again, and lets one that went into a row
+  meanwhile leave at the row's end, so a kill never strands a lock. Memory an
+  extent lets go while another thread may be in a row, or on another core, is
+  freed at the process's end. Which task is which thread is a static table
+  (`self_thr`), so no row reads another process's record as it is freed.
+- **A U call's way back is sealed** (`moy_umode.c`, THE SEAL): its saved
+  kernel context carries a canary over its address, its space, the caller's
+  ra and sp and the task, checked once at the call's end. A context that is
+  not the task's ends the board with that name, never a jump through it.
 - **No ESP-IDF file is patched.** The vectors are ours per core once a module
   loads (`moy_u_ready`): a trap from M-mode goes on to IDF's handler for its
   line, one from U-mode reaches IDF as an interrupt of M-mode code on the

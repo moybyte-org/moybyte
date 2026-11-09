@@ -49,6 +49,8 @@
 
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 #include "esp_elf.h"
@@ -97,7 +99,8 @@ static uintptr_t resolve_none(const char *name) {
 #ifdef MOY_OS_UMODE
 // The loader's executable allocation (a P4 has one: the segment) is a module's
 // block: the gate first, then the segment, 128-aligned and a multiple of 128
-// long (-Wl,--wrap=esp_elf_malloc). The free finds the block's start.
+// long (-Wl,--wrap=esp_elf_malloc), zeroed, so nothing of the heap's last
+// holder shows in it. The free finds the block's start and scrubs it.
 #define GATE MOY_U_GATE(MOY_OS_ROWS)
 #define BLOCKS MOY_OS_PROCS
 static uint8_t *g_block[BLOCKS];
@@ -116,6 +119,7 @@ void *__wrap_esp_elf_malloc(uint32_t n, bool exec) {
             if (b == NULL) {
                 return NULL;
             }
+            memset(b, 0, GATE + MOY_U_UP(n));
             g_block[i] = b;
             g_last = b;
             return b + GATE;
@@ -127,6 +131,7 @@ void *__wrap_esp_elf_malloc(uint32_t n, bool exec) {
 void __wrap_esp_elf_free(void *ptr) {
     for (int i = 0; ptr != NULL && i < BLOCKS; i++) {
         if (g_block[i] != NULL && g_block[i] + GATE == ptr) {
+            memset(g_block[i], 0, heap_caps_get_allocated_size(g_block[i]));
             heap_caps_free(g_block[i]);
             g_block[i] = NULL;
             return;
@@ -519,6 +524,19 @@ static mp_obj_t mod_mem(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
 
+// check() -> (heap intact, the least free stack in bytes of this task and of
+// any native thread's kernel stack): what a test asks after each attack.
+static mp_obj_t mod_check(void) {
+    uint32_t low = moy_os_stack_low();
+    mp_obj_t t[3] = {
+        mp_obj_new_bool(heap_caps_check_integrity_all(true)),
+        mp_obj_new_int_from_uint((uint32_t)uxTaskGetStackHighWaterMark(NULL)),
+        low == UINT32_MAX ? mp_const_none : mp_obj_new_int_from_uint(low),
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_check_obj, mod_check);
+
 // load() -> (read_us, check_us, reloc_us, internal free before, internal
 // free loaded): the last load's.
 static mp_obj_t mod_load(void) {
@@ -584,6 +602,7 @@ static const mp_rom_map_elem_t moy_elf_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&mod_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
+    { MP_ROM_QSTR(MP_QSTR_check), MP_ROM_PTR(&mod_check_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_elf_globals, moy_elf_globals_table);
 

@@ -226,14 +226,14 @@ static bool task_is(task_t a, task_t b) {
 
 // -- the records ------------------------------------------------------------------
 
-enum { T_FREE = 0, T_LIVE, T_DONE };
+enum { T_FREE = 0, T_LIVE, T_DONE, T_NEW };     // T_NEW: a slot pthread_create holds
 enum { H_FREE = 0, H_MUTEX, H_DIR, H_FD, H_SOCK, H_ADDR };
 
 typedef struct {
     struct moy_os_proc *p;
     task_t task;
     uint8_t state;
-    uint8_t gen;
+    uint16_t gen;
     uint8_t detached;
     uint8_t joined;
     volatile int in_row;
@@ -262,7 +262,9 @@ typedef struct {
 
 typedef struct {
     uint8_t kind;
-    uint8_t gen;
+    uint8_t users;              // H_SOCK, H_MUTEX: rows using it now
+    uint8_t closing;            // H_SOCK: closed while used; the last user lets it go
+    uint16_t gen;
     int fd;                     // H_FD: the session's descriptor; H_SOCK: the stack's descriptor
     uint32_t kinds;             // H_SOCK: SK_NONBLOCK
     void *ptr;                  // H_ADDR: the stack's lookup answer
@@ -354,18 +356,59 @@ static void log_line(moy_os_proc_t *p, int level, const char *text) {
     moy_log_write(level, p != NULL ? p->pid : MOY_LOG_KERNEL, text, strlen(text));
 }
 
+// A text of the module's length, `cap` at most, read only inside the region
+// of its process it starts in: another of its threads may take its NUL away
+// after the row's check, and a read past the region could run off the end of
+// PSRAM. `cap` or more: no NUL inside both.
+static size_t text_len(thr_t *t, const char *p, size_t cap) {
+#ifdef MOY_OS_UMODE
+    if (t != NULL && t->u != NULL) {
+        size_t room = moy_u_room(t->u, p);
+        if (room < cap) {
+            size_t n = strnlen(p, room);
+            return n < room ? n : cap;
+        }
+    }
+#endif
+    (void)t;
+    return strnlen(p, cap);
+}
+
+// Which task is which thread: static, so a lookup never reads a record
+// another task's proc_end may be freeing. A thread's entry is set before its
+// first row and cleared before its record goes; a running thread's record
+// outlives its entry.
+static struct {
+    volatile task_t task;
+    thr_t *volatile thr;
+} g_self[MOY_OS_PROCS * MOY_OS_THREADS];
+
+static void self_set(thr_t *t) {
+    for (uint32_t i = 0; i < MOY_OS_PROCS * MOY_OS_THREADS; i++) {
+        if (g_self[i].thr == NULL) {
+            g_self[i].thr = t;
+            g_self[i].task = task_self();
+            return;
+        }
+    }
+}
+
+static void self_clear(thr_t *t) {
+    for (uint32_t i = 0; i < MOY_OS_PROCS * MOY_OS_THREADS; i++) {
+        if (g_self[i].thr == t) {
+            memset((void *)&g_self[i].task, 0, sizeof g_self[i].task);
+            g_self[i].thr = NULL;
+        }
+    }
+}
+
 // The calling thread's record, or NULL: a thread no process owns.
 static thr_t *self_thr(void) {
     task_t me = task_self();
-    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
-        moy_os_proc_t *p = g_proc[i];
-        if (p == NULL) {
-            continue;
-        }
-        for (uint32_t k = 0; k < MOY_OS_THREADS; k++) {
-            if (p->thr[k].state == T_LIVE && task_is(p->thr[k].task, me)) {
-                return &p->thr[k];
-            }
+    for (uint32_t i = 0; i < MOY_OS_PROCS * MOY_OS_THREADS; i++) {
+        thr_t *t = g_self[i].thr;
+        if (t != NULL && task_is(g_self[i].task, me)) {
+            return t;
         }
     }
     return NULL;
@@ -388,6 +431,7 @@ static void thr_end(thr_t *t) __attribute__((noreturn));
 // touch of the record and the process, which a reaper that sees it frees.
 static void thr_done(thr_t *t) {
     lock();
+    self_clear(t);
     sem_give(&t->done);
     sem_give(&t->p->wake);
     sem_give(&t->p->stopped);
@@ -410,8 +454,10 @@ static void thr_end(thr_t *t) {
 #endif
 }
 
-// A row's start and end: a thread inside one is never deleted where it stands;
-// one whose process is ending leaves at the row's end instead.
+// A row's start and end. `in_row` counts the kernel code a thread is in: a
+// thread inside some is never deleted where it stands (proc_end), and one
+// whose process is ending leaves at the row's end instead, still counted, so
+// its end is DONE and never a delete of kernel code.
 static thr_t *enter(void) {
     thr_t *t = self_thr();
     if (t != NULL) {
@@ -421,9 +467,13 @@ static thr_t *enter(void) {
 }
 
 static void leave(thr_t *t) {
-    if (t != NULL && --t->in_row == 0 && t->p->ending) {
+    if (t == NULL) {
+        return;
+    }
+    if (t->in_row == 1 && t->p->ending) {
         thr_end(t);
     }
+    t->in_row--;
 }
 
 static bool ending(thr_t *t) {
@@ -467,7 +517,11 @@ static void *thr_main(void *arg)
 {
     thr_t *t = arg;
     moy_os_proc_t *p = t->p;
+    const bool service = p->service;
     t->task = task_self();
+    lock();
+    self_set(t);
+    unlock();
 #ifndef MOY_OS_BOARD
     if (setjmp(t->home) != 0) {
         thr_done(t);
@@ -480,7 +534,9 @@ static void *thr_main(void *arg)
     if (t == &p->thr[0] && p->u != NULL) {
         for (uint32_t i = 0; i < p->mod.uinits; i++) {
             uint32_t a[5] = { 0 };
+            t->in_row = 0;
             u_call(t, p->mod.uinit[i], a);
+            t->in_row = 1;
         }
     }
 #endif
@@ -491,17 +547,20 @@ static void *thr_main(void *arg)
 #else
         char **argv = p->argv;
 #endif
+        t->in_row = 0;
         int code = mod_call(t, MOY_ELF_OP_MAIN, p->argc, argv);
+        t->in_row = 1;
         lock();
         if (!p->main_done) {
             p->code = code;
             p->main_done = 1;
         }
         unlock();
-        if (p->service) {
+        if (service) {
             moy_evq_want(MOY_EVQ_WANT_POLL);    // its reap is the VM's
         }
     } else {
+        t->in_row = 0;
 #ifdef MOY_OS_UMODE
         if (p->u != NULL) {
             uint32_t a[5] = { (uint32_t)t->arg };
@@ -509,6 +568,7 @@ static void *thr_main(void *arg)
         } else
 #endif
         t->out = t->start(t->arg);
+        t->in_row = 1;
     }
     thr_end(t);
 #ifndef MOY_OS_BOARD
@@ -536,6 +596,15 @@ static size_t env_len(const char *e) {
     return n;
 }
 
+// Memory a process could read, zeroed and freed: what a dead process held
+// never reaches the next holder of the heap's block.
+static void u_scrub_free(void *mem) {
+    if (mem != NULL) {
+        memset(mem, 0, heap_caps_get_allocated_size(mem));
+        heap_caps_free(mem);
+    }
+}
+
 // Thread t's U stack and windows: its u_area_t at the top and, for the first
 // thread, argv and the environment below it. 0, or an errno value.
 static int u_thread(thr_t *t) {
@@ -553,6 +622,7 @@ static int u_thread(thr_t *t) {
         os_free(u);
         return ENOMEM;
     }
+    memset(mem, 0, len);        // nothing of the heap's last holder shows
     u->proc = p->u;
     u->id = moy_u_new_id();
     u->slo = (uint32_t)mem;
@@ -602,7 +672,7 @@ static void u_free(moy_os_proc_t *p, void *mem) {
     }
     retired_t *r = busy ? os_alloc(sizeof *r) : NULL;
     if (r == NULL) {
-        heap_caps_free(mem);
+        u_scrub_free(mem);
         return;
     }
     r->mem = mem;
@@ -632,11 +702,13 @@ static int thr_spawn(thr_t *t) {
     if (p->u != NULL) {
         int e = u_thread(t);
         if (e != 0) {
+            t->state = T_FREE;
             return e;
         }
     }
 #endif
     sem_init(&t->done, false);
+    t->in_row = 1;              // thr_main's own code until the module's runs
     t->state = T_LIVE;
 #ifdef MOY_OS_BOARD
     TaskHandle_t h = NULL;
@@ -674,6 +746,7 @@ static int thr_spawn(thr_t *t) {
 
 // A DONE thread's task deleted (a board) and its record freed.
 static void thr_reap(thr_t *t) {
+    self_clear(t);
 #ifdef MOY_OS_BOARD
     vTaskDeleteWithCaps(t->task);
 #endif
@@ -690,7 +763,9 @@ static int handle_new(moy_os_proc_t *p, uint8_t kind, void *ptr, int fd) {
     for (uint32_t i = 0; i < MOY_OS_HANDLES; i++) {
         if (p->h[i].kind == H_FREE) {
             p->h[i].kind = kind;
-            p->h[i].gen = (uint8_t)(p->h[i].gen + 1u);
+            p->h[i].gen = (uint16_t)(p->h[i].gen + 1u);
+            p->h[i].users = 0;
+            p->h[i].closing = 0;
             p->h[i].ptr = ptr;
             p->h[i].fd = fd;
             return (int)i;
@@ -733,16 +808,20 @@ static void handle_drop(moy_os_proc_t *p, uint32_t i) {
     }
     h->kind = H_FREE;
     h->ptr = NULL;
+    h->users = 0;
+    h->closing = 0;
 }
 
-// A module's id for handle `i`: never 0 nor all ones (PTHREAD_MUTEX_INITIALIZER's).
+// A module's id for handle `i`: its slot and its slot's generation, so a
+// stale id never names the slot's next holder; never 0 nor all ones
+// (PTHREAD_MUTEX_INITIALIZER's).
 static uint32_t handle_id(const moy_os_proc_t *p, int i) {
-    return ((uint32_t)p->h[i].gen << 8 | (uint32_t)(i + 1)) & 0xffffu;
+    return (uint32_t)p->h[i].gen << 8 | (uint32_t)(i + 1);
 }
 
 static int handle_of(const moy_os_proc_t *p, uint32_t id, uint8_t kind) {
     uint32_t i = (id & 0xffu) - 1u;
-    if (i >= MOY_OS_HANDLES || p->h[i].kind != kind || handle_id(p, (int)i) != (id & 0xffffu)) {
+    if (i >= MOY_OS_HANDLES || p->h[i].kind != kind || handle_id(p, (int)i) != id) {
         return -1;
     }
     return (int)i;
@@ -843,6 +922,8 @@ static int role_errno(int32_t r) {
     }
 }
 
+#define MOY_OS_CALL_ARGS 8u          // a row's registers bound its fields
+
 int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *out, size_t cap) {
     thr_t *t = enter();
     moy_os_proc_t *p = t != NULL ? t->p : NULL;
@@ -850,14 +931,27 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
     uint8_t stack[256];
     uint8_t *buf = stack;
     size_t len = 0;
+    // Each length is measured once: the text is the module's memory, which
+    // another of its threads may change between a measure and the copy.
+    size_t lens[MOY_OS_CALL_ARGS];
+    if (n < 0 || n > (int)MOY_OS_CALL_ARGS) {
+        p = NULL;
+    }
     if (p != NULL && moy_app_run_live(&p->run)) {
         for (int i = 0; i < n; i++) {
             size_t k = a[i].kind == MOY_OS_ARG_INT ? 4u
                        : a[i].kind == MOY_OS_ARG_BYTES ? a[i].n
-                       : a[i].p != NULL ? strlen(a[i].p) : 0u;
+                       : a[i].p != NULL ? text_len(t, a[i].p, SIZE_MAX) : 0u;
+            if (k == SIZE_MAX) {
+                k = 0;
+                len = SIZE_MAX / 2;     // no end inside its memory: refused
+            }
+            lens[i] = k;
             len += 4u + k;
         }
-        if (len > sizeof stack) {
+        if (len >= SIZE_MAX / 2) {
+            buf = NULL;
+        } else if (len > sizeof stack) {
             buf = os_alloc(len);
         }
         if (buf == NULL) {
@@ -871,8 +965,7 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
                     at += 8u;
                     continue;
                 }
-                size_t k = a[i].kind == MOY_OS_ARG_BYTES ? a[i].n
-                           : a[i].p != NULL ? strlen(a[i].p) : 0u;
+                size_t k = lens[i];
                 put32(buf + at, (uint32_t)k);
                 if (k) {
                     memcpy(buf + at + 4, a[i].p, k);
@@ -912,8 +1005,12 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
 
 // -- the rows: files and streams ----------------------------------------------------
 
-// A socket descriptor's handle slot in `p`, or -1 (the sockets' rows, below).
+// A socket descriptor's handle slot in `p`, or -1, and its hold for a row
+// (the sockets' rows, below).
 static int sock_slot(moy_os_proc_t *p, int fd);
+static int sock_of(thr_t *t, int fd);
+static void sock_let(thr_t *t, int k);
+static void sock_close(moy_os_proc_t *p, int k);
 static long sock_io(thr_t *t, int slot, void *buf, size_t n, int flags, bool wr);
 // The event descriptor's read (the rows: the event descriptor, below).
 static long evq_read(moy_os_proc_t *p, void *buf, size_t n);
@@ -1038,7 +1135,7 @@ static void f_body(void *arg) {
     }
     case F_READ:
     case F_WRITE:
-        if (c->fd > 2 && fd_owned(p, c->fd) < 0) {
+        if (c->fd < 0 || (c->fd > 2 && fd_owned(p, c->fd) < 0)) {
             c->r = -EBADF;
         } else if (moy_sh_prog_bg_stdio(&p->prog, c->fd)) {
             if (c->op == F_READ) {
@@ -1073,7 +1170,7 @@ static void f_body(void *arg) {
         }
         break;
     case F_FSTAT:
-        if (c->fd > 2 && fd_owned(p, c->fd) < 0) {
+        if (c->fd < 0 || (c->fd > 2 && fd_owned(p, c->fd) < 0)) {
             c->r = -EBADF;
         } else {
             c->size = 0;
@@ -1139,6 +1236,21 @@ static void f_body(void *arg) {
     }
 }
 
+// *p copied into `out` and pointed there: false when it does not fit.
+static bool path_in(thr_t *t, const char **p, char *out) {
+    if (*p == NULL) {
+        return true;
+    }
+    size_t n = text_len(t, *p, MOY_SH_PROG_PATH);
+    if (n >= MOY_SH_PROG_PATH) {
+        return false;
+    }
+    memcpy(out, *p, n);
+    out[n] = 0;
+    *p = out;
+    return true;
+}
+
 // Call `c` on the session: its answer, errno set below 0.
 static long fcall(thr_t *t, fcall_t *c) {
     if (t == NULL) {
@@ -1160,6 +1272,13 @@ static long fcall(thr_t *t, fcall_t *c) {
         moy_sh_prog_bg_write(&t->p->prog, c->fd, c->buf, c->n);
         unlock();
         return (long)c->n;
+    }
+    // The paths are copied before the hop: the session's task reads them
+    // while the module's other threads run on, and could rewrite them.
+    char path[MOY_SH_PROG_PATH], path2[MOY_SH_PROG_PATH];
+    if (!path_in(t, &c->path, path) || !path_in(t, &c->path2, path2)) {
+        moy_os_errno_set(ENAMETOOLONG);
+        return -1;
     }
     c->r = -EINTR;
     if (on_session(t, f_body, c) != 0) {
@@ -1185,13 +1304,18 @@ int moy_os_open(const char *path, int flags, int mode) {
 int moy_os_close(int fd) {
     thr_t *t = enter();
     long r;
-    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    int k = -1;
+    if (t != NULL && fd != MOY_EVQ_FD) {
+        lock();
+        k = sock_slot(t->p, fd);
+        if (k >= 0) {
+            sock_close(t->p, k);
+        }
+        unlock();
+    }
     if (t != NULL && fd == MOY_EVQ_FD) {
         r = 0;                  // the process's own: it stays open
     } else if (k >= 0) {
-        lock();
-        handle_drop(t->p, (uint32_t)k);
-        unlock();
         r = 0;
     } else {
         fcall_t c = { .op = F_CLOSE, .fd = fd };
@@ -1204,11 +1328,12 @@ int moy_os_close(int fd) {
 ssize_t moy_os_read(int fd, void *buf, size_t n) {
     thr_t *t = enter();
     long r;
-    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    int k = t != NULL && fd >= MOY_OS_SOCK_FD && fd != MOY_EVQ_FD ? sock_of(t, fd) : -1;
     if (t != NULL && fd == MOY_EVQ_FD) {
         r = evq_read(t->p, buf, n);
     } else if (k >= 0) {
         r = sock_io(t, k, buf, n, 0, false);
+        sock_let(t, k);
     } else {
         fcall_t c = { .op = F_READ, .fd = fd, .buf = buf, .n = n };
         r = fcall(t, &c);
@@ -1220,9 +1345,10 @@ ssize_t moy_os_read(int fd, void *buf, size_t n) {
 ssize_t moy_os_write(int fd, const void *buf, size_t n) {
     thr_t *t = enter();
     long r;
-    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    int k = t != NULL && fd >= MOY_OS_SOCK_FD && fd != MOY_EVQ_FD ? sock_of(t, fd) : -1;
     if (k >= 0) {
         r = sock_io(t, k, (void *)buf, n, 0, true);
+        sock_let(t, k);
     } else {
         fcall_t c = { .op = F_WRITE, .fd = fd, .buf = (void *)buf, .n = n };
         r = fcall(t, &c);
@@ -1365,6 +1491,9 @@ DIR *moy_os_opendir(const char *path) {
 struct dirent *moy_os_readdir(DIR *dir) {
     thr_t *t = enter();
     struct dirent *out = NULL;
+    if (t != NULL) {
+        lock();                 // a closedir by another thread frees the record
+    }
     int h = t != NULL ? handle_of(t->p, (uint32_t)(uintptr_t)dir, H_DIR) : -1;
     if (h < 0) {
         moy_os_errno_set(EBADF);
@@ -1385,6 +1514,9 @@ struct dirent *moy_os_readdir(DIR *dir) {
             }
 #endif
         }
+    }
+    if (t != NULL) {
+        unlock();
     }
     leave(t);
     return out;
@@ -1425,7 +1557,8 @@ char *moy_os_getcwd(char *buf, size_t n) {
 char *moy_os_getenv(const char *name) {
     thr_t *t = enter();
     char *out = NULL;
-    size_t k = name != NULL ? strlen(name) : 0;
+    size_t k = name != NULL ? text_len(t, name, MOY_SH_PROG_PATH) : 0;
+    k = k < MOY_SH_PROG_PATH ? k : 0;
 #ifdef MOY_OS_UMODE
     char *env = t == NULL ? NULL : t->p->u != NULL ? t->p->uenv : t->p->env;
 #else
@@ -1448,11 +1581,12 @@ void moy_os_exit(int code) {
 }
 
 void moy_os__exit(int code) {
-    thr_t *t = self_thr();
+    thr_t *t = enter();
     if (t == NULL) {
         abort();
     }
     moy_os_proc_t *p = t->p;
+    const bool service = p->service;
     lock();
     if (!p->main_done) {
         p->code = code & 0xff;
@@ -1460,7 +1594,7 @@ void moy_os__exit(int code) {
     }
     p->ending = 1;
     unlock();
-    if (p->service) {
+    if (service) {
         moy_evq_want(MOY_EVQ_WANT_POLL);
     }
     thr_end(t);
@@ -1482,6 +1616,10 @@ time_t moy_os_time(time_t *out) {
 }
 
 int moy_os_clock_gettime(clockid_t clock, struct timespec *ts) {
+    if (ts == NULL) {
+        moy_os_errno_set(EFAULT);
+        return -1;
+    }
     if (clock_gettime(clock, ts) != 0) {
         moy_os_errno_set(errno);
         return -1;
@@ -1491,6 +1629,9 @@ int moy_os_clock_gettime(clockid_t clock, struct timespec *ts) {
 
 int moy_os_gettimeofday(struct timeval *tv, void *tz) {
     (void)tz;
+    if (tv == NULL) {
+        return 0;
+    }
     if (gettimeofday(tv, NULL) != 0) {
         moy_os_errno_set(errno);
         return -1;
@@ -1553,14 +1694,16 @@ unsigned moy_os_sleep(unsigned s) {
 
 // -- the rows: threads -----------------------------------------------------------------
 
-// pthread_t is the thread's slot and generation, never 0.
+// pthread_t is the thread's slot and the slot's generation, never 0: a stale
+// one never names the slot's next thread.
 static uint32_t thr_id(const moy_os_proc_t *p, const thr_t *t) {
     return (uint32_t)t->gen << 8 | (uint32_t)(t - p->thr + 1);
 }
 
 static thr_t *thr_of(moy_os_proc_t *p, uint32_t id) {
     uint32_t i = (id & 0xffu) - 1u;
-    if (i >= MOY_OS_THREADS || p->thr[i].state == T_FREE || p->thr[i].gen != (uint8_t)(id >> 8)) {
+    if (i >= MOY_OS_THREADS || (p->thr[i].state != T_LIVE && p->thr[i].state != T_DONE)
+        || p->thr[i].gen != (id >> 8)) {
         return NULL;
     }
     return &p->thr[i];
@@ -1576,8 +1719,8 @@ int moy_os_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
         lock();
         // A finished detached thread's slot is reused.
         for (uint32_t i = 1; i < MOY_OS_THREADS; i++) {
-            if (p->thr[i].state == T_DONE && p->thr[i].detached) {
-                uint8_t gen = p->thr[i].gen;
+            if (p->thr[i].state == T_DONE && p->thr[i].detached && !p->thr[i].joined) {
+                uint16_t gen = p->thr[i].gen;
                 thr_reap(&p->thr[i]);
                 p->thr[i].gen = gen;
             }
@@ -1590,12 +1733,13 @@ int moy_os_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
         }
         r = EAGAIN;
         if (n != NULL) {
-            uint8_t gen = (uint8_t)(n->gen + 1u);
+            uint16_t gen = (uint16_t)(n->gen + 1u);
             memset(n, 0, sizeof *n);
             n->gen = gen ? gen : 1;
             n->p = p;
             n->start = start;
             n->arg = arg;
+            n->state = T_NEW;           // no other create takes the slot while it spawns
             unlock();
             r = thr_spawn(n);
             lock();
@@ -1609,14 +1753,27 @@ int moy_os_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     return r;
 }
 
+// A join claims its thread under the lock: no second join, detach or reap
+// can take the record it waits on.
 int moy_os_pthread_join(pthread_t thread, void **out) {
     thr_t *t = enter();
     int r = ESRCH;
-    thr_t *o = t != NULL ? thr_of(t->p, (uint32_t)thread) : NULL;
-    if (o == t && o != NULL) {
-        r = EDEADLK;
-    } else if (o != NULL && o != &t->p->thr[0] && !o->detached && !o->joined) {
-        o->joined = 1;
+    bool mine = false;
+    thr_t *o = NULL;
+    if (t != NULL) {
+        lock();
+        o = thr_of(t->p, (uint32_t)thread);
+        if (o == t && o != NULL) {
+            r = EDEADLK;
+        } else if (o != NULL && (o == &t->p->thr[0] || o->detached || o->joined)) {
+            r = EINVAL;
+        } else if (o != NULL) {
+            o->joined = 1;
+            mine = true;
+        }
+        unlock();
+    }
+    if (mine) {
         while (o->state != T_DONE) {
             if (ending(t)) {
                 break;
@@ -1628,7 +1785,7 @@ int moy_os_pthread_join(pthread_t thread, void **out) {
                 *out = o->out;
             }
             lock();
-            uint8_t gen = o->gen;
+            uint16_t gen = o->gen;
             thr_reap(o);
             o->gen = gen;
             unlock();
@@ -1643,12 +1800,20 @@ int moy_os_pthread_join(pthread_t thread, void **out) {
 
 int moy_os_pthread_detach(pthread_t thread) {
     thr_t *t = enter();
-    thr_t *o = t != NULL ? thr_of(t->p, (uint32_t)thread) : NULL;
-    if (o != NULL) {
-        o->detached = 1;
+    int r = ESRCH;
+    if (t != NULL) {
+        lock();
+        thr_t *o = thr_of(t->p, (uint32_t)thread);
+        if (o != NULL && (o->joined || o->detached)) {
+            r = EINVAL;
+        } else if (o != NULL) {
+            o->detached = 1;
+            r = 0;
+        }
+        unlock();
     }
     leave(t);
-    return o != NULL ? 0 : ESRCH;
+    return r;
 }
 
 pthread_t moy_os_pthread_self(void) {
@@ -1657,7 +1822,7 @@ pthread_t moy_os_pthread_self(void) {
 }
 
 void moy_os_pthread_exit(void *out) {
-    thr_t *t = self_thr();
+    thr_t *t = enter();
     if (t == NULL) {
         abort();
     }
@@ -1674,7 +1839,10 @@ static uint32_t *mutex_word(pthread_mutex_t *m) {
     return (uint32_t *)(void *)m;
 }
 
-static sem_t_ *mutex_of(thr_t *t, pthread_mutex_t *m, bool make) {
+// The mutex `m` names, held for the row (mutex_let) so no destroy frees it
+// under a wait: its slot in *k.
+static sem_t_ *mutex_of(thr_t *t, pthread_mutex_t *m, bool make, int *k) {
+    *k = -1;
     if (t == NULL || m == NULL) {
         return NULL;
     }
@@ -1693,9 +1861,22 @@ static sem_t_ *mutex_of(thr_t *t, pthread_mutex_t *m, bool make) {
             }
         }
     }
-    sem_t_ *out = h >= 0 ? t->p->h[h].ptr : NULL;
+    sem_t_ *out = NULL;
+    if (h >= 0) {
+        out = t->p->h[h].ptr;
+        t->p->h[h].users++;
+        *k = h;
+    }
     unlock();
     return out;
+}
+
+static void mutex_let(thr_t *t, int k) {
+    if (k >= 0) {
+        lock();
+        t->p->h[k].users--;
+        unlock();
+    }
 }
 
 int moy_os_pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *attr) {
@@ -1704,7 +1885,9 @@ int moy_os_pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *att
     if (m != NULL) {
         memset(m, 0, sizeof *m);
     }
-    sem_t_ *s = mutex_of(t, m, true);
+    int k;
+    sem_t_ *s = mutex_of(t, m, true, &k);
+    mutex_let(t, k);
     leave(t);
     return s != NULL ? 0 : EAGAIN;
 }
@@ -1715,7 +1898,9 @@ int moy_os_pthread_mutex_destroy(pthread_mutex_t *m) {
     if (t != NULL && m != NULL) {
         lock();
         int h = handle_of(t->p, *mutex_word(m), H_MUTEX);
-        if (h >= 0) {
+        if (h >= 0 && t->p->h[h].users != 0) {
+            r = EBUSY;
+        } else if (h >= 0) {
             handle_drop(t->p, (uint32_t)h);
             *mutex_word(m) = 0;
             r = 0;
@@ -1728,7 +1913,8 @@ int moy_os_pthread_mutex_destroy(pthread_mutex_t *m) {
 
 int moy_os_pthread_mutex_lock(pthread_mutex_t *m) {
     thr_t *t = enter();
-    sem_t_ *s = mutex_of(t, m, true);
+    int k;
+    sem_t_ *s = mutex_of(t, m, true, &k);
     int r = s != NULL ? 0 : EINVAL;
     while (s != NULL && !sem_take(s, MOY_OS_SLICE_US)) {
         if (ending(t)) {
@@ -1736,24 +1922,29 @@ int moy_os_pthread_mutex_lock(pthread_mutex_t *m) {
             break;
         }
     }
+    mutex_let(t, k);
     leave(t);
     return r;
 }
 
 int moy_os_pthread_mutex_trylock(pthread_mutex_t *m) {
     thr_t *t = enter();
-    sem_t_ *s = mutex_of(t, m, true);
+    int k;
+    sem_t_ *s = mutex_of(t, m, true, &k);
     int r = s == NULL ? EINVAL : sem_take(s, 0) ? 0 : EBUSY;
+    mutex_let(t, k);
     leave(t);
     return r;
 }
 
 int moy_os_pthread_mutex_unlock(pthread_mutex_t *m) {
     thr_t *t = enter();
-    sem_t_ *s = mutex_of(t, m, false);
+    int k;
+    sem_t_ *s = mutex_of(t, m, false, &k);
     if (s != NULL) {
         sem_give(s);
     }
+    mutex_let(t, k);
     leave(t);
     return s != NULL ? 0 : EINVAL;
 }
@@ -1763,8 +1954,10 @@ int moy_os_pthread_mutex_unlock(pthread_mutex_t *m) {
 int moy_os_moy_log(int level, const char *text) {
     thr_t *t = enter();
     if (text != NULL) {
-        log_line(t != NULL ? t->p : NULL, level < 0 || level >= MOY_LOG_LEVELS ? MOY_LOG_INFO : level,
-                 text);
+        size_t n = text_len(t, text, MOY_LOG_TEXT_MAX);
+        moy_log_write(level < 0 || level >= MOY_LOG_LEVELS ? MOY_LOG_INFO : level,
+                      t != NULL ? t->p->pid : MOY_LOG_KERNEL, text,
+                      n < MOY_LOG_TEXT_MAX ? n : MOY_LOG_TEXT_MAX);
     }
     leave(t);
     return text != NULL ? 0 : -1;
@@ -1827,16 +2020,38 @@ static int evq_errno(int rc) {
 int moy_os_moy_send(const char *app, const char *name, const char *args) {
     thr_t *t = enter();
     int r = -1;
-    const char *a = args != NULL && *args ? args : "[]";
-    while (*a == ' ' || *a == '\t' || *a == '\n') {
+    // The names are copied and the arguments measured inside their region:
+    // the module's other threads may rewrite them meanwhile.
+    char app_in[MOY_EVQ_APP], name_in[MOY_EVQ_NAME];
+    size_t an = app != NULL ? text_len(t, app, MOY_EVQ_APP) : MOY_EVQ_APP;
+    size_t nn = name != NULL ? text_len(t, name, MOY_EVQ_NAME) : MOY_EVQ_NAME;
+    if (an < MOY_EVQ_APP) {
+        memcpy(app_in, app, an);
+        app_in[an] = 0;
+    }
+    if (nn < MOY_EVQ_NAME) {
+        memcpy(name_in, name, nn);
+        name_in[nn] = 0;
+    }
+    size_t room = args != NULL ? text_len(t, args, SIZE_MAX) : 0;
+    const char *a = room != 0 && room != SIZE_MAX ? args : "[]";
+    if (room == SIZE_MAX) {
+        an = MOY_EVQ_APP;           // no end inside its memory: refused below
+        room = 0;
+    }
+    while (room > 1 && (*a == ' ' || *a == '\t' || *a == '\n')) {
         a++;
+        room--;
+    }
+    if (room == 0) {
+        room = 2;
     }
     if (t == NULL) {
         moy_os_errno_set(EPERM);
-    } else if (app == NULL || name == NULL || !*name || strlen(name) >= MOY_EVQ_NAME || *a != '[') {
+    } else if (an >= MOY_EVQ_APP || nn == 0 || nn >= MOY_EVQ_NAME || *a != '[') {
         moy_os_errno_set(EINVAL);
     } else {
-        r = moy_evq_send(t->p->pid, app, name, a, strlen(a), NULL);
+        r = moy_evq_send(t->p->pid, app_in, name_in, a, room, NULL);
         if (r < 0) {
             moy_os_errno_set(-r == MOY_EVQ_FULL ? EAGAIN : evq_errno(-r));
             r = -1;
@@ -1851,10 +2066,15 @@ int moy_os_moy_on(const char *name, int on) {
     int r = -1;
     if (t == NULL) {
         moy_os_errno_set(EPERM);
-    } else if (name == NULL || !*name || strlen(name) >= MOY_EVQ_NAME) {
+    } else if (name == NULL || text_len(t, name, MOY_EVQ_NAME) - 1u >= MOY_EVQ_NAME - 1u) {
         moy_os_errno_set(EINVAL);
     } else {
-        int rc = moy_evq_listen(t->p->pid, name, on != 0);
+        char name_in[MOY_EVQ_NAME];
+        size_t n = text_len(t, name, MOY_EVQ_NAME);
+        n = n < MOY_EVQ_NAME ? n : MOY_EVQ_NAME - 1u;
+        memcpy(name_in, name, n);
+        name_in[n] = 0;
+        int rc = moy_evq_listen(t->p->pid, name_in, on != 0);
         if (rc == MOY_EVQ_OK) {
             r = 0;
         } else {
@@ -1995,7 +2215,7 @@ int moy_os_munmap(void *addr, size_t len) {
 
 static int sock_slot(moy_os_proc_t *p, int fd) {
     int k = fd - MOY_OS_SOCK_FD;
-    if (k < 0 || k >= (int)MOY_OS_HANDLES || p->h[k].kind != H_SOCK) {
+    if (k < 0 || k >= (int)MOY_OS_HANDLES || p->h[k].kind != H_SOCK || p->h[k].closing) {
         return -1;
     }
     return k;
@@ -2099,11 +2319,15 @@ static int sk_ready(const int *lfd, const short *want, short *got, int n, int64_
 
 // Wait for socket `slot` to be readable (or writable): 0, EAGAIN at `ms`
 // (0: no limit), EINTR when the process ends.
-static int sk_block(thr_t *t, int lfd, bool wr, uint32_t ms) {
+static int sk_block(thr_t *t, const handle_t *h, bool wr, uint32_t ms) {
     int64_t end = ms ? mono_us() + (int64_t)ms * 1000 : 0;
+    int lfd = h->fd;
     for (;;) {
         if (ending(t)) {
             return EINTR;
+        }
+        if (h->closing) {
+            return EBADF;
         }
         int64_t slice = MOY_OS_SLICE_US;
         if (end) {
@@ -2161,21 +2385,56 @@ static long sock_io(thr_t *t, int slot, void *buf, size_t n, int flags, bool wr)
             moy_os_errno_set(e);
             return -1;
         }
-        if ((e = sk_block(t, h->fd, wr, wr ? h->snd_ms : h->rcv_ms)) != 0) {
+        if ((e = sk_block(t, h, wr, wr ? h->snd_ms : h->rcv_ms)) != 0) {
             moy_os_errno_set(e);
             return -1;
         }
     }
 }
 
-// The socket row's prologue: the calling thread, and the slot of `fd` (or
-// -1 with errno set).
+// The socket row's prologue: the slot of `fd` in the calling thread's
+// process, held for the row (sock_let) so a close by another thread waits for
+// it to finish; or -1 with errno set.
 static int sock_of(thr_t *t, int fd) {
-    int k = t != NULL ? sock_slot(t->p, fd) : -1;
+    int k = -1;
+    if (t != NULL) {
+        lock();
+        k = sock_slot(t->p, fd);
+        if (k >= 0) {
+            t->p->h[k].users++;
+        }
+        unlock();
+    }
     if (k < 0) {
         moy_os_errno_set(t == NULL ? EPERM : EBADF);
     }
     return k;
+}
+
+// A socket row's hold let go: a socket closed meanwhile is closed now, by
+// the last row that held it.
+static void sock_let(thr_t *t, int k) {
+    if (k < 0) {
+        return;
+    }
+    lock();
+    handle_t *h = &t->p->h[k];
+    if (--h->users == 0 && h->closing) {
+        handle_drop(t->p, (uint32_t)k);
+    }
+    unlock();
+}
+
+// `fd`'s close: at once, or, while a row of another thread uses it, shut down
+// (which ends that row's wait) and closed by the row's end.
+static void sock_close(moy_os_proc_t *p, int k) {
+    handle_t *h = &p->h[k];
+    if (h->users == 0) {
+        handle_drop(p, (uint32_t)k);
+    } else {
+        h->closing = 1;
+        SK(shutdown)(h->fd, SHUT_RDWR);
+    }
 }
 
 int moy_os_socket(int domain, int type, int protocol) {
@@ -2214,6 +2473,7 @@ int moy_os_socket(int domain, int type, int protocol) {
             moy_os_errno_set(errno);                \
         }                                           \
     }                                               \
+    sock_let(t, k);                                 \
     leave(t);                                       \
     return r
 
@@ -2229,16 +2489,62 @@ int moy_os_shutdown(int fd, int how) {
     SOCK_CALL(fd, SK(shutdown)(lfd, how));
 }
 
+// A length a row reads through a pointer, read ONCE: the row's check passed
+// the buffer by it, and another thread may change it after. The buffer is
+// checked again by the value read (u_fits), and the stack is handed a copy.
+static socklen_t len_in(const socklen_t *len) {
+    return len != NULL ? *(const volatile socklen_t *)len : 0;
+}
+
+// [p, p+n) writable by the calling thread's process (always, off U-mode).
+static bool u_fits(thr_t *t, void *ptr, size_t n) {
+#ifdef MOY_OS_UMODE
+    if (t != NULL && t->u != NULL && ptr != NULL) {
+        return moy_u_ok(t->u, ptr, n, MOY_U_W) != 0;
+    }
+#endif
+    (void)t;
+    (void)ptr;
+    (void)n;
+    return true;
+}
+
+// getsockname, getpeername and getsockopt over a copy of the length.
+static int sock_out(int fd, int op, int level, int name, void *out, socklen_t *len) {
+    thr_t *t = enter();
+    int k = sock_of(t, fd), r = -1;
+    if (k >= 0) {
+        socklen_t n = len_in(len);
+        if (len == NULL || out == NULL || !u_fits(t, out, n)) {
+            errno = EFAULT;
+        } else {
+            int lfd = t->p->h[k].fd;
+            r = op == 0 ? SK(getsockname)(lfd, out, &n)
+                : op == 1 ? SK(getpeername)(lfd, out, &n)
+                : SK(getsockopt)(lfd, level, name, out, &n);
+            if (r == 0) {
+                *len = n;
+            }
+        }
+        if (r < 0) {
+            moy_os_errno_set(errno);
+        }
+    }
+    sock_let(t, k);
+    leave(t);
+    return r;
+}
+
 int moy_os_getsockname(int fd, struct sockaddr *addr, socklen_t *len) {
-    SOCK_CALL(fd, SK(getsockname)(lfd, addr, len));
+    return sock_out(fd, 0, 0, 0, addr, len);
 }
 
 int moy_os_getpeername(int fd, struct sockaddr *addr, socklen_t *len) {
-    SOCK_CALL(fd, SK(getpeername)(lfd, addr, len));
+    return sock_out(fd, 1, 0, 0, addr, len);
 }
 
 int moy_os_getsockopt(int fd, int level, int name, void *val, socklen_t *len) {
-    SOCK_CALL(fd, SK(getsockopt)(lfd, level, name, val, len));
+    return sock_out(fd, 2, level, name, val, len);
 }
 
 int moy_os_setsockopt(int fd, int level, int name, const void *val, socklen_t len) {
@@ -2262,6 +2568,7 @@ int moy_os_setsockopt(int fd, int level, int name, const void *val, socklen_t le
             }
         }
     }
+    sock_let(t, k);
     leave(t);
     return r;
 }
@@ -2269,20 +2576,32 @@ int moy_os_setsockopt(int fd, int level, int name, const void *val, socklen_t le
 int moy_os_accept(int fd, struct sockaddr *addr, socklen_t *len) {
     thr_t *t = enter();
     int k = sock_of(t, fd), r = -1;
+    socklen_t n = len_in(len);
+    bool named = addr != NULL && len != NULL;
+    if (k >= 0 && named && !u_fits(t, addr, n)) {
+        moy_os_errno_set(EFAULT);
+        sock_let(t, k);
+        k = -1;
+    }
+    int held = k;
     while (k >= 0) {
         handle_t *h = &t->p->h[k];
-        int lfd = SK(accept)(h->fd, addr, len);
+        int lfd = SK(accept)(h->fd, named ? addr : NULL, named ? &n : NULL);
         if (lfd >= 0) {
+            if (named) {
+                *len = n;
+            }
             r = sock_adopt(t, lfd, 0);
             break;
         }
         int e = errno;
         if ((h->kinds & SK_NONBLOCK) || !would_block(e)
-            || (e = sk_block(t, h->fd, false, h->rcv_ms)) != 0) {
+            || (e = sk_block(t, h, false, h->rcv_ms)) != 0) {
             moy_os_errno_set(e);
             break;
         }
     }
+    sock_let(t, held);
     leave(t);
     return r;
 }
@@ -2297,7 +2616,7 @@ int moy_os_connect(int fd, const struct sockaddr *addr, socklen_t len) {
         r = SK(connect)(h->fd, addr, len);
         e = r < 0 ? errno : 0;
         if (r < 0 && would_block(e) && !(h->kinds & SK_NONBLOCK)) {
-            e = sk_block(t, h->fd, true, h->snd_ms);
+            e = sk_block(t, h, true, h->snd_ms);
             if (e == 0) {
                 int err = 0;
                 socklen_t n = sizeof err;
@@ -2314,6 +2633,7 @@ int moy_os_connect(int fd, const struct sockaddr *addr, socklen_t len) {
             moy_os_errno_set(e);
         }
     }
+    sock_let(t, k);
     leave(t);
     return r;
 }
@@ -2322,6 +2642,7 @@ ssize_t moy_os_send(int fd, const void *buf, size_t n, int flags) {
     thr_t *t = enter();
     int k = sock_of(t, fd);
     long r = k >= 0 ? sock_io(t, k, (void *)buf, n, flags, true) : -1;
+    sock_let(t, k);
     leave(t);
     return (ssize_t)r;
 }
@@ -2330,6 +2651,7 @@ ssize_t moy_os_recv(int fd, void *buf, size_t n, int flags) {
     thr_t *t = enter();
     int k = sock_of(t, fd);
     long r = k >= 0 ? sock_io(t, k, buf, n, flags, false) : -1;
+    sock_let(t, k);
     leave(t);
     return (ssize_t)r;
 }
@@ -2350,12 +2672,13 @@ ssize_t moy_os_sendto(int fd, const void *buf, size_t n, int flags, const struct
                 break;
             }
             e = errno;
-            if (!block || !would_block(e) || (e = sk_block(t, h->fd, true, h->snd_ms)) != 0) {
+            if (!block || !would_block(e) || (e = sk_block(t, h, true, h->snd_ms)) != 0) {
                 moy_os_errno_set(e);
                 break;
             }
         }
     }
+    sock_let(t, k);
     leave(t);
     return (ssize_t)r;
 }
@@ -2365,21 +2688,30 @@ ssize_t moy_os_recvfrom(int fd, void *buf, size_t n, int flags, struct sockaddr 
     thr_t *t = enter();
     int k = sock_of(t, fd), e;
     long r = -1;
-    if (k >= 0) {
+    socklen_t fl = len_in(len);
+    bool named = from != NULL && len != NULL;
+    if (k >= 0 && named && !u_fits(t, from, fl)) {
+        moy_os_errno_set(EFAULT);
+    } else if (k >= 0) {
         handle_t *h = &t->p->h[k];
         bool block = !(h->kinds & SK_NONBLOCK) && !(flags & MSG_DONTWAIT);
         for (;;) {
-            r = (long)SK(recvfrom)(h->fd, buf, n, flags | MSG_DONTWAIT, from, len);
+            r = (long)SK(recvfrom)(h->fd, buf, n, flags | MSG_DONTWAIT, named ? from : NULL,
+                                   named ? &fl : NULL);
             if (r >= 0) {
+                if (named) {
+                    *len = fl;
+                }
                 break;
             }
             e = errno;
-            if (!block || !would_block(e) || (e = sk_block(t, h->fd, false, h->rcv_ms)) != 0) {
+            if (!block || !would_block(e) || (e = sk_block(t, h, false, h->rcv_ms)) != 0) {
                 moy_os_errno_set(e);
                 break;
             }
         }
     }
+    sock_let(t, k);
     leave(t);
     return (ssize_t)r;
 }
@@ -2429,25 +2761,53 @@ int moy_os_getaddrinfo(const char *node, const char *service, const struct addri
     if (e != 0) {
         moy_os_errno_set(e);
     } else {
-        r = SK(getaddrinfo)(node, service, hints, res);
+        // The answer stays in the kernel until it is the process's own: *res
+        // is the module's memory, which another of its threads may write.
+        struct addrinfo *got = NULL;
+        bool own = true;
+        char node_in[256], service_in[32];
+        size_t nn = node != NULL ? text_len(t, node, sizeof node_in) : 0;
+        size_t sn = service != NULL ? text_len(t, service, sizeof service_in) : 0;
+        if (nn >= sizeof node_in || sn >= sizeof service_in) {
+            r = EAI_NONAME;
+        } else {
+            if (node != NULL) {
+                memcpy(node_in, node, nn);
+                node_in[nn] = 0;
+            }
+            if (service != NULL) {
+                memcpy(service_in, service, sn);
+                service_in[sn] = 0;
+            }
+            r = SK(getaddrinfo)(node != NULL ? node_in : NULL, service != NULL ? service_in : NULL,
+                                hints, &got);
+        }
 #ifdef MOY_OS_UMODE
         if (r == 0 && t->p->u != NULL) {
-            struct addrinfo *u = u_addrinfo(t->p, *res);
-            SK(freeaddrinfo)(*res);
-            *res = u;
+            struct addrinfo *u = u_addrinfo(t->p, got);
+            SK(freeaddrinfo)(got);
+            got = u;
+            own = false;
             r = u != NULL ? 0 : EAI_MEMORY;
         }
 #endif
         if (r == 0) {
             lock();
-            int h = handle_new(t->p, H_ADDR, *res, -1);
+            int h = handle_new(t->p, H_ADDR, got, -1);
             unlock();
             if (h < 0) {
-                SK(freeaddrinfo)(*res);
-                *res = NULL;
+#ifdef MOY_OS_UMODE
+                if (!own) {
+                    u_unmap(t->p, got, false);
+                } else
+#endif
+                SK(freeaddrinfo)(got);
+                got = NULL;
                 r = EAI_MEMORY;
             }
         }
+        (void)own;
+        *res = got;
     }
     leave(t);
     return r;
@@ -2476,6 +2836,7 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
     int lfd[MOY_OS_HANDLES];
     short want[MOY_OS_HANDLES], got[MOY_OS_HANDLES];
     nfds_t at[MOY_OS_HANDLES];
+    int held[MOY_OS_HANDLES];
     for (;;) {
         int ready = 0, m = 0;
         bool evq = false;
@@ -2485,7 +2846,7 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
             if (f->fd < 0) {
                 continue;
             }
-            int k = sock_slot(p, f->fd);
+            int k = f->fd >= MOY_OS_SOCK_FD && m < (int)MOY_OS_HANDLES ? sock_of(t, f->fd) : -1;
             if (f->fd == MOY_EVQ_FD) {
                 if (p->hup) {
                     f->revents = (short)(POLLHUP | (f->events & POLLIN));
@@ -2496,11 +2857,12 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
                 }
                 evq |= f->revents == 0;
             } else if (k >= 0) {
-                if (m < (int)MOY_OS_HANDLES) {
-                    lfd[m] = p->h[k].fd;
-                    want[m] = (short)(f->events & (POLLIN | POLLOUT));
-                    at[m++] = i;
-                }
+                held[m] = k;
+                lfd[m] = p->h[k].fd;
+                want[m] = (short)(f->events & (POLLIN | POLLOUT));
+                at[m++] = i;
+            } else if (f->fd >= MOY_OS_SOCK_FD && sock_slot(p, f->fd) >= 0) {
+                f->revents = 0;         // past the sockets one poll takes: not looked at
             } else if ((f->fd >= 0 && f->fd <= 2) || fd_owned(p, f->fd) >= 0) {
                 f->revents = (short)(f->events & (POLLIN | POLLOUT));
             } else {
@@ -2516,12 +2878,15 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
                 slice = left <= 0 ? 0 : left < slice ? left : slice;
             }
         }
-        if (m > 0 && sk_ready(lfd, want, got, m, slice) > 0) {
-            for (int j = 0; j < m; j++) {
+        bool any = m > 0 && sk_ready(lfd, want, got, m, slice) > 0;
+        for (int j = 0; j < m; j++) {
+            if (any) {
                 fds[at[j]].revents = (short)(got[j] & (fds[at[j]].events | POLLERR | POLLHUP));
                 ready += fds[at[j]].revents != 0;
             }
-        } else if (m == 0 && slice > 0 && evq) {
+            sock_let(t, held[j]);
+        }
+        if (m == 0 && slice > 0 && evq) {
             // The one wait: woken by an event, a stop or the slice's end.
             moy_evq_wait(p->pid, (uint32_t)((slice + 999) / 1000));
         } else if (m == 0 && slice > 0 && doze(t, slice) != 0) {
@@ -2724,11 +3089,12 @@ static uint32_t u_bind(moy_os_proc_t *p) {
     if (stack == NULL) {
         return 0;
     }
+    memset(stack, 0, len);
     moy_u_space_t u = { .proc = p->u, .id = moy_u_new_id(), .slo = (uint32_t)stack,
                         .shi = (uint32_t)stack + len, .ending = &g_never };
     uint32_t a[5] = { p->mod.utable, MOY_ELF_OP_BIND };
     uint32_t hooks = (uint32_t)moy_u_run(&u, (uint32_t)p->mod.entry, p->mod.uret, u.shi, a);
-    heap_caps_free(stack);
+    u_scrub_free(stack);
     if (u.fault != 0) {
         log_line(p, MOY_LOG_ERR, "the native module's entry faulted");
         return 0;
@@ -2823,19 +3189,31 @@ static bool proc_end(moy_os_proc_t *p) {
         }
         if (!inside) {
 #ifdef MOY_OS_BOARD
-            // Every live thread is in the module's code: deleted there.
+            // Every live thread is in the module's code: deleted there. Each
+            // is held first and looked at again, held: one that has gone into
+            // kernel code since is let go to leave at its row's end.
             lock();
             for (uint32_t k = 0; k < MOY_OS_THREADS; k++) {
                 thr_t *t = &p->thr[k];
-                if (t->state == T_LIVE && t->in_row == 0) {
-                    vTaskDeleteWithCaps(t->task);
-#ifdef MOY_OS_UMODE
-                    u_thread_end(t);
-#endif
-                    sem_fini(&t->done);
-                    memset(t, 0, sizeof *t);
-                    g_stats.killed++;
+                if (t->state != T_LIVE || t->in_row != 0) {
+                    continue;
                 }
+                vTaskSuspend(t->task);
+                while (eTaskGetState(t->task) == eRunning) {
+                    taskYIELD();
+                }
+                if (t->state != T_LIVE || t->in_row != 0) {
+                    vTaskResume(t->task);
+                    continue;
+                }
+                self_clear(t);
+                vTaskDeleteWithCaps(t->task);
+#ifdef MOY_OS_UMODE
+                u_thread_end(t);
+#endif
+                sem_fini(&t->done);
+                memset(t, 0, sizeof *t);
+                g_stats.killed++;
             }
             unlock();
             continue;
@@ -2885,7 +3263,9 @@ static bool proc_end(moy_os_proc_t *p) {
     while (maps != NULL) {
         map_t *m = maps;
         maps = m->next;
-#ifdef MOY_OS_BOARD
+#ifdef MOY_OS_UMODE
+        u_scrub_free(m->mem);
+#elif defined(MOY_OS_BOARD)
         heap_caps_free(m->mem);
 #endif
         os_free(m);
@@ -2917,7 +3297,7 @@ static bool proc_end(moy_os_proc_t *p) {
     while (p->retired != NULL) {
         retired_t *r = p->retired;
         p->retired = r->next;
-        heap_caps_free(r->mem);
+        u_scrub_free(r->mem);
         os_free(r);
     }
     os_free(p->u);
@@ -3130,13 +3510,36 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
     return p;
 }
 
+// The record of `pid`, looked up under the lock: a command's record is freed
+// by the task serving it, so only that task, or a caller under the lock,
+// reads one past this.
 static moy_os_proc_t *proc_of(uint32_t pid) {
+    moy_os_proc_t *out = NULL;
+    lock();
     for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
         if (g_proc[i] != NULL && g_proc[i]->pid == pid) {
-            return g_proc[i];
+            out = g_proc[i];
+            break;
         }
     }
-    return NULL;
+    unlock();
+    return out;
+}
+
+// The services' records, taken under the lock. A service's record is freed
+// only on the VM's task (moy_os_reap, moy_os_stop, a failed start), which is
+// the task that watches and reaps them, so they stay readable past it.
+static uint32_t services(moy_os_proc_t **out) {
+    uint32_t n = 0;
+    lock();
+    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
+        moy_os_proc_t *p = g_proc[i];
+        if (p != NULL && p->service) {
+            out[n++] = p;
+        }
+    }
+    unlock();
+    return n;
 }
 
 // THE WATCHDOG. Native code is not aborted where it stands by a timer: a
@@ -3201,9 +3604,11 @@ static bool watched(moy_os_proc_t *p, int64_t now) {
 bool moy_os_watch(void) {
     bool live = false;
     int64_t now = mono_us();
-    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
-        moy_os_proc_t *p = g_proc[i];
-        if (p == NULL || !p->service || p->reaped) {
+    moy_os_proc_t *svc[MOY_OS_PROCS];
+    uint32_t n = services(svc);
+    for (uint32_t i = 0; i < n; i++) {
+        moy_os_proc_t *p = svc[i];
+        if (p->reaped) {
             continue;
         }
         live = true;
@@ -3217,11 +3622,10 @@ bool moy_os_watch(void) {
 uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
     uint32_t got = 0;
     int64_t now = mono_us();
-    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
-        moy_os_proc_t *p = g_proc[i];
-        if (p == NULL || !p->service) {
-            continue;
-        }
+    moy_os_proc_t *svc[MOY_OS_PROCS];
+    uint32_t m = services(svc);
+    for (uint32_t i = 0; i < m; i++) {
+        moy_os_proc_t *p = svc[i];
         if (!watched(p, now)) {
             continue;
         }
@@ -3246,8 +3650,14 @@ uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
 }
 
 int moy_os_stop(uint32_t pid) {
-    moy_os_proc_t *p = proc_of(pid);
-    if (p == NULL || !p->service || p->reaped) {
+    moy_os_proc_t *svc[MOY_OS_PROCS], *p = NULL;
+    uint32_t n = services(svc);
+    for (uint32_t i = 0; i < n; i++) {
+        if (svc[i]->pid == pid) {
+            p = svc[i];
+        }
+    }
+    if (p == NULL || p->reaped) {
         return -1;
     }
     p->hup = 1;
@@ -3313,6 +3723,7 @@ void moy_os_u_fault(moy_u_space_t *s, uint32_t *f, uint32_t cause, uint32_t pc, 
         moy_u_bail(f);
     }
     thr_t *t = s->thr;
+    t->in_row++;
     moy_os_proc_t *p = t->p;
     const moy_u_proc_t *u = p->u;
     uint32_t at = pc >= u->lo && pc < u->hi ? pc - u->vbase : pc;
@@ -3350,7 +3761,9 @@ void moy_os_u_fault(moy_u_space_t *s, uint32_t *f, uint32_t cause, uint32_t pc, 
 }
 
 void moy_os_u_park(moy_u_space_t *s) {
-    thr_end(s->thr);
+    thr_t *t = s->thr;
+    t->in_row++;
+    thr_end(t);
 }
 
 // A row from a U-mode module's ecall: its ordinal in t0, its arguments in
@@ -3359,9 +3772,18 @@ void moy_os_u_park(moy_u_space_t *s) {
 typedef uint64_t u_row_fn(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
                           uint32_t);
 
+// The thread counts as in a row from before the check, so memory the check
+// passed is never freed under the row by another thread (u_free), and the
+// thread is never deleted in kernel code (proc_end). A call no thread owns
+// (BIND) has no rows: its ecall is its fault.
 void moy_os_u_row(moy_u_space_t *s, uint32_t *f) {
     uint32_t row = f[5];
     const uint32_t *a = &f[10];
+    thr_t *t = s->thr;
+    if (t == NULL) {
+        moy_os_u_fault(s, f, MOY_U_BAD_ROW, f[0], row);
+    }
+    t->in_row++;
     if (row >= MOY_OS_ROWS) {
         moy_os_u_fault(s, f, MOY_U_BAD_ROW, f[0], row);
     }
@@ -3373,12 +3795,20 @@ void moy_os_u_row(moy_u_space_t *s, uint32_t *f) {
     f[10] = (uint32_t)r;
     f[11] = (uint32_t)(r >> 32);
     f[0] += 4;
+    t->in_row--;
 }
 #endif
 
 int moy_os_info(uint32_t pid, moy_os_info_t *out) {
-    moy_os_proc_t *p = proc_of(pid);
+    moy_os_proc_t *p = NULL;
+    lock();
+    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
+        if (g_proc[i] != NULL && g_proc[i]->pid == pid) {
+            p = g_proc[i];
+        }
+    }
     if (p == NULL) {
+        unlock();
         return -1;
     }
     memset(out, 0, sizeof *out);
@@ -3397,9 +3827,28 @@ int moy_os_info(uint32_t pid, moy_os_info_t *out) {
     }
     out->mapped = (uint32_t)p->mapped;
     out->cpu_us = p->cpu_us;
+    unlock();
     return 0;
 }
 
 void moy_os_stats(moy_os_stats_t *out) {
     *out = g_stats;
+}
+
+uint32_t moy_os_stack_low(void) {
+    uint32_t low = UINT32_MAX;
+#ifdef MOY_OS_BOARD
+    lock();
+    for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
+        moy_os_proc_t *p = g_proc[i];
+        for (uint32_t k = 0; p != NULL && k < MOY_OS_THREADS; k++) {
+            if (p->thr[k].state == T_LIVE && p->thr[k].task != NULL) {
+                uint32_t w = (uint32_t)uxTaskGetStackHighWaterMark(p->thr[k].task);
+                low = w < low ? w : low;
+            }
+        }
+    }
+    unlock();
+#endif
+    return low;
 }

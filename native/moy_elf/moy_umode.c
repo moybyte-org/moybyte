@@ -10,6 +10,8 @@
 #include "esp_cpu.h"
 #include "esp_cache.h"
 #include "esp_ipc.h"
+#include "esp_random.h"
+#include "esp_system.h"
 #include "esp_private/startup_internal.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -81,6 +83,7 @@ extern void u_exc(void);
 #define U_LINES 48
 
 static int s_ready;
+static uint32_t s_seal;     // the uctx canary's secret, drawn when the vectors go in
 
 static void install(void *arg) {
     if (!layout_ours()) {
@@ -95,6 +98,7 @@ static void install(void *arg) {
 int moy_u_ready(void) {
     if (s_ready == 0) {
         s_ready = 1;
+        s_seal = esp_random() | 1u;
         for (int i = 0; i < U_LINES; i++) {
             if (_mtvt_table[i] != u_mtvt_want[i]) {
                 s_ready = -1;
@@ -279,6 +283,12 @@ int moy_u_ok(const moy_u_space_t *s, const void *ptr, size_t n, uint32_t perm) {
     return end != 0 && a + n <= end;
 }
 
+size_t moy_u_room(const moy_u_space_t *s, const void *ptr) {
+    uint32_t a = (uint32_t)ptr;
+    uint32_t end = region_end(s, a, MOY_U_R);
+    return end != 0 ? end - a : 0;
+}
+
 int moy_u_str(const moy_u_space_t *s, const char *ptr) {
     uint32_t a = (uint32_t)ptr;
     uint32_t end = region_end(s, a, MOY_U_R);
@@ -315,7 +325,8 @@ typedef struct {
     moy_u_space_t *space;
     uint32_t glo, ghi;
     uint32_t ra, sp, s[12];
-    uint32_t pad[2];
+    uint32_t seal;              // moy_u_seal's canary over the way back
+    uint32_t pad;
 } moy_uctx_t;
 _Static_assert(sizeof(moy_uctx_t) == 80, "moy_umode.S's UCTX");
 
@@ -345,6 +356,21 @@ int moy_u_run(moy_u_space_t *s, uint32_t entry, uint32_t ret, uint32_t sp, const
     return r;
 }
 
+// THE SEAL. A U call's uctx carries a canary over what its way back rests on
+// (its address, its space, the caller's ra and sp) and the task that made
+// it, checked once at the call's end (u_leave): a uctx that is not the
+// calling task's, or that something overwrote, ends the board with that
+// name instead of a jump through whatever it holds.
+static IRAM_ATTR uint32_t seal_of(const moy_uctx_t *u) {
+    return s_seal ^ (uint32_t)u ^ (uint32_t)u->space ^ u->ra ^ (u->sp * 0x9e3779b1u)
+           ^ (uint32_t)xTaskGetCurrentTaskHandle();
+}
+
+IRAM_ATTR void moy_u_seal(uint32_t *f) {
+    moy_uctx_t *u = uctx_of(f);
+    u->seal = seal_of(u);
+}
+
 // The kernel stack's guard back on: the thread runs kernel code.
 static IRAM_ATTR void guard_on(const moy_uctx_t *u) {
     uint32_t core = (uint32_t)esp_cpu_get_core_id();
@@ -370,8 +396,13 @@ IRAM_ATTR void moy_u_return(uint32_t *f) {
     assist_debug_ll_sp_spill_monitor_disable((uint32_t)core);
 }
 
+// The call's end (u_leave): its seal checked, the guard back on.
 IRAM_ATTR void moy_u_kernel(uint32_t *f) {
-    guard_on(uctx_of(f));
+    moy_uctx_t *u = uctx_of(f);
+    guard_on(u);
+    if (u->seal != seal_of(u)) {
+        esp_system_abort("moy_umode: a U call's saved kernel context is not its thread's");
+    }
 }
 
 void moy_u_ecall(uint32_t *f) {

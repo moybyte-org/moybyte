@@ -348,7 +348,8 @@ moy_u_bail:
 /* int moy_u_enter(const moy_u_go_t *go): the module's code at go->entry in
  * U-mode on go->sp, returning when it returns to go->ret. sp drops past the
  * uctx and the frame before either is written: an interrupt taken here saves
- * IDF's context below sp, over anything kept there. */
+ * IDF's context below sp, over anything kept there. The uctx is sealed
+ * (moy_u_seal) before the first way in and checked at u_leave. */
     .global moy_u_enter
     .type moy_u_enter, @function
 moy_u_enter:
@@ -398,6 +399,8 @@ moy_u_enter:
     sw    t1, 52(sp)
     lw    t1, GO_A+16(a0)
     sw    t1, 56(sp)
+    mv    a0, sp
+    call  moy_u_seal
     csrci mstatus, MSTATUS_MIE
     mv    a0, sp
     call  moy_u_return
