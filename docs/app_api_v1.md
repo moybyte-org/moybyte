@@ -125,6 +125,24 @@ this guide is each step in full.
 Badges (`award`, `progress`, §9) are a call in every tier and may be called
 freely, every frame if need be.
 
+**Which tier for which work.** Every tier reaches the same calls (§10), so
+choose by cost and reach, not by what is available:
+
+| the work | the tier | why |
+|---|---|---|
+| an app with a window, most apps | Python or Lua | the fastest to write and change, and the console's own apps are Python; Lua is sealed to its permissions, Python is trusted (§6) |
+| light background work: a reminder, a sync, an alarm, a reply to messages | a Lua service | a small state of its own on its own task, sealed like a Lua app |
+| a game, or one binary for every board and the browser | a wasm app | compiled once for every chip, sealed by its imports |
+| a command, or heavy work that is portable: a codec, a protocol, a compressor | a WASI program | the same portability, with POSIX-style I/O; each running instance holds its own linear memory, in 64 KiB pages, which a P4 affords and an S3 feels, so prefer a Lua service for light work there |
+| work near the hardware, or one chip's full speed | a C program (ELF) | built per chip, and unsealed on the S3s (`full_access`, §6) |
+
+**What a service survives.** A service outlives its app's window on every
+tier. On the S3s a compiled game stops the VM, and every app's service is
+stopped before that and started again after it, whatever its tier, its
+timers fresh (`docs/os_2026-11/processes.md` §5). Work that must go on
+through a game, like music, belongs to a service of the console's own, which
+an app asks (`media`, §6). The P4s have no VM stop.
+
 ## 2. The manifest
 
 moy-spec's fields sit at the top level (SPEC.md §3.1 is their authority):
