@@ -623,6 +623,7 @@ static int kind_entries(const char *dir, int kind, entries_t *out) {
     const char *ext = KINDS[kind].ext;
     size_t en = strlen(ext), nwhole = kind == DOCS ? NVAULT : 0u;
     for (size_t i = 0; i < raw.n && rc == 0; i++) {
+        moy_store_yield();
         const char *n = raw.e[i].name;
         size_t nl = strlen(n);
         char *p = cat(dir, "/", n, NULL);
@@ -725,6 +726,7 @@ static int project_list(const char *root, const char *kind, entries_t *out) {
     sort_names(&raw);
     memset(&flat, 0, sizeof flat);
     for (size_t i = 0; i < raw.n && rc == 0; i++) {
+        moy_store_yield();
         const char *n = raw.e[i].name;
         size_t nl = strlen(n);
         if (ends(n, nl, ".bak") || ends(n, nl, ".tmp")) {
@@ -843,6 +845,7 @@ int moy_uf_count(const char *root, const char *kind, uint32_t *count) {
         const char *ext = KINDS[k].ext;
         size_t en = strlen(ext), nwhole = k == DOCS ? NVAULT : 0u;
         for (size_t i = 0; i < raw.n && rc == 0; i++) {
+            moy_store_yield();
             const char *n = raw.e[i].name;
             size_t nl = strlen(n);
             if (KINDS[k].folder) {
@@ -1024,6 +1027,7 @@ static int unique_name(const char *root, int kind, const char *name, path_fn pat
     memcpy(stem, name, n - e);
     stem[n - e] = 0;
     for (unsigned long i = 2;; i++) {
+        moy_store_yield();
         char num[16];
         snprintf(num, sizeof num, "_%lu", i);
         if (n + strlen(num) > MOY_UF_NAME_MAX) {
@@ -1173,6 +1177,7 @@ static int copy_tree(const char *src, const char *dst) {
         return missing;
     }
     for (size_t i = 0; i < raw.n && rc == 0; i++) {
+        moy_store_yield();
         char *s = cat(src, "/", raw.e[i].name, NULL);
         char *d = cat(dst, "/", raw.e[i].name, NULL);
         if ((rc = path_pair(&s, &d)) != 0) {

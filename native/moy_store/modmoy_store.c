@@ -1542,10 +1542,13 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lock_stats_obj, 0, 1, mod_lock_st
 // does, each op inside the store's gate (tests/test_store_tasks.py).
 // task(dir, rounds) starts it: each round publishes <dir>/t<i>.txt, reads it
 // back, renames it <dir>/r<i>.txt and reads that, and lists the folder.
-// task_join() -> (rounds whole, the first failure's round, its errno, the
+// task(dir, -ms) walks instead: one op inside the gate that stats the folder
+// entry after entry for `ms` milliseconds, yielding between entries
+// (moy_store_yield), as a listing of a big folder does. task_join() -> (rounds whole, the first failure's round, its errno, the
 // gate's -1s): waits for it.
 #include <pthread.h>
 #include <stdio.h>
+#include <time.h>
 
 typedef struct {
     pthread_t t;
@@ -1610,8 +1613,37 @@ static int task_round(task_t *k, int i) {
     return rc;
 }
 
+static int64_t task_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void task_walk(task_t *k, int ms) {
+    int g = moy_vol_gate_enter(k->dir);
+    if (g < 0) {
+        k->refused++;
+        return;
+    }
+    int64_t end = task_now_ms() + ms;
+    while (task_now_ms() < end) {
+        moy_store_yield();
+        moy_vol_stat_t st;
+        if (moy_fs_stat(k->dir, &st) == 0) {
+            k->ok++;
+        }
+        struct timespec nap = { 0, 1000000 };
+        nanosleep(&nap, NULL);
+    }
+    moy_vol_gate_leave(g);
+}
+
 static void *task_run(void *arg) {
     task_t *k = arg;
+    if (k->rounds < 0) {
+        task_walk(k, -k->rounds);
+        return NULL;
+    }
     for (int i = 0; i < k->rounds; i++) {
         int rc = task_round(k, i);
         if (rc == 0) {

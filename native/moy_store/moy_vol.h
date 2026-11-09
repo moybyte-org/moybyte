@@ -138,6 +138,16 @@ void moy_vol_unwind(void);                      // close every file still open
 //   * on the T-Deck the panel's kick takes it, so no frame starts while a
 //     task holds the card's bus (modmoy_lcd.c).
 //
+// An op that walks a folder entry by entry (a listing that stats each one, a
+// free name tried after another) calls moy_store_yield between entries: where
+// the VM's task waits for the lock and the caller is another task, the
+// caller lets its holds and its bus gate go, the VM's op runs, and the caller
+// takes them back at the same depth, the bus gate draining whatever frame the
+// VM began. A caller holding a working folder (moy_vol_enter) does not let
+// go. So the VM, and the T-Deck's next frame, wait for one entry of a
+// program's walk, never for the walk. The walk's entries are read again
+// after it, so an entry the VM changed meanwhile reads as it now is.
+//
 // moy_store_unlock_to drops the calling task's holds down to `depth`, what a
 // raised call's unwind does with the depth it entered at. moy_store_lock_stats
 // is the meter: how many outermost holds, the longest, and the longest any
@@ -147,6 +157,7 @@ void moy_store_lock(void);
 void moy_store_unlock(void);
 int moy_store_lock_depth(void);         // the calling task's holds
 void moy_store_unlock_to(int depth);
+void moy_store_yield(void);
 uintptr_t moy_store_me(void);           // the calling task, never 0
 int moy_store_on_vm(void);
 typedef struct {

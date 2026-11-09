@@ -117,3 +117,45 @@ def test_a_volume_the_table_does_not_hold_is_refused_to_the_task(tmp_path):
     exe = require_unix_mp("moy_store", why="the store from a task that is not the VM's")
     out = _run(tmp_path, exe, "lfs2")
     assert out[0] == "task 0 0 %d %d" % (19, ROUNDS), out
+
+
+WALK = """
+import os, time, vfs, moy_store
+vfs.mount(moy_store.card_ram(16384), "/v")
+moy_store.mkdir("/v/w")
+moy_store.lock_stats(True)
+moy_store.task("/v/w", -@MS@)
+time.sleep_ms(50)
+worst = 0
+for i in range(@OPS@):
+    t = time.ticks_us()
+    moy_store.publish("/v/w/vm%d.txt" % i, "vm %d" % i)
+    worst = max(worst, time.ticks_diff(time.ticks_us(), t))
+    time.sleep_ms(20)
+ok, at, rc, refused = moy_store.task_join()
+holds, hold_us, wait_us, vm_wait_us, waits = moy_store.lock_stats()
+print("walk", ok > 0, refused)
+print("vm", worst, vm_wait_us)
+"""
+
+
+@pytest.mark.parametrize("board_model", [False, True])
+def test_a_long_walk_lets_the_vm_in_between_its_entries(tmp_path, board_model):
+    """A program's op that walks a folder entry by entry holds the gate the
+    whole walk and yields between entries (moy_store_yield) while the VM waits:
+    the VM's ops on the same volume each wait for one entry, never for the
+    walk."""
+    exe = (find_unix_mp("moy_store", board_model=True) if board_model
+           else require_unix_mp("moy_store", why="the store from a task that is not the VM's"))
+    if exe is None:
+        pytest.skip("no 32-bit desktop MicroPython (gcc-multilib)")
+    ms, ops = 1000, 20
+    script = tmp_path / "walk.py"
+    script.write_text(WALK.replace("@MS@", str(ms)).replace("@OPS@", str(ops)))
+    done = subprocess.run([str(exe), "-X", "heapsize=32M", str(script)], capture_output=True,
+                          text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    out = done.stdout.splitlines()
+    assert out[0] == "walk True 0", out
+    worst, vm_wait = (int(x) for x in out[1].split()[1:])
+    assert worst < ms * 1000 // 4 and vm_wait < ms * 1000 // 4, out

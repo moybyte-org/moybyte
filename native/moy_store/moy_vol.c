@@ -702,6 +702,39 @@ void moy_vol_set_gate(moy_vol_gate_fn fn) {
 // What moy_vol_gate_enter took: the lock, and the bus gate.
 enum { GATE_BUS = 1, GATE_LOCK = 2 };
 
+// The lock holder's bus gates (under the lock).
+static int s_bus;
+
+void moy_store_yield(void) {
+    if (__atomic_load_n(&s_vm_wants, __ATOMIC_ACQUIRE) == 0u
+        || (moy_store_on_vm != NULL && moy_store_on_vm())) {
+        return;
+    }
+    int depth = moy_store_lock_depth();
+    if (depth <= 0) {
+        return;
+    }
+    uintptr_t me = moy_store_me();
+    for (moy_vol_here_t *h = heres; h != NULL; h = h->next) {
+        if (h->who == me) {
+            return;                     // its working folder holds the volume
+        }
+    }
+    int bus = s_bus;
+    for (int i = 0; i < bus && gate != NULL; i++) {
+        gate(0);
+    }
+    s_bus = 0;
+    moy_store_unlock_to(0);
+    for (int i = 0; i < depth; i++) {
+        moy_store_lock();               // the VM's op first (its want)
+    }
+    for (int i = 0; i < bus && gate != NULL; i++) {
+        gate(1);
+    }
+    s_bus = bus;
+}
+
 int moy_vol_gate_enter(const char *path) {
     moy_vol_t v;
     const char *r;
@@ -714,6 +747,7 @@ int moy_vol_gate_enter(const char *path) {
         return GATE_LOCK;
     }
     gate(1);
+    s_bus++;
     return GATE_LOCK | GATE_BUS;
 }
 
@@ -723,6 +757,7 @@ void moy_vol_gate_leave(int entered) {
     }
     if ((entered & GATE_BUS) && gate != NULL) {
         gate(0);
+        s_bus--;
     }
     if (entered & GATE_LOCK) {
         moy_store_unlock();
