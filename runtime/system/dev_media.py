@@ -2,7 +2,8 @@
 section 3) over its C (native/moy_media/moy_media.h, the module moy_media).
 One stream at a time, one process's.
 
-  play(src)          play `src`, replacing what this process played: a file
+  play(src, allow=None)
+                     play `src`, replacing what this process played: a file
                      (an MP3, or an .m3u/.pls playlist) under `media`, an
                      http:// URL (a stream, its ICY now-playing text read, or
                      a playlist) under `media:url` and `http`. OSError: EPERM
@@ -11,7 +12,11 @@ One stream at a time, one process's.
                      server's certificate as `http` does), EBUSY while
                      another process's stream plays, ENOSPC where THE
                      SHARES give no MEDIA row or it is full, ENOENT for a
-                     file that is not there
+                     file that is not there. With `allow` (a function of
+                     a file's path, as `where` makes it), a file it refuses,
+                     the source or an entry its list names, is EPERM before
+                     anything plays, whether the file is there or not
+  where(path) -> str the path the C plays `path` as (a URL as it is)
   tls() -> bool      whether an https:// URL plays here
   held(folder) -> ((name, size), ...)  the songs in `folder` that this
                      console plays but does not keep (a board-served page:
@@ -168,6 +173,11 @@ def tls():
 
 def _is_url(src):
     return src[:7].lower() == "http://" or src[:8].lower() == "https://"
+
+
+def where(path):
+    """The path the C plays `path` as (a URL as it is)."""
+    return _abs(str(path))
 
 
 def _abs(path):
@@ -391,10 +401,12 @@ def _owned():
     return _s["pid"]
 
 
-def play(src):
+def play(src, allow=None):
     src = str(src)
     url = _is_url(src)
     p = _need(("media:url", "http") if url else ("media",))
+    if allow is not None and not url and not allow(_abs(src)):
+        raise OSError(EPERM, "not one of its folders")
     if url and src[:8].lower() == "https://" and not tls():
         raise OSError(EPROTONOSUPPORT, "https is refused")
     if _s["stopping"]:
@@ -419,6 +431,12 @@ def play(src):
     if n < 0:
         stop()
         raise OSError(-n, "an empty playlist" if n == -EINVAL else src)
+    if allow is not None:
+        for i in range(n):
+            e = _N.entry(i)[0]
+            if not _is_url(e) and not allow(e):
+                stop()
+                raise OSError(EPERM, "its list names a file outside its folders")
     if any(_is_url(_N.entry(i)[0]) for i in range(n)):
         _hold()
     if _STEP:

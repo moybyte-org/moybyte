@@ -102,9 +102,11 @@ answers:
             section 3), this process's: write: play the source the bytes
             name (UTF-8): a file, an .m3u or .pls playlist (`media`) or an
             http(s):// URL (`media:url` and `http`), replacing what this
-            process played, BUSY while another process's plays, ABSENT for
-            a file not there, BAD for https where nothing verifies it,
-            FULL where THE SHARES' MEDIA row is;
+            process played, BUSY while another process's plays, DENIED
+            for a file outside its cart's folder and the folder its
+            `files` permission names (or a playlist naming one), there or
+            not, ABSENT for a file not there, BAD for https where nothing
+            verifies it, FULL where THE SHARES' MEDIA row is;
             set volume=0..100, pause=1|0, seek=<seconds>, skip=next|prev,
             stop=1, applied in that order (ABSENT with no stream, a seek a
             stream or an unknown length cannot take, a skip past the list's
@@ -117,7 +119,8 @@ answers:
             UTF-8 lines -- title, artist, station, src -- whole (FULL where
             it does not fit), 0 bytes with no stream; xfer: a file's probe,
             its path in, its length in seconds (u32) then its title and
-            artist on two lines out, ABSENT where it reads none. Its close
+            artist on two lines out, DENIED where it may not play the file,
+            ABSENT where it reads none. Its close
             and its process's end stop the stream
   pins      the `pins` permission's digital pins (Python's pin_write and
             pin_read), each a pin of the board's gpio row taken for the
@@ -1042,13 +1045,72 @@ def _text(data):
     return bytes(data).decode("utf-8")
 
 
+def _norm(path):
+    """`path` with its "." and ".." folded, or None where a ".." climbs past
+    its root."""
+    out = []
+    for part in path.replace("\\", "/").split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not out:
+                return None
+            out.pop()
+        else:
+            out.append(part)
+    return "/" + "/".join(out)
+
+
+def _media_roots(pid):
+    """The folders process `pid`'s media handle plays files from, as the
+    media service's paths (`dev_media.where`): its cart's own folder and the
+    one its `files` permission names, the folder the files role makes its
+    grant for (`moy_app.policy`, by FILE_KIND_DIRS under the store's files
+    root). None where the process is not gated (a bare host, the shell)."""
+    try:
+        import devices
+        import moy_app
+        from moy_store_base import FILE_KIND_DIRS, files_root
+    except ImportError:  # host: the runtime package
+        from runtime import devices, moy_app
+        from runtime.moy_store_base import FILE_KIND_DIRS, files_root
+    have = devices.grants(pid) if devices.grants is not None else None
+    if have is None:
+        return None
+    where = _face("media").where
+    roots = []
+    cart = devices.cart_of(pid) if devices.cart_of is not None else None
+    if cart and cart.get("path"):
+        roots.append(_norm(where(cart["path"])))
+    kind = moy_app.policy(tuple(have))[1]
+    root = getattr(devices.console, "carts_root", None)
+    if kind is not None and root:
+        roots.append(_norm(where(files_root(root) + "/" + FILE_KIND_DIRS[kind])))
+    return [r for r in roots if r is not None]
+
+
+def _within(roots, path):
+    p = _norm(path)
+    return p is not None and any(p.startswith(r.rstrip("/") + "/") for r in roots)
+
+
 class _Media(_Handle):
     def __init__(self, cfg):
         _only(cfg, ())
         self.f = _face("media")
 
+    def _allow(self):
+        """The test a file the calling process names must pass: inside its
+        folders (`_media_roots`), else None where it is not gated."""
+        try:
+            import devices
+        except ImportError:  # host: the runtime package
+            from runtime import devices
+        roots = _media_roots(devices.pid())
+        return None if roots is None else (lambda path: _within(roots, path))
+
     def write(self, data):
-        self.f.play(_text(data))
+        self.f.play(_text(data), self._allow())
         return len(data)
 
     def _none(self):
@@ -1106,7 +1168,11 @@ class _Media(_Handle):
         return FULL if len(out) > cap else out
 
     def xfer(self, data, cap):
-        got = self.f.probe(_text(data))
+        path = _text(data)
+        allow = self._allow()
+        if allow is not None and not allow(self.f.where(path)):
+            raise OSError(EPERM, "not one of its folders")
+        got = self.f.probe(path)
         if got is None:
             self._none()
         out = _u32(got[0]) + ((got[1] or "") + "\n" + (got[2] or "")).encode("utf-8")

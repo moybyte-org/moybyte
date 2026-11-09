@@ -774,10 +774,13 @@ def test_a_media_handle_plays_a_file_and_reads_what_plays(media):
     assert media._s["stopping"] or not media._s["pid"]
 
 
-def test_a_media_handle_needs_either_permission_and_its_end_stops_the_stream(media):
+def test_a_media_handle_needs_either_permission_and_its_end_stops_the_stream(media,
+                                                                             monkeypatch):
     from runtime import moy_media
     a, b = L.spawn("t.a"), L.spawn("t.b")
     devices.grants = lambda p: {a: {"media"}, b: {"media:url"}}.get(p, set())
+    monkeypatch.setattr(devices, "cart_of",       # the tone is in a's own folder
+                        lambda p: {"path": str(TONE.parent)} if p in (a, b) else None)
     assert _open(L.spawn("t.none"), "media") == H.DENIED
     hb = _open(b, "media")
     assert _as(b, lambda: H.write(b, hb, str(TONE).encode())) == H.DENIED      # a file is media's
@@ -828,3 +831,46 @@ def test_a_pins_handle_needs_the_permission_and_pins_and_keeps_nothing_refused()
     assert _open(pid, "pins", "gpio6=1 gpio7=9") == H.BAD and N.held() == 0
     leases.stand_in(None, None)
     assert _open(pid, "pins") == H.ABSENT
+
+
+def test_a_media_handle_plays_only_from_its_own_folders(media, tmp_path, monkeypatch):
+    """A gated process plays a file only from its cart's folder and the
+    folder its `files` permission names: anything else is DENIED, there
+    or not (so a refusal tells it nothing of what is there), a probe as
+    much as a play, and a playlist in its folder naming a file outside it
+    as much as the file. A URL is unchanged."""
+    import shutil
+    store = tmp_path / "store"
+    carts = store / "carts"
+    own = carts / "local.player.moy"
+    own.mkdir(parents=True)
+    music = store / "files" / "Music"
+    music.mkdir(parents=True)
+    docs = store / "files" / "Documents"
+    docs.mkdir(parents=True)
+    shutil.copy(TONE, own / "tone.mp3")
+    shutil.copy(TONE, music / "song.mp3")
+    shutil.copy(TONE, docs / "secret.mp3")
+    (own / "list.m3u").write_text(str(docs / "secret.mp3") + "\n")
+    pid = L.spawn("t.player")
+    cart = {"path": str(own), "id": "local.player"}
+    monkeypatch.setattr(devices, "grants",
+                        lambda p: ("media", "files:music") if p == pid else None)
+    monkeypatch.setattr(devices, "cart_of", lambda p: cart if p == pid else None)
+    monkeypatch.setattr(devices, "console", type("C", (), {"carts_root": str(carts)})())
+    h = _open(pid, "media")
+    for path in (docs / "secret.mp3", docs / "missing.mp3", TONE,
+                 own / ".." / ".." / "files" / "Documents" / "secret.mp3"):
+        assert _as(pid, lambda: H.write(pid, h, str(path).encode())) == H.DENIED, path
+        assert _as(pid, lambda: H.xfer(pid, h, str(path).encode(), 64)) == H.DENIED, path
+    assert _as(pid, lambda: H.write(pid, h, str(own / "list.m3u").encode())) == H.DENIED
+    assert not media._s["pid"] or media._s["stopping"]
+    assert _as(pid, lambda: H.write(pid, h, str(own / "missing.mp3").encode())) == H.ABSENT
+    assert _as(pid, lambda: H.xfer(pid, h, str(music / "song.mp3").encode(), 64)) \
+        == struct.pack("<I", 2) + b"Tone\n"
+    src = str(own / "tone.mp3")
+    assert _as(pid, lambda: H.write(pid, h, src.encode())) == len(src)
+    assert _get(pid, h, "mine") == 1
+    src = str(music / "song.mp3")
+    assert _as(pid, lambda: H.write(pid, h, src.encode())) == len(src)
+    assert _as(pid, lambda: H.close(pid, h)) == 0

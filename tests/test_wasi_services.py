@@ -476,13 +476,16 @@ def test_a_wasi_service_plays_a_file_by_a_media_handle_until_it_ends(svc, perms)
     """moybyte.os `dev_*` on a `media` handle: a file probed (its length and
     its tag's title), played as the service's own stream, its source read
     back with the now-playing text; the stream lasts until the service
-    ends, whose sweep stops it. Each refused ACCES without `media`."""
+    ends, whose sweep stops it. Each refused ACCES without `media`. The
+    file is in the service's own folder, the one a media handle plays
+    from without a `files` permission."""
     from runtime import audio_binding, dev_media
     from runtime import moy_media as N
     if audio_binding.get() is None or not dev_media.present():
         pytest.skip("no media service on this host")
     ws, s, cart, peer = svc
-    tone = os.path.join(ROOT, "tests", "fixtures", "media", "tone_1k.mp3")
+    tone = os.path.join(cart["path"], "tone_1k.mp3")
+    shutil.copy(os.path.join(ROOT, "tests", "fixtures", "media", "tone_1k.mp3"), tone)
     since = L.next()
     pid = S.start_cart(ws, _granted(ws, cart, perms), s)
     assert pid is not None

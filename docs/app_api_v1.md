@@ -876,7 +876,11 @@ first.
 A `media` handle is the media service's one stream, the process's own:
 `dev_write` plays the source its bytes name (a file or a playlist under
 `media`, an `http://` or `https://` URL under `media:url` and `http`; BUSY
-while another process's stream plays), `dev_set` controls it
+while another process's stream plays). A file plays only from the cart's
+own folder and the folder its `files` permission names (owner,
+2026-11-09): any other, or a playlist naming one, is DENIED whether it is
+there or not, so a refusal tells nothing of what a folder holds, and
+`dev_xfer`'s probe refuses the same files. `dev_set` controls it
 (`"volume=60"`, `"pause=1"`, `"pause=0"`, `"seek=30"`, `"skip=next"`,
 `"skip=prev"`, `"stop=1"`), `dev_get` reads its numbers (`"state"`,
 `"paused"`, `"at"`, `"len"`, `"volume"`, `"stamp"`, which moves when they

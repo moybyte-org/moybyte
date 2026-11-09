@@ -183,7 +183,9 @@ uplinks and downlinks, a `mic` handle PCM16 samples, a `ble` handle the
 face's verbs and its events as records, a `usb` handle the USB host's
 devices, their reports and serial lines, as records, a `midi` handle one
 port's messages, a `camera` handle its latest frame, a `media`
-handle the media service's stream (§3, §4).
+handle the media service's stream (§3, §4), playing a file only from its
+cart's folder and the one its `files` permission names: any other is DENIED,
+there or not (`runtime/system/dev_handles.py`).
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's

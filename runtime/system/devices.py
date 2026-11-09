@@ -40,6 +40,9 @@ PERM = {"http": "http", "mic": "mic", "lora": "lora", "ble": "ble", "usb": "usb"
 # fn(pid) -> the granted permissions, None for an ungated process: the
 # console's Procs.granted. None: nothing is gated (a bare host).
 grants = None
+# fn(pid) -> the cart process `pid` runs (the console's Procs.who), None
+# where it runs none; None: no console to ask.
+cart_of = None
 # The console (its wifi_hold/wifi_release and its wifi and cart_net), which
 # `http` takes the radio lease through; None: no radio to hold.
 console = None

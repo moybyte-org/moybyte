@@ -1058,6 +1058,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         _hwleases.LEASES.grants = self.procs.granted
         _hwleases.LEASES.settle = self.wifi_settle
         _devices.grants = self.procs.granted
+        _devices.cart_of = lambda pid: self.procs.who(pid)[1]
         _moybyte.WAKES.woke = self.alarm_woke
         _devices.console = self
         _devfs.RUNS = self.procs.runs
