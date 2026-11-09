@@ -57,16 +57,17 @@ ROOT = os.path.dirname(HERE)
 # may predate --site, so under CI this tree builds its own site bundle
 # (site_player) rather than publish the boards'.
 SITE_PLAYER = os.path.join(ROOT, "firmware", "web_runner", "dist_site")
+BOARD_PLAYER = os.path.join(ROOT, "firmware", "web_runner", "dist")
 PLAYER_SRC = SITE_PLAYER
 if not os.path.exists(os.path.join(PLAYER_SRC, "index.html")):
-    PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist")
+    PLAYER_SRC = BOARD_PLAYER
 
 
 def site_player():
     """Under CI, the site bundle this tree's build.sh makes when no step
     made it: the player is then dist_site, never the boards' dist."""
     global PLAYER_SRC
-    if PLAYER_SRC == SITE_PLAYER or not os.environ.get("CI"):
+    if PLAYER_SRC != BOARD_PLAYER or not os.environ.get("CI"):
         return
     script = os.path.join(ROOT, "firmware", "web_runner", "build.sh")
     print("== no site bundle: %s --site" % script, flush=True)
