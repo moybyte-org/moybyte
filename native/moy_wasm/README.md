@@ -322,8 +322,8 @@ that returned, answering its exit status (a trap's is 134, its line in
 the OS log); `service_info()` reads its linear memory and its wakes' time.
 A killed service's instance is terminated, which its `_start` reads at its
 next import call ("Stopping a run" below), so a wake that calls none runs
-on until it does. The S3s carry none of the four, as they run no Lua
-service, and the glue refuses one. The host runs the same C, each service's
+on until it does. The task is on core 0 on the P4s and core 1 on the S3s
+(`MOY_WASM_SVC_CORE`, as a Lua service's). The host runs the same C, each service's
 `_start` on a pthread of its own, apart from the command's one job
 (`runtime/host/moyhost_wasm.c`'s `hw_wasi_service`).
 

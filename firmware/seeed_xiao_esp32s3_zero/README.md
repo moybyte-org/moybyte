@@ -663,7 +663,7 @@ monitor prints `ZERO SETUP saved: name=… ssid=… -- rebooting` and then, afte
 the reset, `ZERO wifi: <ssid> <ip>` and `ZERO serving http://<ip>/`. Then check what landed:
 `mpremote connect /dev/ttyACM0 fs cat :/moy/wifi.json` — the network just typed
 must be **first** and any older one still there — and `… fs cat :/moy/zero.json`
-→ `{"name": …}`, and `… fs cat :/moy/system/password` → `$moy1$…`. *Fail:* the board reboots straight back into the
+→ `{"name": …}`, and `… fs cat :/moy/system/password` → `$moy2$…`. *Fail:* the board reboots straight back into the
 setup AP → it saved but cannot join (a wrong password: the whole reason for the
 reveal in step 2); the page hangs on submit with nothing on the monitor → the
 POST never arrived; `ZERO SETUP save failed:` → the filesystem, and the board
