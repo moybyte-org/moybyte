@@ -149,21 +149,21 @@ int32_t moy_os_moy_every(int32_t ms) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, ms, MOY_OS_ARG_INT },
     };
-    return moy_os_call(168u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.every
+    return moy_os_call(168u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.every
 }
 
 int32_t moy_os_moy_after(int32_t ms) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, ms, MOY_OS_ARG_INT },
     };
-    return moy_os_call(169u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.after
+    return moy_os_call(169u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.after
 }
 
 int32_t moy_os_moy_cancel(int32_t id) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, id, MOY_OS_ARG_INT },
     };
-    return moy_os_call(170u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.cancel
+    return moy_os_call(170u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.cancel
 }
 
 int32_t moy_os_moy_at(int32_t t) {

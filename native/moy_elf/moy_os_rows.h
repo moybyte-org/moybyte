@@ -72,9 +72,11 @@ typedef struct {
     int32_t v;
     uint8_t kind;
 } moy_os_arg_t;
-// How it runs: on the task that serves the process's session, or where it
-// is called, under the app ABI's seqlock (native/moy_app/moy_app_wasm.h).
-enum { MOY_OS_HOP = 0, MOY_OS_SEQ = 1 };
+// How it runs: on the task that serves the process's session; where it
+// is called, under the app ABI's seqlock (native/moy_app/moy_app_wasm.h);
+// or where it is called, its row's own lock its guard, hopped where it
+// answers that it needs the VM.
+enum { MOY_OS_HOP = 0, MOY_OS_SEQ = 1, MOY_OS_HERE = 2 };
 // Role table row `row` for the calling process's run, its fields `a` and
 // its answer written into `out` (cap bytes): the answer, or -1 and errno.
 int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *out,

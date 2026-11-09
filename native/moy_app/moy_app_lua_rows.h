@@ -50,7 +50,6 @@
     X("notify") \
     X("open_with") \
     X("share") \
-    X("send") \
     X("award") \
     X("progress") \
     X("pick") \

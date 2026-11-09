@@ -35,6 +35,14 @@ The role table is data, and every verb has one of four servers:
   Lua state holds them in its `moybyte` table, calling the body directly, a
   service with no grant too (`moy_app_lua_open_crypto`); and the module's
   functions of the same names are Python's (`runtime/system/moybyte.py`).
+  Its rows over the kernel's own locked state -- a message's `send` and
+  `recv`, `log`, and the timers `every`, `after` and `cancel` -- are the
+  process's whose grant it is (the grant's owner, its pid), run where they
+  are called (`how` "here"): on a compiled program's own task, never a hop,
+  so they answer with no VM. A "here" row that answers `MOY_APP_NEEDS_VM`
+  is hopped as a "hop" row is. Lua's `send`, `log` and wakes are its own
+  forms of them (`lua_own`: a Lua service's C, a Lua app's prelude over the
+  `moybyte` module).
 - **`shell`**: the state is the Python console's (the routes' surfaces, the
   look and its caches, the wallpaper cart's namespace, the shelf's live list,
   Get Carts' transport). There is no resident C catalogue,
@@ -51,17 +59,15 @@ The role table is data, and every verb has one of four servers:
   the row as a shell row; the link sends the process its events as messages and
   reads its answers off its functions.
 - **`call`**: a console call (the `moybyte` role, which every grant holds):
-  the `moybyte` module's function (`notify`, `open_with`, `share`, `send`,
+  the `moybyte` module's function (`notify`, `open_with`, `share`,
   `award`, `progress`, `pick`) run as the process whose grant it is
   (`runtime/shell/shell_servers.py`'s `ConsoleCalls`), so the permission it
   names is that process's. A native command reaches them through the door; a
   Lua service and a WASI program through the VM's queue; a compiled app
-  through its imports, which also reach the kernel's and Python's rows of the
-  `moybyte` role (`on`, `log`, and the wakes `at`, `every`, `after` and
-  `cancel`) and its own reads (`recv`,
-  `item_read`, `item_write`) through the door. The door hands the Python
-  half an answer buffer's capacity as a number field, so a read that does not
-  fit keeps what it read (`recv`). An import of the `moybyte` role is admitted
+  through its imports, which also reach Python's rows of the `moybyte` role
+  (`on`, `at`) and its own reads (`item_read`, `item_write`) through the
+  door. The door hands the Python half an answer buffer's capacity as a
+  number field, so a read that does not fit keeps what it read. An import of the `moybyte` role is admitted
   for every grant (`MOY_ROLE_FLOOR`); the permission a call names is checked
   at the call.
 - **Python-only**: a row no other tier imports, whose only consumer is Python

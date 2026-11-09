@@ -394,6 +394,55 @@ def test_a_wasi_service_runs_on_through_a_vm_stop(tmp_path, wasi_built, fresh, m
     assert "stopped after 1 pings, ticking" in texts
 
 
+def test_an_elf_and_a_wasi_service_message_each_other_and_log_through_a_vm_stop(
+        tmp_path, elf_built, wasi_built, fresh, monkeypatch):
+    """`send` and `log` are the kernel's on each program's own task
+    (native/os_calls.json, how "here"): with the VM down, a WASI service's
+    ping reaches an ELF service of another app that receives it, the ELF
+    service's pong reaches a process of the WASI service's app, and each
+    service's log lines are written meanwhile."""
+    from runtime.host_app import build_workstation
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    for built, name, hears in ((elf_built, "elf_svc.moy", "ping"),
+                               (wasi_built, "wasi_svc.moy", "pong")):
+        shutil.copytree(built, str(carts / name))
+        man_path = carts / name / "manifest.json"
+        man = json.loads(man_path.read_text())
+        man["moybyte"]["receives"] = [hears]
+        man_path.write_text(json.dumps(man))
+    ws = build_workstation(str(carts))
+    if "elf" not in ws.runtimes or "wasm" not in ws.runtimes:
+        pytest.skip("no ELF or wasm tier on this host")
+    s = fresh
+    since = L.next()
+    elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
+    wasi = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "wasi.svc", "pong", False) == moy_evq.OK
+    assert moy_evq.listen(peer, "pong", True) == moy_evq.OK
+    assert _polled(s, lambda: all(any(t in ("listening", "started") for t in _texts(since, p))
+                                  for p in (elf, wasi)))
+    rec, door = _stop(ws, s)
+    assert sorted(k[0] for k in rec["keep"]) == sorted((elf, wasi))
+    assert moy_evq.send(peer, "wasi.svc", "wake", '["pass","elf.svc"]')[0] == 1
+    got = []
+    t0 = time.monotonic()
+    while not got:
+        assert time.monotonic() - t0 < 5, "the ELF service's pong reaches the WASI app"
+        _during(10)
+        m = moy_evq.take(peer)
+        if m is not None:
+            got.append(m)
+    assert got[0][1:3] == ("elf.svc", "pong") and got[0][3] == '["wasi"]', got
+    assert "passed 1" in _texts(since, wasi), _texts(since, wasi)
+    assert "ping 8" in _texts(since, elf), _texts(since, elf)
+    s2, _started = _back(ws, rec, door, monkeypatch)
+    for p in (elf, wasi):
+        assert s2.stop(p) and s2.procs[p].code == 0
+    moy_evq.close(peer)
+
+
 # -- on the VM a board runs ---------------------------------------------------------
 
 VM_STOP = """

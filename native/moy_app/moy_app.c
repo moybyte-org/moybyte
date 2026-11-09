@@ -7,11 +7,24 @@
 #include "moy_crypto.h"
 #include "moy_route.h"
 
-// The kernel's timers (native/moy_kernel/moy_evq.h, TIMERS): weak, for a
-// build of the layer alone, where a timer row answers STALE.
+// The kernel's timers, messages and log (native/moy_kernel/moy_evq.h,
+// TIMERS and THE RULE; moy_log.h): weak, for a build of the layer alone,
+// where a timer, message or log row answers STALE.
 int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id)
     __attribute__((weak));
 bool moy_evq_timer_cancel(uint32_t pid, uint32_t id) __attribute__((weak));
+int moy_evq_send(uint32_t from, const char *app, const char *name, const char *args, size_t n,
+                 uint32_t *denied) __attribute__((weak));
+int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len) __attribute__((weak));
+void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
+
+// moy_evq.h's and moy_log.h's numbers, which this layer does not include.
+enum { EVQ_STALE = 1, EVQ_FULL = 2, EVQ_NOMEM = 3, EVQ_RANGE = 7 };
+#define EVQ_NAME 24u
+#define EVQ_APP 48u
+#define LOG_INFO 6
+#define LOG_LEVELS 8
+#define LOG_TEXT_MAX 2048u
 
 struct moy_app {
     const moy_htab_mem_t *mem;
@@ -1662,6 +1675,7 @@ static int no_args(int row) {
         case MOY_ROW_WALLPAPER_SAVE_COPY: case MOY_ROW_ARTWORK_FOLLOW:
         case MOY_ROW_CLIPBOARD_PUT_TEXT:
         case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL:
+        case MOY_ROW_MOYBYTE_SEND: case MOY_ROW_MOYBYTE_LOG:
         case MOY_ROW_MOYBYTE_RANDOM: case MOY_ROW_MOYBYTE_SHA256:
         case MOY_ROW_MOYBYTE_HMAC_SHA256: case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
         case MOY_ROW_MOYBYTE_AES_GCM_OPEN: case MOY_ROW_MOYBYTE_X25519:
@@ -1693,6 +1707,86 @@ static int32_t timer_row(moy_appabi_t *a, uint32_t h, int row, int32_t v) {
     uint32_t id = 0;
     int rc = moy_evq_timer(g->owner, ms, row == MOY_ROW_MOYBYTE_EVERY ? ms : 0u, &id);
     return rc == 0 ? (int32_t)id : rc == 2 ? -MOY_APP_FULL : -MOY_APP_STALE;  // MOY_EVQ_OK, FULL
+}
+
+// A compiled process's messages (moybyte.send, recv) and its log lines
+// (moybyte.log): the kernel's, as the process the grant names, run on the
+// caller's own task (how "here": the queues and the log lock their own
+// state), so they need no VM. A send answers how many took it (FULL:
+// BACKPRESSURE, moy_evq.h; STALE where the process has no queue); a recv the
+// next event's record (moy_evq_read's), 0 with none queued, FULL where `cap`
+// does not hold it (the event stays); a log 0.
+static uint32_t owner_of(moy_appabi_t *a, uint32_t h, int row) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return 0u;
+    }
+    a->counts[row]++;
+    return g->owner;
+}
+
+static int32_t send_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    size_t an, nn, jn;
+    const uint8_t *ap = arg_field(f, &an);
+    const uint8_t *np = arg_field(f, &nn);
+    const uint8_t *jp = arg_field(f, &jn);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_SEND);
+    if (pid == 0u || moy_evq_send == NULL) {
+        return -MOY_APP_STALE;
+    }
+    char app[EVQ_APP], name[EVQ_NAME];
+    if (an >= sizeof app || nn == 0u || nn >= sizeof name || memchr(ap, 0, an) != NULL
+        || memchr(np, 0, nn) != NULL) {
+        return -MOY_APP_BAD;
+    }
+    memcpy(app, ap, an);
+    app[an] = 0;
+    memcpy(name, np, nn);
+    name[nn] = 0;
+    const char *j = jn ? (const char *)jp : "[]";
+    if (!jn) {
+        jn = 2u;
+    }
+    while (jn && (*j == ' ' || *j == '\t' || *j == '\n' || *j == '\r')) {
+        j++;
+        jn--;
+    }
+    if (!jn || *j != '[') {
+        return -MOY_APP_BAD;
+    }
+    int took = moy_evq_send(pid, app, name, j, jn, NULL);
+    return took >= 0 ? took : took == -EVQ_FULL ? -MOY_APP_FULL
+           : took == -EVQ_STALE ? -MOY_APP_STALE : took == -EVQ_NOMEM ? -MOY_APP_NOMEM
+           : -MOY_APP_BAD;
+}
+
+static int32_t recv_row(moy_appabi_t *a, uint32_t h, uint8_t *ans, size_t cap) {
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_RECV);
+    if (pid == 0u || moy_evq_read == NULL) {
+        return -MOY_APP_STALE;
+    }
+    size_t len = 0;
+    int rc = moy_evq_read(pid, ans, cap, &len);
+    return rc == 0 ? (int32_t)len : rc == EVQ_RANGE ? -MOY_APP_FULL : 0;
+}
+
+static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    int32_t level = arg_int(f);
+    size_t n;
+    const uint8_t *t = arg_field(f, &n);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_LOG);
+    if (pid == 0u || moy_log_write == NULL) {
+        return -MOY_APP_STALE;
+    }
+    moy_log_write(level < 0 || level >= LOG_LEVELS ? LOG_INFO : level, pid, (const char *)t,
+                  n < LOG_TEXT_MAX ? n : LOG_TEXT_MAX);
+    return 0;
 }
 
 // The C rows a compiled app reaches through the door.
@@ -1938,6 +2032,12 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             }
             return timer_row(a, g, row, v);
         }
+        case MOY_ROW_MOYBYTE_SEND:
+            return send_row(a, g, f);
+        case MOY_ROW_MOYBYTE_RECV:
+            return recv_row(a, g, ans, cap);
+        case MOY_ROW_MOYBYTE_LOG:
+            return log_row(a, g, f);
         case MOY_ROW_MOYBYTE_RANDOM: {
             int32_t want = arg_int(f);
             if (f->bad || f->at != f->n) {

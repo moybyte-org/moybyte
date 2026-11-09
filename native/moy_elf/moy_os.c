@@ -875,10 +875,12 @@ static int on_session(thr_t *t, void (*fn)(void *arg), void *arg) {
 // process's app run, its fields packed as the door takes them
 // (native/moy_app/moy_app.h's moy_app_role): run on the VM's task -- a
 // command's through the task that serves its session, a service's as a hop
-// on the VM's queue (moy_vmq.h), which the scheduler's poll serves -- or a
+// on the VM's queue (moy_vmq.h), which the scheduler's poll serves -- a
 // read of what the look and the clipboard write where it is called, under the
-// state's seqlock. A hop's wait is not its wake's cost; a queue that is full
-// answers EAGAIN.
+// state's seqlock, or a row over the kernel's own locked state (its queues,
+// timers and log: the how "here") run where it is called, and hopped only
+// where it answers that it needs the VM. A hop's wait is not its wake's cost;
+// a queue that is full answers EAGAIN.
 
 typedef struct {
     const moy_app_run_t *run;
@@ -999,7 +1001,12 @@ int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *o
             }
             role_call_t c = { &p->run, row, buf, len, out, out != NULL ? cap : 0u,
                               -MOY_APP_NEEDS_VM };
-            if (how == MOY_OS_SEQ) {
+            if (how == MOY_OS_HERE) {
+                c.r = moy_app_role(p->run.a, p->run.g, row, buf, len, c.out, c.cap);
+            }
+            if (how == MOY_OS_HERE && c.r != -MOY_APP_NEEDS_VM) {
+                // answered on the module's own thread
+            } else if (how == MOY_OS_SEQ) {
                 for (;;) {
                     uint32_t q = moy_app_seq_begin(p->run.a);
                     if (!(q & 1u)) {

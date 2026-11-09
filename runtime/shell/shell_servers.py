@@ -67,11 +67,6 @@ try:
 except ImportError:  # host: the runtime package
     from runtime import moy_evq as _E
 
-try:
-    import json as _json
-except ImportError:  # pragma: no cover - every VM has it
-    _json = None
-
 _SHELL = 1
 
 _COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
@@ -675,17 +670,15 @@ class ConsoleCalls:
     is answered STALE.
 
     A compiled app's messages are its process's own event queue
-    (native/moy_kernel/moy_evq.h), opened for it at its first `send`, `on`
-    or wake as a native service's is (no Python wake serves it): `on` is the
-    kernel's listen, `recv` takes the oldest event as the event descriptor's
-    record (`moy_evq_ev_t`, its arguments, a NUL), and a wake is the
-    system's message carrying its id (an alarm's `moybyte.at`, a timer's,
-    `every` or `after`, `moybyte.timer`), which `cancel` takes for a wake of
-    the process's own."""
+    (native/moy_kernel/moy_evq.h), opened for it at its launch
+    (moybyte._compiled_events) as a native service's is (no Python wake
+    serves it): `on` is the kernel's listen here, and an alarm is the
+    system's message carrying its id (`moybyte.at`). Its `send`, `recv`,
+    `log` and timers are no console call: native/moy_app's C rows serve them
+    on the caller's own task (moy_app.c, send_row)."""
 
     def __init__(self, ws):
         self.__ws = ws
-        self.__held = {}            # pid -> a record recv could not hand over
 
     def _as(self, g, fn, *args):
         pid = self.__ws.procs.pid_of(g)
@@ -723,17 +716,6 @@ class ConsoleCalls:
 
     def pick(self, g, mime, mode=None):
         return self._as(g, _moybyte.pick, mime, mode or "r")
-
-    def send(self, g, app, name, args=None):
-        try:
-            a = _json.loads(args) if args else []
-        except ValueError:
-            return _DOOR_BAD
-        if not isinstance(a, list):
-            return _DOOR_BAD
-        if self._own(g) is None:
-            return _DOOR_STALE
-        return self._as(g, _moybyte.send, app, name, *a)
 
     def award(self, g, ach_id):
         if self._own(g) is None:
@@ -778,30 +760,6 @@ class ConsoleCalls:
             return self._as(g, fn, v)
         except OSError as exc:
             return _DOOR_DENIED if exc.args and exc.args[0] == _moybyte.EPERM else _DOOR_FULL
-
-    def log(self, g, level, text):
-        if self.__ws.procs.pid_of(g) is None:
-            return _DOOR_STALE
-        self._as(g, _moybyte.log, level, text)
-        return 0
-
-    def recv(self, g, cap):
-        """The oldest event of the process's queue as its record: its
-        length, 0 with none queued, FULL where `cap` does not hold it (the
-        event kept for the next call)."""
-        pid = self.__ws.procs.pid_of(g)
-        if pid is None:
-            return _DOOR_STALE
-        rec = self.__held.pop(pid, None)
-        if rec is None:
-            ev = _E.take(pid) if _E.has(pid) else None
-            if ev is None:
-                return 0
-            rec = _record(*ev)
-        if len(rec) > cap:
-            self.__held[pid] = rec
-            return _DOOR_FULL
-        return rec
 
     def item_read(self, g, h, cap):
         it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
@@ -920,24 +878,6 @@ def _dev_handles():
     return dev_handles
 
 
-# The event descriptor's record (moy_evq_ev_t, native/moy_kernel/moy_evq.h):
-# the sender's pid, the arguments' bytes, the app id and the name, each
-# NUL-padded to its field, then the arguments and a NUL.
-EV_APP, EV_NAME = 48, 24
-
-
-def _le32(v):
-    return bytes((v & 255, v >> 8 & 255, v >> 16 & 255, v >> 24 & 255))
-
-
-def _record(frm, app, name, args):
-    a = args.encode("utf-8")
-    ap = app.encode("utf-8")[:EV_APP - 1]
-    nm = name.encode("utf-8")[:EV_NAME - 1]
-    return (_le32(frm) + _le32(len(a)) + ap + bytes(EV_APP - len(ap))
-            + nm + bytes(EV_NAME - len(nm)) + a + b"\0")
-
-
 # -- the ROLE door ----------------------------------------------------------------
 
 # moy_app.h's codes the door answers with, negated.
@@ -974,13 +914,10 @@ DOOR_ARGS = {
     "moybyte.notify": "so",
     "moybyte.open_with": "si",
     "moybyte.share": "bs",
-    "moybyte.send": "sso",
     "moybyte.award": "s",
     "moybyte.progress": "si",
     "moybyte.on": "si",
     "moybyte.pick": "so",
-    "moybyte.log": "is",
-    "moybyte.recv": "i",
     "moybyte.item_read": "ii",
     "moybyte.item_write": "ib",
     "moybyte.at": "i",

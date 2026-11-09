@@ -126,7 +126,7 @@ KINDS = ("posix", "moybyte")
 DOOR_SERVERS = ("c", "shell", "call")
 TYPES = ("int", "str", "str?", "bytes", "cart", "out")
 RETS = ("int", "len")
-HOWS = ("hop", "seq", "direct")
+HOWS = ("hop", "seq", "here", "direct")
 FLOOR_ROLE = "floor"
 
 
@@ -547,6 +547,8 @@ def check(src):
             raise TableError("%s's ret: %r" % (name, r["ret"]))
         if "how" in r and r["how"] not in HOWS:
             raise TableError("%s's how: %r" % (name, r["how"]))
+        if r.get("how") == "here" and r.get("server") != "c":
+            raise TableError("%s: a row run where it is called is served in C" % name)
         outs = [n for n, t in params(r) if t == "out"]
         if (r.get("ret") == "len") != bool(outs) and r.get("how") != "direct":
             raise TableError("%s: a len answer is what an out parameter holds" % name)
@@ -725,9 +727,11 @@ def gen_rows_h(table):
           "    int32_t v;",
           "    uint8_t kind;",
           "} moy_os_arg_t;",
-          "// How it runs: on the task that serves the process's session, or where it",
-          "// is called, under the app ABI's seqlock (native/moy_app/moy_app_wasm.h).",
-          "enum { MOY_OS_HOP = 0, MOY_OS_SEQ = 1 };",
+          "// How it runs: on the task that serves the process's session; where it",
+          "// is called, under the app ABI's seqlock (native/moy_app/moy_app_wasm.h);",
+          "// or where it is called, its row's own lock its guard, hopped where it",
+          "// answers that it needs the VM.",
+          "enum { MOY_OS_HOP = 0, MOY_OS_SEQ = 1, MOY_OS_HERE = 2 };",
           "// Role table row `row` for the calling process's run, its fields `a` and",
           "// its answer written into `out` (cap bytes): the answer, or -1 and errno.",
           "int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *out,",
@@ -770,7 +774,7 @@ def _call_body(r):
             else:
                 o.append("        { %s, 0u, 0, %s }," % (n, _ARG[t]))
         o.append("    };")
-    how = "MOY_OS_SEQ" if r["how"] == "seq" else "MOY_OS_HOP"
+    how = "MOY_OS_" + r["how"].upper()
     o.append("    return moy_os_call(%du, %s, %s, %d, %s, %s);   // %s" % (
         r["door"], how, "a" if ins else "NULL", len(ins),
         out[0] if out else "NULL", (out[0] + "_cap") if out else "0u", src["name"]))
@@ -972,7 +976,7 @@ def gen_wasi_h(src):
             if packs:
                 o.append("    const os_arg_t a[%d] = { %s };" % (len(packs), ", ".join(packs)))
             o.append("    return os_role(e, MOY_T_%s, %s, %s, %d, %s, %s);" % (
-                upper(r["name"]), "true" if r["how"] == "seq" else "false",
+                upper(r["name"]), "OS_" + r["how"].upper(),
                 "a" if packs else "NULL", len(packs), out[0], out[1]))
             o += ["}", ""]
             continue

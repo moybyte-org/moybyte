@@ -236,7 +236,6 @@ _CALLS = {
     "moybyte.notify": _moybyte.notify,
     "moybyte.open_with": _moybyte.open_with,
     "moybyte.share": _moybyte.share,
-    "moybyte.send": _moybyte.send,
     "moybyte.award": _moybyte.award,
     "moybyte.progress": _moybyte.progress,
     "moybyte.pick": _moybyte.pick,
@@ -931,6 +930,16 @@ class Scheduler:
         self.wakes.cancel(self._poll)
         self._plain.pop(self._poll, None)
         self._poll = 0
+
+    def mail_owed(self):
+        """Whether the frame's start serves messages: one queued from
+        Python, a Lua service's, or (where no board loop runs `woken`) one
+        the kernel queued from C for a VM process, a compiled app's send on
+        its own task (moy_evq.h, THE VM'S WAKE)."""
+        w = self.wakes
+        if not self.kernel_wake and not w.queued and _E.wants() & _E.WANT_MAIL:
+            w.queued = 1
+        return w.queued or self.svc_mail
 
     def woken(self):
         """THE VM'S WAKE (native/moy_kernel/moy_evq.h), at a board's frame

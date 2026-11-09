@@ -33,7 +33,8 @@
 // mode, name), whose item it reads, writes and reads again through its
 // handle, and a handle it was never given; a "wake" carrying ["rearm"] sets a
 // timer 10 ms off that its own message sets again, printing "rearmed" each
-// time; a "wake" carrying ["media", path]
+// time; a "wake" carrying ["pass", app] sends that app a "ping" of its own,
+// printing how many took it; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
 // reads back, and leaves it playing; a "wake" carrying
@@ -108,6 +109,16 @@ int main(void) {
             pings++;
             printf("ping %u from %s: %d\n", m.ev.n, m.ev.app,
                    moy_send(m.ev.app, "pong", m.b + sizeof m.ev));
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strncmp(m.b + sizeof m.ev, "[\"pass\",\"", 9) == 0) {
+            char app[48];
+            const char *a = m.b + sizeof m.ev + 9;
+            size_t k = strcspn(a, "\"");
+            k = k < sizeof app ? k : sizeof app - 1;
+            memcpy(app, a, k);
+            app[k] = 0;
+            printf("passed %d\n", moy_send(app, "ping", "[\"wasi\"]"));
             fflush(stdout);
         } else if (strcmp(m.ev.name, "note") == 0) {
             int id = moy_notify("Service Wasi", m.b + sizeof m.ev);

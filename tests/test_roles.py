@@ -167,7 +167,7 @@ def test_the_console_calls_are_the_door_rows_of_the_moybyte_role():
     """Each `moybyte` row the door decodes is a method of the door's
     console-call server, which runs the `moybyte` module's function of the
     same name where a Python program holds one (the rest are a compiled
-    app's own: its queue's read, its granted items' and its device
+    app's own: its granted items' and its device
     handles', runtime/system/dev_handles.py, and its status item's, a
     Python program's being `moybyte.status`); a method no row
     names is a call nothing can reach."""
@@ -180,7 +180,7 @@ def test_the_console_calls_are_the_door_rows_of_the_moybyte_role():
     assert have == door
     py = {r["name"][8:] for r in gen_os_table.load()["rows"]
           if r["name"] in ss.DOOR_ARGS and r["name"] in (r.get("py") or ())}
-    assert py == door - {"recv", "item_read", "item_write"} - {
+    assert py == door - {"item_read", "item_write"} - {
         v for v in door if v.startswith("dev_") or v.startswith("status_")}
     assert all(callable(getattr(moybyte, v)) for v in py)
 

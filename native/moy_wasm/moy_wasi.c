@@ -915,9 +915,11 @@ static int32_t os_call(wasm_exec_env_t e, const char *name, const os_arg_t *a, i
 // the crypto rows, and the door rows the door's Python half serves): each its
 // role table row for the run's app run (moy_wasi_set_run), its fields packed
 // as the ROLE door takes them (moy_app.h's moy_app_role): a read of what the
-// clipboard writes where it is called, under the state's seqlock, any other
-// on the VM's task, a command's through its session's hop and a service's
-// as a hop on the VM's queue (moy_vmq.h), which the scheduler's poll serves.
+// clipboard writes where it is called, under the state's seqlock; a row over
+// the kernel's own locked state (its queues, timers and log) where it is
+// called, hopped only where it answers that it needs the VM; any other on the
+// VM's task, a command's through its session's hop and a service's as a hop
+// on the VM's queue (moy_vmq.h), which the scheduler's poll serves.
 // A run with no app run answers ACCES, as a permission it lacks does.
 typedef struct {
     const moy_app_run_t *run;
@@ -945,7 +947,12 @@ static void le32(uint8_t *q, uint32_t v) {
     q[3] = (uint8_t)(v >> 24);
 }
 
-static int32_t os_role(wasm_exec_env_t e, uint32_t row, bool seq, const os_arg_t *a, int n,
+// How an app row runs (moy_wasi_os_rows.h): on the VM's task, read where it
+// is called under the seqlock, or run where it is called over state that
+// locks itself, hopped where it answers that it needs the VM.
+enum { OS_HOP = 0, OS_SEQ = 1, OS_HERE = 2 };
+
+static int32_t os_role(wasm_exec_env_t e, uint32_t row, int how, const os_arg_t *a, int n,
                        uint8_t *out, uint32_t cap) {
     moy_wasi_t *w = os_run(e);
     if (w == NULL || w->pid == 0) {
@@ -982,7 +989,12 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, bool seq, const os_arg_t
         k += 4u + len;
     }
     role_call_t c = { &w->run, row, buf, k, out, out != NULL ? cap : 0u, -MOY_APP_NEEDS_VM };
-    if (seq) {
+    if (how == OS_HERE) {
+        c.r = moy_app_role(c.run->a, c.run->g, c.row, c.arg, c.n, c.out, c.cap);
+    }
+    if (how == OS_HERE && c.r != -MOY_APP_NEEDS_VM) {
+        // answered on the module's own thread
+    } else if (how == OS_SEQ) {
         for (;;) {
             uint32_t q = moy_app_seq_begin(w->run.a);
             if (!(q & 1u)) {

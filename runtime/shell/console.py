@@ -3440,7 +3440,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._services_due = False
             self.boot_services()
         sched = _scheduler.SCHED
-        if sched.wakes.queued or sched.svc_mail:
+        if sched.mail_owed():
             sched.mail()              # messages the input sent: served before the draw
         if self._press_owed:
             self._press_owed = False

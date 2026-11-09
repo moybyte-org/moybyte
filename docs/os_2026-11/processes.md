@@ -233,7 +233,9 @@ the kernel stamped. The rule is the kernel's (`moy_evq.h`, THE RULE):
 
 A message to a process that does not listen on its name is not taken. Every
 tier holds the same two names (`moybyte.send` is a row of
-`native/os_calls.json`; Lua's runs as a console call), and a message crosses
+`native/os_calls.json`, the kernel's send on the sender's own task in a
+compiled program and a Lua service, the `moybyte` module's in a Python
+program and a Lua app on the VM), and a message crosses
 tiers unchanged: a Python app's `send` reaches its Lua service's queue, and
 the service's reply the app's.
 

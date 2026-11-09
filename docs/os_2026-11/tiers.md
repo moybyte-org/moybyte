@@ -108,9 +108,10 @@ costs are #227's.
   is not append-only by index. WASI's imports (§3) keep WASI's names and are
   not rows; they and the POSIX rows (above) are the same C functions under
   two standard names, neither a second implementation. A row a compiled app
-  imports whose server is the kernel's or Python's (`moybyte.on`, `log`,
-  `at`, `every`, `after`, `cancel`) is a row of the role table too, so its
-  import has a door to cross.
+  imports whose server is the kernel's or Python's (`moybyte.on`, `at`;
+  `send`, `log`, `every`, `after`, `cancel`, whose C runs on the caller's
+  own task) is a row of the role table too, so its import has a door to
+  cross.
 - **A native module's app calls.** The app verbs a compiled app imports are
   rows of this table too (ordinals 62 to 79 and 82 to 109): the files role
   (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
@@ -304,16 +305,21 @@ row's types give, and the adapter's natives and the toolkit's are generated
 from it (`native/moy_app/moy_app_wasm_rows.h`,
 `native/moy_ui/moy_ui_wasm_rows.h`), each packing its fields for the ROLE
 door and hopping to the VM's task, or, for a read of what the look and the
-clipboard write, reading in place under the seqlock, as its row's `how`
-says. The console calls are imported too (`moybyte_notify`, `open_with`,
-`share`, `pick`, `send`, `award`, `progress`, `at`, `every`, `after`,
-`cancel`, `log`), each the
+clipboard write, reading in place under the seqlock, or, for a row over the
+kernel's own locked state, running in place on the app's own task, as its
+row's `how` says. The console calls are imported too (`moybyte_notify`,
+`open_with`, `share`, `pick`, `award`, `progress`, `at`), each the
 `moybyte` module's verb run as the app's process through the door
 (`runtime/shell/shell_servers.py`, ConsoleCalls), under the permission it
-names there. **A compiled app polls its messages (2026-11-08)**: `moybyte_on`
-is the kernel's listen and `moybyte_recv` takes the next event of its
-process's queue (its senders in turn, `moy_evq.h`) as the record the event descriptor reads (`moy_evq_ev_t`, the
-arguments, a NUL), 0 when none waits. A callback export the host called at
+names there; `send`, `log` and the wakes `every`, `after` and `cancel` are
+the kernel's, C rows run on the app's own task as its process (`how`
+"here", `native/moy_app/moy_app.c`), so they need no VM. **A compiled app
+polls its messages (2026-11-08)**: `moybyte_on` is the kernel's listen and
+`moybyte_recv` takes the next event of its process's queue (opened at its
+launch, `runtime/system/moybyte.py`'s `_compiled_events`), a C row run on
+its own task, taking it (its senders in turn, `moy_evq.h`) as the record the
+event descriptor reads (`moy_evq_ev_t`, the arguments, a NUL), 0 when none
+waits. A callback export the host called at
 the frame's start would need room in the module's memory for three strings
 and a new call in each engine's glue (a board's, the host's, the browser's);
 the poll is one more generated import, cart-shaped as `btn` is (an app reads

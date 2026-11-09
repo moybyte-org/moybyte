@@ -42,9 +42,10 @@ static void yield(void) {
 // weak, so an image or a host with no session thread calls the row in place.
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg) __attribute__((weak));
 
-// How a native's row runs: hopped to the VM's task, or read in place under
-// the seqlock.
-enum { HOP = 0, SEQ = 1 };
+// How a native's row runs: hopped to the VM's task, read in place under the
+// seqlock, or run in place over state that locks itself (a row that answers
+// NEEDS_VM there is hopped).
+enum { HOP = 0, SEQ = 1, HERE = 2 };
 
 static moy_appabi_t *volatile s_live;   // the console's state: what the theme reads
 static uint32_t s_hops, s_hop_us, s_hop_work_us;
@@ -161,8 +162,13 @@ static int32_t run(void *e, int how, int row, const span_t *f, int nf, uint8_t *
         }
         at += 4u + f[i].n;
     }
-    int32_t r;
-    if (how == SEQ) {
+    int32_t r = -MOY_APP_NEEDS_VM;
+    if (how == HERE) {
+        r = moy_app_role(a, g, (uint32_t)row, buf, n, ans, cap);
+    }
+    if (how == HERE && r != -MOY_APP_NEEDS_VM) {
+        // answered on the caller's task
+    } else if (how == SEQ) {
         for (unsigned spins = 0;; spins++) {
             uint32_t q = moy_app_seq_begin(a);
             if (!(q & 1u)) {

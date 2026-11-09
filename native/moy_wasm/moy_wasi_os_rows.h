@@ -78,103 +78,103 @@
 #define MOY_WASI_OS_BODIES_DONE
 
 static int32_t w_os_files_readable(wasm_exec_env_t e) {
-    return os_role(e, MOY_T_FILES_READABLE, false, NULL, 0, NULL, 0);
+    return os_role(e, MOY_T_FILES_READABLE, OS_HOP, NULL, 0, NULL, 0);
 }
 
 static int32_t w_os_files_ready(wasm_exec_env_t e) {
-    return os_role(e, MOY_T_FILES_READY, false, NULL, 0, NULL, 0);
+    return os_role(e, MOY_T_FILES_READY, OS_HOP, NULL, 0, NULL, 0);
 }
 
 static int32_t w_os_files_list(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                uint8_t *names, uint32_t names_cap) {
     const os_arg_t a[1] = { OS_O(kind, kind_n) };
-    return os_role(e, MOY_T_FILES_LIST, false, a, 1, names, names_cap);
+    return os_role(e, MOY_T_FILES_LIST, OS_HOP, a, 1, names, names_cap);
 }
 
 static int32_t w_os_files_count(wasm_exec_env_t e, const char *kind, uint32_t kind_n) {
     const os_arg_t a[1] = { OS_O(kind, kind_n) };
-    return os_role(e, MOY_T_FILES_COUNT, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_FILES_COUNT, OS_HOP, a, 1, NULL, 0);
 }
 
 static int32_t w_os_files_load(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                const char *name, uint32_t name_n, uint8_t *data,
                                uint32_t data_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(name, name_n) };
-    return os_role(e, MOY_T_FILES_LOAD, false, a, 2, data, data_cap);
+    return os_role(e, MOY_T_FILES_LOAD, OS_HOP, a, 2, data, data_cap);
 }
 
 static int32_t w_os_files_save(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                const char *name, uint32_t name_n, const uint8_t *data,
                                uint32_t data_n, uint8_t *saved, uint32_t saved_cap) {
     const os_arg_t a[3] = { OS_O(kind, kind_n), OS_O(name, name_n), OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_FILES_SAVE, false, a, 3, saved, saved_cap);
+    return os_role(e, MOY_T_FILES_SAVE, OS_HOP, a, 3, saved, saved_cap);
 }
 
 static int32_t w_os_files_delete(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                  const char *name, uint32_t name_n, uint8_t *trashed,
                                  uint32_t trashed_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(name, name_n) };
-    return os_role(e, MOY_T_FILES_DELETE, false, a, 2, trashed, trashed_cap);
+    return os_role(e, MOY_T_FILES_DELETE, OS_HOP, a, 2, trashed, trashed_cap);
 }
 
 static int32_t w_os_files_duplicate(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                     const char *name, uint32_t name_n, uint8_t *copy,
                                     uint32_t copy_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(name, name_n) };
-    return os_role(e, MOY_T_FILES_DUPLICATE, false, a, 2, copy, copy_cap);
+    return os_role(e, MOY_T_FILES_DUPLICATE, OS_HOP, a, 2, copy, copy_cap);
 }
 
 static int32_t w_os_files_rename(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                  const char *name, uint32_t name_n, const char *title,
                                  uint32_t title_n, uint8_t *renamed, uint32_t renamed_cap) {
     const os_arg_t a[3] = { OS_O(kind, kind_n), OS_O(name, name_n), OS_O(title, title_n) };
-    return os_role(e, MOY_T_FILES_RENAME, false, a, 3, renamed, renamed_cap);
+    return os_role(e, MOY_T_FILES_RENAME, OS_HOP, a, 3, renamed, renamed_cap);
 }
 
 static int32_t w_os_files_new_name(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                    const char *title, uint32_t title_n, uint8_t *name,
                                    uint32_t name_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(title, title_n) };
-    return os_role(e, MOY_T_FILES_NEW_NAME, false, a, 2, name, name_cap);
+    return os_role(e, MOY_T_FILES_NEW_NAME, OS_HOP, a, 2, name, name_cap);
 }
 
 static int32_t w_os_nav_open_app(wasm_exec_env_t e, const char *id, uint32_t id_n) {
     const os_arg_t a[1] = { OS_O(id, id_n) };
-    return os_role(e, MOY_T_NAV_OPEN_APP, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_NAV_OPEN_APP, OS_HOP, a, 1, NULL, 0);
 }
 
 static int32_t w_os_prefs_get(wasm_exec_env_t e, const char *key, uint32_t key_n, uint8_t *json,
                               uint32_t json_cap) {
     const os_arg_t a[1] = { OS_O(key, key_n) };
-    return os_role(e, MOY_T_PREFS_GET, false, a, 1, json, json_cap);
+    return os_role(e, MOY_T_PREFS_GET, OS_HOP, a, 1, json, json_cap);
 }
 
 static int32_t w_os_prefs_set(wasm_exec_env_t e, const char *key, uint32_t key_n,
                               const char *json, uint32_t json_n) {
     const os_arg_t a[2] = { OS_O(key, key_n), OS_O(json, json_n) };
-    return os_role(e, MOY_T_PREFS_SET, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_PREFS_SET, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_prefs_clear(wasm_exec_env_t e, const char *key, uint32_t key_n) {
     const os_arg_t a[1] = { OS_O(key, key_n) };
-    return os_role(e, MOY_T_PREFS_CLEAR, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_PREFS_CLEAR, OS_HOP, a, 1, NULL, 0);
 }
 
 static int32_t w_os_clipboard_put_text(wasm_exec_env_t e, const char *text, uint32_t text_n) {
     const os_arg_t a[1] = { OS_O(text, text_n) };
-    return os_role(e, MOY_T_CLIPBOARD_PUT_TEXT, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_CLIPBOARD_PUT_TEXT, OS_HOP, a, 1, NULL, 0);
 }
 
 static int32_t w_os_clipboard_text(wasm_exec_env_t e, uint8_t *text, uint32_t text_cap) {
-    return os_role(e, MOY_T_CLIPBOARD_TEXT, true, NULL, 0, text, text_cap);
+    return os_role(e, MOY_T_CLIPBOARD_TEXT, OS_SEQ, NULL, 0, text, text_cap);
 }
 
 static int32_t w_os_clipboard_kind(wasm_exec_env_t e) {
-    return os_role(e, MOY_T_CLIPBOARD_KIND, true, NULL, 0, NULL, 0);
+    return os_role(e, MOY_T_CLIPBOARD_KIND, OS_SEQ, NULL, 0, NULL, 0);
 }
 
 static int32_t w_os_clipboard_seq(wasm_exec_env_t e) {
-    return os_role(e, MOY_T_CLIPBOARD_SEQ, true, NULL, 0, NULL, 0);
+    return os_role(e, MOY_T_CLIPBOARD_SEQ, OS_SEQ, NULL, 0, NULL, 0);
 }
 
 static int32_t w_os_notify(wasm_exec_env_t e, const char *summary, uint32_t summary_n,
@@ -192,7 +192,7 @@ static int32_t w_os_open_with(wasm_exec_env_t e, const char *item, uint32_t item
 static int32_t w_os_share(wasm_exec_env_t e, const uint8_t *data, uint32_t data_n,
                           const char *mime, uint32_t mime_n) {
     const os_arg_t a[2] = { OS_O((const char *)data, data_n), OS_O(mime, mime_n) };
-    return os_role(e, MOY_T_MOYBYTE_SHARE, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_SHARE, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_award(wasm_exec_env_t e, const char *id, uint32_t id_n) {
@@ -207,17 +207,17 @@ static int32_t w_os_progress(wasm_exec_env_t e, const char *id, uint32_t id_n, i
 
 static int32_t w_os_every(wasm_exec_env_t e, int32_t ms) {
     const os_arg_t a[1] = { OS_I(ms) };
-    return os_role(e, MOY_T_MOYBYTE_EVERY, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_EVERY, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_after(wasm_exec_env_t e, int32_t ms) {
     const os_arg_t a[1] = { OS_I(ms) };
-    return os_role(e, MOY_T_MOYBYTE_AFTER, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_AFTER, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_cancel(wasm_exec_env_t e, int32_t id) {
     const os_arg_t a[1] = { OS_I(id) };
-    return os_role(e, MOY_T_MOYBYTE_CANCEL, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_CANCEL, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_pick(wasm_exec_env_t e, const char *mime, uint32_t mime_n, const char *mode,
@@ -228,13 +228,13 @@ static int32_t w_os_pick(wasm_exec_env_t e, const char *mime, uint32_t mime_n, c
 
 static int32_t w_os_item_read(wasm_exec_env_t e, int32_t item, uint8_t *data, uint32_t data_cap) {
     const os_arg_t a[2] = { OS_I(item), OS_CAP(data_cap) };
-    return os_role(e, MOY_T_MOYBYTE_ITEM_READ, false, a, 2, data, data_cap);
+    return os_role(e, MOY_T_MOYBYTE_ITEM_READ, OS_HOP, a, 2, data, data_cap);
 }
 
 static int32_t w_os_item_write(wasm_exec_env_t e, int32_t item, const uint8_t *data,
                                uint32_t data_n) {
     const os_arg_t a[2] = { OS_I(item), OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_MOYBYTE_ITEM_WRITE, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_ITEM_WRITE, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_at(wasm_exec_env_t e, int32_t t) {
@@ -256,121 +256,121 @@ static int32_t w_os_service_running(wasm_exec_env_t e) {
 
 static int32_t w_os_random(wasm_exec_env_t e, int32_t n, uint8_t *data, uint32_t data_cap) {
     const os_arg_t a[1] = { OS_I(n) };
-    return os_role(e, MOY_T_MOYBYTE_RANDOM, true, a, 1, data, data_cap);
+    return os_role(e, MOY_T_MOYBYTE_RANDOM, OS_SEQ, a, 1, data, data_cap);
 }
 
 static int32_t w_os_sha256(wasm_exec_env_t e, const uint8_t *data, uint32_t data_n,
                            uint8_t *digest, uint32_t digest_cap) {
     const os_arg_t a[1] = { OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_MOYBYTE_SHA256, true, a, 1, digest, digest_cap);
+    return os_role(e, MOY_T_MOYBYTE_SHA256, OS_SEQ, a, 1, digest, digest_cap);
 }
 
 static int32_t w_os_hmac_sha256(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
                                 const uint8_t *data, uint32_t data_n, uint8_t *mac,
                                 uint32_t mac_cap) {
     const os_arg_t a[2] = { OS_O((const char *)key, key_n), OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_MOYBYTE_HMAC_SHA256, true, a, 2, mac, mac_cap);
+    return os_role(e, MOY_T_MOYBYTE_HMAC_SHA256, OS_SEQ, a, 2, mac, mac_cap);
 }
 
 static int32_t w_os_aes_gcm_seal(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
                                  const uint8_t *plain, uint32_t plain_n, uint8_t *sealed,
                                  uint32_t sealed_cap) {
     const os_arg_t a[2] = { OS_O((const char *)key, key_n), OS_O((const char *)plain, plain_n) };
-    return os_role(e, MOY_T_MOYBYTE_AES_GCM_SEAL, true, a, 2, sealed, sealed_cap);
+    return os_role(e, MOY_T_MOYBYTE_AES_GCM_SEAL, OS_SEQ, a, 2, sealed, sealed_cap);
 }
 
 static int32_t w_os_aes_gcm_open(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
                                  const uint8_t *sealed, uint32_t sealed_n, uint8_t *plain,
                                  uint32_t plain_cap) {
     const os_arg_t a[2] = { OS_O((const char *)key, key_n), OS_O((const char *)sealed, sealed_n) };
-    return os_role(e, MOY_T_MOYBYTE_AES_GCM_OPEN, true, a, 2, plain, plain_cap);
+    return os_role(e, MOY_T_MOYBYTE_AES_GCM_OPEN, OS_SEQ, a, 2, plain, plain_cap);
 }
 
 static int32_t w_os_x25519(wasm_exec_env_t e, const uint8_t *secret, uint32_t secret_n,
                            const uint8_t *peer, uint32_t peer_n, uint8_t *shared,
                            uint32_t shared_cap) {
     const os_arg_t a[2] = { OS_O((const char *)secret, secret_n), OS_O((const char *)peer, peer_n) };
-    return os_role(e, MOY_T_MOYBYTE_X25519, true, a, 2, shared, shared_cap);
+    return os_role(e, MOY_T_MOYBYTE_X25519, OS_SEQ, a, 2, shared, shared_cap);
 }
 
 static int32_t w_os_dev_open(wasm_exec_env_t e, const char *name, uint32_t name_n,
                              const char *cfg, uint32_t cfg_n) {
     const os_arg_t a[2] = { OS_O(name, name_n), OS_O(cfg, cfg_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_OPEN, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_OPEN, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_dev_close(wasm_exec_env_t e, int32_t h) {
     const os_arg_t a[1] = { OS_I(h) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_CLOSE, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_CLOSE, OS_HOP, a, 1, NULL, 0);
 }
 
 static int32_t w_os_dev_read(wasm_exec_env_t e, int32_t h, uint8_t *data, uint32_t data_cap) {
     const os_arg_t a[2] = { OS_I(h), OS_CAP(data_cap) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_READ, false, a, 2, data, data_cap);
+    return os_role(e, MOY_T_MOYBYTE_DEV_READ, OS_HOP, a, 2, data, data_cap);
 }
 
 static int32_t w_os_dev_write(wasm_exec_env_t e, int32_t h, const uint8_t *data,
                               uint32_t data_n) {
     const os_arg_t a[2] = { OS_I(h), OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_WRITE, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_WRITE, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_dev_xfer(wasm_exec_env_t e, int32_t h, const uint8_t *data, uint32_t data_n,
                              uint8_t *into, uint32_t into_cap) {
     const os_arg_t a[3] = { OS_I(h), OS_O((const char *)data, data_n), OS_CAP(into_cap) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_XFER, false, a, 3, into, into_cap);
+    return os_role(e, MOY_T_MOYBYTE_DEV_XFER, OS_HOP, a, 3, into, into_cap);
 }
 
 static int32_t w_os_dev_set(wasm_exec_env_t e, int32_t h, const char *cfg, uint32_t cfg_n) {
     const os_arg_t a[2] = { OS_I(h), OS_O(cfg, cfg_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_SET, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_SET, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_dev_get(wasm_exec_env_t e, int32_t h, const char *what, uint32_t what_n) {
     const os_arg_t a[2] = { OS_I(h), OS_O(what, what_n) };
-    return os_role(e, MOY_T_MOYBYTE_DEV_GET, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_DEV_GET, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_ed25519_public(wasm_exec_env_t e, const uint8_t *secret, uint32_t secret_n,
                                    uint8_t *pub, uint32_t pub_cap) {
     const os_arg_t a[1] = { OS_O((const char *)secret, secret_n) };
-    return os_role(e, MOY_T_MOYBYTE_ED25519_PUBLIC, true, a, 1, pub, pub_cap);
+    return os_role(e, MOY_T_MOYBYTE_ED25519_PUBLIC, OS_SEQ, a, 1, pub, pub_cap);
 }
 
 static int32_t w_os_ed25519_sign(wasm_exec_env_t e, const uint8_t *secret, uint32_t secret_n,
                                  const uint8_t *msg, uint32_t msg_n, uint8_t *sig,
                                  uint32_t sig_cap) {
     const os_arg_t a[2] = { OS_O((const char *)secret, secret_n), OS_O((const char *)msg, msg_n) };
-    return os_role(e, MOY_T_MOYBYTE_ED25519_SIGN, true, a, 2, sig, sig_cap);
+    return os_role(e, MOY_T_MOYBYTE_ED25519_SIGN, OS_SEQ, a, 2, sig, sig_cap);
 }
 
 static int32_t w_os_ed25519_verify(wasm_exec_env_t e, const uint8_t *pub, uint32_t pub_n,
                                    const uint8_t *msg, uint32_t msg_n, const uint8_t *sig,
                                    uint32_t sig_n) {
     const os_arg_t a[3] = { OS_O((const char *)pub, pub_n), OS_O((const char *)msg, msg_n), OS_O((const char *)sig, sig_n) };
-    return os_role(e, MOY_T_MOYBYTE_ED25519_VERIFY, true, a, 3, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_ED25519_VERIFY, OS_SEQ, a, 3, NULL, 0);
 }
 
 static int32_t w_os_status_show(wasm_exec_env_t e, const char *icon, uint32_t icon_n,
                                 int32_t state, int32_t order) {
     const os_arg_t a[3] = { OS_O(icon, icon_n), OS_I(state), OS_I(order) };
-    return os_role(e, MOY_T_MOYBYTE_STATUS_SHOW, false, a, 3, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_STATUS_SHOW, OS_HOP, a, 3, NULL, 0);
 }
 
 static int32_t w_os_status_state(wasm_exec_env_t e, int32_t item, int32_t state) {
     const os_arg_t a[2] = { OS_I(item), OS_I(state) };
-    return os_role(e, MOY_T_MOYBYTE_STATUS_STATE, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_STATUS_STATE, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_status_panel(wasm_exec_env_t e, int32_t item, const char *rows,
                                  uint32_t rows_n) {
     const os_arg_t a[2] = { OS_I(item), OS_O(rows, rows_n) };
-    return os_role(e, MOY_T_MOYBYTE_STATUS_PANEL, false, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_STATUS_PANEL, OS_HOP, a, 2, NULL, 0);
 }
 
 static int32_t w_os_status_remove(wasm_exec_env_t e, int32_t item) {
     const os_arg_t a[1] = { OS_I(item) };
-    return os_role(e, MOY_T_MOYBYTE_STATUS_REMOVE, false, a, 1, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_STATUS_REMOVE, OS_HOP, a, 1, NULL, 0);
 }
 
 #endif // MOY_WASI_OS_BODIES

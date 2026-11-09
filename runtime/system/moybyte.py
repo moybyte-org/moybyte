@@ -1051,7 +1051,15 @@ def hand_item(pid, g):
 def _compiled_events(ns, pid):
     """`_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`
     of the run of process `pid` into its namespace `ns`, each posted to it,
-    `moy_open` by `hand_item`."""
+    `moy_open` by `hand_item`. Its event queue opens here, the VM serving
+    none of it, so its `send` and `recv` (native/moy_app's C rows, on its
+    own task) find it from its first call."""
+    if pid and not _E.has(pid):
+        if WAKES.opener is not None:
+            WAKES.opener(pid, False)
+        else:
+            _E.open(pid, "pid%d" % pid, "", False)
+
     def post(name, *args):
         WAKES.post(pid, name, args)
 
