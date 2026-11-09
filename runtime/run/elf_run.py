@@ -19,7 +19,11 @@ and answers an ElfGame, the shape every runtime's run has
 (`init`/`update`/`draw`/`close`). Each tick posts the frame message with the
 buttons and waits up to the tick's time for a present; the draw puts the
 presented screen into the run's canvas through the one canvas class's
-`blit_indices`. A game whose main returns 0 quits; any other end is a stop
+`blit_indices`. An APP (its manifest's type "app") draws with the toolkit
+it links (sdk/include/moybyte/ui.h): its screen is RGB565, drawn with
+`blit565`, and its frame message carries the input words the toolkit reads
+(moy_os.h's MOY_OS_FRAME_IN_*: the pointer, the key typed, the window and
+the canvas's byte order). A game whose main returns 0 quits; any other end is a stop
 the stop card reports, a signal by its name and, where the console keeps
 one (a P4's isolation), its fault record. The Player asks `footprint` and
 `memory` first, as it asks a compiled cart's runtime.
@@ -57,8 +61,15 @@ WHAT = {4: "an illegal instruction", 5: "a breakpoint", 7: "a misaligned access"
 
 try:
     from lua_ext import MOY_BUTTONS
+    from moy_input import pointer_state
 except ImportError:  # host: the runtime package
     from runtime.lua_ext import MOY_BUTTONS
+    from runtime.moy_input import pointer_state
+
+from array import array
+
+# moy_os.h's MOY_OS_FRAME_IN_*: an app's input words.
+IN_X, IN_Y, IN_PTR, IN_KEY, IN_WINDOW, IN_SWAP = range(6)
 
 
 def stop_text(code, fault=None):
@@ -126,7 +137,8 @@ class ElfRuntime:
     def footprint(self, cart, w=320, h=240):
         """(total, block) a game's start takes: its module (its file bounds
         what loads), its `w` x `h` screen twice (the module's and the
-        process's frame) and its thread's stack; None with no module."""
+        process's frame), at two bytes a pixel for an app, and its thread's
+        stack (an app's twice a game's); None with no module."""
         path = self.module(cart)
         if path is None:
             return None
@@ -138,7 +150,10 @@ class ElfRuntime:
         canvas = getattr(getattr(self.ws, "run", None), "canvas", None)
         if canvas is not None:
             w, h = canvas.w, canvas.h
-        return size + 2 * w * h + STACK, max(size, w * h, STACK)
+        app = cart.get("type") == "app"
+        px = w * h * (2 if app else 1)
+        stack = STACK * (2 if app else 1)       # moy_os_game's for an app
+        return size + 2 * px + stack, max(size, px, stack)
 
     def memory(self):
         """(free, largest block) of the memory a module and its frame take:
@@ -259,8 +274,11 @@ class ElfGame:
         canvas = ws.run.canvas
         self.pid = ws.run.player.pid
         self._w, self._h = canvas.w, canvas.h
+        self._app = cart.get("type") == "app"
+        self._words = array("i", bytes(4 * 6)) if self._app else None
+        self._ptr = [0, 0, 0, 0]
         why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
-                           self._w, self._h, run)
+                           self._w, self._h, run, 2 if self._app else 1)
         if why is not None:
             raise RuntimeError(why)
         self._px = self._e.screen(self.pid)
@@ -301,7 +319,10 @@ class ElfGame:
         wait = ms * 1000
         if wait > WAIT_US_MAX:
             wait = WAIT_US_MAX
-        got = self._e.frame(self.pid, out[0], self._pressed, ms, wait)
+        words = self._words
+        if words is not None:
+            self._fill(words)
+        got = self._e.frame(self.pid, out[0], self._pressed, ms, wait, words)
         if got == ENDED or got < 0:
             self._end()
             return
@@ -309,6 +330,22 @@ class ElfGame:
             self._pressed = 0
         if got & FRAME_SHOWN:
             self._shown = True
+
+    def _fill(self, words):
+        """An app's input words for this frame (IN_*)."""
+        ws = self._ws
+        inp = ws.input
+        p = self._ptr
+        try:
+            pointer_state(inp, p)
+        except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead app
+            p[2] = 0
+        words[IN_X] = int(p[0])
+        words[IN_Y] = int(p[1])
+        words[IN_PTR] = int(p[2])
+        words[IN_KEY] = int(getattr(inp, "last_key", 0) or 0)
+        words[IN_WINDOW] = 1 if getattr(ws, "windowed_chrome", False) else 0
+        words[IN_SWAP] = 1 if getattr(ws.run.canvas, "swapped565", False) else 0
 
     def _end(self):
         self._live = False
@@ -328,7 +365,10 @@ class ElfGame:
 
     def _draw(self):
         if self._shown:
-            self._ws.run.canvas.blit_indices(self._px, self._w, self._h, 0, 0)
+            if self._app:
+                self._ws.run.canvas.blit565(self._px, self._w, self._h, 0, 0)
+            else:
+                self._ws.run.canvas.blit_indices(self._px, self._w, self._h, 0, 0)
             self._shown = False
 
     def close(self):

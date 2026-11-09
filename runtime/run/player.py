@@ -477,7 +477,8 @@ class Player(PlayerDiag):
         """The run the app ABI's tier bindings serve this launch
         (native/moy_app/moy_app_run.h): this run's grant and the roles its
         permissions name, for a compiled user app that declares the app
-        extension, whose imports reach them, and for a Lua app or script,
+        extension, whose imports reach them, for a native app, whose rows
+        reach them (runtime/run/elf_run.py), and for a Lua app or script,
         whose state opens their names (moy_app_lua.h). The run's own: the
         namespace hands it to the runtime's open, which copies it, so two
         runs hold two grants. None otherwise, so a module's imports from the
@@ -488,7 +489,8 @@ class Player(PlayerDiag):
             return None
         ctx = self._app_ctx
         rt = cart.get("runtime") if cart is not None else None
-        if (ctx is None or not (rt == "lua" or (
+        native_app = cart is not None and cart.get("type") == "app" and bool(cart.get("native"))
+        if (ctx is None or not (rt == "lua" or native_app or (
                 rt == "wasm" and APP_EXT in (cart.get("extensions") or ())))):
             return run(0, ())
         return run(ctx.grant, _moy_app.policy(self.granted)[0])

@@ -21,6 +21,9 @@ void moy_ui_inst_init(moy_ui_inst_t *I) {
 void moy_ui_inst_pull(moy_ui_inst_t *I, uint32_t (*pull)(uint32_t have, void *buf, size_t cap),
                       void *buf, size_t cap,
                       uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap)) {
+    if (I == NULL) {
+        I = &s_main;
+    }
     I->font_pull = font_pull;
     I->pull = pull;
     I->theme_buf = buf;
@@ -921,26 +924,33 @@ static void dialog_plan(moy_ui_ctx_t *c, int owed, int same) {
     c->sh_plan = MOY_UI_SHIFT_ROWS;
 }
 
+void moy_ui_inst_sync(moy_ui_inst_t *I) {
+    if (I == NULL) {
+        I = &s_main;
+    }
+    if (I->pull == NULL) {
+        return;
+    }
+    uint32_t g = I->pull(I->theme_gen, I->theme_buf, I->theme_cap);
+    if (g != 0 && I->font_pull != NULL) {
+        fonts_drop(I);
+    }
+    if (g != 0 && moy_ui_theme_put(I->theme_buf, I->theme_cap) == MOY_UI_OK) {
+        if (I->font_pull != NULL) {
+            fonts_take(I, g);
+        }
+        I->theme_gen = g;
+        I->theme_puts++;
+    }
+}
+
 int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int flags,
                      int fs) {
     static const int32_t none[MOY_UI_IN_LEN] = {0};
     if (in == NULL) {
         in = none;
     }
-    moy_ui_inst_t *I = c->inst;
-    if (I->pull != NULL) {
-        uint32_t g = I->pull(I->theme_gen, I->theme_buf, I->theme_cap);
-        if (g != 0 && I->font_pull != NULL) {
-            fonts_drop(I);
-        }
-        if (g != 0 && moy_ui_theme_put(I->theme_buf, I->theme_cap) == MOY_UI_OK) {
-            if (I->font_pull != NULL) {
-                fonts_take(I, g);
-            }
-            I->theme_gen = g;
-            I->theme_puts++;
-        }
-    }
+    moy_ui_inst_sync(c->inst);
     int was_held = (c->last_ptr & MOY_UI_P_LIVE) && (c->last_ptr & MOY_UI_P_HELD);
     memcpy(c->in, in, sizeof(c->in));
     for (int i = 0; i < MOY_UI_API_KEEP; i++) {

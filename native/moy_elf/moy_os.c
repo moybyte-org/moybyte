@@ -332,8 +332,8 @@ struct moy_os_proc {
     volatile uint8_t fb_state;  // FB_FREE, FB_WRITING, FB_READY, FB_TAKEN
     uint8_t fb_posted;          // a frame message posted, the last when the game had
     uint32_t fb_mark;           // read `fb_mark` records: the next waits for another read
-    int fb_w, fb_h;
-    uint8_t *fb;                // fb_w * fb_h palette indices
+    int fb_w, fb_h, fb_depth;
+    uint8_t *fb;                // fb_w * fb_h pixels of fb_depth bytes each
     sem_t_ fb_room;             // the frame let go: a present may write it
     sem_t_ fb_shown;            // a present made it READY
 #ifdef MOY_OS_UMODE
@@ -2013,7 +2013,7 @@ int moy_os_moy_term_size(int *cols, int *rows) {
 
 // -- the rows: a game's screen -------------------------------------------------------
 //
-// A game's frame (moy_os_game): moy_present copies the module's indices into
+// A game's frame (moy_os_game): moy_present copies the module's pixels into
 // the process's frame while it is FREE, making it READY; the console's frame
 // call takes a READY frame (TAKEN) and lets it go (FREE) at its next call,
 // once it has drawn it. A present while the frame is not FREE waits for it.
@@ -2044,7 +2044,7 @@ int moy_os_moy_present(const void *px, size_t n) {
         return -1;
     }
     moy_os_proc_t *p = t->p;
-    if (px == NULL || n != (size_t)p->fb_w * (size_t)p->fb_h) {
+    if (px == NULL || n != (size_t)p->fb_w * (size_t)p->fb_h * (size_t)p->fb_depth) {
         moy_os_errno_set(EINVAL);
         leave(t);
         return -1;
@@ -3587,10 +3587,11 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
     return r;
 }
 
-// A service's start, or with a screen of w x h (w > 0) a game's: the
-// process, its main running on its own task, or NULL with the reason in err.
+// A service's start, or with a screen of w x h (w > 0) pixels of `depth`
+// bytes a game's: the process, its main running on its own task, or NULL
+// with the reason in err.
 static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *caps,
-                                 uint32_t pid, const char *id, int w, int h,
+                                 uint32_t pid, const char *id, int w, int h, int depth,
                                  const moy_app_run_t *run, char *err, size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, true, err, errlen);
     if (p == NULL) {
@@ -3634,7 +3635,8 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
         p->game = 1;
         p->fb_w = w;
         p->fb_h = h;
-        p->fb = os_alloc((size_t)w * (size_t)h);
+        p->fb_depth = depth;
+        p->fb = os_alloc((size_t)w * (size_t)h * (size_t)depth);
         if (p->fb == NULL) {
             snprintf(err, errlen, "out of memory");
             proc_end(p);
@@ -3663,20 +3665,28 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
 moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
                               uint32_t pid, const char *id, const moy_app_run_t *run,
                               char *err, size_t errlen) {
-    return loop_start(m, caps, pid, id, 0, 0, run, err, errlen);
+    return loop_start(m, caps, pid, id, 0, 0, 0, run, err, errlen);
 }
 
 moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
-                           const char *id, int w, int h, const moy_app_run_t *run, char *err,
-                           size_t errlen) {
-    if (w <= 0 || h <= 0) {
+                           const char *id, int w, int h, int depth, const moy_app_run_t *run,
+                           char *err, size_t errlen) {
+    if (w <= 0 || h <= 0 || depth < 1 || depth > 2) {
         snprintf(err, errlen, "no screen for it");
         if (m->unload != NULL) {
             m->unload(m->loaded);
         }
         return NULL;
     }
-    return loop_start(m, caps, pid, id, w, h, run, err, errlen);
+    // An app's thread runs the toolkit it links (sdk/include/moybyte/ui.h),
+    // whose calls nest deeper than a game's: twice the default stack.
+    moy_os_caps_t app;
+    if (caps == NULL && depth == 2) {
+        moy_os_default_caps(&app);
+        app.stack *= 2;
+        caps = &app;
+    }
+    return loop_start(m, caps, pid, id, w, h, depth, run, err, errlen);
 }
 
 // The record of `pid`, looked up under the lock: a command's record is freed
@@ -3897,7 +3907,7 @@ static moy_os_proc_t *game_of(uint32_t pid) {
 }
 
 int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms,
-                      uint32_t max_us) {
+                      uint32_t max_us, const int32_t *in, int n_in) {
     moy_os_proc_t *p = game_of(pid);
     if (p == NULL) {
         return -1;
@@ -3912,9 +3922,13 @@ int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms
     uint32_t mark = p->events;
     unlock();
     if (send) {
-        char args[40];
-        int n = snprintf(args, sizeof args, "[%u,%u,%u]", (unsigned)held, (unsigned)pressed,
+        char args[40 + 12 * MOY_OS_FRAME_IN];
+        int n = snprintf(args, sizeof args, "[%u,%u,%u", (unsigned)held, (unsigned)pressed,
                          (unsigned)ms);
+        for (int i = 0; i < n_in && i < MOY_OS_FRAME_IN; i++) {
+            n += snprintf(args + n, sizeof args - (size_t)n, ",%ld", (long)in[i]);
+        }
+        args[n++] = ']';
         if (moy_evq_post(pid, 0, MOY_OS_FRAME, args, (size_t)n) == MOY_EVQ_OK) {
             lock();
             p->fb_posted = 1;
@@ -3950,13 +3964,14 @@ int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms
     }
 }
 
-const uint8_t *moy_os_game_screen(uint32_t pid, int *w, int *h) {
+const uint8_t *moy_os_game_screen(uint32_t pid, int *w, int *h, int *depth) {
     moy_os_proc_t *p = game_of(pid);
     if (p == NULL) {
         return NULL;
     }
     *w = p->fb_w;
     *h = p->fb_h;
+    *depth = p->fb_depth;
     return p->fb;
 }
 

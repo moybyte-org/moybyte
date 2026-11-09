@@ -506,7 +506,8 @@ static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 5, mod_service);
 
-// game(path, pid, id, flags, w, h, run=None) -> None, or why it did not start.
+// game(path, pid, id, flags, w, h, run=None, depth=1) -> None, or why it did
+// not start: its screen w x h pixels of `depth` bytes (moy_os_game).
 static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
     char err[ERR_MAX];
     moy_app_run_t run;
@@ -515,33 +516,44 @@ static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
     if (load(args[0], (uint32_t)mp_obj_get_int(args[3]), (uint32_t)mp_obj_get_int(args[1]), &m, err, sizeof err) != 0) {
         return mp_obj_new_str(err, strlen(err));
     }
+    int depth = n_args > 7 ? mp_obj_get_int(args[7]) : 1;
     if (moy_os_game(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
-                    mp_obj_get_int(args[4]), mp_obj_get_int(args[5]), rp, err, sizeof err)
+                    mp_obj_get_int(args[4]), mp_obj_get_int(args[5]), depth, rp, err,
+                    sizeof err)
             == NULL) {
         return mp_obj_new_str(err, strlen(err));
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_game_obj, 6, 7, mod_game);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_game_obj, 6, 8, mod_game);
 
-// frame(pid, held, pressed, ms, max_us) -> moy_os_game_frame's answer.
+// frame(pid, held, pressed, ms, max_us, words=None) -> moy_os_game_frame's
+// answer; `words` an array('i') of the frame's input words.
 static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
+    const int32_t *in = NULL;
+    int n_in = 0;
+    if (n_args > 5 && args[5] != mp_const_none) {
+        mp_buffer_info_t b;
+        mp_get_buffer_raise(args[5], &b, MP_BUFFER_READ);
+        in = (const int32_t *)b.buf;
+        n_in = (int)(b.len / sizeof(int32_t));
+    }
     return MP_OBJ_NEW_SMALL_INT(moy_os_game_frame(
         (uint32_t)mp_obj_get_int(args[0]), (uint32_t)mp_obj_get_int(args[1]),
         (uint32_t)mp_obj_get_int(args[2]), (uint32_t)mp_obj_get_int(args[3]),
-        (uint32_t)mp_obj_get_int(args[4])));
+        (uint32_t)mp_obj_get_int(args[4]), in, n_in));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 5, 5, mod_frame);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 5, 6, mod_frame);
 
 // screen(pid) -> a view of the game's frame for its life, or None.
 static mp_obj_t mod_screen(mp_obj_t pid) {
-    int w = 0, h = 0;
-    const uint8_t *fb = moy_os_game_screen((uint32_t)mp_obj_get_int(pid), &w, &h);
+    int w = 0, h = 0, depth = 1;
+    const uint8_t *fb = moy_os_game_screen((uint32_t)mp_obj_get_int(pid), &w, &h, &depth);
     if (fb == NULL) {
         return mp_const_none;
     }
-    return mp_obj_new_memoryview(BYTEARRAY_TYPECODE, (size_t)w * (size_t)h, (void *)fb);
+    return mp_obj_new_memoryview(BYTEARRAY_TYPECODE, (size_t)w * (size_t)h * (size_t)depth,
+                                 (void *)fb);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_screen_obj, mod_screen);
 

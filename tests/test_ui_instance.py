@@ -56,6 +56,7 @@ SHARED = {
     ("moy_ui.c", "s_cart_print"): "the console's print font, put aside inside the boundary",
     ("moy_ui.c", "s_gen"): "the theme's generation, a seqlock word",
     ("moy_ui.c", "s_writing"): "the console's setters' nesting, its task's alone",
+    ("moy_ui.c", "s_readers"): "the pulls copying the block, an atomic count a write waits on",
     ("moy_ui_depth.c", "s_depth"): BLOCK,
     ("moy_ui_depth.c", "s_paint"): BLOCK,
     ("moy_ui_depth.c", "s_paints"): BLOCK,

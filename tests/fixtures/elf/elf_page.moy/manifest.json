@@ -1,0 +1,10 @@
+{
+  "title": "Native page",
+  "id": "elf.page",
+  "moybyte": {
+    "type": "app",
+    "permissions": [
+      "full_access"
+    ]
+  }
+}

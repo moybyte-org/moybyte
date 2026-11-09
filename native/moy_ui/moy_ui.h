@@ -55,6 +55,8 @@ int moy_ui_state(const char *name, size_t n);
 // Point `look` at a token row (MOY_UI_TOKENS values, MOY_UI_ABSENT where the
 // theme is silent): its flatten starts over.
 int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]);
+// The token row `look` holds into `tokens`: MOY_UI_OK, or MOY_UI_BAD.
+int moy_ui_look_get(int look, int32_t tokens[MOY_UI_TOKENS]);
 // (field, ink, edge) of `kind` in `state` under `look`, -1 for nothing. A
 // disabled state inks in the live theme's disabled ink where it names one.
 int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
@@ -1179,9 +1181,9 @@ int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int
 // only inside the image that loaded it.
 //
 // The console's setters move a generation around their writes
-// (moy_ui_theme_write: odd while one writes, even after), so a pull from
-// another task copies the records between two reads of the same even
-// generation or answers none. moy_ui_theme_pull writes the block into
+// (moy_ui_theme_write: odd while one writes, even after), and a write waits
+// for the pulls copying when it begins, so a pull from another task copies
+// the records of one even generation or answers none. moy_ui_theme_pull writes the block into
 // `buf` and answers its generation where the theme is past `have`, else 0:
 // the theme has not moved, a setter was writing meanwhile (the next frame's
 // pull takes it), or `cap` is short of moy_ui_theme_size(). An instance
@@ -1194,9 +1196,15 @@ size_t moy_ui_theme_size(void);
 uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap);
 // A font the block names (a role's, an icon set's mask), console side: its
 // file's length, written into `buf` where `cap` holds it, while the theme
-// is at generation `gen` from before the copy to after it; 0 for a font no
-// slot holds or a theme that moved (the next generation's pull asks again).
+// is at generation `gen` (no write runs while it copies, as a pull's); 0
+// for a font no slot holds or a theme that moved (the next generation's
+// pull asks again).
 uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap);
+// moy_font_free and moy_font_reset (moy_text.h) as a theme write: a pull or
+// a font's copy on another task is never reading the bytes they free. The
+// console frees its fonts through these.
+int moy_ui_font_free(uint32_t font);
+void moy_ui_font_reset(void);
 // The words of the toolkit's records that hold font ids (each role's, then
 // the icon set's two masks), copy side: an install's fonts are the
 // console's ids, which a copy replaces with fonts of its own

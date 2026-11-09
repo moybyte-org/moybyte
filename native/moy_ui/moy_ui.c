@@ -6,6 +6,14 @@
 #include "moy_ui.h"
 #include "moy_theme.h"
 
+#if __has_include("freertos/FreeRTOS.h")
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#define READERS_WAIT() vTaskDelay(1)
+#else
+#define READERS_WAIT() ((void)0)
+#endif
+
 #if __has_include("esp_heap_caps.h")
 #include "esp_heap_caps.h"
 #define UI_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
@@ -142,6 +150,15 @@ int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]) {
     int rc = moy_ui_look_set_w(look, tokens);
     moy_ui_theme_write(0);
     return rc;
+}
+
+int moy_ui_look_get(int look, int32_t tokens[MOY_UI_TOKENS]) {
+    ui_t *u = ui();
+    if (u == NULL || look < 0 || look >= MOY_UI_LOOKS) {
+        return MOY_UI_BAD;
+    }
+    memcpy(tokens, u->look[look].tok, sizeof(u->look[look].tok));
+    return MOY_UI_OK;
 }
 
 const int16_t *moy_ui_sprite_slots(int look) {
@@ -878,12 +895,32 @@ static uint32_t theme_layout(const moy_ui_rec_t *r, int n) {
 
 static uint32_t s_gen = 2;              // even: settled; odd: a setter is writing
 static int s_writing;
+// The pulls copying the block now, from any task. A write begins by making
+// the generation odd and then waits for them, and a pull counts itself in
+// before it reads the generation, so no pull copies a record a write frees.
+static int s_readers;
+
+static int readers_in(void) {
+    __atomic_fetch_add(&s_readers, 1, __ATOMIC_SEQ_CST);
+    uint32_t g = __atomic_load_n(&s_gen, __ATOMIC_SEQ_CST);
+    if (g & 1u) {
+        __atomic_fetch_sub(&s_readers, 1, __ATOMIC_RELEASE);
+        return 0;
+    }
+    return 1;
+}
+
+static void readers_out(void) {
+    __atomic_fetch_sub(&s_readers, 1, __ATOMIC_RELEASE);
+}
 
 void moy_ui_theme_write(int begin) {
     if (begin ? s_writing++ == 0 : --s_writing == 0) {
         if (begin) {
-            __atomic_fetch_add(&s_gen, 1u, __ATOMIC_RELAXED);
-            __atomic_thread_fence(__ATOMIC_RELEASE);
+            __atomic_fetch_add(&s_gen, 1u, __ATOMIC_SEQ_CST);
+            while (__atomic_load_n(&s_readers, __ATOMIC_SEQ_CST) != 0) {
+                READERS_WAIT();
+            }
         } else {
             __atomic_fetch_add(&s_gen, 1u, __ATOMIC_RELEASE);
         }
@@ -906,9 +943,10 @@ size_t moy_ui_theme_size(void) {
 
 uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap) {
     uint32_t g = __atomic_load_n(&s_gen, __ATOMIC_ACQUIRE);
-    if (g == have || (g & 1u) || buf == NULL || cap < moy_ui_theme_size()) {
+    if (g == have || (g & 1u) || buf == NULL || cap < moy_ui_theme_size() || !readers_in()) {
         return 0;
     }
+    g = __atomic_load_n(&s_gen, __ATOMIC_RELAXED);
     moy_ui_rec_t r[THEME_RECS];
     int n = theme_recs(r);
     uint32_t *w = (uint32_t *)buf;
@@ -930,8 +968,8 @@ uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap) {
         memset(at + r[i].n, 0, round4(r[i].n) - r[i].n);
         at += round4(r[i].n);
     }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    return __atomic_load_n(&s_gen, __ATOMIC_RELAXED) == g ? g : 0;
+    readers_out();
+    return g;
 }
 
 int moy_ui_theme_put(const void *buf, size_t size) {
@@ -973,19 +1011,32 @@ int moy_ui_theme_put(const void *buf, size_t size) {
 }
 
 uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap) {
-    if ((gen & 1u) || __atomic_load_n(&s_gen, __ATOMIC_ACQUIRE) != gen) {
+    if ((gen & 1u) || !readers_in()) {
         return 0;
     }
     size_t n = 0;
-    const uint8_t *src = moy_font_bytes(font, &n);
-    if (src == NULL) {
-        return 0;
+    const uint8_t *src = NULL;
+    if (__atomic_load_n(&s_gen, __ATOMIC_RELAXED) == gen) {
+        src = moy_font_bytes(font, &n);
     }
-    if (buf != NULL && cap >= n) {
+    if (src != NULL && buf != NULL && cap >= n) {
         memcpy(buf, src, n);
     }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    return __atomic_load_n(&s_gen, __ATOMIC_RELAXED) == gen ? (uint32_t)n : 0;
+    readers_out();
+    return src != NULL ? (uint32_t)n : 0;
+}
+
+int moy_ui_font_free(uint32_t font) {
+    moy_ui_theme_write(1);
+    int rc = moy_font_free(font);
+    moy_ui_theme_write(0);
+    return rc;
+}
+
+void moy_ui_font_reset(void) {
+    moy_ui_theme_write(1);
+    moy_font_reset();
+    moy_ui_theme_write(0);
 }
 
 int moy_ui_theme_font_ids(uint32_t *ids[MOY_UI_THEME_FONTS]) {

@@ -249,7 +249,7 @@ class Engine:
     def screen(self, pid):
         return memoryview(self.px)
 
-    def frame(self, pid, held, pressed, ms, wait):
+    def frame(self, pid, held, pressed, ms, wait, words=None):
         self.n += 1
         return 3 if self.n & 1 else 0
 

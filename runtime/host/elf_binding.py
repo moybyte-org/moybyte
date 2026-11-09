@@ -92,11 +92,12 @@ def _lib():
         d.moy_os_stats.restype = None
         d.moy_os_set_net.argtypes = [_NET_FN, _P]
         d.moy_os_set_net.restype = None
-        d.hl_elf_game.argtypes = [_C, _U32, _C, _U32, _I, _I, _C, _C, _I]
+        d.hl_elf_game.argtypes = [_C, _U32, _C, _U32, _I, _I, _I, _C, _C, _I]
         d.hl_elf_game.restype = _I
-        d.moy_os_game_frame.argtypes = [_U32, _U32, _U32, _U32, _U32]
+        d.moy_os_game_frame.argtypes = [_U32, _U32, _U32, _U32, _U32, _P, _I]
         d.moy_os_game_frame.restype = _I
-        d.moy_os_game_screen.argtypes = [_U32, ctypes.POINTER(_I), ctypes.POINTER(_I)]
+        d.moy_os_game_screen.argtypes = [_U32, ctypes.POINTER(_I), ctypes.POINTER(_I),
+                                         ctypes.POINTER(_I)]
         d.moy_os_game_screen.restype = _P
         d.moy_os_game_stop.argtypes = [_U32]
         d.moy_os_game_stop.restype = _I
@@ -243,31 +244,40 @@ ENDED = -4              # moy_os.h's MOY_OS_ENDED
 FRAME_SENT, FRAME_SHOWN = 1, 2
 
 
-def game(path, pid, cid="", flags=0, w=0, h=0, run=None):
+def game(path, pid, cid="", flags=0, w=0, h=0, run=None, depth=1):
     """Start the native game at `path` as process `pid` (its Player run's),
-    its screen `w` x `h` palette indices, as the boards' `moy_elf.game`:
-    None, or why not."""
+    its screen `w` x `h` pixels of `depth` bytes (palette indices, or an
+    app's RGB565), as the boards' `moy_elf.game`: None, or why not."""
     d = _lib()
     err = ctypes.create_string_buffer(256)
     if d.hl_elf_game(path.encode(), int(pid), (cid or "").encode(), int(flags), int(w), int(h),
-                     _run(run), err, len(err)) != 0:
+                     int(depth), _run(run), err, len(err)) != 0:
         return err.value.decode("utf-8", "replace")
     return None
 
 
-def frame(pid, held, pressed, ms, max_us):
-    """moy_os_game_frame: a mask of FRAME_SENT and FRAME_SHOWN, ENDED, or -1."""
-    return _lib().moy_os_game_frame(int(pid), int(held), int(pressed), int(ms), int(max_us))
+def frame(pid, held, pressed, ms, max_us, words=None):
+    """moy_os_game_frame: a mask of FRAME_SENT and FRAME_SHOWN, ENDED, or -1.
+    `words`, an array('i'), the frame's input words (moy_os.h's
+    MOY_OS_FRAME_IN_*)."""
+    if words is None:
+        return _lib().moy_os_game_frame(int(pid), int(held), int(pressed), int(ms),
+                                        int(max_us), None, 0)
+    addr = words.buffer_info()[0]
+    return _lib().moy_os_game_frame(int(pid), int(held), int(pressed), int(ms), int(max_us),
+                                    addr, len(words))
 
 
 def screen(pid):
-    """Game `pid`'s frame as a writable view of its w x h indices, held for
-    the game's life (moy_os_game_screen), or None."""
-    w, h = _I(), _I()
-    addr = _lib().moy_os_game_screen(int(pid), ctypes.byref(w), ctypes.byref(h))
+    """Game `pid`'s frame as a writable view of its bytes, held for the
+    game's life (moy_os_game_screen), or None."""
+    w, h, depth = _I(), _I(), _I()
+    addr = _lib().moy_os_game_screen(int(pid), ctypes.byref(w), ctypes.byref(h),
+                                     ctypes.byref(depth))
     if not addr:
         return None
-    return memoryview((ctypes.c_uint8 * (w.value * h.value)).from_address(addr)).cast("B")
+    n = w.value * h.value * depth.value
+    return memoryview((ctypes.c_uint8 * n).from_address(addr)).cast("B")
 
 
 def game_stop(pid):

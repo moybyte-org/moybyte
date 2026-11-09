@@ -1160,7 +1160,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return rc, (fid.value if rc == 0 else None)
 
     def font_free(font):
-        return bool(lib.moy_font_free(int(font) & 0xFFFFFFFF))
+        return bool(lib.moy_ui_font_free(int(font) & 0xFFFFFFFF))
 
     def font_info(font):
         out = (c.c_int * 8)()           # moy_font_info_t
@@ -1203,7 +1203,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.theme_home = theme_home
     m.font_load = font_load
     m.font_file = font_file
-    m.font_reset = lib.moy_font_reset
+    m.font_reset = lib.moy_ui_font_reset
 
     def text_wire(*swapped):
         was = bool(lib.moy_text_wire_swapped())

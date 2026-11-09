@@ -803,13 +803,13 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_load_obj, ui_font_load);
 
 // font_free(font) -> bool: False for an id that names no loaded font.
 static mp_obj_t ui_font_free(mp_obj_t font) {
-    return mp_obj_new_bool(moy_font_free((uint32_t)mp_obj_get_int_truncated(font)));
+    return mp_obj_new_bool(moy_ui_font_free((uint32_t)mp_obj_get_int_truncated(font)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_free_obj, ui_font_free);
 
 // font_reset(): free every loaded font (moy_text.h).
 static mp_obj_t ui_font_reset(void) {
-    moy_font_reset();
+    moy_ui_font_reset();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_font_reset_obj, ui_font_reset);

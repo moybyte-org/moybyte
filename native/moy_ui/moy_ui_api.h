@@ -338,6 +338,9 @@ size_t moy_ui_inst_size(void);
 void moy_ui_inst_pull(moy_ui_inst_t *I, uint32_t (*pull)(uint32_t have, void *buf, size_t cap),
                       void *buf, size_t cap,
                       uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap));
+// The theme pulled where it moved and installed, its fonts with it: what
+// every begin over `I` does first.
+void moy_ui_inst_sync(moy_ui_inst_t *I);
 void moy_ui_inst_init(moy_ui_inst_t *I);
 void moy_ui_inst_free(moy_ui_inst_t *I);
 

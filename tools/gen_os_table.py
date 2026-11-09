@@ -88,6 +88,7 @@ LUA_EXT = str(runtime_file("lua_ext.py"))
 APP_DOC = os.path.join(ROOT, "docs", "app_api_v1.md")
 PLUGIN_TABLE = os.path.join(ROOT, "sdk", "moybyte_sdk", "os_table.py")
 APP_WASM_SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "app.h")
+UI_SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "ui.h")
 STUBS = os.path.join(ROOT, "sdk", "moybyte_sdk", "stubs")
 LUA_STUB = os.path.join(STUBS, "moybyte_os.lua")
 PY_STUBS = (os.path.join(STUBS, "__builtins__.pyi"), os.path.join(STUBS, "moybyte.pyi"))
@@ -591,7 +592,7 @@ def check(src):
             if r["how"] != "direct" and (len(outs) > 1 or (outs and params(r)[-1][1] != "out")):
                 raise TableError("%s: the adapter writes one answer, last" % name)
         e = r.get("elf")
-        if e is not None and not (isinstance(e, int) or e == "deferred"):
+        if e is not None and not (isinstance(e, int) or e == "linked"):
             raise TableError("%s's elf: %r" % (name, e))
         if isinstance(e, int) and kind == "moybyte" and "c" not in r:
             if not is_door(r) or "in" not in r or "ret" not in r:
@@ -629,8 +630,8 @@ def check(src):
         if not perm_tiers(p, src):
             raise TableError("%s: no tier serves it" % p["perm"])
     for r in door_rows(src):
-        if role_of(r) == "ui" and r.get("elf") != "deferred":
-            raise TableError("%s: the toolkit's rows are deferred for ELF" % r["name"])
+        if role_of(r) == "ui" and r.get("elf") != "linked":
+            raise TableError("%s: the toolkit's rows are linked into an ELF module" % r["name"])
     _check_elf_table(elf(src))
 
 
@@ -1780,6 +1781,57 @@ def gen_app_wasm_h(src):
     return "\n".join(o)
 
 
+def gen_sdk_ui_h(src):
+    rows = [r for r in wasm_rows(src) if role_of(r) == "ui"]
+    o = [HEAD,
+         "// The public UI API for a native app (docs/ui_api_2026-10.md): the toolkit\n"
+         "// linked into the module (sdk/src/moyui_link.c, native/moy_ui), drawing on\n"
+         "// the app's own RGB565 screen. Each ui row is app.h's, the same call a\n"
+         "// compiled app imports, answered inline by the copy's RUN face\n"
+         "// (native/moy_ui/moy_ui_wasm.h). A frame is moy_ui_link_frame, the rows,\n"
+         "// then moy_ui_link_show:\n"
+         "//\n"
+         "//     moy_frame_t f;\n"
+         "//     int32_t on = 1;\n"
+         "//     while (moy_ui_link_frame(&f)) {\n"
+         "//         ui_page(\"Settings\", 8, NULL, 0, NULL, 0);\n"
+         "//         on = ui_toggle(\"Sound\", 5, on, NULL, 0);\n"
+         "//         moy_ui_link_show();\n"
+         "//     }\n",
+         "#ifndef MOYBYTE_UI_H", "#define MOYBYTE_UI_H", "",
+         "#include <stdint.h>", "",
+         '#include "moybyte/frame.h"', "",
+         "#ifdef __cplusplus", 'extern "C" {', "#endif", "",
+         "// The copy opened on the program's screen (moy_screen) with the console's",
+         "// theme: 0, or -1 for no screen or no memory. The first frame opens it.",
+         "int moy_ui_link_open(void);",
+         "// The console's next frame into *f, its input the rows' and the theme",
+         "// pulled where it moved: 1, or 0 once the app is stopped.",
+         "int moy_ui_link_frame(moy_frame_t *f);",
+         "// The frame's screen handed to the console (moy_present): 0, or -1.",
+         "int moy_ui_link_show(void);",
+         "// The canvas the rows draw on (a libmoy moy_canvas), NULL before the open.",
+         "void *moy_ui_link_target(void);", ""]
+    for r in rows:
+        o += _c_decl("int32_t moy_ui_wasm_%s" % verb_of(r), _ui_c_params(r).split(", "), ";")
+    o.append("")
+    for r in rows:
+        args = ["moy_ui_link_target()"]
+        for n, t in params(r):
+            if t == "int":
+                args.append(n)
+            elif t == "out":
+                args += ["(uint8_t *)%s" % n, "%s_cap" % n]
+            else:
+                args += ["(const uint8_t *)%s" % n, "%s_n" % n]
+        o.append("// %s" % r["name"])
+        o += _c_decl("static inline int32_t %s" % ident(r["name"]), _app_c_params(r), " {")
+        o += _c_decl("    return moy_ui_wasm_%s" % verb_of(r), args, ";")
+        o.append("}")
+    o += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif // MOYBYTE_UI_H", ""]
+    return "\n".join(o)
+
+
 def _stub_rows(src, field):
     """[(name, row, permissions)] of the names `field` lists, in the source's
     order, each once."""
@@ -1863,6 +1915,7 @@ def outputs(src=None):
             (SHELL_SERVERS, gen_door_args(src)), (SCHEDULER, gen_calls(src)),
             (LUA_EXT, gen_lua_ext(src)), (APP_DOC, gen_doc(src)),
             (PLUGIN_TABLE, gen_plugin_table(src)), (APP_WASM_SDK_H, gen_app_wasm_h(src)),
+            (UI_SDK_H, gen_sdk_ui_h(src)),
             (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
 
 

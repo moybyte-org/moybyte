@@ -89,11 +89,21 @@ standing only where it lists the reason.
   headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
 - `include/moybyte/app.h` (generated): a C app compiled to wasm's
   `moybyte.app` imports, each under its import name.
-- `include/moybyte/game.h`: a native game's frame loop and screen
-  (`native/moy_elf/moy_os.h`, A GAME): `moy_game_screen` maps a screen-sized
-  buffer and puts a libmoy canvas over it, `moy_game_frame` waits for the
-  console's next frame message and reads its buttons, and `moy_present`
-  hands the screen over. It includes libmoy's `moy.h`.
+- `include/moybyte/frame.h`: the frame loop (`native/moy_elf/moy_os.h`, A
+  GAME): `moy_game_frame` waits for the console's next frame message and
+  reads its buttons and an app's input words.
+- `include/moybyte/game.h`: a native game's screen: `moy_game_screen` maps
+  a screen-sized buffer and puts a libmoy canvas over it, and `moy_present`
+  hands the screen over. It includes `frame.h` and libmoy's `moy.h`.
+- `include/moybyte/ui.h` (generated): the public UI API for a native app
+  (a manifest of type `app`), every `ui` row under app.h's name and
+  signature, answered inline by the toolkit the app links:
+  `src/moyui_link.c` and `native/moy_ui` with its RUN face, built into
+  `libmoyui.a` (`tools/elf_cart.py`'s `libmoyui`, libmoy at RGB565 in it),
+  which an app's module links before `libmoyos.a`. `moy_ui_link_frame`
+  takes the frame and pulls the console's theme where it moved (the
+  `moy_ui_pull` and `moy_ui_font_pull` rows), the rows draw on the app's
+  own canvas, and `moy_ui_link_show` presents it, RGB565.
 - libmoy's raster (**decision, owner, 2026-11-09, #246**: the game verbs
   are a library, not rows): `native/moy_gfx/libmoy`'s `moy_canvas.c`,
   `moy_sprite.c` and `moy_data.c`, the copy the console compiles, built

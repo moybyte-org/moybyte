@@ -120,10 +120,11 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
   kill deletes its threads where they stand, as a stop past its time does.
 - A game is a service's loop with a screen (`moy_os.h`, A GAME), started by
   the Player for its run's pid (`moy_os_game`) and never the scheduler's: it
-  hears the system's `frame` message ([held, pressed, ms]) once a frame
-  while it has read since the last, so a slow game is never flooded and a
-  paused one is sent nothing, and it presents a whole screen of palette
-  indices with `moy_present`, which COPIES it into the process's frame
+  hears the system's `frame` message ([held, pressed, ms], and an app's
+  input words after them, `MOY_OS_FRAME_IN_*`) once a frame while it has
+  read since the last, so a slow game is never flooded and a paused one is
+  sent nothing, and it presents a whole screen with `moy_present`: palette
+  indices, or an app's RGB565 (the screen's depth, `moy_os_game`'s), which COPIES it into the process's frame
   (kernel memory, so a U-mode module is never handed a kernel pointer and
   its own buffer stays its own). The frame has one writer at a time: a
   present waits while the frame is READY or TAKEN, and the console's frame
