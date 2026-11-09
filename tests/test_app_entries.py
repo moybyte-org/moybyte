@@ -352,6 +352,26 @@ def test_the_install_prompt_says_the_app_works_in_the_background():
     assert app_perms.prompt(dict(cart, entries=None))[-1] != app_perms.BACKGROUND
 
 
+def test_a_copy_keeps_its_service_and_what_its_program_asks_for(tmp_path):
+    """The Make tab's COPY regenerates the manifest: it keeps the entry (and
+    the file beside it), the permissions, `receives` and the rest of
+    COPY_KEEPS, and drops what makes a seed a system cart."""
+    from runtime import moy_carts
+    root = _cart(tmp_path, "service.lua", LUA_SVC, perms=("prefs", "autostart"))
+    man = json.loads((root / "manifest.json").read_text())
+    man["moybyte"].update(receives=["ping"], handles=["text/plain"], system=True, order=3)
+    (root / "manifest.json").write_text(json.dumps(man))
+    cart = moy_carts.load(str(root))
+    dup = moy_carts.duplicate(cart, str(tmp_path / "carts"))
+    assert dup["entries"] == {"service": "service.lua"}
+    assert dup["permissions"] == ["prefs", "autostart"]
+    assert dup["receives"] == ["ping"] and dup["handles"] == ["text/plain"]
+    ven = json.loads(open(dup["path"] + "/manifest.json").read())["moybyte"]
+    assert "system" not in ven and "order" not in ven
+    run = S.as_service(dup)
+    assert run["id"] == dup["id"] != APP and run["src"] == LUA_SVC
+
+
 # -- a WASI service entry --------------------------------------------------------
 
 @pytest.fixture(scope="module")

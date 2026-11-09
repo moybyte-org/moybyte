@@ -1559,7 +1559,7 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
            runtime="python", main="main.py", scenes=None, scene_order=None,
            author=None, palette=None, extensions=None, format=None, fps=None,
            icon=None, canvas=None, listing=None, ns=USER_NS, glass=False,
-           pictures=None):
+           pictures=None, vendor_kept=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
@@ -1570,18 +1570,19 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     duplicate()'s passthrough (SPEC.md 3.1): copying a spec cart must yield
     another "moy-1" cart at its declared tick, not a restamped moybyte one.
     `listing` is a cart dict whose description/genre/tags (SPEC.md 3.7) the
-    manifest keeps, the PICO-8 tag included."""
+    manifest keeps, the PICO-8 tag included; `vendor_kept` the Moybyte fields
+    a copy keeps (`COPY_KEEPS`), written into its "moybyte" object."""
     d = _unique_dir(root, slug(title), ns)
     _mkdir(d)
     return _whole_or_none(d, lambda: _create_in(
         d, title, src, cfg, edit, type, runtime, main, scenes, scene_order,
         author, palette, extensions, format, fps, icon, canvas, listing, glass,
-        pictures))
+        pictures, vendor_kept))
 
 
 def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
                scene_order, author, palette, extensions, format, fps, icon,
-               canvas, listing, glass=False, pictures=None):
+               canvas, listing, glass=False, pictures=None, vendor_kept=None):
     name = d.replace("\\", "/").rsplit("/", 1)[-1]
     manifest = {
         "format": format or CART_FORMAT, "title": title,
@@ -1589,6 +1590,7 @@ def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
         "runtime": runtime, "main": main,
     }
     ven = {"type": type, "edit": edit or []}
+    ven.update(vendor_kept or {})
     if glass:                         # a per-glass wallpaper stays one
         ven["glass"] = True
     if pictures is not None:          # and a picture wallpaper
@@ -1681,6 +1683,19 @@ def _copy_cart_files(src, dst, main):
                     raise
 
 
+# What a copy's program does, which the copy's regenerated manifest keeps:
+# the permissions it asks for (its consent is its own, under its new id), the
+# MIME types its app opens, the messages it takes, its badges, its entry
+# points and whether it draws every frame. A seed cart's own fields (`system`,
+# `order`, `targets`, `app`) do not follow a copy: the copy is the kid's.
+COPY_KEEPS = ("permissions", "required", "handles", "receives", "achievements",
+              "entries", "animates")
+
+
+def _kept(cart):
+    return {k: cart[k] for k in COPY_KEEPS if cart.get(k)}
+
+
 def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
     if cart.get("runtime") == "wasm" and cart.get("path"):
         return _duplicate_compiled(cart, root, new_title, ns)
@@ -1698,7 +1713,8 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
                  canvas=cart.get("canvas"),                  # spec 1/3.1 cart canvas
                  listing=cart,                               # spec 3.7 description/genre/tags
                  ns=ns, glass=cart.get("glass", False),      # a per-glass wallpaper
-                 pictures=cart.get("pictures"))              # a picture wallpaper
+                 pictures=cart.get("pictures"),              # a picture wallpaper
+                 vendor_kept=_kept(cart))                    # what its program does
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
     # blocks.json, images/, docs/ -- lives only in the source FOLDER, so a copy
