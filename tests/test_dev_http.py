@@ -83,7 +83,7 @@ def test_a_get_returns_the_body_and_holds_the_radio_while_it_runs(ws, server):
     dev_http.auto_run = False
     r = _as(pid, lambda: moybyte.http.get(server + "/hello"))
     assert r.state() is None
-    assert "http" in ws.leases.holders() and ws.wifi.radio is True
+    assert ws.leases.holders() == ["http:%d" % pid] and ws.wifi.radio is True
     N.run()
     assert r.state() == (200, 14)
     assert r.body() == b"hello, moybyte"
@@ -112,7 +112,7 @@ def test_a_stream_brings_a_body_of_any_length_through_its_window(ws, server):
         if not n and r.ended():
             break
     assert bytes(got) == BIG
-    assert "http" in ws.leases.holders()
+    assert ws.leases.holders() == ["http:%d" % pid]
     r.close()
     assert ws.leases.holders() == [] and N.count(0) == 0
 
@@ -179,12 +179,32 @@ def test_a_process_ending_mid_request_closes_it_and_lets_the_radio_go(ws, server
     pid = L.spawn("t.http")
     dev_http.auto_run = False
     r = _as(pid, lambda: moybyte.http.get(server + "/hello"))
-    assert "http" in ws.leases.holders()
+    assert ws.leases.holders() == ["http:%d" % pid]
     moybyte.end(pid)
     assert N.count(pid) == 0 and ws.leases.holders() == [] and ws.wifi.radio is False
     with pytest.raises(OSError) as e:
         r.readinto(bytearray(4))
     assert e.value.errno == errno.EBADF
+
+
+def test_a_process_killed_mid_request_lets_go_its_hold_and_no_other(ws, server):
+    """Each process's requests hold the radio under its own pid: killing one
+    mid-request lets exactly its hold go (the lease table's sweep of its
+    rows), and the other process's request keeps the radio up."""
+    a, b = L.spawn("t.http"), L.spawn("t.http")
+    dev_http.auto_run = False
+    ra = _as(a, lambda: moybyte.http.get(server + "/hello"))
+    rb = _as(b, lambda: moybyte.http.get(server + "/hello"))
+    assert sorted(ws.leases.holders()) == sorted(["http:%d" % a, "http:%d" % b])
+    moybyte.end(a)
+    assert ws.leases.holders() == ["http:%d" % b] and ws.wifi.radio is True
+    assert N.count(a) == 0 and N.count(b) == 1
+    N.run()
+    assert rb.state() == (200, 14) and rb.body() == b"hello, moybyte"
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
+    rb.close()
+    with pytest.raises(OSError):
+        ra.state()
 
 
 def test_close_mid_request_lets_the_radio_go(ws, server):

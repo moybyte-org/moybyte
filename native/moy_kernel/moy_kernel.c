@@ -1630,7 +1630,7 @@ static void moy_kernel_kstop_mark(void) {
     }
     uint32_t mask;
     moy_returns_run(k->returns, "kstop", 5);
-    moy_lease_wifi_hold("dev", 3, &mask);
+    moy_lease_wifi_hold(MOY_LEASE_SHELL, "dev", 3, &mask);
 }
 
 // What the mark reads after the stop, cleared: "route=kstop lease=dev" when
@@ -1654,7 +1654,7 @@ static void moy_kernel_kstop_readback(char *out, size_t n) {
     }
     uint32_t mask;
     moy_returns_run(k->returns, NULL, 0);
-    moy_lease_wifi_release("dev", 3, &mask);
+    moy_lease_wifi_release(MOY_LEASE_SHELL, "dev", 3, &mask);
 }
 
 void moy_kernel_kstop(int n) {

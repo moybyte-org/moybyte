@@ -527,25 +527,39 @@ uint32_t moy_lease_wifi_bit(const char *tag, size_t n) {
     return 0u;
 }
 
-uint32_t moy_lease_wifi_mask(void) {
-    uint32_t at = device_row(MOY_LEASE_WIFI);
-    return at != 0 ? row_of(at)->tags : 0u;
+static moy_lease_row_t *wifi_at(uint32_t s) {
+    if (moy_htab_at(s_tab, s) == 0) {
+        return NULL;
+    }
+    moy_lease_row_t *r = moy_htab_row(s_tab, s);
+    return r->cls == MOY_LEASE_WIFI ? r : NULL;
 }
 
-int moy_lease_wifi_hold(const char *tag, size_t n, uint32_t *mask) {
+uint32_t moy_lease_wifi_mask(void) {
+    uint32_t mask = 0u;
+    for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        const moy_lease_row_t *r = wifi_at(s);
+        mask |= r != NULL ? r->tags : 0u;
+    }
+    return mask;
+}
+
+int moy_lease_wifi_hold(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
     uint32_t bit = moy_lease_wifi_bit(tag, n);
-    if (bit == 0u) {
+    if (bit == 0u || owner == 0u) {
         return MOY_LEASE_BAD;
     }
-    uint32_t at = device_row(MOY_LEASE_WIFI);
-    moy_lease_row_t *r;
-    if (at != 0) {
-        r = row_of(at);
-    } else {
+    moy_lease_row_t *r = NULL;
+    for (uint32_t s = 0; r == NULL && s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        r = wifi_at(s);
+        r = r != NULL && r->owner == owner ? r : NULL;
+    }
+    if (r == NULL) {
         int rc = table();
         if (rc != MOY_LEASE_OK) {
             return rc;
         }
+        uint32_t at;
         void *row;
         rc = moy_htab_add(s_tab, &at, &row);
         if (rc != MOY_HTAB_OK) {
@@ -553,36 +567,49 @@ int moy_lease_wifi_hold(const char *tag, size_t n, uint32_t *mask) {
         }
         r = row;
         memset(r, 0, sizeof(*r));
-        r->owner = MOY_LEASE_SHELL;
+        r->owner = owner;
         r->cls = MOY_LEASE_WIFI;
     }
     r->tags |= bit;
-    *mask = r->tags;
+    *mask = moy_lease_wifi_mask();
     return MOY_LEASE_OK;
 }
 
-int moy_lease_wifi_release(const char *tag, size_t n, uint32_t *mask) {
+int moy_lease_wifi_release(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
     uint32_t bit = moy_lease_wifi_bit(tag, n);
     if (bit == 0u) {
         return MOY_LEASE_BAD;
     }
-    uint32_t at = device_row(MOY_LEASE_WIFI);
-    *mask = 0u;
-    if (at != 0) {
-        moy_lease_row_t *r = row_of(at);
-        r->tags &= ~bit;
-        *mask = r->tags;
-        if (r->tags == 0u) {
-            moy_htab_release(s_tab, at);
+    for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        moy_lease_row_t *r = wifi_at(s);
+        if (r != NULL && (owner == 0u || r->owner == owner)) {
+            r->tags &= ~bit;
+            if (r->tags == 0u) {
+                moy_htab_release(s_tab, moy_htab_at(s_tab, s));
+            }
         }
     }
+    *mask = moy_lease_wifi_mask();
     return MOY_LEASE_OK;
 }
 
+int moy_lease_wifi_holder(uint32_t i, uint32_t *owner, uint32_t *tags) {
+    for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        const moy_lease_row_t *r = wifi_at(s);
+        if (r != NULL && i-- == 0u) {
+            *owner = r->owner;
+            *tags = r->tags;
+            return MOY_LEASE_OK;
+        }
+    }
+    return MOY_LEASE_STALE;
+}
+
 void moy_lease_wifi_reset(void) {
-    uint32_t at = device_row(MOY_LEASE_WIFI);
-    if (at != 0) {
-        moy_htab_release(s_tab, at);
+    for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        if (wifi_at(s) != NULL) {
+            moy_htab_release(s_tab, moy_htab_at(s_tab, s));
+        }
     }
 }
 

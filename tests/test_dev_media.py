@@ -441,15 +441,15 @@ def test_the_radio_is_held_while_a_url_may_play(media, server, tmp_path):
     devices.grants = None
     pid = L.spawn("t.lease")
     _as(pid, lambda: moybyte.media.play(server + "/a.mp3"))
-    assert "media" in ws.leases.holders()
+    assert ws.leases.held("media")
     assert _drive(lambda: moybyte.media.now()["state"] == "ended")
-    assert "media" not in ws.leases.holders()            # the list ended
+    assert not ws.leases.held("media")            # the list ended
     _as(pid, lambda: moybyte.media.play(server + "/a.mp3"))
-    assert "media" in ws.leases.holders()
+    assert ws.leases.held("media")
     _as(pid, moybyte.media.stop)
-    assert "media" not in ws.leases.holders()
+    assert not ws.leases.held("media")
     _as(pid, lambda: moybyte.media.play(str(TONE)))
-    assert "media" not in ws.leases.holders()            # a file needs no radio
+    assert not ws.leases.held("media")            # a file needs no radio
     devices.console = None
 
 

@@ -171,8 +171,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   fragmented allocation takes every byte and every big cart fails to load until
   a hard reset.
 - **The WiFi radio is a LEASE (2026-09-07)**: off unless something holds it.
-  `Workstation.wifi_hold(tag)` powers the STA up and the last
-  `wifi_release(tag)` powers it down (`esp_wifi_stop`), which keeps the S3's
+  `Workstation.wifi_hold(tag, pid=None)` powers the STA up and the last
+  `wifi_release(tag, pid=None)` powers it down (`esp_wifi_stop`), which keeps the S3's
   WLAN-vs-LCD-DMA internal-RAM fight to when the network is needed. The holders
   are `web` (released when the webhost's socket closes), `update` (taken before
   the hand-off releases `web`), `settings` (the WIFI panel), `cart` (a run with
@@ -182,10 +182,14 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `media` (a stream while a URL of its list may play,
   `runtime/system/dev_media.py`), `ssh` (the SSH server while a password
   is set, `runtime/system/ssh_service.py`) and `native` (a native command
-  from its first socket to its end, `runtime/run/elf_run.py`).
+  from its first socket to its end, `runtime/run/elf_run.py`). `cart`,
+  `http`, `media` and `native` are a process's (`console_spine.PROC_TAGS`):
+  held under its pid in a lease row it owns, so its end (`moy_lease_sweep`)
+  lets exactly its holds go and another process's survive.
   A new network consumer takes a tag and releases it on every way out, or the
   radio never goes off again — `tests/test_wifi.py`'s lease section is the
-  guard and `state`'s `wifi_held` names the holders. On the consoles the
+  guard and `state`'s `wifi_held` names the holders (a process's as
+  `tag:pid`). On the consoles the
   station is the kernel's driver (`native/moy_net/moy_wifi.c`, reached through
   `device_wifi.kernel_wlan`; Python never constructs the port's `network.WLAN`),
   it outlives a soft reset, and a new VM puts it down unless the kernel's

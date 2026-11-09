@@ -623,9 +623,12 @@ class Player(PlayerDiag):
             except Exception:  # noqa: BLE001 -- teardown must never block an exit
                 pass
             self.ws.wifi_release("link")
-        # ...and the run's own lease. Nothing else holds the WiFi at a plain
-        # exit, so this is where a console goes back to radio-off.
-        self.ws.wifi_release("cart")
+        # ...and the run's own lease, which its process's end let go; a run
+        # that ended in the kernel has no process left to name, so every
+        # "cart" hold goes (one run holds it at a time). Nothing else holds
+        # the WiFi at a plain exit, so this is where a console goes back to
+        # radio-off.
+        self.ws.wifi_release("cart", 0)
 
     def release_world(self):
         """Drop the dead run's WORLD at EXIT, not at the next start (#66 the
@@ -1189,7 +1192,7 @@ class Player(PlayerDiag):
         # cart namespace iff the backend it receives is non-None.
         wifi = ws.wifi if ws._cart_has_perm("network") else None
         if wifi is not None:
-            ws.wifi_hold("cart")       # the radio lease for this run; release_world lets go
+            ws.wifi_hold("cart", self.pid)  # the radio lease for this run; its end lets go
         # Multiplayer message service (#65): gate net.* by the "multiplayer"
         # manifest permission exactly like wifi's "network" gate. reset() drops any
         # handler/inbox from a previous run so a fresh run starts clean; make_api
@@ -1649,7 +1652,7 @@ class Player(PlayerDiag):
             return False
         ws = self.ws
         leases = getattr(ws, "leases", None)
-        if leases is None or "media" not in leases.holders():
+        if leases is None or not leases.held("media"):
             return False
         try:
             _moy_play.end(run)

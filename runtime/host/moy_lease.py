@@ -26,6 +26,7 @@ WIFI = 8
 WIFI_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh",
              "native")
 VM, PINS = 0x01, 0x02
+SHELL = 1
 PIN_IN, PIN_OUT, PIN_PU, PIN_PD, PIN_PERIPH = 0x01, 0x02, 0x04, 0x08, 0x10
 PIN_SAFE = PIN_IN
 ROWS_MAX = 16
@@ -67,9 +68,11 @@ _SIGS = (
     ("moy_lease_sim_get", [_I], _I),
     ("moy_lease_reset", [], None),
     ("moy_lease_wifi_bit", [ctypes.c_char_p, ctypes.c_size_t], _U32),
-    ("moy_lease_wifi_hold", [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U32)], _I),
-    ("moy_lease_wifi_release", [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U32)], _I),
+    ("moy_lease_wifi_hold", [_U32, ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U32)], _I),
+    ("moy_lease_wifi_release", [_U32, ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U32)],
+     _I),
     ("moy_lease_wifi_mask", [], _U32),
+    ("moy_lease_wifi_holder", [_U32, ctypes.POINTER(_U32), ctypes.POINTER(_U32)], _I),
     ("moy_lease_wifi_reset", [], None),
 )
 
@@ -196,7 +199,8 @@ def reset():
 
 
 class Wifi:
-    """The radio's holders (moy_lease.h's THE RADIO): a view of the one row."""
+    """The radio's holders (moy_lease.h's THE RADIO): a view of its rows, the
+    shell's (`owner` SHELL) and one a process that holds it owns."""
 
     @staticmethod
     def _tag(tag):
@@ -207,14 +211,14 @@ class Wifi:
             raise ValueError("unknown lease tag %s" % tag)
         return b
 
-    def hold(self, tag):
+    def hold(self, tag, owner=SHELL):
         b, mask = self._tag(tag), _U32()
-        _check(_lib().moy_lease_wifi_hold(b, len(b), ctypes.byref(mask)))
+        _check(_lib().moy_lease_wifi_hold(owner, b, len(b), ctypes.byref(mask)))
         return mask.value
 
-    def release(self, tag):
+    def release(self, tag, owner=SHELL):
         b, mask = self._tag(tag), _U32()
-        _check(_lib().moy_lease_wifi_release(b, len(b), ctypes.byref(mask)))
+        _check(_lib().moy_lease_wifi_release(owner, b, len(b), ctypes.byref(mask)))
         return mask.value
 
     def mask(self):
@@ -225,8 +229,13 @@ class Wifi:
         return bool(self.mask() & _lib().moy_lease_wifi_bit(b, len(b)))
 
     def holders(self):
-        mask = self.mask()
-        return [WIFI_TAGS[i] for i in range(len(WIFI_TAGS)) if mask >> i & 1]
+        out, owner, tags, i = [], _U32(), _U32(), 0
+        while _lib().moy_lease_wifi_holder(i, ctypes.byref(owner), ctypes.byref(tags)) == 0:
+            for j, tag in enumerate(WIFI_TAGS):
+                if tags.value >> j & 1:
+                    out.append(tag if owner.value == SHELL else "%s:%d" % (tag, owner.value))
+            i += 1
+        return out
 
 
 def wifi_reset():

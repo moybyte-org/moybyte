@@ -413,6 +413,30 @@ def test_the_radio_is_one_row_of_the_shells_holding_a_mask_of_tags():
         w.held(None)
 
 
+def test_a_process_holds_the_radio_in_its_own_row_and_its_end_lets_exactly_it_go():
+    """The shell's tags are one row; each process that holds the radio owns
+    a row of its own, so the listing names it and its sweep takes its holds
+    and no one else's. Owner 0 releases a tag from every process."""
+    w = N.Wifi()
+    w.hold("settings")
+    w.hold("http", 7)
+    w.hold("cart", 7)
+    assert w.hold("http", 9) == w.hold("http", 9) == w.mask()
+    assert sorted((r[0], r[1]) for r in (N.get(h) for h in N.leases())) == [
+        (N.SHELL, N.WIFI), (7, N.WIFI), (9, N.WIFI)]
+    assert w.holders() == ["settings", "cart:7", "http:7", "http:9"]
+    assert N.sweep(7) == 1
+    assert w.holders() == ["settings", "http:9"] and w.held("http") and not w.held("cart")
+    w.hold("cart", 11)
+    w.release("http")                             # the shell holds no http: 9's stays
+    assert sorted(w.holders()) == ["cart:11", "http:9", "settings"]
+    assert w.release("cart", 0) == w.mask() and w.holders() == ["settings", "http:9"]
+    w.release("http", 9)
+    assert w.release("settings") == 0 and not N.leases()
+    with pytest.raises(OSError):
+        w.hold("cart", 0)                         # a hold names its holder
+
+
 def test_the_radios_row_takes_no_pin_and_holds_no_offer():
     N.Wifi().hold("ssh")
     h = N.take(2, N.GPIO, 0, (4,))
@@ -469,6 +493,9 @@ print("hold", w.hold("update"), w.hold("web"), w.hold("update"), ",".join(w.hold
 print("held", w.held("web"), w.held("cart"), w.mask(), len(N.leases()))
 print("release", w.release("link"), w.release("update"), w.release("web"), w.holders(),
       len(N.leases()))
+w.hold("ssh")
+print("procs", w.hold("http", 7), w.hold("cart", 9), w.holders(), N.sweep(7), w.holders(),
+      w.release("cart", 0), w.release("ssh"), len(N.leases()))
 for fn, arg in ((w.hold, "wasm"), (w.release, None), (w.held, "nobody")):
     try:
         fn(arg)
@@ -488,4 +515,5 @@ def test_the_radio_answers_alike_on_the_vm_a_board_runs(tmp_path):
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout.splitlines() == [
         "hold 2 3 3 web,update", "held True False 3 1", "release 3 1 0 [] 0",
+        "procs 640 648 ['ssh', 'http:7', 'cart:9'] 1 ['ssh', 'cart:9'] 512 0 0",
         "VALUE", "TYPE", "VALUE"]

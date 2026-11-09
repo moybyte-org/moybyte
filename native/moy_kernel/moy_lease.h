@@ -40,15 +40,19 @@
 // moy_<driver>_lease_end, weak: an image without the driver has none).
 //
 // THE RADIO. The WiFi station is off unless something holds it (the
-// consoles' rule, .claude/rules/boards.md): MOY_LEASE_WIFI is a SHARED class,
-// one row while anything holds it, owned by the shell (pid 1, which powers
-// the station up and down), whose `tags` are its holders, each a bit of the
-// closed table moy_lease_wifi_tag names ("web", "update", "settings", "cart",
-// "link", "carts", "dev", "http", "media", "ssh", "native"). A hold is idempotent per
-// tag; the last release lets the row go. The row survives a VM stop with the
-// table; a VM's fresh start (not a return start) lets it go with
-// moy_lease_wifi_reset. Dropped any other way, the holders are forgotten and
-// the station is powered down at the next release.
+// consoles' rule, .claude/rules/boards.md): MOY_LEASE_WIFI is a SHARED class
+// whose rows are its holders, each row's `tags` a mask of the closed table
+// moy_lease_wifi_tag names ("web", "update", "settings", "cart", "link",
+// "carts", "dev", "http", "media", "ssh", "native"). The console's own holds
+// are one row owned by the shell (pid 1, which powers the station up and
+// down); a process's (a run's "cart", a request's "http", a stream's "media",
+// a native process's "native") are one row it owns, so its end
+// (moy_lease_sweep) lets exactly its holds go and the listing names who
+// holds the radio. A hold is idempotent per tag and owner; a row goes with
+// its last tag; the station is held while any row is. The rows survive a VM
+// stop with the table; a VM's fresh start (not a return start) lets them go
+// with moy_lease_wifi_reset. Dropped any other way, the holds are forgotten
+// and the station is powered down at the next release.
 //
 // EDGES. moy_lease_edge opens a held pin's edges as a ring source of the
 // kernel's input table: on a board moy_edge.h's ISR source (BAD on one that
@@ -107,7 +111,7 @@ enum {
 #define MOY_LEASE_NAME 7u
 #define MOY_LEASE_PIN_MAX 64u
 #define MOY_LEASE_WIFI_TAGS 11u     // the radio's holder tags
-#define MOY_LEASE_SHELL 1u          // the radio row's owner, the shell's pid
+#define MOY_LEASE_SHELL 1u          // the console's own radio holds' owner, the shell's pid
 
 typedef struct {
     char name[MOY_LEASE_NAME + 1u];     // "gpio", "uart1", "spi2"
@@ -169,15 +173,20 @@ uint32_t moy_lease_holder(uint8_t cls);
 const char *moy_lease_device_name(uint8_t cls);
 
 // The radio's holders (THE RADIO). Tag i's name (NULL past the table) and a
-// tag's bit (0: no such tag). Hold: OK with the holders' mask after, BAD for
-// a tag outside the table, FULL or NOMEM when the row cannot be made. Release:
-// OK with the mask after (a tag nobody holds is no error), BAD. The mask, 0
-// while nothing holds the radio; reset lets every holder go.
+// tag's bit (0: no such tag). Hold: `owner` holds `tag` (MOY_LEASE_SHELL for
+// the console's own), OK with every holder's mask after, BAD for a tag
+// outside the table or owner 0, FULL or NOMEM when its row cannot be made.
+// Release: OK with the mask after (a tag the owner does not hold is no
+// error), BAD; owner 0 lets every owner's hold of the tag go (a run that
+// ended in the kernel, whose process is gone). The mask, 0 while nothing
+// holds the radio. Holder i (in table order): OK with its owner and tags,
+// STALE past the last. Reset lets every holder go.
 const char *moy_lease_wifi_tag(uint32_t i);
 uint32_t moy_lease_wifi_bit(const char *tag, size_t n);
-int moy_lease_wifi_hold(const char *tag, size_t n, uint32_t *mask);
-int moy_lease_wifi_release(const char *tag, size_t n, uint32_t *mask);
+int moy_lease_wifi_hold(uint32_t owner, const char *tag, size_t n, uint32_t *mask);
+int moy_lease_wifi_release(uint32_t owner, const char *tag, size_t n, uint32_t *mask);
 uint32_t moy_lease_wifi_mask(void);
+int moy_lease_wifi_holder(uint32_t i, uint32_t *owner, uint32_t *tags);
 void moy_lease_wifi_reset(void);
 
 // Pin `pin` of lease `h` as an edge source of `depth` records; a `loop` pin is

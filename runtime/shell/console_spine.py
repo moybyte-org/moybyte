@@ -28,6 +28,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.achievements import is_proc as _is_ach_proc
 import moy_app as _moy_app
 
+# The radio's holders: a process's tags, each held under its pid, and the
+# owner of the console's own (moy_lease.SHELL, the shell's pid).
+PROC_TAGS = ("cart", "http", "media", "native")
+_SHELL = 1
+
 
 def _resolve_app_entry(entry):
     """Resolve an app declaration's "module:Class" to the class itself.
@@ -479,30 +484,34 @@ class SpineVerbs:
                 return True
         return False
 
-    def wifi_hold(self, tag):
+    def wifi_hold(self, tag, pid=None):
         """Take the radio for `tag`: the WiFi is OFF unless
         something holds it, and this is the only way to turn it on. Powers the
         interface up at once -- every holder scans or connects next, and the
         ESP-NOW link must find the service owning the interface it activates.
-        Idempotent per tag. The holders: "web" (wasm mode, released when its
-        socket actually closes), "update" (the online update screen), "settings"
-        (the WIFI panel), "cart" (a run with the "network" permission), "link"
-        (a match), "carts" (the Get Carts app while it fetches), "http" (a
-        process's `moybyte.http` request while it runs, dev_http.py), "media" (a
-        stream while a URL of its list may play, dev_media.py), "ssh" (the SSH
-        server while it serves, ssh_service.py), "native" (a native process
-        from its first socket to its end, elf_run.py). A new consumer
-        of the network takes a tag here and releases it on its way out, or the
-        radio never goes off again. The holders are the lease table's radio
-        row (`moy_lease.Wifi`), its tags `moy_lease.WIFI_TAGS`, and any other
-        is refused (ValueError); a table with no row left is a radio that
+        Idempotent per tag and holder. The console's own holders: "web" (wasm
+        mode, released when its socket actually closes), "update" (the online
+        update screen), "settings" (the WIFI panel), "link" (a match), "carts"
+        (the Get Carts app while it fetches), "ssh" (the SSH server while it
+        serves, ssh_service.py). A process's, held with its `pid`
+        (`PROC_TAGS`): "cart" (a run with the "network" permission), "http"
+        (its `moybyte.http` requests while one runs, dev_http.py), "media"
+        (its stream while a URL of its list may play, dev_media.py), "native"
+        (a native process from its first socket to its end, elf_run.py); its
+        end lets exactly its holds go (the lease table's sweep, then
+        `wifi_settle`). A new consumer of the network takes a tag here and
+        releases it on its way out, or the radio never goes off again. The
+        holders are the lease table's radio rows (`moy_lease.Wifi`), its tags
+        `moy_lease.WIFI_TAGS`, and any other is refused (ValueError), as is a
+        process's tag with no pid; a table with no row left is a radio that
         cannot start (False)."""
+        owner = self._wifi_owner(tag, pid)
         w = self.wifi
         if w is None:
             self.leases.held(tag)          # refused even with no radio to hold
             return False
         try:
-            self.leases.hold(tag)
+            self.leases.hold(tag, owner)
         except OSError:
             return False
         on = getattr(w, "radio_on", None)
@@ -513,14 +522,31 @@ class SpineVerbs:
         except Exception:  # noqa: BLE001 -- a radio that will not start is offline
             return False
 
-    def wifi_release(self, tag):
-        """Let the radio go for `tag`; the last holder out powers it down.
-        Releasing a tag never held is fine (every exit path releases without
-        asking), and an empty set powers down even so: "off in general" is the
-        rule, and whatever a serial `py` brought up without a lease goes with
-        the next exit."""
-        if self.leases.release(tag):
+    def wifi_release(self, tag, pid=None):
+        """Let the radio go for `tag` (a process's tag: process `pid`'s hold,
+        or with pid 0 every process's, for a run that ended in the kernel);
+        the last holder out powers it down. Releasing a tag never held is fine
+        (every exit path releases without asking), and an empty set powers
+        down even so: "off in general" is the rule, and whatever a serial `py`
+        brought up without a lease goes with the next exit."""
+        if self.leases.release(tag, self._wifi_owner(tag, pid, True)):
             return
+        self._radio_off()
+
+    def wifi_settle(self):
+        """The radio powered down when nothing holds it: what a process's
+        end runs after the lease table let its holds go."""
+        if not self.leases.mask():
+            self._radio_off()
+
+    def _wifi_owner(self, tag, pid, release=False):
+        if tag not in PROC_TAGS:
+            return _SHELL
+        if pid is None or (pid == 0 and not release):
+            raise ValueError("the radio's %s tag is a process's: name it" % tag)
+        return pid
+
+    def _radio_off(self):
         off = getattr(self.wifi, "radio_off", None)
         if off is not None:
             try:

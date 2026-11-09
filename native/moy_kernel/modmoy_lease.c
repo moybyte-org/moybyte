@@ -14,12 +14,17 @@
 //   sim_pin(pin, state, level)  sim_level(pin, level)  sim_get(pin)   the host's stand-in
 //   reset()
 //   Wifi()               the radio's holders (moy_lease.h's THE RADIO), a view
-//                        of the one row: hold(tag) -> mask, release(tag) -> mask,
-//                        mask(), held(tag), holders() -> [tag, ...]; a tag
-//                        outside WIFI_TAGS is a ValueError, a non-str a TypeError
+//                        of its rows: hold(tag, owner=1) -> mask,
+//                        release(tag, owner=1) -> mask (owner 0: every
+//                        owner's), mask(), held(tag), holders() -> [tag, ...],
+//                        the shell's tags bare and a process's as "tag:pid";
+//                        a tag outside WIFI_TAGS is a ValueError, a non-str a
+//                        TypeError
 //   wifi_reset()         every holder let go (a fresh start)
-//   GPIO UART SPI WIFI, WIFI_TAGS, VM PINS, PIN_IN PIN_OUT PIN_PU PIN_PD PIN_PERIPH PIN_SAFE, ROWS_MAX
+//   GPIO UART SPI WIFI, WIFI_TAGS, VM PINS, PIN_IN PIN_OUT PIN_PU PIN_PD PIN_PERIPH PIN_SAFE, ROWS_MAX,
+//   SHELL (the console's own radio holds' owner)
 
+#include <stdio.h>
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -225,25 +230,27 @@ static const char *wifi_arg(mp_obj_t tag, size_t *n) {
     return s;
 }
 
-static mp_obj_t wifi_hold(mp_obj_t self, mp_obj_t tag) {
-    (void)self;
-    size_t n;
-    const char *s = wifi_arg(tag, &n);
-    uint32_t mask;
-    check(moy_lease_wifi_hold(s, n, &mask));
-    return MP_OBJ_NEW_SMALL_INT(mask);
+static uint32_t wifi_owner(size_t n_args, const mp_obj_t *args) {
+    return n_args > 2 ? (uint32_t)mp_obj_get_int(args[2]) : MOY_LEASE_SHELL;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(wifi_hold_obj, wifi_hold);
 
-static mp_obj_t wifi_release(mp_obj_t self, mp_obj_t tag) {
-    (void)self;
+static mp_obj_t wifi_hold(size_t n_args, const mp_obj_t *args) {
     size_t n;
-    const char *s = wifi_arg(tag, &n);
+    const char *s = wifi_arg(args[1], &n);
     uint32_t mask;
-    check(moy_lease_wifi_release(s, n, &mask));
+    check(moy_lease_wifi_hold(wifi_owner(n_args, args), s, n, &mask));
     return MP_OBJ_NEW_SMALL_INT(mask);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(wifi_release_obj, wifi_release);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(wifi_hold_obj, 2, 3, wifi_hold);
+
+static mp_obj_t wifi_release(size_t n_args, const mp_obj_t *args) {
+    size_t n;
+    const char *s = wifi_arg(args[1], &n);
+    uint32_t mask;
+    check(moy_lease_wifi_release(wifi_owner(n_args, args), s, n, &mask));
+    return MP_OBJ_NEW_SMALL_INT(mask);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(wifi_release_obj, 2, 3, wifi_release);
 
 static mp_obj_t wifi_mask(mp_obj_t self) {
     (void)self;
@@ -261,12 +268,18 @@ static MP_DEFINE_CONST_FUN_OBJ_2(wifi_held_obj, wifi_held);
 
 static mp_obj_t wifi_holders(mp_obj_t self) {
     (void)self;
-    uint32_t mask = moy_lease_wifi_mask();
     mp_obj_t out = mp_obj_new_list(0, NULL);
-    for (uint32_t i = 0; i < MOY_LEASE_WIFI_TAGS; i++) {
-        if (mask & (1u << i)) {
-            const char *tag = moy_lease_wifi_tag(i);
-            mp_obj_list_append(out, MP_OBJ_NEW_QSTR(qstr_from_strn(tag, strlen(tag))));
+    uint32_t owner, tags;
+    for (uint32_t h = 0; moy_lease_wifi_holder(h, &owner, &tags) == MOY_LEASE_OK; h++) {
+        for (uint32_t i = 0; i < MOY_LEASE_WIFI_TAGS; i++) {
+            if (tags & (1u << i)) {
+                char name[24];
+                const char *tag = moy_lease_wifi_tag(i);
+                int k = owner == MOY_LEASE_SHELL
+                        ? snprintf(name, sizeof name, "%s", tag)
+                        : snprintf(name, sizeof name, "%s:%u", tag, (unsigned)owner);
+                mp_obj_list_append(out, mp_obj_new_str(name, (size_t)k));
+            }
         }
     }
     return out;
@@ -339,6 +352,7 @@ static const mp_rom_map_elem_t lease_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_PIN_PERIPH), MP_ROM_INT(MOY_PIN_PERIPH) },
     { MP_ROM_QSTR(MP_QSTR_PIN_SAFE), MP_ROM_INT(MOY_PIN_SAFE) },
     { MP_ROM_QSTR(MP_QSTR_ROWS_MAX), MP_ROM_INT(MOY_LEASE_ROWS_MAX) },
+    { MP_ROM_QSTR(MP_QSTR_SHELL), MP_ROM_INT(MOY_LEASE_SHELL) },
 };
 static MP_DEFINE_CONST_DICT(lease_globals, lease_globals_table);
 

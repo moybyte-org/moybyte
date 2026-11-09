@@ -4068,7 +4068,7 @@ def _elf_nc_both_ways(board):
     th.join(10)
     assert answered == [b"ping\n"] and (st, got) == (0, ["pong"]), (answered, st, got)
     held = board.state().get("wifi_held", [])
-    assert "native" not in held, held
+    assert not [h for h in held if h.split(":")[0] == "native"], held
 
 
 APP_ROLES = ("app_roles", "App Roles Wasm")

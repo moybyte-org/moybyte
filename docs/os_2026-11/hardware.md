@@ -164,11 +164,13 @@ BLE central's and the media service's holder is a lease of the device's class
 swept with its holder's other leases, so the lease listing (`lease`) names
 it; the shell's `mic`, `lora` and `ble scan` are served in C over their drivers and
 those leases (`native/moy_sh/moy_sh_board.c`). The WiFi station's holders
-are a row of the same table, the radio's (`MOY_LEASE_WIFI`, `moy_lease.h`'s
-THE RADIO): one row the shell owns while anything holds the station, its
-holders a mask of tags (`web`, `update`, `cart`, `media`, ...), which
-`Workstation.wifi_hold` and `wifi_release` take and let go and which a VM stop
-keeps; the station's address coming and going is a NET record on the
+are rows of the same table, the radio's (`MOY_LEASE_WIFI`, `moy_lease.h`'s
+THE RADIO), each a mask of tags (`web`, `update`, `cart`, `media`, ...): the
+console's own in one row the shell owns, and a process's (`cart`, `http`,
+`media`, `native`) in one row the process owns, so its end lets exactly its
+holds go and `state`'s `wifi_held` names it (`http:12`). The station is held
+while any row is; `Workstation.wifi_hold` and `wifi_release` take and let go,
+and a VM stop keeps the rows; the station's address coming and going is a NET record on the
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
@@ -184,7 +186,7 @@ media service are Python's alone.
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
   stop leaves alone), its body kept up to a cap; `https` verifies (above),
   `moybyte.http.tls()` says whether it can here, and a request holds the WiFi
-  lease's `http` tag while it runs. The `http` permission gates
+  lease's `http` tag under its process's pid while it runs. The `http` permission gates
   `moybyte.http` and nothing else: a Python app's `socket` and `requests`
   reach the network with or without it (Python is trusted, `processes.md`
   §2).
@@ -438,7 +440,8 @@ stage cost a heavy cart frames whether a stream played or not (A/B'd
 is no longer lazy (the open starts the output), its I²S DMA ring is permanent
 internal SRAM (6 KiB on the T-Deck, 24 KiB on a P4: 12 × 512 stereo
 frames), and a
-stream whose list holds a URL holds the WiFi lease under `media`, whose
+stream whose list holds a URL holds the WiFi lease under `media` and its
+process's pid, whose
 internal cost never comes back (#158).
 
 **Its memory** is THE SHARES' MEDIA row (`native/moy_play/moy_play.h`): the

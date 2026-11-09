@@ -1056,6 +1056,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
         self.procs = Procs(self)
         _hwleases.LEASES.grants = self.procs.granted
+        _hwleases.LEASES.settle = self.wifi_settle
         _devices.grants = self.procs.granted
         _moybyte.WAKES.woke = self.alarm_woke
         _devices.console = self

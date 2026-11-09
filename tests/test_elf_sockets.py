@@ -110,8 +110,8 @@ def test_sockets_need_the_network_permission(term):
 def test_the_first_socket_holds_the_radio_until_the_end(term, monkeypatch):
     ws, app = term
     calls = []
-    monkeypatch.setattr(ws, "wifi_hold", lambda tag: calls.append(("hold", tag)) or True)
-    monkeypatch.setattr(ws, "wifi_release", lambda tag: calls.append(("release", tag)))
+    monkeypatch.setattr(ws, "wifi_hold", lambda tag, pid: calls.append(("hold", tag, pid)) or True)
+    monkeypatch.setattr(ws, "wifi_release", lambda tag, pid: calls.append(("release", tag, pid)))
     seen = []
 
     def handle(conn):
@@ -122,8 +122,10 @@ def test_the_first_socket_holds_the_radio_until_the_end(term, monkeypatch):
     assert out(app, "echo x | elf.nc/nc 127.0.0.1 %d; echo status $?" % got[0]) == [
         "status 0"]
     th.join(5)
-    assert seen == [[("hold", "native")]]
-    assert calls == [("hold", "native"), ("release", "native")]
+    assert len(calls) == 2 and calls[0][2] > 1             # held under the process's pid
+    pid = calls[0][2]
+    assert seen == [[("hold", "native", pid)]]
+    assert calls == [("hold", "native", pid), ("release", "native", pid)]
     assert not ws.runtimes["elf"].netted
     calls.clear()
     assert out(app, "elf.hello/hello; echo status $?")[-1] == "status 0"

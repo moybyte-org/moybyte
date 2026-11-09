@@ -37,8 +37,9 @@ One stream at a time, one process's.
 
 A stream lives as long as its process (owner, 2026-11-03): the process's end
 stops it (`sweep`), and the shell (pid 1) may stop it from anywhere. While a
-URL may play the stream holds the radio lease under "media"
-(`Workstation.wifi_hold`), let go when it stops or its list ends.
+URL may play the stream holds the radio lease under "media" and its
+process's pid (`Workstation.wifi_hold`), let go when it stops, its list
+ends or its process does.
 
 WHAT RUNS IN C. play() is the C's (moy_media_play: the list, a playlist file
 read, the first entry begun), and a file plays with no Python at all: the
@@ -103,7 +104,7 @@ _STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the C's jo
 
 # The stream's process and what the face's wake holds for it.
 _s = {"pid": 0, "wake": None, "every": 0, "file": None, "gen": 0, "eof": False,
-      "stopping": False, "sized": False}
+      "stopping": False, "sized": False, "radio": 0}
 _buf = [None]
 
 
@@ -193,27 +194,29 @@ def _rate():
     return a.rate() if a is not None else 22050
 
 
-def _holds(ws):
-    """Whether the stream holds the radio: the lease table's radio row says
-    (a console with no radio has none)."""
+def _holds(ws, pid):
+    """Whether process `pid`'s stream holds the radio: the lease table's
+    radio rows say (a console with no radio has none)."""
     leases = getattr(ws, "leases", None)
-    return leases is not None and leases.held(TAG)
+    return _s["radio"] == pid and leases is not None and leases.held(TAG)
 
 
 def _hold():
-    ws = _D.console
-    if ws is None or _holds(ws):
+    ws, pid = _D.console, _s["pid"]
+    if ws is None or not pid or _holds(ws, pid):
         return
-    ws.wifi_hold(TAG)
+    ws.wifi_hold(TAG, pid)
+    _s["radio"] = pid
     dial = getattr(getattr(ws, "cart_net", None), "dial", None)
     if dial is not None:
         dial()                     # never waited: the worker's task waits for the link
 
 
 def _let_go():
-    ws = _D.console
-    if _holds(ws):
-        ws.wifi_release(TAG)
+    ws, pid = _D.console, _s["radio"]
+    _s["radio"] = 0
+    if ws is not None and pid:
+        ws.wifi_release(TAG, pid)
 
 
 def _close_file():
@@ -257,7 +260,7 @@ def _watch():
     has not let go of, the radio to let go of at its list's end, or none."""
     if _s["stopping"] or (_s["pid"] and _net() is not None):
         _wake(PUMP_MS)
-    elif _s["pid"] and _holds(_D.console):
+    elif _s["pid"] and _holds(_D.console, _s["pid"]):
         _wake(WATCH_MS)
     else:
         _wake(0)

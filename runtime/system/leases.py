@@ -278,6 +278,7 @@ class Leases:
     def __init__(self, machine=None):
         self.machine = None
         self.grants = None          # fn(pid) -> its permissions, None: not gated
+        self.settle = None          # fn(): the radio down when no row holds it
         self.held = {}              # pid -> [its leased objects]
         if machine is not None:
             self.use(machine)
@@ -386,11 +387,16 @@ class Leases:
 
     def sweep(self, pid):
         """Process `pid` ended: each object's driver ended, then its leases
-        dropped, every pin they held left safe. Answers how many."""
+        dropped, every pin they held left safe and its radio holds let go
+        (the station powered down when they were the last). Answers how
+        many."""
         for obj in self.held.pop(pid, ()):
             if _N.live(obj._h):
                 obj._end()
-        return _N.sweep(pid)
+        n = _N.sweep(pid)
+        if self.settle is not None:
+            self.settle()          # its radio holds went with its rows
+        return n
 
     def of(self, pid, name):
         """The live object process `pid` holds for `name`, or None."""

@@ -47,21 +47,22 @@ class ElfRuntime:
 
     def _net(self, pid, hold):
         """A process's first socket (hold 1) or its end (0): the radio held
-        while any native process holds it, and on the hold the console's
-        last-joined network asked for (the link is the rows' to wait for)."""
+        under the process's pid until its end, and on the first hold the
+        console's last-joined network asked for (the link is the rows' to
+        wait for)."""
         ws = self.ws
         if hold:
             first = not self.netted
             self.netted.add(pid)
-            if first and getattr(ws, "wifi_hold", None) is not None:
-                ws.wifi_hold(NET_TAG)
+            if getattr(ws, "wifi_hold", None) is not None:
+                ws.wifi_hold(NET_TAG, pid)
                 dial = getattr(getattr(ws, "cart_net", None), "dial", None)
-                if dial is not None:
+                if first and dial is not None:
                     dial()
         elif pid in self.netted:
             self.netted.discard(pid)
-            if not self.netted and getattr(ws, "wifi_release", None) is not None:
-                ws.wifi_release(NET_TAG)
+            if getattr(ws, "wifi_release", None) is not None:
+                ws.wifi_release(NET_TAG, pid)
 
     def _flags(self, cart, net):
         try:

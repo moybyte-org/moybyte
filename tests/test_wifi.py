@@ -12,6 +12,8 @@ implementation (docs/theme_and_shell_2026-11.md §8.6).
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 SYSTEM_CARTS = ROOT / "system_carts"
@@ -571,13 +573,30 @@ def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     _open_cart(ws, "Net Cart")
     assert ws.cart_error is None
-    assert "cart" in ws.leases.holders()
+    assert ws.leases.holders() == ["cart:%d" % ws.run.player.pid]   # the run's process
     assert ws.wifi.radio is True
 
     ws.go_home()
     assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     assert ws.wifi.status() == (False, None, None)
+
+
+def test_a_processs_tag_names_its_process(tmp_path):
+    """`cart`, `http`, `media` and `native` are held under a pid, so the
+    holders name who holds the radio; the console's own tags are bare."""
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    for tag in ("cart", "http", "media", "native"):
+        with pytest.raises(ValueError):
+            ws.wifi_hold(tag)
+    assert ws.wifi_hold("http", 7) and ws.wifi_hold("settings")
+    assert sorted(ws.leases.holders()) == ["http:7", "settings"]
+    ws.wifi_release("settings")
+    assert ws.wifi.radio is True
+    ws.wifi_release("http", 7)
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def test_a_plain_cart_never_touches_the_radio(tmp_path):

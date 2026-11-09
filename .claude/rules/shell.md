@@ -25,7 +25,7 @@ to whoever called it.
   mixins (`runtime/README.md` lists them): the key and pointer routers are
   `console_input.py`'s, and the spawn/exit verbs, app registration and
   the WiFi lease `runtime/shell/console_spine.py`'s, over the spine's components
-  in `native/moy_spine` and the lease table's radio row (ids, kinds and tags,
+  in `native/moy_spine` and the lease table's radio rows (ids, kinds and tags,
   never objects); everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)

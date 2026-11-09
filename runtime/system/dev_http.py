@@ -31,9 +31,10 @@ Needs the `http` permission.
   Stream.readinto(buf) -> n   the window's oldest bytes taken (0: none now)
   Stream.close()
 
-The radio is a lease (`Workstation.wifi_hold`): a request holds the console's
-"http" tag from its `get` until it finishes, is closed, or its process ends,
-and the last one out lets it go. A `get` with the station down asks for the
+The radio is a lease (`Workstation.wifi_hold`): a request holds the "http"
+tag under its process's pid from its `get` until it finishes, is closed, or
+its process ends, and the process's last one out lets its hold go; another
+process's requests hold the radio under their own. A `get` with the station down asks for the
 last-joined network (the console's cart_net `dial`) and returns at once; the
 request waits for the link on the worker's task (moy_net_dialing), so
 neither holds a frame.
@@ -63,7 +64,7 @@ _HOST = hasattr(_N, "PART")
 auto_run = _HOST
 
 _open = {}          # handle -> Request, every request not yet closed
-_held = [False]     # the radio lease is taken
+_held = set()       # the processes whose requests hold the radio lease
 
 
 class Request:
@@ -143,8 +144,10 @@ def _end(req):
     _settle()
 
 
-def _busy():
+def _busy(pid):
     for req in _open.values():
+        if req.owner != pid:
+            continue
         st = _N.state(req.h)
         if not isinstance(st, int) and st[0] in (_N.QUEUED, _N.RUNNING, _N.STREAM):
             return True
@@ -152,25 +155,26 @@ def _busy():
 
 
 def _settle():
-    """The radio lease let go once no request is in flight."""
-    if _held[0] and not _busy():
-        _held[0] = False
-        ws = _D.console
-        if ws is not None:
-            ws.wifi_release(TAG)
-
-
-def take():
-    """The radio lease taken ahead of a `get`, its link not yet asked for:
-    True when this call took it. A caller that spreads the radio's round
-    trips over frames (the shell's `http get`; on a P4 each is the C6's)
-    takes, then `dial()`s, then gets, and `settle()`s where no request
-    followed."""
+    """The radio lease let go for each process with no request in flight."""
     ws = _D.console
-    if ws is None or _held[0]:
+    for pid in [p for p in _held if not _busy(p)]:
+        _held.discard(pid)
+        if ws is not None:
+            ws.wifi_release(TAG, pid)
+
+
+def take(pid=None):
+    """The radio lease taken for process `pid` (the caller, by default)
+    ahead of a `get`, its link not yet asked for: True when this call took
+    it. A caller that spreads the radio's round trips over frames (the
+    shell's `http get`; on a P4 each is the C6's) takes, then `dial()`s,
+    then gets, and `settle()`s where no request followed."""
+    ws = _D.console
+    pid = _D.pid() if pid is None else pid
+    if ws is None or pid in _held:
         return False
-    _held[0] = True
-    ws.wifi_hold(TAG)
+    _held.add(pid)
+    ws.wifi_hold(TAG, pid)
     return True
 
 
@@ -187,8 +191,8 @@ def settle():
     _settle()
 
 
-def _hold():
-    if take():
+def _hold(pid):
+    if take(pid):
         dial()
 
 
@@ -218,7 +222,7 @@ def _moybyte_buf():
 
 def get(url, cap=16384, on_done=None):
     p = _D.need("http")
-    _hold()
+    _hold(p)
     h = _N.open(p, str(url), int(cap))
     if h < 0:
         _settle()
@@ -234,7 +238,7 @@ def get(url, cap=16384, on_done=None):
 
 def stream(url, window=65536):
     p = _D.need("http")
-    _hold()
+    _hold(p)
     h = _N.stream(p, str(url), int(window))
     if h < 0:
         _settle()
