@@ -89,7 +89,7 @@ SHARED = {
     ("moy_theme.c", "sh"): "the backdrop's scratch: the console's calls alone",
     ("moy_theme.c", "looks"): "the loader's scratch: the console's calls alone",
 }
-for _n in ("s_gen", "s_gen_serial", "s_shape", "s_ctx", "s_tick", "s_serial", "s_live",
+for _n in ("s_gen", "s_gen_serial", "s_ctx", "s_tick", "s_serial", "s_live",
            "s_tp_on", "s_tp_clip", "s_wl"):
     SHARED[("moy_ui_wasm.c", _n)] = "the console's one compiled run, on the main instance"
 
