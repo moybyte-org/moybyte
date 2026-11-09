@@ -125,8 +125,11 @@ enum {
     MOY_T_MOYBYTE_SERVICE_START, MOY_T_MOYBYTE_SERVICE_STOP, MOY_T_MOYBYTE_SERVICE_RUNNING,
     MOY_T_MOYBYTE_RANDOM, MOY_T_MOYBYTE_SHA256, MOY_T_MOYBYTE_HMAC_SHA256,
     MOY_T_MOYBYTE_AES_GCM_SEAL, MOY_T_MOYBYTE_AES_GCM_OPEN, MOY_T_MOYBYTE_X25519,
+    MOY_T_MOYBYTE_DEV_OPEN, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_READ,
+    MOY_T_MOYBYTE_DEV_WRITE, MOY_T_MOYBYTE_DEV_XFER, MOY_T_MOYBYTE_DEV_SET,
+    MOY_T_MOYBYTE_DEV_GET,
 };
-#define MOY_APP_TABLE_N 186u
+#define MOY_APP_TABLE_N 193u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -316,6 +319,13 @@ enum {
     { "moybyte.aes_gcm_seal", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AES_GCM_SEAL }, \
     { "moybyte.aes_gcm_open", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AES_GCM_OPEN }, \
     { "moybyte.x25519", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_X25519 }, \
+    { "moybyte.dev_open", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.dev_close", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.dev_read", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.dev_write", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.dev_xfer", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.dev_set", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.dev_get", MOY_ROLE_MOYBYTE, -1 }, \
 }
 
 // The permission each role is granted by: a role absent here is never

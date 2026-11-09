@@ -8,6 +8,13 @@ offers, and gets MicroPython's own object for it, wrapped:
   "uart<n>"   a machine.UART; cfg is UART's, tx and rx defaulting to the row's
   "spi<n>"    a machine.SPI; cfg is SPI's, sck, mosi and miso defaulting to
               the row's (MicroPython's SPI(1) is the chip's SPI2)
+  "pwm<n>"    a machine.PWM on pin n; cfg is PWM's (freq, duty_u16)
+  "adc<n>"    a machine.ADC on pin n; cfg is ADC's
+  "i2c"       a machine.SoftI2C on two pins of the gpio row; cfg is
+              SoftI2C's, scl and sda required
+
+A PWM, an ADC and an I2C bus are pins of the gpio row (an I2C bus is clocked
+by the CPU, so it holds no unit), each needing `lease:gpio` as a pin does.
 
 so a driver written for MicroPython runs on it unchanged. The lease is the
 process's until it ends: the sweep (`moybyte.end`, on exit, crash and kill)
@@ -78,9 +85,13 @@ def _name(pid):
     return _L.name(pid) if _L is not None else "pid %d" % pid
 
 
+_ON_PINS = ("gpio", "pwm", "adc", "i2c")
+
+
 def perm_of(name):
-    """The permission a lease of row `name` needs: `lease:gpio` for any pin."""
-    return "lease:gpio" if name.startswith("gpio") else "lease:" + name
+    """The permission a lease of row `name` needs: `lease:gpio` for anything
+    on the gpio row's pins."""
+    return "lease:gpio" if name.startswith(_ON_PINS) else "lease:" + name
 
 
 class _Leased:
@@ -202,9 +213,65 @@ class SPI(_Leased):
         return self._o().write_readinto(out, into)
 
 
+class PWM(_Leased):
+    """A leased machine.PWM."""
+
+    def init(self, *args, **kw):
+        return self._o().init(*args, **kw)
+
+    def freq(self, *v):
+        return self._o().freq(*v)
+
+    def duty_u16(self, *v):
+        return self._o().duty_u16(*v)
+
+    def deinit(self):
+        return self._o().deinit()
+
+
+class ADC(_Leased):
+    """A leased machine.ADC."""
+
+    def read_u16(self):
+        return self._o().read_u16()
+
+
+class I2C(_Leased):
+    """A leased machine.SoftI2C."""
+
+    def scan(self):
+        return self._o().scan()
+
+    def readfrom(self, addr, n, stop=True):
+        return self._o().readfrom(addr, n, stop)
+
+    def readfrom_into(self, addr, buf, stop=True):
+        return self._o().readfrom_into(addr, buf, stop)
+
+    def writeto(self, addr, buf, stop=True):
+        return self._o().writeto(addr, buf, stop)
+
+    def readfrom_mem(self, addr, reg, n, addrsize=8):
+        return self._o().readfrom_mem(addr, reg, n, addrsize=addrsize)
+
+    def readfrom_mem_into(self, addr, reg, buf, addrsize=8):
+        return self._o().readfrom_mem_into(addr, reg, buf, addrsize=addrsize)
+
+    def writeto_mem(self, addr, reg, buf, addrsize=8):
+        return self._o().writeto_mem(addr, reg, buf, addrsize=addrsize)
+
+
 def _bind_pin_names(m):
     for n in ("IN", "OUT", "OPEN_DRAIN", "PULL_UP", "PULL_DOWN", "IRQ_RISING", "IRQ_FALLING"):
         setattr(Pin, n, getattr(m.Pin, n, None))
+
+
+def _maker(m, kind):
+    """`machine`'s class `kind`, or OSError(ENODEV) where this VM has none."""
+    mk = getattr(m, kind, None)
+    if mk is None:
+        raise OSError(ENODEV, "this console has no %s" % kind)
+    return mk
 
 
 class Leases:
@@ -265,6 +332,20 @@ class Leases:
             pin = int(name[4:])
             h = _N.take(pid, _N.GPIO, 0, (pin,), flags | _N.VM)
             make = lambda: Pin(self, h, m.Pin(pin, **cfg), name, pid, pin)  # noqa: E731
+        elif name[:3] in ("pwm", "adc") and name[3:].isdigit():
+            pin = int(name[3:])
+            wrap, kind = (PWM, "PWM") if name[:3] == "pwm" else (ADC, "ADC")
+            mk = _maker(m, kind)
+            h = _N.take(pid, _N.GPIO, 0, (pin,), flags | _N.VM)
+            make = lambda: wrap(self, h, mk(m.Pin(pin), **cfg), name, pid)  # noqa: E731
+        elif name == "i2c":
+            scl, sda = cfg.pop("scl", None), cfg.pop("sda", None)
+            if scl is None or sda is None or scl == sda:
+                raise OSError(EINVAL, "an i2c lease names its scl and sda pins")
+            mk = _maker(m, "SoftI2C")
+            h = _N.take(pid, _N.GPIO, 0, (scl, sda), flags | _N.VM)
+            make = lambda: I2C(self, h, mk(scl=m.Pin(scl), sda=m.Pin(sda), **cfg),  # noqa: E731
+                               name, pid)
         else:
             o = self.offer(name)
             if o is None or o[1] == _N.GPIO:

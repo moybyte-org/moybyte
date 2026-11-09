@@ -110,11 +110,32 @@ of that row, since the P4's GPIO matrix routes a unit to any pin. A Python
 process takes one with `moybyte.lease(name, **cfg)` (`runtime/system/leases.py`):
 `"gpio<n>"` a `machine.Pin`, `"uart<n>"` a `machine.UART`, `"spi<n>"` a
 `machine.SPI`, MicroPython's own object behind a wrapper that checks the
-lease on every call. A leased Pin's `irq` opens its edges (`moy_edge.h`) as a
-ring source read by a wake of the process alone (`moy_input_reader_only`).
+lease on every call; `"pwm<n>"` and `"adc<n>"` a `machine.PWM` and a
+`machine.ADC` on a pin, and `"i2c"` a `machine.SoftI2C` on two pins of the
+gpio row (CPU-clocked, so it holds pins and no unit; a hardware I²C unit
+would be a class of the table like UART's), each needing `lease:gpio`. A
+leased Pin's `irq` opens its edges (`moy_edge.h`) as a ring source read by a
+wake of the process alone (`moy_input_reader_only`).
 `moybyte.pins()` lists each offered row and who holds it, and the `pins`
 permission's `pin_write`/`pin_read` take their pins through the same table
 (`leases.LocalPins`, the consoles' `ws.gpio`).
+
+**The compiled tiers' leases** (a compiled app, a WASI program, a native
+module) are the same objects held by HANDLE: the `moybyte.dev_*` rows
+(`native/os_calls.json`, ELF ordinals 103 to 109), served by the door's
+Python half as the calling process (`runtime/system/dev_handles.py`, which
+holds every name, key and answer, over `leases.LEASES.take` with the
+process's pid). `dev_open(name, cfg)` answers a handle, `cfg` words
+`key=value`; `dev_read`, `dev_write`, `dev_xfer`, `dev_set` and `dev_get`
+act on it and `dev_close` gives it back. One table holds every tier's, so
+one holder a pin or a unit whatever the tiers: a Python object's resource
+is BUSY to a handle and the reverse. A ring's records are read through the
+handle on every tier (a pin's edges after `dev_set(h, "edges=...")`, 8
+bytes each from `dev_read`; a packet; the microphone's samples), never
+posted on the process's event queue: a compiled program polls its handles
+where it polls its messages, a device's rate and binary records stay off a
+queue built for the console's text messages, and the reader picks its own
+buffer. Python keeps its callbacks.
 
 **Revocation.** The sweep that ends a process ends its leases: on exit, crash,
 strike-out and kill (`moybyte.end`, which the Player's run end and the
@@ -122,10 +143,14 @@ scheduler's exit both reach). The Python sweep deinits each object, then drops
 its lease, which closes its edge sources and returns its pins to a safe state
 (input, no pull, interrupt off, no peripheral driving it, the UART driver
 uninstalled); `moy_lease_pin_state` reads a pin back from the GPIO matrix. An
-object kept past its process raises `OSError(EBADF)`. **A VM stop is refused
-while a Python process holds a lease** (`MOY_LEASE_VM`, read by
-`native/moy_play/moy_play_stop.c` beside the radio's row); a Lua, wasm or ELF
-process's lease will live outside the VM, untouched by a stop.
+object kept past its process raises `OSError(EBADF)`; a compiled process's
+handles close at its end (`dev_handles.sweep`, ahead of the leases' in
+`moybyte.ENDS`), a handle closed answers ABSENT. **A VM stop is refused
+while a lease is held** (`MOY_LEASE_VM`, read by
+`native/moy_play/moy_play_stop.c` beside the radio's row): every tier's
+lease is a VM object, a compiled program's too, and its rows are served in
+Python, so an app that imports them keeps the VM (moy_play's verdict). The
+boards that offer leases, the P4s, keep the VM for every run.
 
 **The device APIs as built** are `runtime/system/devices.py`'s faces,
 `moybyte.http`, `.mic`, `.lora`, `.ble`, `.usb`, `.midi` and `.camera`
@@ -147,7 +172,11 @@ keeps; the station's address coming and going is a NET record on the
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
-on.
+on. A compiled program holds `http`, `lora` and `mic` by handle through the
+same rows as its leases (above): an `http` handle a GET whose body it reads
+in chunks (`cfg` `url=... cap=N`, or `window=N` for a body of any length),
+a `lora` handle the radio's raw packets, a `mic` handle PCM16 samples.
+BLE, USB, MIDI, the camera and the media service are Python's alone (§4).
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
@@ -494,18 +523,28 @@ moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s
 ```
 
 Leases (Python gets them as `machine` objects, §1:
-`moybyte.lease(name, **cfg)` and `moybyte.pins()`; wasm and ELF through
-these verbs, which arrive with those tiers; `pins` is the digital subset every
-tier may hold):
+`moybyte.lease(name, **cfg)` and `moybyte.pins()`; `pins` is the digital
+subset every tier may hold), and on the compiled tiers leases and the
+`http`, `lora` and `mic` devices by handle (`runtime/system/dev_handles.py`;
+moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
 ```
-lease.open(name, cfg) -> h            refused if held; cfg is a versioned struct
-lease.close(h)
-uart.write(h, bytes); uart.read(h, into) -> n
-gpio.mode(h, pin, mode); gpio.set(h, pin, v); gpio.get(h, pin) -> v
-gpio.edges(h, pin, on)                events of kind EDGE, stamped in the ISR
-pwm.start(h, pin, hz, duty); adc.sample(h, pin, hz, into)
+dev_open(name, cfg) -> h              BUSY while another holds it; cfg "key=value ..."
+dev_close(h)
+dev_read(h, into) -> n                what waits: bytes, edges (8 bytes each), a packet, samples
+dev_write(h, bytes) -> n
+dev_xfer(h, bytes, into) -> n         SPI full duplex; an I2C write then read
+dev_set(h, cfg); dev_get(h, what) -> n
 ```
+
+BLE by handle is not built. It would be one more name on the same rows: a
+`ble` handle whose `dev_set` asks (`scan=ms`, `connect=aa:bb:...`,
+`find=<uuid>`, `subscribe=<handle>`) and whose `dev_read` takes the face's
+events as records (the event, its value, its status, and the bytes a read
+or a notification carried), the records `dev_ble.on` wakes Python on;
+it waits on a reader of the BLE ring per handle, which the edges' reader
+shows the shape of. LoRaWAN's join and uplink would be `dev_set` words on
+the `lora` handle the same way.
 
 In C (`native/moy_kernel/moy_lease.h`): `moy_lease_take(owner, cls, unit,
 pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,
@@ -516,7 +555,7 @@ pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,
 | design piece | today | what changes |
 |---|---|---|
 | hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1), with `uart1` and `spi2` riding them, offered as `MOY_LEASE_ROWS` | |
-| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects, `pins` (P2.3; `tests/test_leases.py`) | I²C, PWM and ADC leases; the wasm and ELF verbs |
+| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects (Pin, UART, SPI, PWM, ADC, a SoftI2C on the pins), `pins` (P2.3; `tests/test_leases.py`); the compiled tiers' handles, `runtime/system/dev_handles.py` (`tests/test_dev_handles.py`, and each tier's fixture) | a hardware I²C unit as a class of the table |
 | the link ring | `native/moy_net/moy_link.h`, counting its drops | the link's records a ring source's (LINK) |
 | GPIO edges | `native/moy_input/moy_edge.h`: a leased pin's edges as an ISR ring source, opened through `moy_lease_edge` and closed by the drop (P2.3) | |
 | brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the backlight is a `class` row naming `brightness` on every console (P2.1), whose API is P2.3's |

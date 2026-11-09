@@ -168,6 +168,45 @@ def test_a_native_command_picks_an_item_and_hears_it_as_a_message(term):
     assert ws.carts_store.load_file("docs", "picked", ws.carts_root) == "# kept\n"
 
 
+def test_a_native_command_holds_leases_by_handle_and_its_end_sweeps_them(term):
+    """`moy_dev_*` from C (elf_app.moy's `app lease`): the device handles'
+    rows (runtime/system/dev_handles.py) for the command's process under its
+    `lease:<row>` permissions -- a pin driven and read, a UART written and
+    read through its peer, a UART it already holds EBUSY, an SPI host a
+    Python program holds EBUSY too, a row not offered EINVAL, a handle it
+    never had ENOENT. Its end sweeps the pin it kept, which reads back safe
+    and is free for a Python program again."""
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import board_config
+    from runtime import leases, moybyte
+    from runtime import moy_lease as N
+    from runtime.host import lease_sim
+    _ws, app = term
+    leases.stand_in(lease_sim, board_config.lease_spec(
+        os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
+    lease_sim.reset()
+    lease_sim.loopback(1, True)
+    try:
+        spi = leases.LEASES.take(moybyte.SHELL, "spi2")
+        assert out(app, "elf.app/app lease; echo status $?") == [
+            "dev_open.gpio6 1", "dev_set.value 0", "dev_get.value 1", "dev_open.uart1 1",
+            "dev_write 5", "dev_read hello", "dev_open.uart1.again -1 EBUSY", "dev_close 0",
+            "dev_open.spi2 -1 EBUSY", "dev_xfer -1 ENOENT", "dev_xfer.short -1 ENOENT",
+            "dev_open.gpio7 -1 EINVAL", "dev_get.none -1 ENOENT", "status 0"]
+        assert N.held() == 1 and N.pin_state(6) == N.PIN_SAFE
+        leases.LEASES.drop(spi)
+        assert out(app, "elf.app/app lease; echo status $?")[8:11] == [
+            "dev_open.spi2 1", "dev_xfer 2", "dev_xfer.short -1 ERANGE"]
+        assert N.held() == 0
+        leases.LEASES.drop(leases.LEASES.take(moybyte.SHELL, "gpio6"))
+    finally:
+        for p in list(leases.LEASES.held):
+            leases.LEASES.sweep(p)
+        N.reset()
+        leases.stand_in(None, None)
+
+
 def test_the_crypto_rows_answer_a_native_command(term):
     """The crypto rows from C (tests/fixtures/elf/elf_crypto.moy): the known
     answers, and each length refused an errno, never a crash."""

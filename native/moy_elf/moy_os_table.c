@@ -280,6 +280,62 @@ int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len) {
     return moy_os_call(175u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.item_write
 }
 
+int32_t moy_os_moy_dev_open(const char *name, const char *cfg) {
+    const moy_os_arg_t a[2] = {
+        { name, 0u, 0, MOY_OS_ARG_STR },
+        { cfg, 0u, 0, MOY_OS_ARG_OPT },
+    };
+    return moy_os_call(186u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_open
+}
+
+int32_t moy_os_moy_dev_close(int32_t h) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, h, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(187u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.dev_close
+}
+
+int32_t moy_os_moy_dev_read(int32_t h, void *data, size_t data_cap) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, h, MOY_OS_ARG_INT },
+        { NULL, 0u, (int32_t)(data_cap < 0x7fffffffu ? data_cap : 0x7fffffffu), MOY_OS_ARG_INT },
+    };
+    return moy_os_call(188u, MOY_OS_HOP, a, 2, data, data_cap);   // moybyte.dev_read
+}
+
+int32_t moy_os_moy_dev_write(int32_t h, const void *data, size_t data_len) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, h, MOY_OS_ARG_INT },
+        { data, data_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(189u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_write
+}
+
+int32_t moy_os_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap) {
+    const moy_os_arg_t a[3] = {
+        { NULL, 0u, h, MOY_OS_ARG_INT },
+        { data, data_len, 0, MOY_OS_ARG_BYTES },
+        { NULL, 0u, (int32_t)(into_cap < 0x7fffffffu ? into_cap : 0x7fffffffu), MOY_OS_ARG_INT },
+    };
+    return moy_os_call(190u, MOY_OS_HOP, a, 3, into, into_cap);   // moybyte.dev_xfer
+}
+
+int32_t moy_os_moy_dev_set(int32_t h, const char *cfg) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, h, MOY_OS_ARG_INT },
+        { cfg, 0u, 0, MOY_OS_ARG_STR },
+    };
+    return moy_os_call(191u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_set
+}
+
+int32_t moy_os_moy_dev_get(int32_t h, const char *what) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, h, MOY_OS_ARG_INT },
+        { what, 0u, 0, MOY_OS_ARG_STR },
+    };
+    return moy_os_call(192u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_get
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -406,6 +462,13 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_pick,
         (void *)moy_os_moy_item_read,
         (void *)moy_os_moy_item_write,
+        (void *)moy_os_moy_dev_open,
+        (void *)moy_os_moy_dev_close,
+        (void *)moy_os_moy_dev_read,
+        (void *)moy_os_moy_dev_write,
+        (void *)moy_os_moy_dev_xfer,
+        (void *)moy_os_moy_dev_set,
+        (void *)moy_os_moy_dev_get,
     },
 };
 
@@ -513,4 +576,11 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_pick",
     "moy_item_read",
     "moy_item_write",
+    "moy_dev_open",
+    "moy_dev_close",
+    "moy_dev_read",
+    "moy_dev_write",
+    "moy_dev_xfer",
+    "moy_dev_set",
+    "moy_dev_get",
 };

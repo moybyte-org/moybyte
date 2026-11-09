@@ -8,7 +8,10 @@
       "prefs",
       "clipboard",
       "files:documents",
-      "notifications"
+      "notifications",
+      "lease:gpio",
+      "lease:uart1",
+      "lease:spi2"
     ],
     "achievements": [
       {

@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 94
+#define MOY_APP_WASM_N 101
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -310,6 +310,42 @@ static int32_t w_moybyte_x25519(void *e, const uint8_t *secret, uint32_t secret_
     span_t f[2] = { { secret, secret_n }, { peer, peer_n } };
     return run(e, SEQ, MOY_T_MOYBYTE_X25519, f, 2, shared, shared_cap);
 }
+static int32_t w_moybyte_dev_open(void *e, const uint8_t *name, uint32_t name_n,
+                                  const uint8_t *cfg, uint32_t cfg_n) {
+    span_t f[2] = { { name, name_n }, { cfg, cfg_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_DEV_OPEN, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_dev_close(void *e, int32_t h) {
+    uint8_t q_h[4];
+    span_t f[1] = { NUM(q_h, h) };
+    return run(e, HOP, MOY_T_MOYBYTE_DEV_CLOSE, f, 1, NULL, 0);
+}
+static int32_t w_moybyte_dev_read(void *e, int32_t h, uint8_t *data, uint32_t data_cap) {
+    uint8_t q_h[4], q_data[4];
+    span_t f[2] = { NUM(q_h, h), NUM(q_data, data_cap) };
+    return run(e, HOP, MOY_T_MOYBYTE_DEV_READ, f, 2, data, data_cap);
+}
+static int32_t w_moybyte_dev_write(void *e, int32_t h, const uint8_t *data, uint32_t data_n) {
+    uint8_t q_h[4];
+    span_t f[2] = { NUM(q_h, h), { data, data_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_DEV_WRITE, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_dev_xfer(void *e, int32_t h, const uint8_t *data, uint32_t data_n,
+                                  uint8_t *into, uint32_t into_cap) {
+    uint8_t q_h[4], q_into[4];
+    span_t f[3] = { NUM(q_h, h), { data, data_n }, NUM(q_into, into_cap) };
+    return run(e, HOP, MOY_T_MOYBYTE_DEV_XFER, f, 3, into, into_cap);
+}
+static int32_t w_moybyte_dev_set(void *e, int32_t h, const uint8_t *cfg, uint32_t cfg_n) {
+    uint8_t q_h[4];
+    span_t f[2] = { NUM(q_h, h), { cfg, cfg_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_DEV_SET, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_dev_get(void *e, int32_t h, const uint8_t *what, uint32_t what_n) {
+    uint8_t q_h[4];
+    span_t f[2] = { NUM(q_h, h), { what, what_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_DEV_GET, f, 2, NULL, 0);
+}
 
 // The natives, in the role table's order, and the table row each serves.
 static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
@@ -407,6 +443,13 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "moybyte_aes_gcm_seal", FN(w_moybyte_aes_gcm_seal), "(*~*~*~)i", NULL },
     { "moybyte_aes_gcm_open", FN(w_moybyte_aes_gcm_open), "(*~*~*~)i", NULL },
     { "moybyte_x25519", FN(w_moybyte_x25519), "(*~*~*~)i", NULL },
+    { "moybyte_dev_open", FN(w_moybyte_dev_open), "(*~*~)i", NULL },
+    { "moybyte_dev_close", FN(w_moybyte_dev_close), "(i)i", NULL },
+    { "moybyte_dev_read", FN(w_moybyte_dev_read), "(i*~)i", NULL },
+    { "moybyte_dev_write", FN(w_moybyte_dev_write), "(i*~)i", NULL },
+    { "moybyte_dev_xfer", FN(w_moybyte_dev_xfer), "(i*~*~)i", NULL },
+    { "moybyte_dev_set", FN(w_moybyte_dev_set), "(i*~)i", NULL },
+    { "moybyte_dev_get", FN(w_moybyte_dev_get), "(i*~)i", NULL },
 };
 static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_THEME_TOKEN, MOY_T_THEME_GEN, MOY_T_THEME_LIGHT, MOY_T_THEME_NAME,
@@ -431,4 +474,7 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_MOYBYTE_SERVICE_START, MOY_T_MOYBYTE_SERVICE_STOP, MOY_T_MOYBYTE_SERVICE_RUNNING,
     MOY_T_MOYBYTE_RANDOM, MOY_T_MOYBYTE_SHA256, MOY_T_MOYBYTE_HMAC_SHA256,
     MOY_T_MOYBYTE_AES_GCM_SEAL, MOY_T_MOYBYTE_AES_GCM_OPEN, MOY_T_MOYBYTE_X25519,
+    MOY_T_MOYBYTE_DEV_OPEN, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_READ,
+    MOY_T_MOYBYTE_DEV_WRITE, MOY_T_MOYBYTE_DEV_XFER, MOY_T_MOYBYTE_DEV_SET,
+    MOY_T_MOYBYTE_DEV_GET,
 };

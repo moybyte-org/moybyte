@@ -14,7 +14,8 @@ What a C program needs to become a native module for a console
   message from the system, and the app's own service, `moy_service_start`,
   `moy_service_stop` and `moy_service_running`, and `moy_pick`, whose item
   is heard as the message `moy_open` and read and written by its handle with
-  `moy_item_read` and `moy_item_write`:
+  `moy_item_read` and `moy_item_write`, and the leases and devices by handle,
+  `moy_dev_open` to `moy_dev_get`:
   `docs/app_api_v1.md`'s call table), all from
   `native/os_calls.json`. The POSIX rows are declared by the toolchain's own
   headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).

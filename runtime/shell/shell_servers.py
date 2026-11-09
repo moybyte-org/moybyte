@@ -815,6 +815,43 @@ class ConsoleCalls:
             return _DOOR_ABSENT
         return bool(it.write(bytes(data)))
 
+    # The device handles (runtime/system/dev_handles.py): each run as the
+    # process, whose permissions the lease or the device checks.
+    def _dev(self, g, fn, *args):
+        pid = self.__ws.procs.pid_of(g)
+        if pid is None or pid <= _SHELL:
+            return _DOOR_STALE
+        return self._as(g, getattr(_dev_handles(), fn), pid, *args)
+
+    def dev_open(self, g, name, cfg=None):
+        return self._dev(g, "open", name, cfg or "")
+
+    def dev_close(self, g, h):
+        return self._dev(g, "close", h)
+
+    def dev_read(self, g, h, cap):
+        return self._dev(g, "read", h, cap)
+
+    def dev_write(self, g, h, data):
+        return self._dev(g, "write", h, data)
+
+    def dev_xfer(self, g, h, data, cap):
+        return self._dev(g, "xfer", h, data, cap)
+
+    def dev_set(self, g, h, cfg):
+        return self._dev(g, "set", h, cfg)
+
+    def dev_get(self, g, h, what):
+        return self._dev(g, "get", h, what)
+
+
+def _dev_handles():
+    try:
+        import dev_handles
+    except ImportError:  # host: the runtime package
+        from runtime import dev_handles
+    return dev_handles
+
 
 # The event descriptor's record (moy_evq_ev_t, native/moy_kernel/moy_evq.h):
 # the sender's pid, the arguments' bytes, the app id and the name, each
@@ -886,6 +923,13 @@ DOOR_ARGS = {
     "moybyte.service_start": "",
     "moybyte.service_stop": "",
     "moybyte.service_running": "",
+    "moybyte.dev_open": "so",
+    "moybyte.dev_close": "i",
+    "moybyte.dev_read": "ii",
+    "moybyte.dev_write": "ib",
+    "moybyte.dev_xfer": "ibi",
+    "moybyte.dev_set": "is",
+    "moybyte.dev_get": "is",
 }
 # END GENERATED
 

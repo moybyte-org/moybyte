@@ -348,8 +348,8 @@ imports its rows, §10).
 | `network` | `wifi` |
 | `multiplayer` | `net`, `on_net` (`docs/moy_cart_api.md`, Multiplayer) |
 | `pins` | `pin_write`, `pin_read` (`docs/moy_cart_api.md`, Pins) |
-| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`) |
-| `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1) |
+| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); `http`, `lora` and `mic` by handle on the compiled tiers too (§10, Devices by handle) |
+| `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1); by handle on the compiled tiers (§10) |
 | `full_access` | what a native (ELF) cart must ask for, and what admits an unsigned compiled module (§10) |
 | `console` | `print` writes to the text console's scrollback instead of drawing (a script's, the terminal's) |
 | `editor`, `calc`, `terminal`, `getcarts`, `storybook`, `myart`, `artwork`, `music` | markers: a shipped app's claim on its identity cart (§13); `editor` is where the console opens a text file from Files (Notes) |
@@ -715,6 +715,13 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
 | `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
 | `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
+| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
+| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
+| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
+| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
+| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
+| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
+| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -733,10 +740,11 @@ hears `_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`,
 the item a table whose `read()` answers its text and whose `write(text)`
 writes it back under an `"rw"` grant. Python-only rows (`status`, `lease`,
 the device APIs) are `runtime/system/moybyte.py`'s. The rows with only a
-wasm and C names (`moybyte.recv`, `item_read`, `item_write`) are what a
-compiled app or a native module reads where a Python or a Lua one is called
-back: its messages (§8; a native module reads them from its event
-descriptor) and an item handed to it. Standard names come first on every tier: Python's
+wasm and C names (`moybyte.recv`, `item_read`, `item_write`, the `dev_*`
+rows) are what a compiled app or a native module reads where a Python or a
+Lua one is called back or handed an object: its messages (§8; a native
+module reads them from its event descriptor), an item handed to it, and its
+leases and devices by handle (below). Standard names come first on every tier: Python's
 `open`, `os`, `time`, `socket`, `requests`, `asyncio` and `logging`; POSIX
 in C; WASI preview1 in wasm; Lua's `io` and `os`.
 
@@ -784,6 +792,35 @@ C app as a reactor, its memory the manifest's `memory` pages,
 `tests/fixtures/wasm/app_talk.moy`), `--chip` adding a board's signed AOT
 module; `native/moy_wasm/README.md` is the tier.
 
+**Devices by handle.** A compiled program (a compiled app, a WASI program,
+a native module) holds a lease or a device API by a handle where a Python
+program holds an object (`runtime/system/dev_handles.py` is the authority
+on every name, key and answer). `dev_open(name, cfg)` answers the handle:
+`name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
+`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`), `cfg` words
+`key=value` (`"mode=out value=1"`, `"baudrate=9600"`, `"scl=20 sda=21
+addr=0x48"`, `"url=http://example.com/ cap=4096"`). On the handle,
+`dev_read(h, buf, cap)` takes what waits (0 when nothing does),
+`dev_write(h, data, len)` sends, `dev_xfer(h, data, len, buf, cap)` writes
+then reads as one transfer (SPI's full duplex, an I²C register read),
+`dev_set(h, cfg)` configures it again and `dev_get(h, what)` reads one
+number (`"value"`, `"any"`, `"status"`, `"rssi"`, ...); `dev_close(h)` gives
+it back, and the process's end closes what it left open. A ring's records
+are read through the handle on every tier, never posted as messages: a
+pin's edges (`dev_set(h, "edges=both")`, then 8 bytes an edge from
+`dev_read`), a packet the radio heard, the microphone's samples. A program
+polls its handles where it polls its messages, in `_update` or on a timer.
+Each name needs what Python's needs: `lease:<row>` (`lease:gpio` for
+anything on the pins: a pin, a PWM, an ADC, an I²C bus), `http`, `lora`,
+`mic`. One holder a lease or a device, whatever the tiers: a resource a
+Python program's object holds is BUSY to a handle and the reverse (`-11`
+to a compiled app, `EBUSY` to a native or WASI program). A refused
+permission is DENIED (`EACCES`), a name, key or value the console does not
+take BAD (`EINVAL`), a handle not open ABSENT (`ENOENT`), a buffer that
+cannot hold one record FULL (`ERANGE`). `ble`, `usb`, `midi`, `camera` and
+`media` are Python's alone; `docs/os_2026-11/hardware.md` §4 says how BLE
+would come.
+
 **A command** (`"type": "command"`) is a program the terminal runs by
 its id's name (`local.hello` is `hello`): in Python its `main(argv)`, with
 `print` and `input` on the session's streams, answering the exit code; in
@@ -794,15 +831,16 @@ wasm a WASI program's `_start`; in C an ELF module's `main`
 `wasm32-wasip1` or Zig builds: files under its permissions, clocks, args, env,
 stdio; it imports `moybyte.os` for its messages (`send`, `on`), its
 notifications, badges and log lines (`notify`, `award`, `progress`, `log`),
-its wakes (`every`, `after`, `at`, `cancel`, §9), `open_with`, and its
+its wakes (`every`, `after`, `at`, `cancel`, §9), `open_with`, its
 prefs and the clipboard (`prefs_get`, `prefs_set`, `prefs_clear`,
 `clipboard_put_text`, `clipboard_text`, `clipboard_kind`,
-`clipboard_seq`), and `sdk/include/moybyte/os.h` declares each under its C
+`clipboard_seq`), and its leases and devices by handle (`dev_open` to
+`dev_get`, above), and `sdk/include/moybyte/os.h` declares each under its C
 name, `moy_notify`, `moy_prefs_get` and the rest. A console call waits for
 the console's answer: a service's at the scheduler's next poll, a
 foreground command's at its job's next step; a background command's answers
-AGAIN after 5 s, its door serving nothing while it runs. The prefs and
-clipboard rows are the role table's for a grant its start makes, over the
+AGAIN after 5 s, its door serving nothing while it runs. The prefs,
+clipboard and device rows are the role table's for a grant its start makes, over the
 roles its granted permissions name (`runtime/system/scheduler.py`,
 `compiled_run`), as a C program's are: a permission it lacks answers ACCES
 and a buffer too small RANGE. A WASI program has no window: `pick`, whose
@@ -823,7 +861,9 @@ message `moy_open` on its event descriptor, which it listens on with
 cancelled pick's handle 0), the handle what `moy_item_read(h, buf, cap)` and
 `moy_item_write(h, data, len)` take until the process ends
 (`runtime/system/moybyte.py`, `hand_item`, which hands an item to any
-process that is not the app on screen).
+process that is not the app on screen). Its leases and devices are
+`moy_dev_open` to `moy_dev_get` (above), each under the `lease:<row>` or
+device permission its manifest asks beside `full_access`.
 
 ## 11. Lifecycle
 

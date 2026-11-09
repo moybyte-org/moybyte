@@ -100,6 +100,12 @@ static const wild_row_t WILD_ROWS[] = {
     { 100, "moy_pick", 2, { A_STR, A_STR0 }, { -1, -1 } },
     { 101, "moy_item_read", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
     { 102, "moy_item_write", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
+    { 103, "moy_dev_open", 2, { A_STR, A_STR0 }, { -1, -1 } },
+    { 105, "moy_dev_read", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
+    { 106, "moy_dev_write", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
+    { 107, "moy_dev_xfer", 5, { A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { -1, 2, -1, 4, -1 } },
+    { 108, "moy_dev_set", 2, { A_VAL, A_STR }, { -1, -1 } },
+    { 109, "moy_dev_get", 2, { A_VAL, A_STR }, { -1, -1 } },
 };
 
 #define WILD_NROWS (sizeof WILD_ROWS / sizeof WILD_ROWS[0])

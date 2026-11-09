@@ -8,7 +8,10 @@ MicroPython alike; never staged.
 The far end, for a test: `moy_lease.sim_level(pin, v)` moves an input pin (an
 edge where one is open); `feed(unit, data)` is what a UART's peer sent;
 `sent(unit)` what it wrote; `loopback(unit, on)` joins its TX to its RX, as
-uart_set_loop_back does; `SPI_LOG[id]` every buffer an SPI host wrote."""
+uart_set_loop_back does; `SPI_LOG[id]` every buffer an SPI host wrote;
+`I2C_DEV[addr]` a device on an I2C bus, its registers a bytearray a read
+takes from its pointer (the last byte written) and a write fills after it;
+`ADC_LEVEL[pin]` what an ADC reads."""
 
 try:
     import moy_lease as _N
@@ -19,6 +22,8 @@ _RX = {}            # unit -> bytearray its peer sent, unread
 _TX = {}            # unit -> bytearray it wrote
 _LOOP = {}          # unit -> TX joined to RX
 SPI_LOG = {}        # SPI id -> [bytes written]
+I2C_DEV = {}        # address -> bytearray, the device's registers
+ADC_LEVEL = {}      # pin -> read_u16's answer
 
 
 def feed(unit, data):
@@ -38,6 +43,8 @@ def reset():
     _TX.clear()
     _LOOP.clear()
     SPI_LOG.clear()
+    I2C_DEV.clear()
+    ADC_LEVEL.clear()
 
 
 class Pin:
@@ -184,3 +191,90 @@ class SPI:
         self.write(out)
         for i in range(len(into)):
             into[i] = 0xFF
+
+
+class PWM:
+    def __init__(self, pin, freq=1000, duty_u16=0, **kw):
+        self.pin = pin.id
+        self._freq, self._duty = freq, duty_u16
+        _periph(self.pin, True)
+
+    def init(self, freq=None, duty_u16=None, **kw):
+        if freq is not None:
+            self._freq = freq
+        if duty_u16 is not None:
+            self._duty = duty_u16
+
+    def freq(self, *v):
+        if not v:
+            return self._freq
+        self._freq = int(v[0])
+
+    def duty_u16(self, *v):
+        if not v:
+            return self._duty
+        self._duty = int(v[0])
+
+    def deinit(self):
+        pass
+
+
+class ADC:
+    def __init__(self, pin, **kw):
+        self.pin = pin.id
+        _periph(self.pin, False)
+
+    def read_u16(self):
+        return ADC_LEVEL.get(self.pin, 0)
+
+
+class SoftI2C:
+    def __init__(self, scl, sda, freq=400000, **kw):
+        self.pins = (scl.id, sda.id)
+        self.freq = freq
+        self._at = {}
+        for p in self.pins:
+            _periph(p, True)
+
+    def _dev(self, addr):
+        d = I2C_DEV.get(addr)
+        if d is None:
+            raise OSError(19, "ENODEV")     # no ACK, as the board's I2C raises it
+        return d
+
+    def scan(self):
+        return sorted(I2C_DEV)
+
+    def writeto(self, addr, buf, stop=True):
+        d = self._dev(addr)
+        buf = bytes(buf)
+        if buf:
+            at = buf[0]
+            self._at[addr] = at
+            for i, b in enumerate(buf[1:]):
+                if at + i < len(d):
+                    d[at + i] = b
+        return len(buf)
+
+    def readfrom_into(self, addr, into, stop=True):
+        d = self._dev(addr)
+        at = self._at.get(addr, 0)
+        for i in range(len(into)):
+            into[i] = d[at + i] if at + i < len(d) else 0xFF
+        self._at[addr] = at + len(into)
+
+    def readfrom(self, addr, n, stop=True):
+        b = bytearray(n)
+        self.readfrom_into(addr, b, stop)
+        return bytes(b)
+
+    def readfrom_mem(self, addr, reg, n, addrsize=8):
+        self.writeto(addr, bytes([reg]), False)
+        return self.readfrom(addr, n)
+
+    def readfrom_mem_into(self, addr, reg, buf, addrsize=8):
+        self.writeto(addr, bytes([reg]), False)
+        self.readfrom_into(addr, buf)
+
+    def writeto_mem(self, addr, reg, buf, addrsize=8):
+        self.writeto(addr, bytes([reg]) + bytes(buf))

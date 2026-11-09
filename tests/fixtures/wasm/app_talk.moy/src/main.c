@@ -6,7 +6,9 @@
 // At _init it listens on "pong", pings the Echo service (local.echo), posts a
 // notification, awards the badge its manifest declares, sets an alarm that is
 // already due, a timer that goes off once and one that repeats, asks its
-// documents for a free name, and writes the OS log. Every _update reads the messages queued for it, one record
+// documents for a free name, writes the OS log, and opens leases by handle
+// (a pin it drives high and keeps until its run ends, a UART it writes and
+// reads back through its peer and closes). Every _update reads the messages queued for it, one record
 // each (moy_evq_ev_t, sdk/include/moybyte/os.h, its arguments a JSON array
 // after it), and logs what it heard: a timer is the system's message
 // "moybyte.timer" carrying its id, and the repeating one's first tick
@@ -39,6 +41,12 @@ int32_t files_new_name(const char *kind, uint32_t kind_n, const char *title, uin
                        char *name, uint32_t cap) APP(files_new_name);
 int32_t moybyte_log(int32_t level, const char *text, uint32_t text_n) APP(moybyte_log);
 int32_t moybyte_item_read(int32_t item, char *data, uint32_t cap) APP(moybyte_item_read);
+int32_t moybyte_dev_open(const char *name, uint32_t name_n, const char *cfg,
+                         uint32_t cfg_n) APP(moybyte_dev_open);
+int32_t moybyte_dev_close(int32_t h) APP(moybyte_dev_close);
+int32_t moybyte_dev_read(int32_t h, char *data, uint32_t cap) APP(moybyte_dev_read);
+int32_t moybyte_dev_write(int32_t h, const char *data, uint32_t n) APP(moybyte_dev_write);
+int32_t moybyte_dev_get(int32_t h, const char *what, uint32_t what_n) APP(moybyte_dev_get);
 void cls(int32_t c) MOY(cls);
 
 static uint32_t len(const char *s) {
@@ -114,6 +122,29 @@ EXPORT(_init) void init(void) {
     ticker = moybyte_every(1);
     put(S("every "));
     put_int(ticker);
+    say();
+    int32_t pin = moybyte_dev_open(S("gpio6"), S("mode=out value=1"));
+    put(S("dev_open "));
+    put_int(pin > 0 ? 1 : pin);
+    say();
+    put(S("dev_get "));
+    put_int(moybyte_dev_get(pin, S("value")));
+    say();
+    int32_t u = moybyte_dev_open(S("uart1"), S("baudrate=9600"));
+    put(S("dev_write "));
+    put_int(moybyte_dev_write(u, S("ping")));
+    say();
+    static char got[16];
+    int32_t n = moybyte_dev_read(u, got, sizeof got);
+    put(S("dev_read "));
+    if (n >= 0) {
+        put(got, (uint32_t)n);
+    } else {
+        put_int(n);
+    }
+    say();
+    put(S("dev_close "));
+    put_int(moybyte_dev_close(u));
     say();
 }
 

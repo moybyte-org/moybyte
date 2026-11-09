@@ -796,6 +796,7 @@ static int32_t role_errno(int32_t r) {
         case MOY_APP_IO: return W_IO;
         case MOY_APP_NEEDS_VM: return W_AGAIN;
         case MOY_APP_FORGED: return W_BADMSG;
+        case MOY_APP_BUSY: return W_BUSY;
         default: return W_INVAL;
     }
 }
@@ -863,6 +864,9 @@ typedef struct {
 #define OS_S(p, n) { (p), (n), 0, 's' }
 #define OS_O(p, n) { (p), (n), 0, 'o' }
 #define OS_I(v) { NULL, 0u, (v), 'i' }
+// An answer's capacity, handed to a door served in Python as a number (a
+// positive int32: it only tells the door what fits).
+#define OS_CAP(n) OS_I((int32_t)((n) < 0x7fffffffu ? (n) : 0x7fffffffu))
 
 // The console's verb `name` run as the run's process (os_console) over
 // arguments `a` packed as a JSON array; an empty text that must not be is

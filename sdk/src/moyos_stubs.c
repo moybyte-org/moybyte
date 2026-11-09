@@ -1056,3 +1056,73 @@ int32_t moy_item_write(int32_t item, const void *data, size_t data_len)
     return ((moy_os_fn_moy_item_write *)__moy_os->fn[102])(item, data, data_len);
 }
 #endif
+
+#if MOY_OS_ROW(103)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_dev_open(const char *name, const char *cfg);
+MOY_OS_USED(103);
+int32_t moy_dev_open(const char *name, const char *cfg)
+{
+    return ((moy_os_fn_moy_dev_open *)__moy_os->fn[103])(name, cfg);
+}
+#endif
+
+#if MOY_OS_ROW(104)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_dev_close(int32_t h);
+MOY_OS_USED(104);
+int32_t moy_dev_close(int32_t h)
+{
+    return ((moy_os_fn_moy_dev_close *)__moy_os->fn[104])(h);
+}
+#endif
+
+#if MOY_OS_ROW(105)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_dev_read(int32_t h, void *data, size_t data_cap);
+MOY_OS_USED(105);
+int32_t moy_dev_read(int32_t h, void *data, size_t data_cap)
+{
+    return ((moy_os_fn_moy_dev_read *)__moy_os->fn[105])(h, data, data_cap);
+}
+#endif
+
+#if MOY_OS_ROW(106)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_dev_write(int32_t h, const void *data, size_t data_len);
+MOY_OS_USED(106);
+int32_t moy_dev_write(int32_t h, const void *data, size_t data_len)
+{
+    return ((moy_os_fn_moy_dev_write *)__moy_os->fn[106])(h, data, data_len);
+}
+#endif
+
+#if MOY_OS_ROW(107)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap);
+MOY_OS_USED(107);
+int32_t moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap)
+{
+    return ((moy_os_fn_moy_dev_xfer *)__moy_os->fn[107])(h, data, data_len, into, into_cap);
+}
+#endif
+
+#if MOY_OS_ROW(108)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_dev_set(int32_t h, const char *cfg);
+MOY_OS_USED(108);
+int32_t moy_dev_set(int32_t h, const char *cfg)
+{
+    return ((moy_os_fn_moy_dev_set *)__moy_os->fn[108])(h, cfg);
+}
+#endif
+
+#if MOY_OS_ROW(109)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_dev_get(int32_t h, const char *what);
+MOY_OS_USED(109);
+int32_t moy_dev_get(int32_t h, const char *what)
+{
+    return ((moy_os_fn_moy_dev_get *)__moy_os->fn[109])(h, what);
+}
+#endif

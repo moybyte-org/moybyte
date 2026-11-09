@@ -36,6 +36,13 @@
     X(aes_gcm_seal, "(*~*~*~)i") \
     X(aes_gcm_open, "(*~*~*~)i") \
     X(x25519, "(*~*~*~)i") \
+    X(dev_open, "(*~*~)i") \
+    X(dev_close, "(i)i") \
+    X(dev_read, "(i*~)i") \
+    X(dev_write, "(i*~)i") \
+    X(dev_xfer, "(i*~*~)i") \
+    X(dev_set, "(i*~)i") \
+    X(dev_get, "(i*~)i") \
 
 #endif // MOY_WASI_OS_ROWS_H
 
@@ -172,6 +179,44 @@ static int32_t w_os_x25519(wasm_exec_env_t e, const uint8_t *secret, uint32_t se
                            uint32_t shared_cap) {
     const os_arg_t a[2] = { OS_O((const char *)secret, secret_n), OS_O((const char *)peer, peer_n) };
     return os_role(e, MOY_T_MOYBYTE_X25519, true, a, 2, shared, shared_cap);
+}
+
+static int32_t w_os_dev_open(wasm_exec_env_t e, const char *name, uint32_t name_n,
+                             const char *cfg, uint32_t cfg_n) {
+    const os_arg_t a[2] = { OS_O(name, name_n), OS_O(cfg, cfg_n) };
+    return os_role(e, MOY_T_MOYBYTE_DEV_OPEN, false, a, 2, NULL, 0);
+}
+
+static int32_t w_os_dev_close(wasm_exec_env_t e, int32_t h) {
+    const os_arg_t a[1] = { OS_I(h) };
+    return os_role(e, MOY_T_MOYBYTE_DEV_CLOSE, false, a, 1, NULL, 0);
+}
+
+static int32_t w_os_dev_read(wasm_exec_env_t e, int32_t h, uint8_t *data, uint32_t data_cap) {
+    const os_arg_t a[2] = { OS_I(h), OS_CAP(data_cap) };
+    return os_role(e, MOY_T_MOYBYTE_DEV_READ, false, a, 2, data, data_cap);
+}
+
+static int32_t w_os_dev_write(wasm_exec_env_t e, int32_t h, const uint8_t *data,
+                              uint32_t data_n) {
+    const os_arg_t a[2] = { OS_I(h), OS_O((const char *)data, data_n) };
+    return os_role(e, MOY_T_MOYBYTE_DEV_WRITE, false, a, 2, NULL, 0);
+}
+
+static int32_t w_os_dev_xfer(wasm_exec_env_t e, int32_t h, const uint8_t *data, uint32_t data_n,
+                             uint8_t *into, uint32_t into_cap) {
+    const os_arg_t a[3] = { OS_I(h), OS_O((const char *)data, data_n), OS_CAP(into_cap) };
+    return os_role(e, MOY_T_MOYBYTE_DEV_XFER, false, a, 3, into, into_cap);
+}
+
+static int32_t w_os_dev_set(wasm_exec_env_t e, int32_t h, const char *cfg, uint32_t cfg_n) {
+    const os_arg_t a[2] = { OS_I(h), OS_O(cfg, cfg_n) };
+    return os_role(e, MOY_T_MOYBYTE_DEV_SET, false, a, 2, NULL, 0);
+}
+
+static int32_t w_os_dev_get(wasm_exec_env_t e, int32_t h, const char *what, uint32_t what_n) {
+    const os_arg_t a[2] = { OS_I(h), OS_O(what, what_n) };
+    return os_role(e, MOY_T_MOYBYTE_DEV_GET, false, a, 2, NULL, 0);
 }
 
 #endif // MOY_WASI_OS_BODIES

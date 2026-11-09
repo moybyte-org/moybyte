@@ -276,7 +276,7 @@ def test_a_lease_row_prompts_full_access_and_is_absent_where_not_offered():
     granted, absent, refusal = P.check(cart, None, ("gpio",))
     assert absent == ["lease:spi2"] and 'needs "lease:spi2"' in refusal
     lua = dict(cart, runtime="lua", required=[])
-    assert P.check(lua, None, have)[1] == ["lease:spi2"]   # Python's alone for now
+    assert P.check(lua, None, have)[1] == ["lease:spi2"]   # no Lua row serves a lease
 
 
 # -- /dev and /proc -------------------------------------------------------------------

@@ -9,7 +9,11 @@
 // messages "moybyte.timer" and "moybyte.at" carrying the wake's id (the
 // repeating one cancelled at its first tick), then writes and reads back a
 // pref and the clipboard and opens an item no app opens, printing each
-// answer and its errno; a "bye" ends it, a "quit" returns
+// answer and its errno; a "wake" carrying ["dev"] instead opens the
+// console's leases by handle (a process listens on eight names): gpio6
+// driven high and kept until the service ends, uart1 written and read back
+// (its peer joined to it) and closed, and a handle it never had, each
+// answer printed with its errno; a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -79,6 +83,23 @@ int main(void) {
             moy_log(MOY_LOG_INFO, "noted");
             int r = moy_service_running();
             printf("service_running %d errno %d\n", r, r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0 && strcmp(m.b + sizeof m.ev, "[\"dev\"]") == 0) {
+            int pin = (int)moy_dev_open("gpio6", "mode=out value=1");
+            printf("dev_open.gpio6 %d errno %d\n", pin > 0 ? 1 : pin, pin < 0 ? errno : 0);
+            int r = (int)moy_dev_get(pin, "value");
+            printf("dev_get.value %d errno %d\n", r, r < 0 ? errno : 0);
+            int u = (int)moy_dev_open("uart1", "baudrate=9600");
+            printf("dev_open.uart1 %d errno %d\n", u > 0 ? 1 : u, u < 0 ? errno : 0);
+            r = (int)moy_dev_write(u, "ping", 4);
+            printf("dev_write %d errno %d\n", r, r < 0 ? errno : 0);
+            char b[16];
+            r = (int)moy_dev_read(u, b, sizeof b);
+            printf("dev_read %.*s errno %d\n", r > 0 ? r : 0, b, r < 0 ? errno : 0);
+            r = (int)moy_dev_close(u);
+            printf("dev_close %d errno %d\n", r, r < 0 ? errno : 0);
+            r = (int)moy_dev_get(9999, "value");
+            printf("dev_get.none %d errno %d\n", r, r < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0) {
             printf("after %d\n", (int)moy_after(0));

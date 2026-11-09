@@ -3,6 +3,11 @@
 // printed as 1 where it is one. `app pick` picks instead: a document it
 // hears as `moy_open` on its event descriptor, read, written and read
 // again through its handle, then a pick the user cancels (handle 0).
+// `app lease` opens the console's leases by handle (a handle printed as 1):
+// a pin driven and read, a UART written and read back through its peer, an
+// SPI transfer and one too long for its buffer, a UART it already holds, a
+// row the board does not offer and a handle it never had; it ends holding
+// the pin, for its end to sweep.
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -15,7 +20,8 @@
 static void said(const char *what, int32_t r, const char *buf) {
     if (r < 0) {
         printf("%s -1 %s\n", what, errno == EACCES ? "EACCES" : errno == ERANGE ? "ERANGE"
-               : errno == ENOENT ? "ENOENT" : "other");
+               : errno == ENOENT ? "ENOENT" : errno == EBUSY ? "EBUSY"
+               : errno == EINVAL ? "EINVAL" : "other");
     } else if (buf != NULL) {
         printf("%s %.*s\n", what, (int)r, buf);
     } else {
@@ -61,9 +67,33 @@ static int pick(void) {
     return 0;
 }
 
+static int lease(void) {
+    char buf[16];
+    int32_t pin = moy_dev_open("gpio6", "mode=out");
+    said("dev_open.gpio6", pin > 0 ? 1 : pin, NULL);
+    said("dev_set.value", moy_dev_set(pin, "value=1"), NULL);
+    said("dev_get.value", moy_dev_get(pin, "value"), NULL);
+    int32_t u = moy_dev_open("uart1", "baudrate=9600");
+    said("dev_open.uart1", u > 0 ? 1 : u, NULL);
+    said("dev_write", moy_dev_write(u, "hello", 5), NULL);
+    said("dev_read", moy_dev_read(u, buf, sizeof buf), buf);
+    said("dev_open.uart1.again", moy_dev_open("uart1", NULL), NULL);
+    said("dev_close", moy_dev_close(u), NULL);
+    int32_t s = moy_dev_open("spi2", "baudrate=1000000");
+    said("dev_open.spi2", s > 0 ? 1 : s, NULL);
+    said("dev_xfer", moy_dev_xfer(s, "\x9f\x00", 2, buf, sizeof buf), NULL);
+    said("dev_xfer.short", moy_dev_xfer(s, "\x9f\x00", 2, buf, 1), NULL);
+    said("dev_open.gpio7", moy_dev_open("gpio7", NULL), NULL);
+    said("dev_get.none", moy_dev_get(9999, "value"), NULL);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "pick") == 0) {
         return pick();
+    }
+    if (argc > 1 && strcmp(argv[1], "lease") == 0) {
+        return lease();
     }
     char buf[256];
     int32_t r = moy_prefs_set("level", "42");

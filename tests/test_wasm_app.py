@@ -267,3 +267,42 @@ def test_a_compiled_app_is_refused_what_its_permissions_do_not_grant(talk):
     _ws, _pid, lines = talk(off=("notifications", "alarms"))
     assert "notify -4" in lines and "at -4" in lines, lines      # MOY_APP_DENIED
     assert "heard pong from local.echo [42]" in lines, lines     # messages need none
+
+
+@pytest.mark.parametrize("off", [(), ("lease:gpio", "lease:uart1")])
+def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
+    """moybyte_dev_* (runtime/system/dev_handles.py): a pin the app drives and
+    reads back, a UART it writes and reads through its peer, each DENIED with
+    its `lease:<row>` turned off; the pin it keeps is BUSY to a Python
+    program while it runs and safe once its run ends."""
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import board_config
+    from runtime import leases, moybyte
+    from runtime import moy_lease as N
+    from runtime.host import lease_sim
+    leases.stand_in(lease_sim, board_config.lease_spec(
+        os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
+    lease_sim.reset()
+    lease_sim.loopback(1, True)
+    try:
+        ws, pid, lines = talk(off)
+        got = [ln for ln in lines if ln.startswith("dev_")]
+        if not off:
+            assert got == ["dev_open 1", "dev_get 1", "dev_write 4", "dev_read ping",
+                           "dev_close 0"], lines
+            assert N.pin_state(6) & N.PIN_OUT and N.held() == 1
+            with pytest.raises(OSError) as e:
+                leases.LEASES.take(moybyte.SHELL, "gpio6")
+            assert e.value.errno == 16                                  # EBUSY
+            ws.exit()
+            assert N.held() == 0 and N.pin_state(6) == N.PIN_SAFE
+        else:
+            assert got == ["dev_open -4", "dev_get -8", "dev_write -8", "dev_read -8",
+                           "dev_close -8"], lines                       # DENIED, ABSENT
+            assert N.held() == 0
+    finally:
+        for p in list(leases.LEASES.held):
+            leases.LEASES.sweep(p)
+        N.reset()
+        leases.stand_in(None, None)

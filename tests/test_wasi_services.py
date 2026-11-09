@@ -322,3 +322,55 @@ def test_the_fixture_is_a_service():
     with open(os.path.join(FIXTURE, "manifest.json")) as f:
         man = json.load(f)
     assert man["runtime"] == "wasm" and man["moybyte"]["type"] == "service"
+
+
+@pytest.mark.parametrize("perms", [("lease:gpio", "lease:uart1"), ()])
+def test_a_wasi_service_holds_leases_by_handle_until_it_ends(svc, perms):
+    """moybyte.os `dev_*` are the device handles' rows (runtime/system/
+    dev_handles.py) for the service's process: a pin driven and read back, a
+    UART written and read through its peer, a handle it never had NOENT, each
+    refused ACCES without its `lease:<row>`. A pin it holds is BUSY to a
+    Python program until the service ends, whose sweep leaves it safe."""
+    from runtime import leases
+    from runtime import moy_lease as N
+    from runtime.host import lease_sim
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import board_config
+    ws, s, cart, peer = svc
+    leases.stand_in(lease_sim, board_config.lease_spec(
+        os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
+    lease_sim.reset()
+    lease_sim.loopback(1, True)
+    try:
+        since = L.next()
+        pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+        assert pid is not None
+        assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["dev"]')[0] == 1)
+        assert _polled(s, lambda: any(t.startswith("dev_get.none ") for t in _texts(since, pid))), \
+            _texts(since, pid)
+        got = [t for t in _texts(since, pid) if t.startswith("dev_")]
+        if perms:
+            assert got == ["dev_open.gpio6 1 errno 0", "dev_get.value 1 errno 0",
+                           "dev_open.uart1 1 errno 0", "dev_write 4 errno 0",
+                           "dev_read ping errno 0", "dev_close 0 errno 0",
+                           "dev_get.none -1 errno 44"], got
+            assert N.pin_state(6) & N.PIN_OUT and N.held() == 1
+            with pytest.raises(OSError) as e:
+                leases.LEASES.take(moybyte.SHELL, "gpio6")      # Python's, ungated
+            assert e.value.errno == 16                                  # EBUSY
+        else:
+            assert got == ["dev_open.gpio6 -1 errno 2", "dev_get.value -1 errno 44",
+                           "dev_open.uart1 -1 errno 2", "dev_write -1 errno 44",
+                           "dev_read  errno 44", "dev_close -1 errno 44",
+                           "dev_get.none -1 errno 44"], got
+        assert s.stop(pid)
+        assert _polled(s, lambda: N.held() == 0)
+        if perms:
+            assert N.pin_state(6) == N.PIN_SAFE
+        leases.LEASES.drop(leases.LEASES.take(moybyte.SHELL, "gpio6"))
+    finally:
+        for p in list(leases.LEASES.held):
+            leases.LEASES.sweep(p)
+        N.reset()
+        leases.stand_in(None, None)

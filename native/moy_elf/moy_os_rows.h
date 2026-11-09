@@ -180,5 +180,12 @@ int32_t moy_os_moy_service_running(void);
 int32_t moy_os_moy_pick(const char *mime, const char *mode);
 int32_t moy_os_moy_item_read(int32_t item, void *data, size_t data_cap);
 int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len);
+int32_t moy_os_moy_dev_open(const char *name, const char *cfg);
+int32_t moy_os_moy_dev_close(int32_t h);
+int32_t moy_os_moy_dev_read(int32_t h, void *data, size_t data_cap);
+int32_t moy_os_moy_dev_write(int32_t h, const void *data, size_t data_len);
+int32_t moy_os_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap);
+int32_t moy_os_moy_dev_set(int32_t h, const char *cfg);
+int32_t moy_os_moy_dev_get(int32_t h, const char *what);
 
 #endif // MOY_OS_ROWS_H

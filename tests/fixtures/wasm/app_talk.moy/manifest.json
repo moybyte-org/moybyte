@@ -10,7 +10,7 @@
   ],
   "moybyte": {
     "type": "app",
-    "permissions": ["notifications", "alarms", "files:documents"],
+    "permissions": ["notifications", "alarms", "files:documents", "lease:gpio", "lease:uart1"],
     "receives": ["pong"],
     "achievements": [
       {"id": "hello", "title": "Hello", "icon": "star", "hint": "Say hello"}

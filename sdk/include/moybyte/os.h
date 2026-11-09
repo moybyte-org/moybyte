@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 103
+#define MOY_OS_VERSION 110
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -358,6 +358,83 @@ static inline int32_t moy_x25519(const void *secret, size_t secret_len, const vo
     return (int)r;
 }
 
+int32_t __moy_os_dev_open(const char *name, size_t name_len, const char *cfg, size_t cfg_len)
+    __attribute__((import_module("moybyte.os"), import_name("dev_open")));
+static inline int32_t moy_dev_open(const char *name, const char *cfg) {
+    int32_t r = __moy_os_dev_open(name, name ? __builtin_strlen(name) : 0, cfg, cfg ? __builtin_strlen(cfg) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_dev_close(int32_t h)
+    __attribute__((import_module("moybyte.os"), import_name("dev_close")));
+static inline int32_t moy_dev_close(int32_t h) {
+    int32_t r = __moy_os_dev_close(h);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_dev_read(int32_t h, void *data, size_t data_cap)
+    __attribute__((import_module("moybyte.os"), import_name("dev_read")));
+static inline int32_t moy_dev_read(int32_t h, void *data, size_t data_cap) {
+    int32_t r = __moy_os_dev_read(h, data, data_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_dev_write(int32_t h, const void *data, size_t data_len)
+    __attribute__((import_module("moybyte.os"), import_name("dev_write")));
+static inline int32_t moy_dev_write(int32_t h, const void *data, size_t data_len) {
+    int32_t r = __moy_os_dev_write(h, data, data_len);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap)
+    __attribute__((import_module("moybyte.os"), import_name("dev_xfer")));
+static inline int32_t moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap) {
+    int32_t r = __moy_os_dev_xfer(h, data, data_len, into, into_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_dev_set(int32_t h, const char *cfg, size_t cfg_len)
+    __attribute__((import_module("moybyte.os"), import_name("dev_set")));
+static inline int32_t moy_dev_set(int32_t h, const char *cfg) {
+    int32_t r = __moy_os_dev_set(h, cfg, cfg ? __builtin_strlen(cfg) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_dev_get(int32_t h, const char *what, size_t what_len)
+    __attribute__((import_module("moybyte.os"), import_name("dev_get")));
+static inline int32_t moy_dev_get(int32_t h, const char *what) {
+    int32_t r = __moy_os_dev_get(h, what, what ? __builtin_strlen(what) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 #else
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
@@ -418,6 +495,13 @@ int32_t moy_service_running(void);   // moybyte.service_running
 int32_t moy_pick(const char *mime, const char *mode);   // moybyte.pick
 int32_t moy_item_read(int32_t item, void *data, size_t data_cap);   // moybyte.item_read
 int32_t moy_item_write(int32_t item, const void *data, size_t data_len);   // moybyte.item_write
+int32_t moy_dev_open(const char *name, const char *cfg);   // moybyte.dev_open
+int32_t moy_dev_close(int32_t h);   // moybyte.dev_close
+int32_t moy_dev_read(int32_t h, void *data, size_t data_cap);   // moybyte.dev_read
+int32_t moy_dev_write(int32_t h, const void *data, size_t data_len);   // moybyte.dev_write
+int32_t moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap);   // moybyte.dev_xfer
+int32_t moy_dev_set(int32_t h, const char *cfg);   // moybyte.dev_set
+int32_t moy_dev_get(int32_t h, const char *what);   // moybyte.dev_get
 
 #endif // __wasm__
 
