@@ -117,7 +117,23 @@ KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 
 # face's line cursor and the pointers to the block the views share, which
 # is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
 TEXT_SRAM = 44
-WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM, 188416)
+# And less LATE_SRAM, the statics that landed while this guard was skipped
+# (from 2026-11-06 a password on the card served SSH, which held the radio at
+# boot), by the link maps of 26fe07bc5 and of a 2026-10-20 build:
+# U-mode's (native/moy_elf/moy_umode.S and .c, a3e255c43: the trap entry, the
+# vector table and the kernel side of a U-mode call, in IRAM because a trap
+# taken with the cache off must reach them, and their statics), 5206 bytes;
+# and the USB device stack's, net: MicroPython's TinyUSB CDC device, 3130
+# bytes of statics in the module-free image, went with the `usb` host
+# (cce0e58f2, 2026-11-04), and native/moy_usbdisk's TinyUSB MSC device
+# (2ac0cbc09, 2026-11-08) keeps 1107, its endpoint buffer PSRAM
+# (tools/patch_tinyusb_msc_psram.py). A static moves the end of the internal
+# heap's low region, and the boot's allocations that no longer fit there
+# land ahead of the high region's largest block, so the largest block's
+# baseline takes them too.
+LATE_SRAM = 5206 + 1107 - 3130
+WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM - LATE_SRAM,
+                      188416 - LATE_SRAM)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
 
