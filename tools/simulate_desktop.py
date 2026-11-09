@@ -145,13 +145,23 @@ def save_gif(images, path, scale):
     print("wrote %s (%d frames, %dx%d)" % (path, len(frames), images[0][0] * scale, images[0][1] * scale))
 
 
-def _open_named_cart(ws, cart_path, carts_dir):
-    """Copy a named .moy into the store (if needed), select and open it."""
+def _stage_named_cart(cart_path, carts_dir):
+    """The store path of the .moy at `cart_path`, copied over whatever the store
+    holds under its name on every launch, so the run is the source folder as it
+    is now. A cart already in the store is its own source and stays put."""
+    import shutil
     name = os.path.basename(os.path.normpath(cart_path))
     dst = os.path.join(carts_dir, name)
-    if os.path.abspath(cart_path) != os.path.abspath(dst) and not os.path.exists(dst):
-        import shutil
+    if os.path.abspath(cart_path) != os.path.abspath(dst):
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
         shutil.copytree(cart_path, dst)
+    return dst
+
+
+def _open_named_cart(ws, cart_path, carts_dir):
+    """Copy a named .moy into the store, select and open it."""
+    dst = _stage_named_cart(cart_path, carts_dir)
     cat = host_app.moy_catalogue
     ws.launcher.items = [c for c in (cat.load(e["h"])
                                      for e in cat.catalogue(ws.carts_root)) if c]
