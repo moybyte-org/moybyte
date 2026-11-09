@@ -52,6 +52,8 @@ void moy_loop_job_drop(bool (*fn)(void *), void *arg) __attribute__((weak));
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#elif !defined(__EMSCRIPTEN__)
+#include <pthread.h>
 #endif
 
 #define ONE 65536u
@@ -172,6 +174,27 @@ static media_t *s_m;
 #define LOCK(m) ((void)(m))
 #define UNLOCK(m) ((void)(m))
 #define WAKE(m) ((void)(m))
+#endif
+
+// The service's life: a teardown (close, the lease's end, the VM's end) and
+// the frame's job run one at a time, so a teardown on any task frees nothing
+// the job reads. The gate is made by the first open and never freed: with no
+// gate there has been no service.
+#ifdef MEDIA_BOARD
+static StaticSemaphore_t s_life_buf;
+static SemaphoreHandle_t s_life;
+#define LIFE_LOCK() ((void)(s_life != NULL && xSemaphoreTake(s_life, portMAX_DELAY)))
+#define LIFE_UNLOCK() ((void)(s_life != NULL && xSemaphoreGive(s_life)))
+#define LIFE_MAKE() ((void)(s_life == NULL && (s_life = xSemaphoreCreateMutexStatic(&s_life_buf)) != NULL))
+#elif !defined(__EMSCRIPTEN__)
+static pthread_mutex_t s_life = PTHREAD_MUTEX_INITIALIZER;
+#define LIFE_LOCK() pthread_mutex_lock(&s_life)
+#define LIFE_UNLOCK() pthread_mutex_unlock(&s_life)
+#define LIFE_MAKE() ((void)0)
+#else
+#define LIFE_LOCK() ((void)0)
+#define LIFE_UNLOCK() ((void)0)
+#define LIFE_MAKE() ((void)0)
 #endif
 
 #define LOAD(p) __atomic_load_n((p), __ATOMIC_ACQUIRE)
@@ -1804,10 +1827,11 @@ static void file_pump(media_t *m) {
     }
 }
 
-void moy_media_pump(void) {
+// Under the life gate: false when there is no service.
+static bool pump_gated(void) {
     media_t *m = s_m;
     if (m == NULL) {
-        return;
+        return false;
     }
     file_pump(m);
 #ifndef MEDIA_BOARD
@@ -1815,12 +1839,23 @@ void moy_media_pump(void) {
         file_pump(m);
     }
 #endif
+    return true;
 }
 
+void moy_media_pump(void) {
+    LIFE_LOCK();
+    pump_gated();
+    LIFE_UNLOCK();
+}
+
+// The service gone, the job answers false and the loop drops it on its own
+// task: a teardown on another task never touches the loop's job table.
 static bool media_job(void *arg) {
     (void)arg;
-    moy_media_pump();
-    return true;
+    LIFE_LOCK();
+    bool live = pump_gated();
+    LIFE_UNLOCK();
+    return live;
 }
 
 // -- probe ---------------------------------------------------------------------------
@@ -1961,6 +1996,7 @@ static int media_open(uint32_t owner, int rate, int channels) {
     m->state = MOY_MEDIA_IDLE;
     m->seek_req = NO_SEEK;
     mp3dec_init(&m->dec);
+    LIFE_MAKE();
     if (moy_loop_job == NULL || !moy_loop_job(media_job, NULL)) {
         block_free(m);
         moy_share_give(MOY_SHARE_MEDIA, share);
@@ -2030,14 +2066,11 @@ static void reap(media_t *m) {
     uint32_t share = m->share;
     conn_close(m);
     file_close(m, 0);
-    if (moy_loop_job_drop != NULL) {
-        moy_loop_job_drop(media_job, NULL);
-    }
     block_free(m);
     moy_share_give(MOY_SHARE_MEDIA, share);
 }
 
-int moy_media_close(uint32_t owner) {
+static int close_gated(uint32_t owner) {
     media_t *m = mine(owner);
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
@@ -2053,6 +2086,13 @@ int moy_media_close(uint32_t owner) {
     return 0;
 }
 
+int moy_media_close(uint32_t owner) {
+    LIFE_LOCK();
+    int rc = close_gated(owner);
+    LIFE_UNLOCK();
+    return rc;
+}
+
 // Its holder gone, the stream stops and the service is the ORPHAN's, closed
 // by the next open or the VM's end.
 static void orphan(media_t *m) {
@@ -2065,13 +2105,15 @@ static void orphan(media_t *m) {
 }
 
 void moy_media_lease_end(uint32_t owner) {
+    LIFE_LOCK();
     media_t *m = mine(owner);
-    if (m != NULL && moy_media_close(owner) != 0) {
+    if (m != NULL && close_gated(owner) != 0) {
         orphan(m);
     }
+    LIFE_UNLOCK();
 }
 
-int moy_media_close_vm(void) {
+static int close_vm_gated(void) {
     media_t *m = s_m;
     if (m == NULL) {
         return 0;
@@ -2091,6 +2133,13 @@ int moy_media_close_vm(void) {
     }
     reap(m);
     return 0;
+}
+
+int moy_media_close_vm(void) {
+    LIFE_LOCK();
+    int rc = close_vm_gated();
+    LIFE_UNLOCK();
+    return rc;
 }
 
 // -- the pull ------------------------------------------------------------------------------

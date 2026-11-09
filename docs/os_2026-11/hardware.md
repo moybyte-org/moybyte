@@ -388,7 +388,10 @@ read through the store's volume seam), and a job of the console's frame
 stream buffer a few KiB at a time with the card's bus gate around each read,
 sizes it and seeks it, so a store op never runs on the PSRAM stack and no
 Python runs while a file plays. The host has no task; the same job runs one
-pass of its loop. Decode cost is the stream's (internet radio is 44.1 kHz
+pass of its loop. The job and a teardown (close, the lease's end, the VM's
+end) take turns at the service's life gate, so a teardown from any task
+frees nothing the job is reading, and the job, finding no service, is dropped
+by the loop on its own task. Decode cost is the stream's (internet radio is 44.1 kHz
 stereo), not the output's. On the T-Deck that cost reaches a heavy cart on
 core 1 through the cache and the memory bus the cores share, and the decode
 itself is the cost: its state in internal SRAM bought back a fifth of it for

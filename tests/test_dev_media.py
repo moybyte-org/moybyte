@@ -11,6 +11,7 @@ import errno
 import http.server
 import math
 import os
+import random
 import shutil
 import threading
 import time
@@ -21,7 +22,7 @@ import pytest
 
 from runtime import audio_binding, dev_media, devices, moybyte
 from runtime import moy_log as L
-from runtime import moy_loop
+from runtime import moy_lease, moy_loop
 from runtime import moy_media as N
 from runtime import moy_play as mp
 
@@ -248,6 +249,36 @@ def test_a_file_plays_on_the_frames_job_alone(media):
     rate = AUDIO.rate()
     assert abs(_freq(pcm[rate // 5:rate + rate // 2], rate) - 1000) < 10
     assert N.status()[17] == 0                           # never starved
+
+
+def test_a_teardown_on_another_task_frees_nothing_the_frames_job_reads(media):
+    """The lease's end (a sweep, as a kill's) and the VM's end on a thread not
+    the frame's, while the frame's job reads and decodes the file: the two
+    take turns, the service is freed whole, and the job's slot goes on the
+    loop's own thread."""
+    rng = random.Random(7)
+    for i in range(60):
+        pid = L.spawn("t.race")
+        assert N.open(pid, AUDIO.rate()) == 0
+        assert N.play(pid, str(TONE)) >= 0
+        if i % 3 == 1:
+            N.stop(pid)                                  # idle soon: the sweep frees it
+        done = threading.Event()
+        pause = rng.random() * 0.003
+
+        def revoke(pid=pid, pause=pause, done=done):
+            time.sleep(pause)
+            moy_lease.sweep(pid)
+            N.close_vm()
+            done.set()
+
+        t = threading.Thread(target=revoke)
+        t.start()
+        while not done.is_set():
+            moy_loop.jobs()
+        t.join()
+        moy_loop.jobs()
+        assert N.owner() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0 and N.status() is None
 
 
 def test_a_files_tag_and_probe(media, tmp_path):

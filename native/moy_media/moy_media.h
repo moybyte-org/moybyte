@@ -35,7 +35,8 @@
 // is absent or full, before anything is allocated. The service's state, its
 // buffers and its decoder are one PSRAM block, the task's stack is PSRAM and
 // the URL's client buffers are kernel memory (moy_ota.h); close() frees all of
-// it and gives the row back. Nothing is static but a pointer.
+// it and gives the row back. Nothing is static but a pointer and the life
+// gate's mutex.
 //
 // WHO RUNS WHAT. The VM's thread opens, closes, commands and feeds; the
 // frame's job reads a file on that same thread, so a store op never runs on
@@ -47,7 +48,13 @@
 // has one writer (the task) and one reader (the pull); the stream buffer one
 // writer (the task for a URL, the frame's job for a file, the face's feed for
 // the page's bytes) and one reader (the task). Commands and texts change
-// under the service's mutex.
+// under the service's mutex. A TEARDOWN (close, the lease's end, the VM's
+// end) and the frame's job take turns at the life gate, so a teardown on a
+// task other than the VM's frees nothing the job reads; the job, finding no
+// service, answers false and the loop drops it on its own task. Every caller
+// today tears down on the VM's task: the face's close, the lease's end from
+// moybyte.end's sweep, a compiled process's end (moy_os.c's proc_end, run
+// from the loop's jobs and moy_os_reap) and the kernel's VM end.
 //
 // A STREAM'S LIFE. go(i) makes entry i current: the task drops what it held,
 // and opens it. A URL whose response is a playlist (by its type or its path)
