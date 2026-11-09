@@ -8,7 +8,10 @@
 // order, at most six folders deep. A reader takes stored and deflated entries
 // (the image's uzlib), sizes from the central directory, strips the one top
 // folder every entry sits under, and refuses a path that climbs, is absolute,
-// or names what the wire skips. runtime/carts/moy_pack.py's pack/unpack/adopt are
+// or names what the wire skips. Both ways a file passes through a chunk
+// buffer (and the deflate window), so a member of any size -- a compiled
+// cart's module, its game data -- costs neither its size nor a cap.
+// runtime/carts/moy_pack.py's pack/unpack/adopt are
 // the twins; tests/test_store_native.py pins the two and a zip reader.
 
 #ifndef MOY_PACK_H

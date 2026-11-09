@@ -786,3 +786,59 @@ def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
                 k[len("hop.moy/"):]: v for k, v in kept.items()}
     assert "import /shelf/carts/local.hop.moy" in outs["vm"]
     assert "import /shelf/carts/local.hop_2.moy" in outs["vm"]
+
+
+BIG_DRIVER = r'''
+import sys
+sys.path.insert(0, @RUNTIME@)
+import moy_carts
+D = @DIR@
+print("packed", moy_carts.pack(D + "/src/doom.moy", D + "/@TAG@.moy"))
+for name in ("@TAG@.moy", "deflated.zip"):
+    n, top = moy_carts.unpack(D + "/" + name, D + "/@TAG@-" + name.replace(".", "-"))
+    print("unpacked", name, n, repr(top))
+try:
+    import moy_store
+    print("peak", moy_store.mem()[1])
+except ImportError:
+    pass
+'''
+
+
+def test_an_archive_member_past_the_seed_cap_travels_streamed(tmp_path):
+    """A compiled cart's module or game data is megabytes: the archive a
+    browser exports it in and imports it back from carries a member over
+    4 MiB (MOY_SEED_MAX, what a SEED may inflate to), stored and deflated,
+    and the C reads and writes each a chunk at a time -- its peak store
+    memory a fraction of the member."""
+    import random
+    import zipfile
+    exe = _vm()
+    rng = random.Random(7)
+    big = bytes(rng.getrandbits(8) for _ in range(1 << 16)) * 96     # 6 MiB
+    src = tmp_path / "src" / "doom.moy"
+    src.mkdir(parents=True)
+    (src / "manifest.json").write_bytes(b'{"title": "Doom"}')
+    (src / "doom1.wad").write_bytes(big)
+    with zipfile.ZipFile(str(tmp_path / "deflated.zip"), "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("doom.moy/manifest.json", b'{"title": "Doom"}')
+        z.writestr("doom.moy/doom1.wad", big)
+    outs = {}
+    for tag, cmd in (("vm", [exe, "-X", "heapsize=4M"]), ("cp", [sys.executable])):
+        script = (BIG_DRIVER.replace("@RUNTIME@", repr(runtime_tree()))
+                  .replace("@DIR@", repr(str(tmp_path))).replace("@TAG@", tag))
+        out = subprocess.run(cmd + ["-c", script], capture_output=True, text=True,
+                             timeout=300)
+        assert out.returncode == 0, out.stdout + out.stderr
+        outs[tag] = out.stdout.splitlines()
+    peak = [ln for ln in outs["vm"] if ln.startswith("peak ")]
+    for tag in ("vm", "cp"):
+        assert outs[tag][:3] == ["packed 2", "unpacked %s.moy 2 'doom.moy'" % tag,
+                                 "unpacked deflated.zip 2 'doom.moy'"], outs[tag]
+    assert (tmp_path / "vm.moy").read_bytes() == (tmp_path / "cp.moy").read_bytes()
+    for tag in ("vm", "cp"):
+        for name in (tag + "-moy", "deflated-zip"):
+            d = tmp_path / ("%s-%s" % (tag, name))
+            assert (d / "doom1.wad").read_bytes() == big, (tag, name)
+            assert (d / "manifest.json").read_bytes() == b'{"title": "Doom"}'
+    assert peak and int(peak[0].split()[1]) < (256 << 10), peak
