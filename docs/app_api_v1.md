@@ -96,7 +96,21 @@ board id from `tools/board.py ports`; the `on-glass` skill has the rest).
 On the console itself, the home's Make tab makes and edits carts, apps
 included.
 
-The rest of this guide is what you add to that.
+**Start here, per tier.** The same six steps in every tier; the rest of
+this guide is each step in full.
+
+| step | Python | Lua | wasm app | WASI program | C program |
+|---|---|---|---|---|---|
+| the manifest (§2) | `"runtime": "python"` | `"runtime": "lua"` | `"runtime": "wasm"`, `"extensions": ["moybyte.app"]` | `"runtime": "wasm"`, `type` `command` or `service` | `"native": [chips]`, `type` `command` or `service` |
+| permissions (§6) | its list; the prompt calls it trusted | its list, enforced | its list, enforced at load | its list | `full_access` and its list |
+| entry points (§7, §11) | `_init`, `_update`, `_draw`; a service's `moy_start`; a command's `main(argv)` | `_init`, `_update`, `_draw`; `moy_start` | the exports `_init`, `_update`, `_draw` | `_start` | `main` |
+| messages and timers (§8, §9) | `moybyte.on`, `send`, `every`, `after`, `at` | the same | `moybyte_on`, `moybyte_recv`, `moybyte_every` | `poll_oneoff` on `MOY_EVQ_FD`, `moybyte.os` | `poll` on `MOY_EVQ_FD`, `moy_on` |
+| files (§5) | `files` | `files`, `io`, `os` | `files_*` imports | WASI's own, in the granted folder | POSIX, in the granted folder |
+| build and test on the host (§12) | `tools/simulate_desktop.py --cart`; `tests/test_app_examples.py` | the same | `tools/wasm_cart.py`, then the simulator | `tools/wasm_cart.py`; the terminal | `tools/elf_cart.py`; the terminal |
+| example | `tests/fixtures/apps/shopping.moy` | `tests/fixtures/apps/echo_lua.moy` | `tests/fixtures/wasm/app_talk.moy` | `tests/fixtures/wasm/wasi_svc.moy` | `tests/fixtures/elf/elf_svc.moy` |
+
+Badges (`award`, `progress`, §9) are a call in every tier and may be called
+freely, every frame if need be.
 
 ## 2. The manifest
 
@@ -233,8 +247,8 @@ one.
 your app (or step back a page, §11); the ui never reads them. The console's
 own key (the T-Deck's Mic) opens the system menu and is never yours.
 
-**Hints name actions, not keys.** `ui.hints({"confirm", "Open", "menu",
-"Menu"})` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
+**Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
+"Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
 `cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,
 `move`, `scroll`) and the engine shows each input's own keys
 (`native/moy_ui/moy_ui_parts.c`, `ACT_KEYS`). The T-Deck has Enter, K, WASD
@@ -335,7 +349,8 @@ imports its rows, §10).
 | `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`) |
 | `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1) |
 | `full_access` | what a native (ELF) cart must ask for, and what admits an unsigned compiled module (§10) |
-| `editor` | a marker: the cart where the console opens a text file from Files (Notes) |
+| `console` | `print` writes to the text console's scrollback instead of drawing (a script's, the terminal's) |
+| `editor`, `calc`, `terminal`, `getcarts`, `storybook`, `myart`, `artwork`, `music` | markers: a shipped app's claim on its identity cart (§13); `editor` is where the console opens a text file from Files (Notes) |
 
 The full list is `native/os_calls.json`'s `"permissions"`, generated
 into `runtime/shell/app_perms.py`'s `TABLE`, which the install prompt, the
@@ -357,7 +372,8 @@ asks for first and installs only on the user's yes, all or nothing; an update
 that adds a permission asks again. A cart written on the console, a seed and a
 cart copied onto the card are never asked about. The record is kept per app
 id (`runtime/shell/app_perms.py`, `Consent`); `docs/os_2026-11/processes.md`
-§2 has the rules.
+§2 has the rules, and `docs/os_2026-11.md` §4 what the permissions protect
+against and what they do not.
 
 **Notifications** (`notifications`): `moybyte.notify(summary, body="",
 icon=None, actions=(), urgency=1, replaces_id=0)` answers the notification's
@@ -437,8 +453,9 @@ that doubles from 1 s and a cap of 3 ends in a row
 **Which boards.** Python services run on every console board, in the
 shell's VM; on the S3s they are stopped before a VM stop (a game that needs
 the whole board) and started again after it. Lua and WASI services run on
-the P4s and the host; the S3s refuse them. ELF services run on both chips
-(core 1 on the S3s). The browser's VM has no asyncio. The per-board table is
+every console board and the host, on core 1 on the S3s, whose VM stop
+ends them and whose return starts them again, as it does a Python one.
+ELF services run on both chips (core 1 on the S3s). The browser's VM has no asyncio. The per-board table is
 `docs/os_2026-11.md` §5.
 
 ## 8. Messages
@@ -584,8 +601,8 @@ and `moy_progress`.
 | tier | an app | a service | a command | sealed by |
 |---|---|---|---|---|
 | Python | yes | yes | yes | nothing: trusted (§5) |
-| Lua | yes | yes (not on the S3s) | — | its state's names |
-| wasm | yes (`moybyte.app`) | yes, WASI (not on the S3s) | yes, WASI | its imports |
+| Lua | yes | yes | — | its state's names |
+| wasm | yes (`moybyte.app`) | yes, WASI | yes, WASI | its imports |
 | C (ELF) | — | yes | yes | U-mode and PMP on the P4s; nothing on the S3s |
 
 The calls a program reaches on more than one tier, each by its name there
