@@ -91,6 +91,12 @@ static const wild_row_t WILD_ROWS[] = {
     { 88, "moy_files_duplicate", 4, { A_STR, A_STR, A_BUF, A_VAL }, { -1, -1, 3, -1 } },
     { 89, "moy_files_rename", 5, { A_STR, A_STR, A_STR, A_BUF, A_VAL }, { -1, -1, -1, 4, -1 } },
     { 90, "moy_files_new_name", 4, { A_STR, A_STR0, A_BUF, A_VAL }, { -1, -1, 3, -1 } },
+    { 91, "moy_random", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
+    { 92, "moy_sha256", 4, { A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1 } },
+    { 93, "moy_hmac_sha256", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
+    { 94, "moy_aes_gcm_seal", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
+    { 95, "moy_aes_gcm_open", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
+    { 96, "moy_x25519", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
 };
 
 #define WILD_NROWS (sizeof WILD_ROWS / sizeof WILD_ROWS[0])
