@@ -50,14 +50,12 @@ def _applied(chip):
     return set(re.findall(r"case (R_\w+):", src)) | {"R_%s_NONE" % arch.upper()}
 
 
-@pytest.mark.parametrize("chip", sorted(ARCH))
-def test_a_module_calling_libm_links_and_loads(chip, check, tmp_path):
-    if not elf_cart.available(chip):
-        pytest.skip("no %s toolchain" % chip)
-    src = sorted(glob.glob(os.path.join(MATH, "src", "*.c")))
-    mod = elf_cart.build_module(src, chip, str(tmp_path / "m.elf"), signed=False)
+def loads(chip, mod, verdict):
+    """`mod`, a module for `chip`, passes the console's `verdict` (the check
+    fixture), imports nothing and carries only relocations the chip's loader
+    applies."""
     rows = len(_table()["rows"])
-    why, _info = check(open(mod, "rb").read(), MACHINE[chip], rows)
+    why, _info = verdict(open(mod, "rb").read(), MACHINE[chip], rows)
     assert why is None
     readelf = _readelf(chip)
     syms = subprocess.run([readelf, "--dyn-syms", "-W", mod], capture_output=True,
@@ -70,6 +68,14 @@ def test_a_module_calling_libm_links_and_loads(chip, check, tmp_path):
     dyn = subprocess.run([readelf, "-d", "-W", mod], capture_output=True, text=True,
                          check=True).stdout
     assert "TEXTREL" not in dyn
+
+
+@pytest.mark.parametrize("chip", sorted(ARCH))
+def test_a_module_calling_libm_links_and_loads(chip, check, tmp_path):
+    if not elf_cart.available(chip):
+        pytest.skip("no %s toolchain" % chip)
+    src = sorted(glob.glob(os.path.join(MATH, "src", "*.c")))
+    loads(chip, elf_cart.build_module(src, chip, str(tmp_path / "m.elf"), signed=False), check)
 
 
 def _members(tmp_path):

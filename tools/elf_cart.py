@@ -70,14 +70,25 @@ ELF_H = os.path.join(ROOT, "native", "moy_elf", "moy_elf.h")
 # The S3's ld (esp-14.2.0) double-frees on some module links, depending on
 # the output path; --no-keep-memory re-reads symbol tables instead of
 # caching them, and those links come out byte-identical.
+# The S3's ld (binutils 2.43.1) also counts a dynamic relocation for each FDE
+# of an `.eh_frame`, then drops the FDEs of the functions --gc-sections
+# removed without their relocations, and aborts in
+# elf_xtensa_finish_dynamic_sections when fewer come out than it counted.
+# libgcc's 64-bit division helpers carry FDEs, so that abort takes any module
+# that links them but keeps no caller of them: one that calls malloc and no
+# printf (lc_stdlib's assert reaches the printf family). A module unwinds
+# nothing, so the S3 links libgcc without its `.eh_frame` ("bare_libgcc",
+# libgcc() below).
 CHIPS = {
     "esp32s3": {"tools": "xtensa-esp-elf", "prefix": "xtensa-esp32s3-elf-",
                 "flags": ["-mlongcalls"], "link": ["-Wl,--no-keep-memory"],
-                "strip": [".xt.lit", ".xt.prop", ".xtensa.info"], "libm": False},
+                "strip": [".xt.lit", ".xt.prop", ".xtensa.info"], "libm": False,
+                "bare_libgcc": True},
     "esp32p4": {"tools": "riscv32-esp-elf", "prefix": "riscv32-esp-elf-",
                 "flags": ["-march=rv32imafc_zicsr_zifencei", "-mabi=ilp32f"], "link": [],
-                "strip": [".riscv.attributes"], "libm": True},
-    "host": {"tools": None, "prefix": "", "flags": [], "link": [], "strip": [], "libm": False},
+                "strip": [".riscv.attributes"], "libm": True, "bare_libgcc": False},
+    "host": {"tools": None, "prefix": "", "flags": [], "link": [], "strip": [], "libm": False,
+             "bare_libgcc": False},
 }
 
 CFLAGS = ["-Os", "-fPIC", "-ffunction-sections", "-fdata-sections", "-fvisibility=hidden",
@@ -272,6 +283,30 @@ def pure_libc(chip):
     return lib
 
 
+def libgcc(chip):
+    """libgcc as a module for board `chip` links it: the toolchain's, or
+    where the chip is "bare_libgcc", a copy without `.eh_frame` (built once
+    per toolchain into .build/sdk/)."""
+    if not CHIPS[chip]["bare_libgcc"]:
+        return "-lgcc"
+    cc = toolchain(chip)[0]
+    src = _run([cc] + CHIPS[chip]["flags"] + ["-print-libgcc-file-name"]).strip()
+    h = hashlib.sha256(repr((src, os.path.getsize(src))).encode()).hexdigest()[:16]
+    out_dir = os.path.join(CACHE, chip, "libgcc-" + h)
+    lib = os.path.join(out_dir, "libgcc.a")
+    if os.path.exists(lib):
+        return lib
+    tmp = out_dir + ".%d.tmp" % os.getpid()
+    os.makedirs(tmp, exist_ok=True)
+    _run([_tool(chip, "objcopy"), "--remove-section=.eh_frame", "--remove-section=.rela.eh_frame",
+          src, os.path.join(tmp, "libgcc.a")])
+    if os.path.isdir(out_dir):
+        shutil.rmtree(tmp, ignore_errors=True)
+    else:
+        os.replace(tmp, out_dir)
+    return lib
+
+
 def sig_scheme():
     text = open(ELF_H, encoding="utf-8").read()
     return re.search(r'#define MOY_ELF_SIG_SCHEME "([^"]+)"', text).group(1)
@@ -284,7 +319,7 @@ def libs(chip):
     # A group, so a helper any of them needs comes from the first that
     # defines it: the SDK's own before the toolchain's.
     return ["-nostdlib", "-Wl,--no-undefined", "-Wl,--start-group", libmoyos(chip),
-            pure_libc(chip), "-lm", "-lgcc", "-Wl,--end-group"]
+            pure_libc(chip), "-lm", libgcc(chip), "-Wl,--end-group"]
 
 
 def build_module(sources, chip, out, cflags=(), signed=True, sign_with=None):

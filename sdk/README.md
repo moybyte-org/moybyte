@@ -150,7 +150,10 @@ so the host suite tests the library a board runs (`tests/test_sdk_libc.py`).
 - libgcc comes from the toolchain, except on RISC-V, where its count-zeros,
   64-bit division, double division and float/64-bit conversion helpers are
   not position-independent; `libc/lc_rv32.c` carries those
-  (`elf_loader` relocates only absolute and PLT words on RISC-V).
+  (`elf_loader` relocates only absolute and PLT words on RISC-V). On the S3
+  a module links a copy without its `.eh_frame`: the S3's ld aborts a link
+  that removes a function whose FDE it has counted (`elf_cart.py`'s
+  `CHIPS`), and a module unwinds nothing.
 - libm is the toolchain's on the S3. On the P4 the toolchain's libm
   addresses its constants absolutely, as its libgcc's helpers do, so
   `libc/m/` carries one: MicroPython's copies of fdlibm's float functions and

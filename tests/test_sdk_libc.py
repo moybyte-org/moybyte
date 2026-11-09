@@ -1,7 +1,9 @@
 """The SDK's C library (sdk/libc/, sdk/README.md): unmodified POSIX programs
 run as native commands and answer as the host's own C library does; its
 printf and RISC-V helpers are bit-exact against the host's; the board
-modules link for both chips; the sysroot's network values are lwIP's."""
+modules link for both chips, and so does one that takes only the heap, or
+links libgcc's division for a function the link removes; the sysroot's
+network values are lwIP's."""
 
 import glob
 import os
@@ -12,6 +14,8 @@ import pytest
 
 from runtime import native_build
 from tests.test_elf_commands import built, out, run, term  # noqa: F401 -- the fixtures
+from tests.test_os_table import check  # noqa: F401 -- the fixture
+from tests.test_sdk_libm import loads
 
 if native_build.cc() is None:
     pytest.skip("no C compiler", allow_module_level=True)
@@ -202,6 +206,36 @@ def test_the_programs_link_for_each_board(chip, tmp_path):
         srcs = sorted(glob.glob(os.path.join(FIXTURES, name + ".moy", "src", "*.c")))
         mod = elf_cart.build_module(srcs, chip, str(tmp_path / (name + ".elf")), signed=False)
         assert os.path.getsize(mod) > 0
+
+
+# Each links libgcc's 64-bit division and removes its only caller: the heap's
+# through lc_stdlib's assert and the printf family, the other its own.
+LEAN = {
+    "heap": "#include <stdlib.h>\n"
+            "int main(void) {\n"
+            "    char *p = malloc(32), *q = calloc(4, 8);\n"
+            "    int r = p == NULL || q == NULL || q[31] != 0;\n"
+            "    free(p);\n"
+            "    free(q);\n"
+            "    return r;\n"
+            "}\n",
+    "unused_division": "unsigned long long split(unsigned long long a, unsigned long long b) {\n"
+                       "    return a / b + a % b;\n"
+                       "}\n"
+                       "int main(void) { return 0; }\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(LEAN))
+@pytest.mark.parametrize("chip", ["esp32s3", "esp32p4"])
+def test_a_module_that_removes_a_libgcc_caller_links_and_loads(chip, name, check, tmp_path):
+    from tools import elf_cart
+    if not elf_cart.available(chip):
+        pytest.skip("no %s toolchain" % chip)
+    src = tmp_path / (name + ".c")
+    src.write_text(LEAN[name])
+    loads(chip, elf_cart.build_module([str(src)], chip, str(tmp_path / (name + ".elf")),
+                                      signed=False), check)
 
 
 def _defines(path, every=None):
