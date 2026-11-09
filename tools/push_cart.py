@@ -18,6 +18,11 @@
     python tools/push_cart.py ports/celeste.moy --board guition_s3 --port /dev/ttyACM1
     python tools/push_cart.py ports/celeste.moy --board p4 --only main.lua --force
 
+A cart pushed over the cable counts as consented: anyone at the cable is the
+owner, so after the rescan the tool records the cart as made on the console
+(`Consent.made`, runtime/shell/app_perms.py) and its first run is not asked.
+A cart a browser pushes, or one copied onto the card, stays asked on the glass.
+
 --board is REQUIRED and deliberately has no default: the boards differ in line
 state, reset policy and upload window, so a default is a silent wrong transport
 on every board but one.
@@ -739,6 +744,13 @@ def main(argv=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+# The consent a cable push records, as a `py` expression: the shelf's cart in
+# the pushed folder, made on the console (`Consent.made`); the count of carts
+# it recorded.
+CONSENT = ("len([ws.consent.made(__import__('app_perms').app_id(c)) "
+           "for c in ws.carts.all if (c.get('path') or '').rstrip('/') == %r])")
+
+
 def connect(board, port, verbose=False):
     """A live, identity-checked P4Board on `board`'s `port`: attached and
     verified (never pulsed) for an `attach_only` board, reset only when a
@@ -848,6 +860,17 @@ def _push(a, cart, names, local, work):
             n = b.pyval("len(ws.rescan_carts() or ())", timeout=60)
             print("store rescanned" if n is not None else
                   "the rescan did not answer -- reset the board to rescan")
+        # A cart that arrived as files is asked on its first run, and the
+        # cable is the owner's hand: the pushed cart is recorded as made on
+        # the console, the record `Consent.made` writes (runtime/shell/
+        # app_perms.py), so it runs on its manifest as written. A browser's
+        # push is not this one and stays asked on the glass.
+        n = b.pyval(CONSENT % dest, timeout=60)
+        if n:
+            print("recorded as made on the console (no first-run prompt)")
+        else:
+            print("not on the shelf yet, so not recorded as made: its first "
+                  "run asks%s" % (" (--no-rescan)" if a.no_rescan else ""))
     finally:
         b.close()
     return 0

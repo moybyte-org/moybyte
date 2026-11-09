@@ -128,10 +128,32 @@ class _FakeFS:
         self.files[dst] = self.files.pop(src)
 
 
+class _Consent:
+    """`Consent.made` and nothing else: the ids recorded as made."""
+
+    def __init__(self):
+        self.made_ids = []
+
+    def made(self, aid):
+        self.made_ids.append(aid)
+
+
 class _WS:
-    def __init__(self, carts_root):
+    def __init__(self, carts_root, fs=None):
         self.carts_root = carts_root
         self.wm = None
+        self.fs = fs
+        self.carts = types.SimpleNamespace(all=[])
+        self.consent = _Consent()
+
+    def rescan_carts(self):
+        """The shelf: a cart per `<root>/<id>.moy` folder holding a file."""
+        root = self.carts_root.rstrip("/") + "/"
+        names = {p[len(root):].split("/", 1)[0] for p in self.fs.files
+                 if p.startswith(root) and "/" in p[len(root):]}
+        self.carts.all = [{"id": n[:-4], "path": root + n}
+                          for n in sorted(names) if n.endswith(".moy")]
+        return self.carts.all
 
 
 class _FakeConsole:
@@ -170,7 +192,7 @@ class _FakeConsole:
         self.switches = []
         self.fs = _FakeFS(files, corrupt, free)
         self.full_at = full_at          # the store runs out of room here
-        self.ws = _WS(carts_root)
+        self.ws = _WS(carts_root, self.fs)
         self.board = board
         self.has_recv = has_recv        # False = an image from before `recv`
         self.max_window = max_window
@@ -230,6 +252,8 @@ class _FakeConsole:
             return self.fs
         if name == "_ota_build":
             return types.SimpleNamespace(BOARD=self.board)
+        if name == "app_perms":
+            return types.SimpleNamespace(app_id=lambda cart: cart["id"])
         return __import__(name, *rest)
 
     def _recv(self, line, parts):
@@ -751,6 +775,31 @@ def test_the_probe_runs_once_for_the_whole_cart(monkeypatch, tmp_path):
     assert push_cart.main([cart, "--board", "tdeck"]) == 0
     assert dev.sent.count("recv") == 1
     assert len(dev.fs.files) == 3
+
+
+# -- a cable push is consented ------------------------------------------------
+
+
+def test_a_cart_pushed_over_the_cable_is_recorded_as_made(monkeypatch, tmp_path):
+    """Anyone at the cable is the owner: after the rescan the tool records the
+    pushed cart's id as made on the console, so its first run is not asked."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE})
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+    assert dev.ws.consent.made_ids == ["demo"]
+    assert [ln for ln in dev.sent if "consent.made" in ln]
+
+
+def test_a_push_with_no_rescan_records_a_cart_the_shelf_has_not_got(
+        monkeypatch, tmp_path):
+    """The consent is the shelf's cart at the pushed folder: with no rescan a
+    new cart is not on it, and nothing is recorded for a cart that is not."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE})
+    assert push_cart.main([cart, "--board", "tdeck", "--no-rescan"]) == 0
+    assert dev.ws.consent.made_ids == []
 
 
 # -- `recv rate=`: the payload at another UART rate ---------------------------

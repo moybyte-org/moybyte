@@ -360,7 +360,9 @@ unsigned modules with it. Never asked: a built-in (known by its seed), a
 script (no folder), a cart whose prompt would say nothing, and a cart made
 on the console: making one, or copying one that is not waiting to be asked,
 writes a record consenting to its manifest as written (`Consent.made`),
-less what Settings turns off. Deleting a cart forgets its record.
+less what Settings turns off. A cart `tools/push_cart.py`
+pushes over the USB cable is made on the console too: anyone at the cable is the
+owner, and the tool writes the record after its rescan. Deleting a cart forgets its record.
 
 **The permission table.** One JSON source, `native/os_calls.json`'s
 `"permissions"` beside the rows of every call (`tiers.md` §1), which
