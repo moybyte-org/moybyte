@@ -20,8 +20,10 @@ class Section:
         self.ids = ({"id": ns + ".pause"}, {"id": ns + ".stop"})
         self.stops = 0
 
-    def height(self, w, desk):
-        return 60
+    def height(self, w, desk, fs):
+        from runtime import ui_draw
+        row = ui_draw.metrics("row")
+        return 3 * (row[6 if desk else 5] + row[7]) * fs
 
     def draw(self, desk):
         from runtime import ui
@@ -131,6 +133,62 @@ def test_the_desk_item_is_a_cell_that_opens_its_menu(tmp_path):
     assert not ws.sysmenu.open, "the item's menu closes with it"
 
 
+def _tap_row(ws, drv, rid):
+    """Tap the middle of row `rid` of the open desk menu, after asserting it
+    lies inside the menu's card (a tap outside it closes the menu); the
+    press frame, then the release frame the row acts on."""
+    comp = ws.sysmenu.comp
+    x, y, w, h = comp.host.box(rid)
+    px, py, pw, ph = ws.sysmenu.panel_rect()
+    assert px <= x and x + w <= px + pw and py <= y and y + h <= py + ph, \
+        (rid, (x, y, w, h), (px, py, pw, ph))
+    drv.click(x + w * 3 // 4, y + h // 2)
+    for _ in range(2):
+        drv.frame(1 / 30)
+    assert ws.sysmenu.open, "a tap on a row keeps the menu open"
+
+
+@pytest.mark.parametrize("fs", [1, 2])
+def test_a_tap_on_a_desk_menu_row_acts_on_it(tmp_path, fs):
+    ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0, font_scale=fs)
+    sec = Section()
+    it = _as(42, moybyte.status, "music", sec, 0)
+    it.show()
+    ws.open_desk()
+    ws.open_status_menu(it)
+    drv = make_drv(ws)
+    drv.frame(1 / 30)
+    _tap_row(ws, drv, "music.stop")
+    assert sec.stops == 1, "the app's button heard its tap"
+
+
+@pytest.mark.parametrize("fs", [1, 2])
+def test_a_tap_on_a_compiled_panel_row_acts_on_it(tmp_path, fs):
+    ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0, font_scale=fs)
+    from runtime.status_items import parse
+    h = ITEMS.show_compiled(42, "music", PAUSED, 3)
+    it = ITEMS.slots[h - 1]
+    it.section.set(parse(PANEL))
+    heard = []
+    was = ITEMS.post
+    ITEMS.post = lambda pid, name, args: heard.append(args)
+    try:
+        ws.open_desk()
+        ws.open_status_menu(it)
+        drv = make_drv(ws)
+        drv.frame(1 / 30)
+        k = it.k
+        _tap_row(ws, drv, "status%d.1" % k)
+        _tap_row(ws, drv, "status%d.2" % k)
+        _tap_row(ws, drv, "status%d.3" % k)
+    finally:
+        ITEMS.post = was
+    assert heard[:2] == [(h, "skip", 1), (h, "shuffle", 0)], heard
+    assert it.section.v[2] == 0, "the toggle flipped"
+    assert len(heard) == 3 and heard[2][1] == "vol" and heard[2][2] != 6, heard
+    assert it.section.v[3] == heard[2][2], "the slider moved where it was tapped"
+
+
 def test_stop_and_play_stops_the_stream_then_opens_the_game(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     from runtime import devices
@@ -224,7 +282,8 @@ def test_a_compiled_item_is_a_slot_its_panel_drawn_by_the_shell(tmp_path):
     assert not ITEMS.bare(it)
     from runtime import ui_draw
     m = ui_draw.metrics("row")
-    assert ITEMS.height(it, 380, True) == 4 * (m[6] + m[7])
+    assert ITEMS.height(it, 380, True, 1) == 4 * (m[6] + m[7])
+    assert ITEMS.height(it, 380, True, 2) == 8 * (m[6] + m[7]), "at the font scale"
     heard = []
     was = ITEMS.post
     ITEMS.post = lambda pid, name, args: heard.append((pid, name, args))

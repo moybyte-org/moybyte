@@ -750,11 +750,10 @@ class MusicSection:
         self.stream = stream
         self.nav = nav
 
-    def height(self, w, desk):
-        fs = 1 if desk else _fs()
+    def height(self, w, desk, fs):
         h = 8 * fs + 36 * fs + 6 * fs + 26 * fs + 8 * fs
         if desk:
-            h += 8 + 1 + 8 + 30
+            h += (8 + 1 + 8 + 30) * fs
         return h
 
     def draw(self, desk):
@@ -762,17 +761,19 @@ class MusicSection:
         if s.card is None:
             return
         cv = _canvas()
-        fs = 1 if desk else _fs()
-        x, y, w, h, _st = ui.part("music.card", 0, self.height(0, desk), _CARD_ROW)
+        fs = _fs()
+        x, y, w, h, _st = ui.part("music.card", 0, self.height(0, desk, fs), _CARD_ROW)
         k = Card(cv, _theme(), fs, desk)
         k.c = s.card
         if desk:
-            cv.rrect(x, y, w, k.compact_h(), 8, k.th["surface"], ring=k.th["border"], line=1)
+            cv.rrect(x, y, w, k.compact_h(), 8 * fs, k.th["surface"], ring=k.th["border"],
+                     line=fs)
         k.compact(x, y, w)
         if desk:
-            ry = y + k.compact_h() + 8
-            cv.rect(x + 8, ry, w - 16, 1, k.th["border"])
-            k.volume_row(x + 8, ry + 8, w - 16, 30)
+            p = 8 * fs
+            ry = y + k.compact_h() + p
+            cv.rect(x + p, ry, w - 2 * p, fs, k.th["border"])
+            k.volume_row(x + p, ry + p, w - 2 * p, 30 * fs)
         if k.acted == "music.open":
             if self.nav is not None:
                 self.nav.open_app("jukebox")

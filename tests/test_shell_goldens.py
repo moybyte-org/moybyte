@@ -1200,10 +1200,10 @@ class _StatusSection:
     def __init__(self, ns="music"):
         self.ids = ({"id": ns + ".pause"}, {"id": ns + ".stop"})
 
-    def height(self, w, desk):
+    def height(self, w, desk, fs):
         from runtime import ui_draw
         row = ui_draw.metrics("row")
-        return 3 * (row[6 if desk else 5] + row[7])
+        return 3 * (row[6 if desk else 5] + row[7]) * fs
 
     def draw(self, desk):
         from runtime import ui

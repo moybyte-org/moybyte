@@ -14,10 +14,11 @@ its content on the public UI API's verbs.
 The system menu is the popover's ROWS, not a component (`widgets.Popup`).
 
 Every component's interface: `size()` -> (w, h) in pixels at the current
-scales, `draw(cv, rect)` (the card is the popover's, `rect` inside it),
-`keys()` -> the hint strip's keys on a handheld, `handle_input(i)` ->
-"local" when only the panel's pixels moved, "global" when something outside
-it did, None for nothing; `click(px, py, rect)` the same; `typing()` ->
+scales, the font scale on the desk too (its frame draws its rows at it),
+`draw(cv, rect)` (the card is the popover's, `rect` inside it), `keys()`
+-> the hint strip's keys on a handheld, `handle_input(i)` -> "local" when
+only the panel's pixels moved, "global" when something outside it did,
+None for nothing; `click(px, py, rect)` the same; `typing()` ->
 True while typed keys are its own (B and ESC are then the text field's);
 `closed()` on every close, a tap outside included.
 """
@@ -44,7 +45,7 @@ def _desk():
 
 
 def _pad(ws):
-    return 12 if _desk() else 9 * ws.layout.fs
+    return (12 if _desk() else 9) * ws.layout.fs
 
 
 def _inner(ws, rect):
@@ -87,13 +88,12 @@ class MonthView:
     def size(self):
         ws = self.ws
         desk = _desk()
-        fs = 1 if desk else ws.layout.fs
+        fs = ws.layout.fs
         y, m, _d = self.month()
         p = _pad(ws)
         h = _ui.month_h(y or 2026, m or 1, fs, desk) if y else 6 * 21 * fs
-        foot = _ui_draw.metrics("value_row")[_HINTS_DESK] if desk else 0
         if desk:
-            return (264, p + h + foot + p // 2)
+            return (264 * fs, p + h + _foot(fs) + p // 2)
         return (200 * fs, (6 + 3) * fs + h)
 
     def month(self):
@@ -117,7 +117,7 @@ class MonthView:
                         "panel")
         if y:
             _ui.at(x0 + p, y0 + top, w0 - 2 * p,
-                   _ui.month_h(y, m, 1 if desk else ws.layout.fs, desk))
+                   _ui.month_h(y, m, ws.layout.fs, desk))
             step = _ui.month(y, m, today)
             if step:
                 self.off += step
@@ -151,6 +151,11 @@ class MonthView:
 _HINTS_DESK = 17
 
 
+def _foot(fs):
+    """The desk's hint band under a component's rows, at font scale `fs`."""
+    return _ui_draw.metrics("value_row")[_HINTS_DESK] * fs
+
+
 class WifiPanel:
     """The `wifi` widget's component: Settings' Wi-Fi page (scan, pick, the
     password step, connect) drawn in the popover's card over its own UI
@@ -165,13 +170,13 @@ class WifiPanel:
 
     def size(self):
         desk = _desk()
-        fs = 1 if desk else self.ws.layout.fs
+        fs = self.ws.layout.fs
         row = _ui_draw.metrics("row")
         rh, gap = row[6 if desk else 5] * fs, row[7] * fs
         cap = _ui_draw.metrics("group")[4 if desk else 3] * fs
         n = min(len(self.ws.settings_layer.wifi_nets), 6) + 2
-        foot = _ui_draw.metrics("value_row")[_HINTS_DESK] if desk else 0
-        return ((300 if desk else 232 * fs), 2 * _pad(self.ws) + cap + n * (rh + gap) + foot)
+        foot = _foot(fs) if desk else 0
+        return ((300 if desk else 232) * fs, 2 * _pad(self.ws) + cap + n * (rh + gap) + foot)
 
     def keys(self):
         return _WIFI_KEYS
@@ -237,13 +242,13 @@ class PowerRows:
 
     def size(self):
         desk = _desk()
-        fs = 1 if desk else self.ws.layout.fs
+        fs = self.ws.layout.fs
         row = _ui_draw.metrics("row")
         rh = row[6 if desk else 5] * fs
         gap = row[7] * fs
         rule = (2 * row[7] + (9 if desk else 5)) * fs
-        foot = _ui_draw.metrics("value_row")[_HINTS_DESK] if desk else 0
-        return ((300 if desk else 236 * fs),
+        foot = _foot(fs) if desk else 0
+        return ((300 if desk else 236) * fs,
                 2 * _pad(self.ws) + 3 * rh + 3 * gap + rule + foot)
 
     def keys(self):
@@ -331,7 +336,7 @@ class ControlCenter:
         y = fs + i + 3 * rh             # the panel's frame, the inset, the card
         first = None
         for it in _ITEMS.shown:
-            y += gap + cap + _ITEMS.height(it, w, False)
+            y += gap + cap + _ITEMS.height(it, w, False, fs)
             if first is None:
                 first = y + self.FIRST_FOOT * fs
         y += i + fs
@@ -430,11 +435,12 @@ class StatusMenu:
         self.gen = _ITEMS.gen
 
     def size(self):
-        w = 404
+        fs = self.ws.layout.fs
+        w = 404 * fs
         # under touch alone there are no hints, and no room kept for them
-        foot = 0 if _ui.input_kind() == "touch" else _ui_draw.metrics("value_row")[_HINTS_DESK]
+        foot = 0 if _ui.input_kind() == "touch" else _foot(fs)
         it = self.item
-        h = _ITEMS.height(it, w - 2 * _pad(self.ws), True) if it is not None else 0
+        h = _ITEMS.height(it, w - 2 * _pad(self.ws), True, fs) if it is not None else 0
         return (w, 2 * _pad(self.ws) + h + foot)
 
     def keys(self):

@@ -15,7 +15,8 @@ in the bar with `moybyte.status`, the menu-extra model.
 A SECTION is the app's part of the shell's surfaces, drawn with the public
 UI verbs (`docs/ui_api_2026-10.md`) inside a frame the shell began:
 
-  section.height(w, desk)  the height its rows take at width `w`, pixels
+  section.height(w, desk, fs)  the height its rows take at width `w`,
+                    pixels, its frame drawing at font scale `fs`
   section.draw(desk)       its rows, stacked in the flow the shell opened
                     (on the desk the menu's card, on a handheld its card in
                     the control center); a button it answers True for acts
@@ -124,14 +125,10 @@ class Item:
             self._owner._free(self)
 
 
-def _row_h(desk):
-    """A stacked row's height and the gap after it, at the frame's scale."""
+def _row_h(desk, fs):
+    """A stacked row's height and the gap after it, at font scale `fs`."""
     m = _ui_draw.metrics("row")
-    if desk:
-        return m[6] + m[7]
-    cv = _ui_draw.UI_TARGET[1]
-    fs = getattr(cv, "font_scale", 1) or 1
-    return (m[5] + m[7]) * fs
+    return (m[6 if desk else 5] + m[7]) * fs
 
 
 def parse(text):
@@ -219,8 +216,8 @@ class Panel:
             self.rid[r] = self.label[r] = self.value[r] = ""
         self.n = n
 
-    def height(self, w, desk):
-        return self.n * _row_h(desk)
+    def height(self, w, desk, fs):
+        return self.n * _row_h(desk, fs)
 
     def draw(self, desk):
         kind = self.kind
@@ -333,16 +330,18 @@ class Items:
         sec = it.section
         return sec is None or (type(sec) is Panel and sec.n == 0)
 
-    def height(self, it, w, desk):
+    def height(self, it, w, desk, fs):
+        """The height item `it`'s section takes at width `w`, its menu's
+        frame drawing at font scale `fs`."""
         if self.bare(it):
-            return 0 if desk else _row_h(False)
+            return 0 if desk else _row_h(False, fs)
         sec = it.section
         if _L is None or not it.pid:
-            return int(sec.height(w, desk) or 0)
+            return int(sec.height(w, desk, fs) or 0)
         was = _L.current()
         _L.current(it.pid)
         try:
-            return int(sec.height(w, desk) or 0)
+            return int(sec.height(w, desk, fs) or 0)
         finally:
             _L.current(was)
 
