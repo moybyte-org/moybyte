@@ -146,11 +146,19 @@ def test_the_verdict_keeps_the_vm_for_a_shell_import(tmp_path):
     assert moy_play.census(roles) == ("wasm", True, "free")
     assert moy_play.census(shell) == ("wasm", False,
                                       "import moybyte.app.theme_set_variant")
-    # A role whose permission the manifest does not name is no VM-free pass:
-    # the native set's rule is unchanged for every other permission.
+    # A `lease:<row>` is the kernel's device table's, served on the program's
+    # own task: the permission keeps no VM (a lease a VM process holds does,
+    # at the stop's verdict: test_a_compiled_app_holds_leases_by_handle...).
     p = os.path.join(roles, "manifest.json")
     with open(p) as f:
         man = json.load(f)
+    for perms in (["prefs", "lease:uart1"], ["prefs", "lease:gpio"]):
+        man["moybyte"]["permissions"] = perms
+        with open(p, "w") as f:
+            json.dump(man, f)
+        assert moy_play.census(roles) == ("wasm", True, "free"), perms
+    # A role whose permission the manifest does not name is no VM-free pass:
+    # the native set's rule is unchanged for every other permission.
     man["moybyte"]["permissions"] = ["prefs", "net"]
     with open(p, "w") as f:
         json.dump(man, f)
@@ -309,11 +317,18 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
             assert got == ["dev_open 1", "dev_get 1", "dev_write 4", "dev_read ping",
                            "dev_close 0"], lines
             assert N.pin_state(6) & N.PIN_OUT and N.held() == 2
+            # The compiled app's leases are no VM's: the stop's verdict
+            # (native/moy_play/moy_play_stop.c) reads moy_lease_held(VM).
+            assert N.held(N.VM) == 0
             with pytest.raises(OSError) as e:
                 leases.LEASES.take(moybyte.SHELL, "gpio6")
             assert e.value.errno == 16                                  # EBUSY
             ws.exit()
             assert N.held() == 0 and N.pin_state(6) == N.PIN_SAFE == N.pin_state(20)
+            # A Python program's lease is a machine object in the VM: it
+            # keeps the VM.
+            leases.LEASES.take(moybyte.SHELL, "gpio6")
+            assert N.held(N.VM) == 1
         else:
             assert got == ["dev_open -4", "dev_get -8", "dev_write -8", "dev_read -8",
                            "dev_close -8"], lines                       # DENIED, ABSENT

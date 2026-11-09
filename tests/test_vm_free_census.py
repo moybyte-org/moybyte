@@ -91,7 +91,8 @@ def test_each_clause_keeps_the_vm_by_name(tmp_path):
     assert verdict("a.moy") == ("lua", True, "free")
     assert verdict("b.moy", type="app") == ("lua", False, "type")
     assert verdict("c.moy", type="tool") == ("lua", False, "type")
-    for perm in ("network", "console", "pins", "files", "files:pictures", "prefs", "telepathy"):
+    for perm in ("network", "console", "pins", "files", "files:pictures", "prefs", "telepathy",
+                 "lease:uart1"):
         assert verdict("p_%s.moy" % perm.replace(":", "_"),
                        permissions=["graphics", perm]) == ("lua", False, "permission"), perm
     assert verdict("d.moy", permissions=["graphics", "input", "audio", "multiplayer"]) \

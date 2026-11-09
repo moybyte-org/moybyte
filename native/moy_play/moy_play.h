@@ -9,10 +9,12 @@
 //      spec cart, an app otherwise: runtime/carts/moy_carts.py's rule), or "app"
 //      with the runtime "wasm" where the image carries native/moy_app;
 //   3. every permission is in the native set: graphics, input, audio,
-//      multiplayer -- or, for a compiled app, a role's permission, which
-//      passes when every row the module imports from the app extension is
-//      C-served (moy_play_vm_free_at). A permission the kernel does not know
-//      keeps the VM.
+//      multiplayer -- or, for a compiled app, a role's permission or a
+//      `lease:<row>`, which pass when every row the module imports from the
+//      app extension is C-served (moy_play_vm_free_at): the kernel's device
+//      table takes a compiled program's leases without MOY_LEASE_VM, and a
+//      lease a VM process holds keeps the VM at the stop's verdict instead
+//      (moy_play_stop.c). A permission the kernel does not know keeps the VM.
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed. Everything outside the native set keeps the VM, by name:
 // `network`, `console`, `pins`, `files` and every `files:<folder>`, `prefs`, and
@@ -109,8 +111,8 @@ enum {
 bool moy_play_vm_free(const moy_cat_entry_t *e, uint8_t *why);
 // The verdict with the cart's folder: a compiled app ("runtime": "wasm",
 // "type": "app") passes rule 2 where the image carries native/moy_app, and
-// rule 3 maps each permission through the role table -- a role's permission
-// passes when every import its module makes from the app extension
+// rule 3 maps each permission through the role table -- a role's permission,
+// and a `lease:<row>`, passes when every import its module makes from the app extension
 // (moybyte.app, native/moy_app/moy_app_wasm.h) is a C-served row, read from
 // the head of its main; one that imports a shell-served row keeps the VM
 // (WHY_IMPORT), the import named in `imp` ("moybyte.app.<name>").

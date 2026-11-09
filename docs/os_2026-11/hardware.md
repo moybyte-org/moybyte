@@ -167,9 +167,9 @@ the radio's rows and a C service's pins (the webhost's) stay. **A VM stop is ref
 while a lease is held** (`MOY_LEASE_VM`, read by
 `native/moy_play/moy_play_stop.c` beside the radio's row): a Python
 program's lease is a VM object. A compiled program's handle is the kernel's
-and holds no stop off (its lease has no `MOY_LEASE_VM`); a cart whose
-manifest asks a `lease:<row>` still keeps the VM by moy_play's verdict,
-whose native set names no lease. The boards that offer leases, the P4s,
+and holds no stop off (its lease has no `MOY_LEASE_VM`), so a compiled
+app's `lease:<row>` passes moy_play's VM-free rule as a role's permission
+does, its imports deciding (`native/moy_play/moy_play.h`). The boards that offer leases, the P4s,
 keep the VM for every run.
 
 **The device APIs as built** are `runtime/system/devices.py`'s faces,
