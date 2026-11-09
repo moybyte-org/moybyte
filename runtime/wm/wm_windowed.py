@@ -1445,11 +1445,17 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def _end_playtest(self):
         """Closing the Editor ends its playtest (owner, 2026-10-31), the
         way the pause card's Quit ends a run: the world released, its pmem
-        flushed, its window closed. A game moved to a window of its own, or
-        one the Editor did not run, goes on."""
+        flushed, its window closed. The run the Editor started for PLAY and
+        never showed ends with it too, so its process is no longer the one
+        the shell acts as. A game moved to a window of its own, or one the
+        Editor did not run, goes on."""
         ws = self.ws
         win = self._wins.get("desktop")
-        if win is None or win.own or ws.returns.caller() != EDITOR:
+        if win is None:
+            if ws.editor_app.project is ws.run.project:
+                ws.run.player.release_world()
+            return
+        if win.own or ws.returns.caller() != EDITOR:
             return
         pause = ws.pause
         if pause.open and not pause.stopped:

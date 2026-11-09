@@ -557,6 +557,21 @@ def test_closing_the_editor_ends_its_playtest(desk):
     assert not ws.wm.stack.has("desktop") and "menu" not in ws.wm._wins
 
 
+def test_closing_the_editor_ends_the_run_it_started_for_play(desk):
+    """The Editor starts its cart for PLAY without showing it; closing the
+    Editor before any playtest ends that run too, so its process is no
+    longer the one the shell acts as (the browser's Music, opened next from
+    the desk, was refused as the cart)."""
+    from runtime import moy_log as L
+    ws, drv = desk
+    pid = ws.run.player.pid
+    assert pid and L.current() == pid and "desktop" not in ws.wm._wins
+    ws.wm.close_window_kind("menu")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ws.run.player.pid is None and L.current() == L.SHELL
+
+
 def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
     """The pause card's Play in a window takes the docked playtest out of
     the Run slot into a window of its own, its run going on; that window
