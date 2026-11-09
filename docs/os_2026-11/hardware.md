@@ -486,7 +486,9 @@ playing, posts a notification, so the person learns why the music changed.
 The other commands act on what plays from any client. A client's media keys
 and its own commands are the same commands: no client holds the stream
 against another, because the stream is the person's, and the person is the
-one at whatever app is in front.
+one at whatever app is in front. Music and its status item are the shell's
+client (pid 1, `music_app._as_shell`), never the process of a game or of
+the Editor's run that is current beside them.
 
 **Its memory** is THE SHARES' MEDIA row (`native/moy_play/moy_play.h`): the
 open takes `moy_media.share()` from it (156,680 bytes on the T-Deck,

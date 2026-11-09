@@ -14,7 +14,9 @@ read through the sealed GET /media, a range a request.
 
 RADIO (site): a station is the page's fetch. One that sends CORS headers
 plays; one that does not says so ("Blocks browsers"). The station refuses a
-request that names its page, as SomaFM's do, so the fetch names none.
+request that names its page, as SomaFM's do, so the fetch names none. A desk
+that booted into the Editor (the project site's hero) plays one from Music
+once the Editor is closed.
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_music_e2e.py
 """
@@ -186,6 +188,45 @@ def test_site_a_station_plays_when_it_lets_a_page_read_it_and_says_so_when_not(
             assert media and last is None, js
             ended = _tagged(js, "LAST")
             assert ended and ended["state"] == "failed" and ended["err"] == 13, (js, out[-3000:])
+    finally:
+        station.stop()
+        server.terminate()
+        server.wait(timeout=10)
+
+
+# The project site's hero: the desk boots into the Editor on a cart's code.
+_HERO = "?dev=1&desktop=1&start=1&edit=moybyte.star_catcher.moy&tab=code&scheme=light"
+
+
+def test_site_a_station_plays_on_a_desk_that_booted_into_the_editor(tmp_path):
+    """The hero's start opens the Editor, which starts its cart for PLAY;
+    with the Editor closed (its X), Music opened from the desk adds a
+    station (Enter on Add a station, its fields and Add at the desk's
+    1024x600) and it plays: Music's commands are the shell's, never the
+    Editor's run's."""
+    station = _station(tmp_path, True)
+    server, base = _site(tmp_path)
+    try:
+        url = station.base + "/live"
+        out, js = web_e2e.run(tmp_path, "hero", _HERO, [
+            {"js": _SPY}, {"wait": 2500},
+            {"js": "__moyState().then(s => 'EDIT ' + JSON.stringify(s.edit))"},
+            {"click": [999, 19]}, {"wait": 1200},                   # the Editor's X
+            {"click": [143, 80]}, {"wait": 2500},                   # Music on the desk
+            {"key": "Enter"}, {"wait": 800}, {"click": [610, 159]}]   # Add a station: Address
+            + [{"key": c} for c in url] + [{"click": [610, 245]}]   # Name
+            + [{"key": c} for c in "Test FM"] + [{"click": [962, 519]}] + [   # Add
+            {"waitFor": "__moyState().then(s => (s.media && s.media.at >= 1)"
+                        " || (s.media_last && s.media_last.state === 'failed'))",
+             "timeout": 20000},
+            {"wait": 1000}, {"js": _MEDIA}, {"js": _LAST}, {"js": _PCM}, {"shot": "hero"},
+        ], base, tmp_path / "chrome", boot_ms=40000)
+        assert (_tagged(js, "EDIT") or {}).get("tab") == "code", (js, out[-3000:])
+        media = _tagged(js, "MEDIA")
+        assert media and media["src"] == url and media["state"] == "playing", \
+            (media, _tagged(js, "LAST"), out[-3000:])
+        assert media["client"] == 1, media                 # the shell's
+        _assert_tone(_tagged(js, "PCM"), out)
     finally:
         station.stop()
         server.terminate()

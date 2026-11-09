@@ -67,6 +67,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import status_items as _status
 
+try:
+    import moy_log as _L
+except ImportError:  # host: the runtime package
+    try:
+        from runtime import moy_log as _L
+    except ImportError:  # pragma: no cover - an image without the kernel
+        _L = None
+
 from array import array
 
 # The curated stations: name, style, address (each answers 200 with
@@ -148,11 +156,29 @@ def _clock(s):
     return "%d:%02d" % (s // 60, s % 60)
 
 
+def _as_shell(verb):
+    """`verb` made as the shell (pid 1), whatever process is current."""
+    def shell_verb(*a, **k):
+        if _L is None:
+            return verb(*a, **k)
+        was = _L.current()
+        _L.current(_devices.SHELL)
+        try:
+            return verb(*a, **k)
+        finally:
+            _L.current(was)
+    return shell_verb
+
+
 class Stream:
     """What plays and what the person chose to play: the media face's
     answers read on a wake while a stream is open, the status item that
     shows it in the bar, and the verbs every surface acts with. One for the
-    console (`STREAM`): the app's pages and its section read the same."""
+    console (`STREAM`): the app's pages and its section read the same.
+
+    Music is the shell's, so its verbs are the shell's client and its wake
+    and status item the shell's (`_as_shell`), never the process a running
+    game, or the Editor's run, makes current."""
 
     def __init__(self):
         self.face = None            # the media face, else moybyte.media's (a test's stand-in)
@@ -180,6 +206,7 @@ class Stream:
 
     # -- verbs -----------------------------------------------------------------
 
+    @_as_shell
     def play(self, kind, name, src):
         """Play `src` as `kind` named `name`: the stream starts connecting
         (a station) or playing; False with the card failed when the face
@@ -200,6 +227,7 @@ class Stream:
         self.poll()
         return True
 
+    @_as_shell
     def toggle(self):
         """Pause or play; a stream that failed is tried again."""
         self.stamp = None
@@ -217,6 +245,7 @@ class Stream:
             m.pause()
         self.poll()
 
+    @_as_shell
     def seek(self, s):
         """The file played from `s` seconds, held inside it; False for a
         stream with no length (a station) or a seek the face refuses."""
@@ -232,6 +261,7 @@ class Stream:
         self.poll()
         return bool(ok)
 
+    @_as_shell
     def stop(self):
         m = self.media()
         if m is not None:
@@ -241,6 +271,7 @@ class Stream:
                 pass
         self._end()
 
+    @_as_shell
     def step(self, d):
         """The next (`d` 1) or previous station, song or list entry."""
         self.stamp = None
@@ -265,6 +296,7 @@ class Stream:
         p = pool[i]
         self.play(kind, p[0], p[2] if kind == "radio" else p[1])
 
+    @_as_shell
     def volume(self, v=None):
         self.stamp = None
         m = self.media()
@@ -280,6 +312,7 @@ class Stream:
         c = self.card
         return c["volume"] if c is not None else 0
 
+    @_as_shell
     def follow(self):
         """The service's stream shown, whoever played it: Music's own after
         a VM stop, or another client's (its label says what, else its

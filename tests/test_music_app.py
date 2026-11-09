@@ -155,6 +155,33 @@ def test_a_still_stamp_skips_the_read_and_a_moved_one_reads(tmp_path, face):
     assert f.reads == reads + 1 and M.STREAM.card["paused"]
 
 
+def test_music_plays_as_the_shell_while_a_game_is_current(tmp_path, face):
+    """Music is the shell's: a game's run current on the desk (in its
+    window, or the Editor's run) does not make Music's verbs that game's,
+    so the face hears the shell and the wake and status item are the
+    shell's."""
+    from runtime import moy_log as L
+    from runtime import moybyte
+    ws = build_desktop_ws(tmp_path)
+    ws.open_desk()
+    cart = next(c for c in ws.carts.all if c.get("title") == "Sky Run")
+    ws.open_in_editor(cart)
+    _settle(ws)
+    game = ws.run.player.pid
+    assert game and L.current() == game
+    heard = []
+    play = face.play
+    face.play = lambda src, label=None: (heard.append(L.current()), play(src, label))[1]
+    app = _app(ws)
+    ws.open_app(app)
+    _settle(ws)
+    app._open_row(0, 1, app._station_rows())
+    assert heard == [L.SHELL] and L.current() == game
+    assert moybyte.WAKES.by_id[M.STREAM.wake][1] == L.SHELL
+    assert ITEMS.at(0).pid == L.SHELL
+    M.STREAM.stop()
+
+
 def test_a_station_that_fails_shows_the_danger_state_and_tries_again(tmp_path, face):
     ws = build_ws(tmp_path)
     ws.open_app(_app(ws))
