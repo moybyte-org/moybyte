@@ -18,7 +18,8 @@ decisions the code rests on.
 | `modmoy_elf.c` | the boards' binding (`moy_elf`): store file to PSRAM, signature, verdict, relocation |
 | `elf_loader/` | Espressif's loader, vendored and patched (`UPSTREAM.md`) |
 | `runtime/host/moyhost_elf.c` | the host's loader: a host module through the dynamic loader, under the same C |
-| `runtime/run/elf_run.py` | `ws.runtimes["elf"]` on every tier |
+| `runtime/run/elf_run.py` | `ws.runtimes["elf"]` on every tier: commands, services, and a game in the Player |
+| `../../sdk/include/moybyte/game.h` | a game's frame loop and screen over the two screen rows and libmoy's raster |
 
 ## The module ABI
 
@@ -45,8 +46,9 @@ decisions the code rests on.
 ## The table's rules
 
 The table is the rows of `native/os_calls.json` that carry an ordinal: the
-POSIX rows and the kernel's own (`moy_log`, `moy_term_size`, and the service
-model's `moy_send` and `moy_on`, which a WASI program imports too) with
+POSIX rows and the kernel's own (`moy_log`, `moy_term_size`, the service
+model's `moy_send` and `moy_on`, which a WASI program imports too, and a
+game's screen, `moy_screen` and `moy_present`, 117 and 118) with
 their C prototypes as written there, and the app calls, whose prototypes
 the generator writes from the row's neutral types. The service timers and
 input readers (`moy_timer_every`, `moy_timer_cancel`, `moy_events`, 38 to
@@ -113,6 +115,20 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
   `moy_os_reap`'s watchdog (`moy_os.c`, THE WATCHDOG), once for each
   `MOY_SUPER_ABORT_US`, and killed (137) by the strike that suspends it; a
   kill deletes its threads where they stand, as a stop past its time does.
+- A game is a service's loop with a screen (`moy_os.h`, A GAME), started by
+  the Player for its run's pid (`moy_os_game`) and never the scheduler's: it
+  hears the system's `frame` message ([held, pressed, ms]) once a frame
+  while it has read since the last, so a slow game is never flooded and a
+  paused one is sent nothing, and it presents a whole screen of palette
+  indices with `moy_present`, which COPIES it into the process's frame
+  (kernel memory, so a U-mode module is never handed a kernel pointer and
+  its own buffer stays its own). The frame has one writer at a time: a
+  present waits while the frame is READY or TAKEN, and the console's frame
+  call (`moy_os_game_frame`) lets the taken one go only at its next call,
+  once it has drawn it. That call serves the game's hops while it waits, as
+  a stop does. A game draws with libmoy's raster, linked into the module
+  from the SDK (`sdk/README.md`), or writes its indices itself; the verbs
+  are not rows (owner, 2026-11-09, #246).
 - Every registration is a handle in the process's record, swept with its
   pid's leases however the process ends (`moy_os_stats`' `swept`).
 - A command's rows that touch the session run on the task that serves it.
@@ -235,6 +251,13 @@ UNSIGNED flag, which `runtime/run/elf_run.py` sets from the cart's consent to
 A native cart's manifest names its chips, `"moybyte": {"native": ["esp32s3",
 "esp32p4"], "permissions": ["full_access", ...]}`, and carries `main.<chip>.elf`
 for each; a cart that does not ask for `full_access` is refused
-(`runtime/shell/app_perms.py`). The shell runs it as a command through the
-door WASI commands use (`runtime/shell/sh_door.py`, `run_compiled`). The
-Player opens no native app.
+(`runtime/shell/app_perms.py`). The shell runs a `command` as a command through the
+door WASI commands use (`runtime/shell/sh_door.py`, `run_compiled`), the
+scheduler a `service`, and the Player any other type as a game
+(`runtime/run/elf_run.py`, `ElfGame`): its screen the run's canvas size,
+what it presents drawn with the canvas class's `blit_indices`, the buttons
+in its frame messages. Its main returning 0 quits; any other end is a stop
+whose card names the signal and, on a P4, the fault record
+(`elf_run.stop_text`), with Restart and Home and no See why, as a compiled
+cart's. The Player checks its footprint (the module, the screen twice, its
+stack) against free PSRAM first and gives the fit notice.

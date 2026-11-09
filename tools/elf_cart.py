@@ -16,7 +16,8 @@ with that chip's toolchain (the ESP-IDF's, from ~/.espressif) into
 `"moybyte": {"native": [...]}`, and copies everything else as it is. A module
 is a relocatable ELF that imports nothing: it links the SDK's runtime,
 libmoyos.a (sdk/src/: the entry, and a stub per row of the OS table that calls
-it by ordinal; sdk/libc/: the SDK's C library, and on RISC-V its libm), the
+it by ordinal; sdk/libc/: the SDK's C library, and on RISC-V its libm;
+libmoy's raster, native/moy_gfx/libmoy), the
 toolchain's PURE C library members and its libm and libgcc, every symbol
 hidden. The host's
 chip links the host's C library dynamically behind the SDK's own.
@@ -53,6 +54,10 @@ SDK_SRC = os.path.join(SDK, "src")
 SDK_LIBC = os.path.join(SDK, "libc")
 SDK_SYSROOT = os.path.join(SDK, "sysroot", "include")
 SDK_LIBM = os.path.join(SDK_LIBC, "m")
+# libmoy's raster, the copy the console compiles (native/moy_gfx/libmoy,
+# vendored verbatim): its index build, which a game draws its screen with.
+LIBMOY = os.path.join(ROOT, "native", "moy_gfx", "libmoy")
+LIBMOY_SOURCES = ("moy_canvas.c", "moy_sprite.c", "moy_data.c")
 CACHE = os.path.join(ROOT, ".build", "sdk")
 TABLE = os.path.join(ROOT, "native", "os_calls.json")
 ELF_H = os.path.join(ROOT, "native", "moy_elf", "moy_elf.h")
@@ -144,9 +149,10 @@ def _rows():
 
 
 def includes(chip):
-    """The SDK's include folders for `chip`: its own, and on a board the
-    sysroot's headers a board's C library lacks (sockets, poll, mmap)."""
-    out = ["-I", SDK_INCLUDE]
+    """The SDK's include folders for `chip`: its own, libmoy's (moy.h), and
+    on a board the sysroot's headers a board's C library lacks (sockets,
+    poll, mmap)."""
+    out = ["-I", SDK_INCLUDE, "-I", LIBMOY]
     if chip != "host":
         out += ["-isystem", SDK_SYSROOT]
     return out
@@ -158,13 +164,15 @@ def _sdk_sources():
     srcs += sorted(glob.glob(os.path.join(SDK_LIBC, "*.[ch]")))
     srcs += sorted(glob.glob(os.path.join(SDK_SYSROOT, "**", "*.h"), recursive=True))
     srcs += sorted(glob.glob(os.path.join(SDK_LIBM, "**", "*.[ch]"), recursive=True))
+    srcs += [os.path.join(LIBMOY, n) for n in LIBMOY_SOURCES + ("moy.h", "moy_pixel.h")]
     return srcs
 
 
 def libmoyos(chip):
     """The SDK runtime for `chip` (built once per content into .build/sdk/):
     the entry, one object per row, so a module links only what it calls,
-    and the SDK's C library (sdk/libc/; on RISC-V, with its libm)."""
+    the SDK's C library (sdk/libc/; on RISC-V, with its libm) and libmoy's
+    raster."""
     cc, ar, _strip = toolchain(chip)
     srcs = _sdk_sources()
     h = hashlib.sha256()
@@ -190,6 +198,10 @@ def libmoyos(chip):
     for src in sorted(glob.glob(os.path.join(SDK_LIBC, "*.c"))):
         o = os.path.join(tmp, "lc_" + os.path.basename(src)[:-2] + ".o")
         _run(base + ["-fno-builtin", "-I", SDK_LIBC, src, "-o", o])
+        objs.append(o)
+    for name in LIBMOY_SOURCES:
+        o = os.path.join(tmp, "moy_" + name[:-2] + ".o")
+        _run(base + [os.path.join(LIBMOY, name), "-o", o])
         objs.append(o)
     if CHIPS[chip]["libm"]:
         for part, inc in (("libm", "libm"), ("libm_dbl", "libm_dbl"), ("", "libm")):

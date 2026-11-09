@@ -1973,8 +1973,9 @@ class Player(PlayerDiag):
     def _start_runtime(self, runtime, ns, src, t0, h0, t_pre):
         """Start a cart on a runtime other than the console's Python: `"lua"`
         (#67) or `"wasm"` (native/moy_wasm/README.md), through the factory
-        `ws.runtimes` maps it to -- moycore_glue's runs on every tier, and
-        runtime/wasm_host.WasmHostRun for a compiled cart on the host. The cart gets the SAME make_api namespace a Python cart got
+        `ws.runtimes` maps it to -- moycore_glue's runs on every tier,
+        runtime/wasm_host.WasmHostRun for a compiled cart on the host, and
+        runtime/run/elf_run.ElfGame for a native cart on every tier. The cart gets the SAME make_api namespace a Python cart got
         (a Lua factory registers those callables as the cart's globals; a wasm
         one reads its config and pmem from it), so permission gating, pmem,
         audio and quit() semantics are identical by construction. No
@@ -2000,14 +2001,10 @@ class Player(PlayerDiag):
                 # opens the panel, never a hang.
                 raise RuntimeError("needs the %s runtime (not in this build)"
                                    % RUNTIME_NAMES[runtime])
-            if runtime == "elf":
-                # The native tier runs commands (sh_door.run_compiled); the
-                # Player opens no native app.
-                raise RuntimeError("a native cart runs as a command in the Terminal")
-            if runtime == "wasm":
+            if runtime == "wasm" or runtime == "elf":
                 # A compiled cart's imports against this console's table, and
-                # its load footprint against what this console can give it,
-                # before anything loads.
+                # a compiled or native cart's load footprint against what this
+                # console can give it, before anything loads.
                 cart = ws.cart or {}
                 missing = _cart_missing(make, cart)
                 if missing:
@@ -2077,7 +2074,8 @@ class Player(PlayerDiag):
             # (no/stale module, unsigned with the switch off) was already
             # retried on the interpreter inside WasmRun -- what reaches here
             # is a real error (a trap, a bad signature, a malformed cart).
-            if runtime == "wasm":
+            # A native cart's is the same.
+            if runtime == "wasm" or runtime == "elf":
                 self.crash_file, self.crash_line = None, None
                 title = (ws.cart or {}).get("title")
                 if isinstance(exc, _Refused):

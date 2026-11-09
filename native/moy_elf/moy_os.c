@@ -79,6 +79,8 @@ uint32_t moy_lease_sweep(uint32_t owner) __attribute__((weak));
 
 #define MAGIC 0x6d6f796fu
 
+enum { FB_FREE = 0, FB_WRITING, FB_READY, FB_TAKEN };
+
 // -- the platform: memory, clocks, semaphores, tasks, timers -------------------------
 
 static void *os_alloc(size_t n) {
@@ -325,6 +327,15 @@ struct moy_os_proc {
     moy_app_run_t run;          // its app run: what its app calls are answered for
     volatile uint8_t net_held;
     uint32_t wakes, events;
+    // a game's (moy_os_game): its screen, and the frame moy_present hands over
+    uint8_t game;
+    volatile uint8_t fb_state;  // FB_FREE, FB_WRITING, FB_READY, FB_TAKEN
+    uint8_t fb_posted;          // a frame message posted, the last when the game had
+    uint32_t fb_mark;           // read `fb_mark` records: the next waits for another read
+    int fb_w, fb_h;
+    uint8_t *fb;                // fb_w * fb_h palette indices
+    sem_t_ fb_room;             // the frame let go: a present may write it
+    sem_t_ fb_shown;            // a present made it READY
 #ifdef MOY_OS_UMODE
     moy_u_proc_t *u;            // its memory, when its module runs in U-mode
     char **uargv;               // argv and the environment, in its main thread's U area
@@ -1983,6 +1994,70 @@ int moy_os_moy_term_size(int *cols, int *rows) {
     return r >= 0 ? 0 : -1;
 }
 
+// -- the rows: a game's screen -------------------------------------------------------
+//
+// A game's frame (moy_os_game): moy_present copies the module's indices into
+// the process's frame while it is FREE, making it READY; the console's frame
+// call takes a READY frame (TAKEN) and lets it go (FREE) at its next call,
+// once it has drawn it. A present while the frame is not FREE waits for it.
+
+int moy_os_moy_screen(int *w, int *h) {
+    thr_t *t = enter();
+    int r = -1;
+    if (t == NULL || !t->p->game) {
+        moy_os_errno_set(ENODEV);
+    } else {
+        if (w != NULL) {
+            *w = t->p->fb_w;
+        }
+        if (h != NULL) {
+            *h = t->p->fb_h;
+        }
+        r = 0;
+    }
+    leave(t);
+    return r;
+}
+
+int moy_os_moy_present(const void *px, size_t n) {
+    thr_t *t = enter();
+    if (t == NULL || !t->p->game) {
+        moy_os_errno_set(ENODEV);
+        leave(t);
+        return -1;
+    }
+    moy_os_proc_t *p = t->p;
+    if (px == NULL || n != (size_t)p->fb_w * (size_t)p->fb_h) {
+        moy_os_errno_set(EINVAL);
+        leave(t);
+        return -1;
+    }
+    for (;;) {
+        lock();
+        bool free_ = p->fb_state == FB_FREE;
+        if (free_) {
+            p->fb_state = FB_WRITING;
+        }
+        unlock();
+        if (free_) {
+            break;
+        }
+        if (ending(t)) {
+            moy_os_errno_set(EINTR);
+            leave(t);
+            return -1;
+        }
+        sem_take(&p->fb_room, MOY_OS_SLICE_US);
+    }
+    memcpy(p->fb, px, n);
+    lock();
+    p->fb_state = FB_READY;
+    unlock();
+    sem_give(&p->fb_shown);
+    leave(t);
+    return 0;
+}
+
 // -- the rows: the event descriptor ------------------------------------------------
 //
 // The process's event queue (moy_evq.h), read as descriptor MOY_EVQ_FD: by
@@ -3078,6 +3153,8 @@ static void proc_free(moy_os_proc_t *p) {
     sem_fini(&p->hop_done);
     sem_fini(&p->hop_lock);
     sem_fini(&p->stopped);
+    sem_fini(&p->fb_room);
+    sem_fini(&p->fb_shown);
     p->magic = 0;
     os_free(p);
 }
@@ -3141,6 +3218,8 @@ static moy_os_proc_t *proc_new(const moy_os_module_t *m, const moy_os_caps_t *ca
     sem_init(&p->hop_done, false);
     sem_init(&p->hop_lock, true);
     sem_init(&p->stopped, false);
+    sem_init(&p->fb_room, false);
+    sem_init(&p->fb_shown, false);
 #ifdef MOY_OS_UMODE
     if (m->ulo != 0) {
         p->u = os_alloc(sizeof *p->u);
@@ -3297,6 +3376,7 @@ static bool proc_end(moy_os_proc_t *p) {
     }
     os_free(p->argv);
     os_free(p->env);
+    os_free(p->fb);
 #ifdef MOY_OS_UMODE
     while (p->retired != NULL) {
         retired_t *r = p->retired;
@@ -3310,6 +3390,8 @@ static bool proc_end(moy_os_proc_t *p) {
     sem_fini(&p->hop_done);
     sem_fini(&p->hop_lock);
     sem_fini(&p->stopped);
+    sem_fini(&p->fb_room);
+    sem_fini(&p->fb_shown);
     p->magic = 0;
     os_free(p);
     return true;
@@ -3464,9 +3546,11 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
     return r;
 }
 
-moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
-                              uint32_t pid, const char *id, const moy_app_run_t *run,
-                              char *err, size_t errlen) {
+// A service's start, or with a screen of w x h (w > 0) a game's: the
+// process, its main running on its own task, or NULL with the reason in err.
+static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *caps,
+                                 uint32_t pid, const char *id, int w, int h,
+                                 const moy_app_run_t *run, char *err, size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, true, err, errlen);
     if (p == NULL) {
         if (m->unload != NULL) {
@@ -3478,7 +3562,7 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
     if (run != NULL) {
         p->run = *run;
     }
-    const char *name = id != NULL && *id ? id : "service";
+    const char *name = id != NULL && *id ? id : w > 0 ? "game" : "service";
     size_t k = strlen(name) + 1;
     p->argv = os_alloc(2 * sizeof(char *) + k);
     if (p->argv == NULL) {
@@ -3490,7 +3574,7 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
     p->argv[1] = NULL;
     p->argc = 1;
     if (!(p->hooks & MOY_ELF_H_MAIN)) {
-        snprintf(err, errlen, "not a service: it defines no main");
+        snprintf(err, errlen, "not a %s: it defines no main", w > 0 ? "game" : "service");
         proc_end(p);
         return NULL;
     }
@@ -3502,6 +3586,22 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
         }
         p->own_q = 1;
     }
+    if (w > 0) {
+        p->game = 1;
+        p->fb_w = w;
+        p->fb_h = h;
+        p->fb = os_alloc((size_t)w * (size_t)h);
+        if (p->fb == NULL) {
+            snprintf(err, errlen, "out of memory");
+            proc_end(p);
+            return NULL;
+        }
+        if (moy_evq_listen(pid, MOY_OS_FRAME, true) != MOY_EVQ_OK) {
+            snprintf(err, errlen, "its event queue hears no frames");
+            proc_end(p);
+            return NULL;
+        }
+    }
     p->thr[0].p = p;
     p->thr[0].gen = 1;
     p->started_us = mono_us();
@@ -3510,8 +3610,29 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
         proc_end(p);
         return NULL;
     }
-    p->row = row_add(pid, MOY_PROC_SERVICE, id, p);
+    if (w <= 0) {
+        p->row = row_add(pid, MOY_PROC_SERVICE, id, p);
+    }
     return p;
+}
+
+moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
+                              uint32_t pid, const char *id, const moy_app_run_t *run,
+                              char *err, size_t errlen) {
+    return loop_start(m, caps, pid, id, 0, 0, run, err, errlen);
+}
+
+moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
+                           const char *id, int w, int h, const moy_app_run_t *run, char *err,
+                           size_t errlen) {
+    if (w <= 0 || h <= 0) {
+        snprintf(err, errlen, "no screen for it");
+        if (m->unload != NULL) {
+            m->unload(m->loaded);
+        }
+        return NULL;
+    }
+    return loop_start(m, caps, pid, id, w, h, run, err, errlen);
 }
 
 // The record of `pid`, looked up under the lock: a command's record is freed
@@ -3538,7 +3659,7 @@ static uint32_t services(moy_os_proc_t **out) {
     lock();
     for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
         moy_os_proc_t *p = g_proc[i];
-        if (p != NULL && p->service) {
+        if (p != NULL && p->service && !p->game) {
             out[n++] = p;
         }
     }
@@ -3653,17 +3774,9 @@ uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
     return got;
 }
 
-int moy_os_stop(uint32_t pid) {
-    moy_os_proc_t *svc[MOY_OS_PROCS], *p = NULL;
-    uint32_t n = services(svc);
-    for (uint32_t i = 0; i < n; i++) {
-        if (svc[i]->pid == pid) {
-            p = svc[i];
-        }
-    }
-    if (p == NULL || p->reaped) {
-        return -1;
-    }
+// Service or game `p` stopped on the console's task (moy_os_stop).
+static int loop_stop(moy_os_proc_t *p) {
+    uint32_t pid = p->pid;
     p->hup = 1;
     moy_evq_kick(pid);
     int64_t end = mono_us() + MOY_OS_STOP_US;
@@ -3679,6 +3792,100 @@ int moy_os_stop(uint32_t pid) {
     }
     proc_end(p);
     return code;
+}
+
+int moy_os_stop(uint32_t pid) {
+    moy_os_proc_t *svc[MOY_OS_PROCS], *p = NULL;
+    uint32_t n = services(svc);
+    for (uint32_t i = 0; i < n; i++) {
+        if (svc[i]->pid == pid) {
+            p = svc[i];
+        }
+    }
+    if (p == NULL || p->reaped) {
+        return -1;
+    }
+    return loop_stop(p);
+}
+
+// -- a game -----------------------------------------------------------------------------
+//
+// A game's record is freed only on the console's task (moy_os_game_stop, a
+// failed start), the task every call below runs on, so it stays readable
+// past the lock there.
+
+static moy_os_proc_t *game_of(uint32_t pid) {
+    moy_os_proc_t *p = proc_of(pid);
+    return p != NULL && p->game ? p : NULL;
+}
+
+int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms,
+                      uint32_t max_us) {
+    moy_os_proc_t *p = game_of(pid);
+    if (p == NULL) {
+        return -1;
+    }
+    int out = 0;
+    lock();
+    if (p->fb_state == FB_TAKEN) {
+        p->fb_state = FB_FREE;
+        sem_give(&p->fb_room);
+    }
+    bool send = !p->main_done && (!p->fb_posted || p->events != p->fb_mark);
+    uint32_t mark = p->events;
+    unlock();
+    if (send) {
+        char args[40];
+        int n = snprintf(args, sizeof args, "[%u,%u,%u]", (unsigned)held, (unsigned)pressed,
+                         (unsigned)ms);
+        if (moy_evq_post(pid, 0, MOY_OS_FRAME, args, (size_t)n) == MOY_EVQ_OK) {
+            lock();
+            p->fb_posted = 1;
+            p->fb_mark = mark;
+            unlock();
+            out |= MOY_OS_FRAME_SENT;
+        }
+    }
+    int64_t end = mono_us() + max_us;
+    for (;;) {
+        lock();
+        bool ready = p->fb_state == FB_READY;
+        if (ready) {
+            p->fb_state = FB_TAKEN;
+        }
+        bool done = p->main_done;
+        bool hop = p->hopping != 0;
+        unlock();
+        if (ready) {
+            return out | MOY_OS_FRAME_SHOWN;
+        }
+        if (done) {
+            return MOY_OS_ENDED;
+        }
+        int64_t left = end - mono_us();
+        if (left <= 0) {
+            return out;
+        }
+        if (hop) {
+            moy_vmq_serve();            // its app call is this task's to run
+        }
+        sem_take(&p->fb_shown, hop ? 1000 : left);
+    }
+}
+
+const uint8_t *moy_os_game_screen(uint32_t pid, int *w, int *h) {
+    moy_os_proc_t *p = game_of(pid);
+    if (p == NULL) {
+        return NULL;
+    }
+    *w = p->fb_w;
+    *h = p->fb_h;
+    return p->fb;
+}
+
+int moy_os_game_stop(uint32_t pid) {
+    moy_os_proc_t *p = game_of(pid);
+    return p != NULL ? loop_stop(p) : -1;
 }
 
 // -- faults ---------------------------------------------------------------------------
@@ -3733,7 +3940,8 @@ void moy_os_u_fault(moy_u_space_t *s, uint32_t *f, uint32_t cause, uint32_t pc, 
     uint32_t at = pc >= u->lo && pc < u->hi ? pc - u->vbase : pc;
     int sig;
     const char *why = u_why(cause, &sig);
-    const char *name = !p->service && p->argv != NULL && p->argv[0] != NULL ? p->argv[0] : "service";
+    const char *name = (!p->service || p->game) && p->argv != NULL && p->argv[0] != NULL
+                            ? p->argv[0] : "service";
     char text[160];
     if (cause & MOY_U_BAD_ARG) {
         snprintf(text, sizeof text, "%s (pid %u) killed: %s (%s) at pc 0x%x\n", name,

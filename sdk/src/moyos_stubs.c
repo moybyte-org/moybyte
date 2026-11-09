@@ -1196,3 +1196,23 @@ int32_t moy_status_remove(int32_t item)
     return ((moy_os_fn_moy_status_remove *)__moy_os->fn[116])(item);
 }
 #endif
+
+#if MOY_OS_ROW(117)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_screen(int *w, int *h);
+MOY_OS_USED(117);
+int moy_screen(int *w, int *h)
+{
+    return ((moy_os_fn_moy_screen *)__moy_os->fn[117])(w, h);
+}
+#endif
+
+#if MOY_OS_ROW(118)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_present(const void *px, size_t n);
+MOY_OS_USED(118);
+int moy_present(const void *px, size_t n)
+{
+    return ((moy_os_fn_moy_present *)__moy_os->fn[118])(px, n);
+}
+#endif

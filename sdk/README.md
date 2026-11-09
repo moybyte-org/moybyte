@@ -44,7 +44,8 @@ moy app push <cart> [--board ID | --store DIR]
   signed as those tools sign them; `--unsigned` leaves it off. A Python or
   Lua cart runs from its source and has nothing to build.
 - `stubs` copies what the cart's tier compiles or edits against into it:
-  `include/moybyte/os.h` and `app.h` with a `compile_flags.txt` for C,
+  `include/moybyte/os.h` and `app.h` with a `compile_flags.txt` for C (a
+  native cart's with `game.h` and libmoy's `moy.h`),
   `moybyte_os.lua` for the Lua language server, `__builtins__.pyi` and
   `moybyte.pyi` for a Python editor.
 - `push` copies the cart, less those stubs and only once it checks, onto a
@@ -64,7 +65,7 @@ standing only where it lists the reason.
   version, its type, the event descriptor (`MOY_EVQ_FD`) and the record a
   read of it takes (`moy_evq_ev_t`, from `native/moy_kernel/moy_evq.h`), and
   the Moybyte rows: the kernel's (`moy_log`, `moy_term_size`, `moy_send`,
-  `moy_on`) and the app calls (`moy_files_*`,
+  `moy_on`, and a game's screen, `moy_screen` and `moy_present`) and the app calls (`moy_files_*`,
   `moy_prefs_*`, `moy_clipboard_*`, `moy_nav_open_app`, `moy_notify`,
   `moy_open_with`, `moy_share`, `moy_award`, `moy_progress`, and the wakes
   `moy_every`, `moy_after`, `moy_at` and `moy_cancel`, each heard as a
@@ -79,6 +80,18 @@ standing only where it lists the reason.
   headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
 - `include/moybyte/app.h` (generated): a C app compiled to wasm's
   `moybyte.app` imports, each under its import name.
+- `include/moybyte/game.h`: a native game's frame loop and screen
+  (`native/moy_elf/moy_os.h`, A GAME): `moy_game_screen` maps a screen-sized
+  buffer and puts a libmoy canvas over it, `moy_game_frame` waits for the
+  console's next frame message and reads its buttons, and `moy_present`
+  hands the screen over. It includes libmoy's `moy.h`.
+- libmoy's raster (**decision, owner, 2026-11-09, #246**: the game verbs
+  are a library, not rows): `native/moy_gfx/libmoy`'s `moy_canvas.c`,
+  `moy_sprite.c` and `moy_data.c`, the copy the console compiles, built
+  into `libmoyos.a` as its index build (one byte a pixel) under the SDK's
+  flags, so a game draws with the verbs and pixels the Lua and wasm tiers
+  draw with. It holds no writable data, and a module links only the verbs it
+  calls (`tests/test_elf_player.py`).
 - `src/moyos_crt.c`: the module's entry, `_moy_entry`, and its
   `.moy.table` note.
 - `src/moyos_stubs.c` (generated): one stub a row but a retired one, each compiled on its own

@@ -265,8 +265,13 @@ def test_the_stubs_are_the_generator_s(tmp_path, tier, service):
     assert sorted(set(wrote) - {"compile_flags.txt"}) == sorted(set(want))
     for t in cli.stub_tiers(cli.read_manifest(cart), cart):
         for rel, src in cli.STUB_FILES[t]:
+            if src in made:
+                want_text = made[src]
+            else:                                    # a header the SDK keeps as it is
+                with open(src) as f:
+                    want_text = f.read()
             with open(os.path.join(cart, rel)) as f:
-                assert f.read() == made[src], rel
+                assert f.read() == want_text, rel
     assert ("compile_flags.txt" in wrote) == (tier in ("wasm", "wasi", "c") or service == "c")
 
 

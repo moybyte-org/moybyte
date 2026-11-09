@@ -3,7 +3,7 @@
 reaches on each tier, with the permissions each answers under (any one of
 them), from native/os_calls.json."""
 
-VERSION = 117
+VERSION = 119
 SPEC_NAMES = ('print',)
 
 # a wasm app's "moybyte.app" imports
@@ -294,6 +294,8 @@ ELF = {
     114: ('moy_status_state', ()),
     115: ('moy_status_panel', ()),
     116: ('moy_status_remove', ()),
+    117: ('moy_screen', ()),
+    118: ('moy_present', ()),
 }
 
 # the ordinals of the retired rows, which no module built now calls

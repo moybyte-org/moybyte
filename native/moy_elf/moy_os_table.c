@@ -532,6 +532,8 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_status_state,
         (void *)moy_os_moy_status_panel,
         (void *)moy_os_moy_status_remove,
+        (void *)moy_os_moy_screen,
+        (void *)moy_os_moy_present,
     },
 };
 
@@ -653,4 +655,6 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_status_state",
     "moy_status_panel",
     "moy_status_remove",
+    "moy_screen",
+    "moy_present",
 };

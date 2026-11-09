@@ -161,3 +161,13 @@ int hl_elf_check(const char *path, uint32_t flags, char *err, int errlen) {
     dlclose(m.loaded);
     return 0;
 }
+
+int hl_elf_game(const char *path, uint32_t pid, const char *id, uint32_t flags, int w, int h,
+                const void *run, char *err, int errlen) {
+    moy_os_module_t m;
+    if (load(path, flags, &m, err, errlen) != 0) {
+        return -3;
+    }
+    return moy_os_game(&m, NULL, pid, id, w, h, (const moy_app_run_t *)run, err, (size_t)errlen)
+               != NULL ? 0 : -3;
+}

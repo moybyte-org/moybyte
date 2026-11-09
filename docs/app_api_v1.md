@@ -773,6 +773,8 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.status_state` | none |  |  | `moybyte_status_state`, `moybyte.os.status_state` | `moy_status_state` |
 | `moybyte.status_panel` | none |  |  | `moybyte_status_panel`, `moybyte.os.status_panel` | `moy_status_panel` |
 | `moybyte.status_remove` | none |  |  | `moybyte_status_remove`, `moybyte.os.status_remove` | `moy_status_remove` |
+| `moy_screen` | none |  |  |  | `moy_screen` |
+| `moy_present` | none |  |  |  | `moy_present` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first

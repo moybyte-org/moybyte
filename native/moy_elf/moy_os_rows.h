@@ -194,5 +194,7 @@ int32_t moy_os_moy_status_show(const char *icon, int32_t state, int32_t order);
 int32_t moy_os_moy_status_state(int32_t item, int32_t state);
 int32_t moy_os_moy_status_panel(int32_t item, const char *rows);
 int32_t moy_os_moy_status_remove(int32_t item);
+int moy_os_moy_screen(int *w, int *h);
+int moy_os_moy_present(const void *px, size_t n);
 
 #endif // MOY_OS_ROWS_H

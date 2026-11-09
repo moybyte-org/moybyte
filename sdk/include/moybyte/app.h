@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MOYBYTE_APP_VERSION 117
+#define MOYBYTE_APP_VERSION 119
 
 #define MOYBYTE_APP_IMPORT(name) __attribute__((import_module("moybyte.app"), import_name(#name)))
 

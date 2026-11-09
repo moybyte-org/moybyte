@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 117
+#define MOY_OS_VERSION 119
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -696,6 +696,8 @@ int moy_log(int level, const char *text);
 int moy_term_size(int *cols, int *rows);
 int moy_send(const char *app, const char *name, const char *args);
 int moy_on(const char *name, int on);
+int moy_screen(int *w, int *h);
+int moy_present(const void *px, size_t n);
 
 // The app's calls (docs/app_api_v1.md, the call table): each the console's
 // row of the same name, under the process's permissions. A text is

@@ -163,10 +163,13 @@ to whoever called it.
     (#108's comments hold that design discussion).
 - **Cart runtimes (#67): a manifest `"runtime"` other than python routes
   `Player.start` through `ws.runtimes`, a map of the runtimes this build carries**
-  -- `"lua"`, and `"wasm"` (a compiled cart, `native/moy_wasm/README.md`,
-  on the same moycore console over the `native/moy_wasm` engine). A runtime a
+  -- `"lua"`, `"wasm"` (a compiled cart, `native/moy_wasm/README.md`,
+  on the same moycore console over the `native/moy_wasm` engine), and
+  `"elf"`, the tier of any cart whose manifest names `native` chips, played
+  as a game in its own process (`runtime/run/elf_run.py`, `ElfGame`; a
+  native command or service is the Terminal's and the scheduler's). A runtime a
   build lacks is an ABSENT KEY, and its carts open the runtime-missing panel.
-  A compiled cart the console has no room for opens that same panel as a
+  A compiled or native cart the console has no room for opens that same panel as a
   NOTICE, never an error: the Player compares the cart's load footprint with
   what the runtime reports free before anything loads, and a load that runs
   out anyway maps to the same notice (`native/moy_wasm/README.md`). A cart

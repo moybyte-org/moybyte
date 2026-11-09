@@ -91,6 +91,7 @@ USED_UNCALLED = ("multiplayer",)
 SIM_STORE = os.path.expanduser("~/.moybyte/projects")
 SDK_INCLUDE = os.path.join(ROOT, "sdk", "include")
 STUBS = os.path.join(HERE, "stubs")
+LIBMOY = os.path.join(ROOT, "native", "moy_gfx", "libmoy")
 # What `stubs` writes per tier: (path in the cart, its source).
 STUB_FILES = {
     "python": (("__builtins__.pyi", os.path.join(STUBS, "__builtins__.pyi")),
@@ -99,7 +100,9 @@ STUB_FILES = {
     "wasm": (("include/moybyte/app.h", os.path.join(SDK_INCLUDE, "moybyte", "app.h")),
              ("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h"))),
     "wasi": (("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h")),),
-    "c": (("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h")),),
+    "c": (("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h")),
+          ("include/moybyte/game.h", os.path.join(SDK_INCLUDE, "moybyte", "game.h")),
+          ("include/moy.h", os.path.join(LIBMOY, "moy.h"))),
 }
 COMPILE_FLAGS = {"wasm": "--target=wasm32-wasip1\n-Iinclude\n",
                  "wasi": "--target=wasm32-wasip1\n-Iinclude\n",

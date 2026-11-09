@@ -12,6 +12,18 @@ runtime answers the door's job contract, the WASI runtime's too: start ->
 the scheduler's (runtime/system/scheduler.py, COMPILED SERVICES):
 service(cart, pid, run) -> None or why, stop(pid), reap() and figures(pid).
 
+A GAME is the cart played in the Player (any type but a command or a
+service, which the Terminal and the scheduler run): called with `(ns, src)`
+the runtime starts the cart's module as the run's process (moy_os.h, A GAME)
+and answers an ElfGame, the shape every runtime's run has
+(`init`/`update`/`draw`/`close`). Each tick posts the frame message with the
+buttons and waits up to the tick's time for a present; the draw puts the
+presented screen into the run's canvas through the one canvas class's
+`blit_indices`. A game whose main returns 0 quits; any other end is a stop
+the stop card reports, a signal by its name and, where the console keeps
+one (a P4's isolation), its fault record. The Player asks `footprint` and
+`memory` first, as it asks a compiled cart's runtime.
+
 A command granted the "network" permission runs with the socket rows
 (`net=True`, the engine's NET flag), and its first socket holds the radio
 for it under the lease tag "native" (`NET_TAG`) until its end: the engine
@@ -30,7 +42,36 @@ flag), the one rule the compiled tier's AOT modules follow too.
 
 REFUSED = -3
 RUNNING = -100          # moy_os.h's MOY_OS_RUNNING
+ENDED = -4              # moy_os.h's MOY_OS_ENDED
+FRAME_SENT, FRAME_SHOWN = 1, 2
 NET_TAG = "native"
+STACK = 16 * 1024       # moy_os_default_caps' stack: a game's one thread
+# The longest a tick waits for a present, so a game that falls behind costs
+# the console a frame at its slowest.
+WAIT_US_MAX = 50000
+# A signal's name, its exit status 128 + the number (moy_os.h, the faults).
+SIGNALS = {4: "SIGILL", 5: "SIGTRAP", 7: "SIGBUS", 9: "SIGKILL", 11: "SIGSEGV",
+           31: "SIGSYS"}
+WHAT = {4: "an illegal instruction", 5: "a breakpoint", 7: "a misaligned access",
+        9: "killed", 11: "a memory fault", 31: "a call the console lacks"}
+
+try:
+    from lua_ext import MOY_BUTTONS
+except ImportError:  # host: the runtime package
+    from runtime.lua_ext import MOY_BUTTONS
+
+
+def stop_text(code, fault=None):
+    """What the stop card says of a native game that ended with `code`, its
+    fault record `fault` ((pid, name, cause, pc, addr), or None) beside it."""
+    sig = code - 128 if code > 128 else 0
+    if sig in SIGNALS:
+        text = "native code stopped: %s, %s" % (SIGNALS[sig], WHAT[sig])
+    else:
+        text = "native code ended with status %d" % code
+    if fault is not None:
+        text += " (at 0x%x, address 0x%x, cause 0x%x)" % (fault[3], fault[4], fault[2])
+    return text
 
 
 class ElfRuntime:
@@ -72,6 +113,41 @@ class ElfRuntime:
         unsigned = app_perms.run_admits_unsigned(self.ws, cart)
         return ((getattr(self.engine, "NET", 1) if net else 0)
                 | (getattr(self.engine, "UNSIGNED", 2) if unsigned else 0))
+
+    def __call__(self, ns, src):
+        """The cart in the Player as a game (A GAME, above)."""
+        del src                         # a native cart has no source text
+        ws = self.ws
+        cart = ws.cart or {}
+        if cart.get("type") in ("command", "service"):
+            raise RuntimeError("a native %s runs in the Terminal" % cart["type"])
+        return ElfGame(self, ws, cart, ns.get("_moy_app"))
+
+    def footprint(self, cart, w=320, h=240):
+        """(total, block) a game's start takes: its module (its file bounds
+        what loads), its `w` x `h` screen twice (the module's and the
+        process's frame) and its thread's stack; None with no module."""
+        path = self.module(cart)
+        if path is None:
+            return None
+        try:
+            import os
+            size = os.stat(path)[6]
+        except OSError:
+            return None
+        canvas = getattr(getattr(self.ws, "run", None), "canvas", None)
+        if canvas is not None:
+            w, h = canvas.w, canvas.h
+        return size + 2 * w * h + STACK, max(size, w * h, STACK)
+
+    def memory(self):
+        """(free, largest block) of the memory a module and its frame take:
+        a board's PSRAM (moy_elf.mem), the host's limit."""
+        mem = getattr(self.engine, "mem", None)
+        if mem is None:
+            return 32 * 1024 * 1024, 32 * 1024 * 1024
+        got = mem()
+        return got[2], got[3]
 
     def module(self, cart):
         """The path of the cart's module for this console, or None: its
@@ -169,3 +245,94 @@ def make_elf_runtime(ws):
     except ImportError:
         return None
     return ElfRuntime(ws, moy_elf)
+
+
+class ElfGame:
+    """A native game's run in the Player (A GAME in this module's head)."""
+
+    def __init__(self, rt, ws, cart, run):
+        self._e = rt.engine
+        self._ws = ws
+        path = rt.module(cart)
+        if path is None:
+            raise RuntimeError("it has no module for this console (%s)" % rt.engine.CHIP)
+        canvas = ws.run.canvas
+        self.pid = ws.run.player.pid
+        self._w, self._h = canvas.w, canvas.h
+        why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
+                           self._w, self._h, run)
+        if why is not None:
+            raise RuntimeError(why)
+        self._px = self._e.screen(self.pid)
+        self._masks = [0, 0]
+        self._mask_of = getattr(ws.input, "button_masks", None)
+        self._pressed = 0
+        self._shown = False
+        self._live = True
+        self.draw_next = True
+        self.init = None
+        self.update = self._update
+        self.draw = self._draw
+
+    def _read(self, inp):
+        """The buttons into self._masks: (held, pressed), filled in place."""
+        out = self._masks
+        masks = self._mask_of
+        if masks is not None:
+            masks(MOY_BUTTONS, None, out)
+            return
+        held = pressed = 0
+        for i, name in enumerate(MOY_BUTTONS):
+            if inp.held(name):
+                held |= 1 << i
+            if inp.pressed(name):
+                pressed |= 1 << i
+        out[0] = held
+        out[1] = pressed
+
+    def _update(self, dt):
+        if not self._live:
+            return
+        out = self._masks
+        self._read(self._ws.input)
+        self._pressed |= out[1]
+        self._shown = False             # the call lets the last frame go
+        ms = int(dt * 1000)
+        wait = ms * 1000
+        if wait > WAIT_US_MAX:
+            wait = WAIT_US_MAX
+        got = self._e.frame(self.pid, out[0], self._pressed, ms, wait)
+        if got == ENDED or got < 0:
+            self._end()
+            return
+        if got & FRAME_SENT:
+            self._pressed = 0
+        if got & FRAME_SHOWN:
+            self._shown = True
+
+    def _end(self):
+        self._live = False
+        self._px = None
+        code = self._e.game_stop(self.pid)
+        if code == 0:
+            self._ws.input.cart_quit = True
+            return
+        fault = None
+        faults = getattr(self._e, "faults", None)
+        if faults is not None:
+            for f in faults():
+                if f[0] == self.pid:
+                    fault = f
+                    break
+        raise RuntimeError(stop_text(code, fault))
+
+    def _draw(self):
+        if self._shown:
+            self._ws.run.canvas.blit_indices(self._px, self._w, self._h, 0, 0)
+            self._shown = False
+
+    def close(self):
+        if self._live:
+            self._live = False
+            self._px = None
+            self._e.game_stop(self.pid)

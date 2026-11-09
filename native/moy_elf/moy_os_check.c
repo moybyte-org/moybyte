@@ -563,6 +563,19 @@ static int u_check_115(const moy_u_space_t *u, int32_t item, const char *rows) {
     return U_STR0(rows);
 }
 
+// 117 moy_screen
+_Static_assert(U_REGS(int *) + U_REGS(int *) <= 7, "moy_screen's registers");
+static int u_check_117(const moy_u_space_t *u, int *w, int *h) {
+    return U_BUF0(w, sizeof *w, MOY_U_W)
+        && U_BUF0(h, sizeof *h, MOY_U_W);
+}
+
+// 118 moy_present
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) <= 7, "moy_present's registers");
+static int u_check_118(const moy_u_space_t *u, const void *px, size_t n) {
+    return U_BUF(px, u_n((size_t)n, 1), MOY_U_R);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -646,6 +659,8 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 112: fn = (u_check_fn *)(void *)u_check_112; break;
     case 113: fn = (u_check_fn *)(void *)u_check_113; break;
     case 115: fn = (u_check_fn *)(void *)u_check_115; break;
+    case 117: fn = (u_check_fn *)(void *)u_check_117; break;
+    case 118: fn = (u_check_fn *)(void *)u_check_118; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

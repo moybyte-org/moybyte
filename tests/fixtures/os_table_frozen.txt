@@ -120,3 +120,5 @@
 114 moy_status_state | int32_t moy_status_state(int32_t item, int32_t state)
 115 moy_status_panel | int32_t moy_status_panel(int32_t item, const char *rows)
 116 moy_status_remove | int32_t moy_status_remove(int32_t item)
+117 moy_screen | int moy_screen(int *w, int *h)
+118 moy_present | int moy_present(const void *px, size_t n)

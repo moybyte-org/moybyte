@@ -681,7 +681,7 @@ def test_a_cart_with_no_module_for_this_console_does_not_run(built):
     assert code == REFUSED and "no module for this console (host)" in why
 
 
-def test_the_player_opens_no_native_app(term):
+def test_the_player_leaves_a_native_command_to_the_terminal(term):
     from runtime import player_fit
     ws, _app = term
     cart = next(c for c in ws.carts.all if c.get("id") == "elf.hello")
@@ -689,7 +689,7 @@ def test_the_player_opens_no_native_app(term):
     assert player_fit._compiled(cart)
     from ws_helpers import open_cart
     open_cart(ws, "Hello Native")
-    assert "runs as a command in the Terminal" in (ws.run.player.cart_error or "")
+    assert "a native command runs in the Terminal" in (ws.run.player.cart_error or "")
 
 
 def test_a_signature_that_is_present_must_verify(built, tmp_path):

@@ -179,6 +179,38 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
                               uint32_t pid, const char *id, const moy_app_run_t *run,
                               char *err, size_t errlen);
 
+// A GAME is main(argc, argv) on its task, argv its cart's id, as a service's
+// is: a loop over its event descriptor, hearing the system's message
+// MOY_OS_FRAME once a frame while it has read since the last, its arguments
+// [held, pressed, ms]: the buttons held and those pressed since the last
+// frame message, a bit each in libmoy's moy_button order, and the frame's
+// milliseconds. Its screen is w x h palette indices, row by row: moy_screen
+// answers its size, and moy_present copies a whole screen from the module
+// into the process's frame, which the console draws at its frame. Its stop
+// is a service's, the descriptor hung up. It has no process row of its own:
+// `pid` is its Player run's, and the scheduler never reaps or stops it.
+#define MOY_OS_FRAME "frame"
+moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
+                           const char *id, int w, int h, const moy_app_run_t *run, char *err,
+                           size_t errlen);
+// On the console's task, once a frame: the frame the last call took let go,
+// the frame message posted unless the game has read nothing since the last,
+// then up to `max_us` waiting for a present, the game's hops served
+// meanwhile. A mask, MOY_OS_FRAME_SENT where the message was posted and
+// MOY_OS_FRAME_SHOWN where a frame was presented, taken until the next call;
+// MOY_OS_ENDED once main has ended (moy_os_game_stop answers its status); -1
+// for no such game.
+#define MOY_OS_FRAME_SENT 1
+#define MOY_OS_FRAME_SHOWN 2
+#define MOY_OS_ENDED (-4)
+int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms,
+                      uint32_t max_us);
+// Game `pid`'s frame, w x h indices, for the game's life (a frame call's
+// SHOWN frame is what it holds until the next call); NULL for no such game.
+const uint8_t *moy_os_game_screen(uint32_t pid, int *w, int *h);
+// Game `pid` stopped as a service is (moy_os_stop): its exit status, or -1.
+int moy_os_game_stop(uint32_t pid);
+
 // On the console's task, at the scheduler's poll (a board's runs when an end
 // or a kill wants the VM, moy_os_watch): every service that has ended swept -- main returned or exit called, or killed by the watchdog
 // (moy_os.c's THE WATCHDOG: a wake struck out without a poll, or a start

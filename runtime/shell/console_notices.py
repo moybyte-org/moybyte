@@ -697,8 +697,8 @@ class PauseMenu:
     card over the run's last frame washed, naming the cart and Stopped, the
     sentence (`say.crash_line`), the error exact in the code face on a
     `sunk` inset, then See why (the Code tab on the line,
-    `Workstation._crash_to_code`; none for a compiled cart or one with
-    nothing to edit), Restart and Home, its keys in its foot. A notice (a
+    `Workstation._crash_to_code`; none for a compiled or native cart or
+    one with nothing to edit), Restart and Home, its keys in its foot. A notice (a
     compiled cart this console cannot run) is the same card with its words
     in the body face and Open Updates (a newer console's) or Home. Esc, B or
     Super leave for Home."""
@@ -778,7 +778,8 @@ class PauseMenu:
         cart = ws.cart or {}
         if player.notice is not None:
             rows = (self.UPDATES, self.HOME) if player.newer else (self.HOME,)
-        elif ws.run.project is None or cart.get("runtime") == "wasm" or ws.web.parked:
+        elif (ws.run.project is None or cart.get("runtime") == "wasm" or cart.get("native")
+              or ws.web.parked):
             rows = (self.RESTART, self.HOME)
         else:
             rows = (self.SEE_WHY, self.RESTART, self.HOME)

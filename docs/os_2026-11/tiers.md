@@ -51,6 +51,15 @@ costs are #227's.
   under the OWNER with the module's caps, swept on stop, never a raw
   FreeRTOS task. PSRAM text is never an ISR and never runs during a flash
   operation (`native/moy_kernel/moy_crash.h`'s cache rule).
+- **A game (owner, 2026-11-09, #246)** is that service loop with a screen,
+  started by the Player for its run: the kernel gives it a surface, two
+  rows (`moy_screen`, its size, and `moy_present`, its own buffer of palette
+  indices handed over once a frame) and the system's `frame` message on its
+  descriptor, carrying the buttons. The game verbs are not rows: the SDK
+  links libmoy's raster into the module, so it draws with the verbs and
+  pixels of the Lua and wasm tiers, or writes pixels itself
+  (`native/moy_elf/README.md`, "The cart"; `sdk/README.md`). The app rows
+  stay as they are, and the toolkit's `ui` rows come later, for apps.
 - **The OS interface is a POSIX subset (owner, 2026-11-03)**, so existing C
   software ports with little change: `open`/`read`/`write`/`close`/`stat`/
   `readdir` over the files tree (`between_apps.md` §2), gated by the app's

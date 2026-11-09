@@ -45,6 +45,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/stream.h"
+#include "py/binary.h"
 #include "py/builtin.h"
 
 #include "esp_heap_caps.h"
@@ -470,6 +471,50 @@ static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 5, mod_service);
 
+// game(path, pid, id, flags, w, h, run=None) -> None, or why it did not start.
+static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
+    char err[ERR_MAX];
+    moy_app_run_t run;
+    const moy_app_run_t *rp = run_of(n_args > 6 ? args[6] : mp_const_none, &run);
+    moy_os_module_t m;
+    if (load(args[0], (uint32_t)mp_obj_get_int(args[3]), &m, err, sizeof err) != 0) {
+        return mp_obj_new_str(err, strlen(err));
+    }
+    if (moy_os_game(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
+                    mp_obj_get_int(args[4]), mp_obj_get_int(args[5]), rp, err, sizeof err)
+            == NULL) {
+        return mp_obj_new_str(err, strlen(err));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_game_obj, 6, 7, mod_game);
+
+// frame(pid, held, pressed, ms, max_us) -> moy_os_game_frame's answer.
+static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    return MP_OBJ_NEW_SMALL_INT(moy_os_game_frame(
+        (uint32_t)mp_obj_get_int(args[0]), (uint32_t)mp_obj_get_int(args[1]),
+        (uint32_t)mp_obj_get_int(args[2]), (uint32_t)mp_obj_get_int(args[3]),
+        (uint32_t)mp_obj_get_int(args[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 5, 5, mod_frame);
+
+// screen(pid) -> a view of the game's frame for its life, or None.
+static mp_obj_t mod_screen(mp_obj_t pid) {
+    int w = 0, h = 0;
+    const uint8_t *fb = moy_os_game_screen((uint32_t)mp_obj_get_int(pid), &w, &h);
+    if (fb == NULL) {
+        return mp_const_none;
+    }
+    return mp_obj_new_memoryview(BYTEARRAY_TYPECODE, (size_t)w * (size_t)h, (void *)fb);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_screen_obj, mod_screen);
+
+static mp_obj_t mod_game_stop(mp_obj_t pid) {
+    return mp_obj_new_int(moy_os_game_stop((uint32_t)mp_obj_get_int(pid)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_game_stop_obj, mod_game_stop);
+
 static mp_obj_t mod_reap(void) {
     uint32_t pids[MOY_OS_PROCS];
     int32_t codes[MOY_OS_PROCS];
@@ -598,6 +643,11 @@ static const mp_rom_map_elem_t moy_elf_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_cancel), MP_ROM_PTR(&mod_cancel_obj) },
     { MP_ROM_QSTR(MP_QSTR_service), MP_ROM_PTR(&mod_service_obj) },
     { MP_ROM_QSTR(MP_QSTR_reap), MP_ROM_PTR(&mod_reap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game), MP_ROM_PTR(&mod_game_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&mod_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_screen), MP_ROM_PTR(&mod_screen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_stop), MP_ROM_PTR(&mod_game_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ENDED), MP_ROM_INT(MOY_OS_ENDED) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mod_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&mod_stats_obj) },
