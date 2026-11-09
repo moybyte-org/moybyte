@@ -602,3 +602,21 @@ def test_a_python_app_runs_its_elf_service_entry(tmp_path):
         assert p.state == S.EXITED
     finally:
         moy_evq.close(app)
+
+
+def test_a_copy_keeps_its_scripts_load_order(tmp_path):
+    """`sources` is the order a multi-file cart loads its scripts in (a PICO-8
+    port's); a copy keeps it."""
+    from runtime import moy_carts
+    root = tmp_path / "carts"
+    root.mkdir()
+    cart = moy_carts.create("Port", str(root))
+    moy_carts.add_source(cart, "b.py", "B = 2\n")
+    moy_carts.add_source(cart, "a.py", "A = 1\n")
+    cart = moy_carts.load(cart["path"])
+    want = moy_carts.cart_sources(cart)
+    assert want[-2:] == ["b.py", "a.py"]
+    dup = moy_carts.duplicate(cart, str(root))
+    assert moy_carts.cart_sources(dup) == want
+    man = json.loads(open(dup["path"] + "/manifest.json").read())
+    assert man["sources"] == want

@@ -1726,8 +1726,23 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
     if src_path and dup is not None:
         _whole_or_none(dup["path"], lambda: _copy_cart_files(
             src_path, dup["path"], dup["main"]))
+        if cart.get("src_before") or cart.get("src_after"):
+            _keep_sources(dup["path"], cart_sources(cart))
         return load(dup["path"])
     return dup
+
+
+def _keep_sources(path, names):
+    """A copy's manifest names its scripts in the original's load order
+    (`sources`), which create() does not write."""
+    mpath = path + "/manifest.json"
+    try:
+        man = json.loads(_read_recover(mpath))
+    except (OSError, ValueError):
+        return
+    if isinstance(man, dict):
+        man["sources"] = list(names)
+        _write_atomic(mpath, json.dumps(man))
 
 
 def _duplicate_compiled(cart, root, new_title, ns=USER_NS):
