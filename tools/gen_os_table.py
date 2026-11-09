@@ -66,6 +66,7 @@ KERNEL_C = os.path.join(ROOT, "native", "moy_elf", "moy_os_table.c")
 SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "os.h")
 STUBS_C = os.path.join(ROOT, "sdk", "src", "moyos_stubs.c")
 CHECK_C = os.path.join(ROOT, "native", "moy_elf", "moy_os_check.c")
+WILD_H = os.path.join(ROOT, "tests", "fixtures", "elf", "elf_wild.moy", "src", "rows.h")
 APP_H = os.path.join(ROOT, "native", "moy_app", "moy_app_rows.h")
 WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
@@ -1488,6 +1489,81 @@ def gen_check_c(table):
     return "\n".join(o)
 
 
+# Each argument's kind for the wild fixture's sweep: what its rule checks, or
+# the handle the row looks it up by.
+WILD_KINDS = ("A_VAL", "A_STR", "A_STR0", "A_BUF", "A_BUF0", "A_CODE", "A_LEN", "A_FD",
+              "A_THREAD", "A_DIR", "A_MAP", "A_ADDR", "A_OPAQUE")
+
+
+def _wild_kind(p, tok, row, counts):
+    """A_LEN is a pointer to another argument's count (a `*n` rule's n)."""
+    name = _param_name(p)
+    ptype = _ptype(p)
+    if name in counts:
+        return "A_LEN"
+    if tok == "-":
+        if name == "fd":
+            return "A_FD"
+        if ptype == "pthread_t":
+            return "A_THREAD"
+        return "A_VAL"
+    if tok == "k":
+        if row == "munmap":
+            return "A_MAP"
+        if ptype.startswith("DIR"):
+            return "A_DIR"
+        if "addrinfo" in ptype:
+            return "A_ADDR"
+        return "A_OPAQUE"
+    if tok == "f":
+        return "A_CODE"
+    if tok.startswith("s"):
+        return "A_STR0" if tok.endswith("?") else "A_STR"
+    return "A_BUF0" if U_TOKEN.match(tok).group("null") else "A_BUF"
+
+
+def gen_wild_h(table):
+    """The wild fixture's row list (tests/fixtures/elf/elf_wild.moy): every
+    row a module reaches with a checked pointer or a handle, each argument's
+    kind, and which argument is a buffer's count."""
+    o = [HEAD,
+         "// Every row whose arguments the kernel checks or looks up, for the wild",
+         "// fixture's sweep (tests/on_glass.py, elf_umode_isolates): its ordinal,",
+         "// its name, each argument's kind and, for a buffer, the index of the",
+         "// argument that counts it (-1: its type's size).", "",
+         "#ifndef WILD_ROWS_H", "#define WILD_ROWS_H", "",
+         "enum { %s };" % ", ".join(WILD_KINDS), "",
+         "typedef struct {",
+         "    unsigned short row;",
+         "    const char *name;",
+         "    unsigned char n;",
+         "    unsigned char kind[8];",
+         "    signed char len[8];",
+         "} wild_row_t;", "",
+         "static const wild_row_t WILD_ROWS[] = {"]
+    for i, r in enumerate(table["rows"]):
+        if r.get("retired"):
+            continue
+        params = kernel_params(r)
+        u = r.get("u", ["-"] * len(params))
+        names = [_param_name(p) for p in params]
+        counts = {U_TOKEN.match(t).group("n") for t in u
+                  if U_TOKEN.match(t) and U_TOKEN.match(t).group("deref")}
+        kinds = [_wild_kind(p, t, r["name"], counts) for p, t in zip(params, u)]
+        if all(k in ("A_VAL", "A_OPAQUE") for k in kinds):
+            continue
+        lens = []
+        for t in u:
+            m = U_TOKEN.match(t)
+            n = m.group("n") if m and t not in ("-", "k", "f") and not t.startswith("s") else None
+            lens.append(str(names.index(n)) if n and not m.group("deref") else "-1")
+        o.append('    { %d, "%s", %d, { %s }, { %s } },' % (
+            i, r["name"], len(params), ", ".join(kinds), ", ".join(lens)))
+    o += ["};", "", "#define WILD_NROWS (sizeof WILD_ROWS / sizeof WILD_ROWS[0])", "",
+          "#endif", ""]
+    return "\n".join(o)
+
+
 def outputs(src=None):
     """[(path, text)] for every generated file."""
     if src is None:
@@ -1497,6 +1573,7 @@ def outputs(src=None):
     return [(KERNEL_H, gen_kernel_h(table)), (ROWS_H, gen_rows_h(table)),
             (KERNEL_C, gen_kernel_c(table)), (SDK_H, gen_sdk_h(table)),
             (STUBS_C, gen_stubs_c(table)), (CHECK_C, gen_check_c(table)),
+            (WILD_H, gen_wild_h(table)),
             (APP_H, gen_app_h(src)), (WASM_H, gen_wasm_h(src)), (UI_H, gen_ui_h(src)),
             (LUA_H, gen_lua_h(src)), (WASI_OS_H, gen_wasi_h(src)),
             (APP_CONTEXT, gen_app_context(src)), (APP_PERMS, gen_app_perms(src)),

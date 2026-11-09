@@ -3831,7 +3831,7 @@ def elf_umode_isolates(board, board_dir):
     runs("elf.wild/wild float 1000", (0, ["1000"]))
     runs("elf.wild/wild spin 20000 7", (0, ["ok 7"]))
     runs("elf.wild/wild spins 200000 11", (0, ["ok"]))
-    psram = board.pyval("id(ws)", strict=True)
+    psram = board.pyval("id(ws)", strict=True) & 0xffffffff
     sane = "type(ws).__name__"
     kind = board.pyval(sane, strict=True)
     wild = (("store 0x%x" % psram, 139, 7), ("store 0x4ff40000", 139, 7),
@@ -3847,8 +3847,150 @@ def elf_umode_isolates(board, board_dir):
         assert last[2] == cause and "wild" in last[1], (args, last)
         assert board.pyval(sane, strict=True) == kind
         assert board.state()["upcall_totals"][0] > f0, "the frame stopped: " + args
+    _elf_attacks(board, root, chip, signed)
     stats = board.pyval("__import__('moy_elf').stats()", strict=True)
     assert stats[3] == 0, stats
+
+
+def _elf_healthy(board, what, f0=None):
+    """After an attack: the heap intact (heap_caps_check_integrity_all), the
+    console's task and every native thread with stack to spare, and the
+    console's frames still going."""
+    ok, vm_free, thr_free = board.pyval("__import__('moy_elf').check()", strict=True)
+    assert ok, "the heap is corrupt after " + what
+    assert vm_free > 512 and (thr_free is None or thr_free > 256), (what, vm_free, thr_free)
+    if f0 is not None:
+        assert board.state()["upcall_totals"][0] > f0, "the frame stopped: " + what
+
+
+def _elf_attacks(board, root, chip, signed):
+    """The P4's ELF isolation under attack (native/moy_elf/README.md,
+    "Isolation"), each attack followed by _elf_healthy:
+
+    - every pointer argument of every checked row (native/os_calls.json, by
+      tools/gen_os_table.py into the fixture's rows.h) handed memory outside
+      the process -- NULL, the kernel's, the console's PSRAM, another live
+      process's mapping -- or a buffer straddling the end of the process's
+      memory: each ends the process alone, SIGSEGV naming the row; every
+      nullable one as NULL, and every counted one as a kernel pointer with a
+      count of 0, answered;
+    - every descriptor, thread, directory, mutex and mapping argument stale,
+      foreign, junk or reused after its close: an error, never another's;
+    - sp pointed at the kernel's memory, the console's and a sibling
+      thread's stack, then a row, an illegal instruction and interrupts;
+    - teardown: a process ended (exit, Ctrl-C) with its threads inside rows,
+      a thread ending while the process's end runs, slots reused right after
+      a reap, a service stopped over and over while its watch job runs.
+
+    The suite runs one outside case and one straddle case per argument and a
+    few teardown rounds; MOYBYTE_ELF_SWEEP=all runs every case and
+    MOYBYTE_ELF_SOAK=N that many rounds."""
+    mod = "%s/elf_wild.moy/main.%s.elf" % (root, chip)
+    flags = 0 if signed else 2
+    psram = board.pyval("id(ws)", strict=True) & 0xffffffff
+    pid = 9461
+    seq = board.pyval("__import__('moy_log').next()", strict=True)
+    why = board.pyval("__import__('moy_elf').service(%r, %d, 'elf.wild', %d)" % (mod, pid, flags),
+                      strict=True)
+    assert why is None, why
+    hold = None
+    t0 = time.monotonic()
+    while hold is None and time.monotonic() - t0 < 10:
+        for r in board.pyval("[r[4] for r in __import__('moy_log').read(%d, 64) if r[3] == %d]"
+                             % (seq, pid), strict=True):
+            if r.startswith("hold "):
+                hold = [int(v, 16) for v in r.split()[1:4]]
+        time.sleep(0.2)
+    assert hold is not None, "the holding service never said what it holds"
+    f_map, f_thr, f_mtx = hold
+    try:
+        # the argument sweep
+        f0 = board.state()["upcall_totals"][0]
+        st, out = _sh(board, "elf.wild/wild cases 0x%x" % f_map, timeout=60)
+        cases = [l.split() for l in out if l[:1].isdigit()]
+        assert st == 0 and cases, out
+        full = os.environ.get("MOYBYTE_ELF_SWEEP") == "all"
+        # each argument once outside the process (its kind turning with the
+        # row) and once across its memory's end
+        pick, seen = [], {}
+        for c, row, name, arg, bad in cases:
+            n = seen.get((row, arg), 0)
+            outside = bad in ("null", "kernel", "psram", "foreign")
+            if full or bad == "mapend" or (outside and n == (int(row) + int(arg)) % 3):
+                pick.append((c, name))
+            seen[(row, arg)] = n + outside
+        names = dict(pick)
+        t1 = time.monotonic()
+        for k in range(0, len(pick), 40):
+            ids = " ".join(c for c, _n in pick[k:k + 40])
+            st, out = _sh(board, "for c in %s; do elf.wild/wild sweep $c 0x%x 0x%x; "
+                          "echo \"case $c $?\"; done" % (ids, psram, f_map), timeout=600)
+            said = []
+            for l in out:
+                if l.startswith("case "):
+                    _w, c, code = l.split()
+                    text = " ".join(said)
+                    assert code == "139" and "passed a row memory outside it (%s)" % names[c] \
+                        in text and "survived" not in text, (c, names[c], code, said)
+                    said = []
+                else:
+                    said.append(l)
+        sweep_s = time.monotonic() - t1
+        _elf_healthy(board, "the argument sweep", f0)
+        for mode, want in (("nulls", "nulls "), ("zeros", "zeros ")):
+            st, out = _sh(board, "elf.wild/wild " + mode, timeout=120)
+            assert st == 0 and any(l.startswith(want) and l.endswith(" ok") for l in out), \
+                (mode, st, out)
+        _elf_healthy(board, "the NULL and empty arguments")
+
+        # handles
+        st, out = _sh(board, "cd; mkdir -p Documents; cd Documents; elf.wild/wild handles "
+                      "0x%x 0x%x 0x%x" % (f_thr, f_mtx, f_map), timeout=180)
+        assert (st, out[-1:]) == (0, ["handles ok"]), out
+        st, out = _sh(board, "elf.wild/wild unmapped", timeout=60)
+        assert st == 139 and "read outside its memory" in " ".join(out), (st, out)
+        st, out = _sh(board, "elf.wild/wild load 0x%x" % f_map, timeout=60)
+        assert st == 139 and "read outside its memory" in " ".join(out), (st, out)
+        _elf_healthy(board, "the handle sweep")
+
+        # stack pivots
+        for target in (0x4ff40000, psram):
+            for act, status, said in (("ecall", 139, "pivot ecall ok"), ("ill", 132, "illegal"),
+                                      ("spin", 139, "wrote outside")):
+                f0 = board.state()["upcall_totals"][0]
+                st, out = _sh(board, "elf.wild/wild pivot 0x%x %s" % (target, act), timeout=60)
+                assert st == status and said in " ".join(out), (target, act, st, out)
+                _elf_healthy(board, "a pivot (%s) onto 0x%x" % (act, target), f0)
+        st, out = _sh(board, "elf.wild/wild pivot 0 sib", timeout=60)
+        assert (st, out) == (0, ["spun"]), out
+
+        # teardown
+        rounds = int(os.environ.get("MOYBYTE_ELF_SOAK", "4"))
+        f0 = board.state()["upcall_totals"][0]
+        st, out = _sh(board, "i=0; while [ $i -lt %d ]; do elf.wild/wild churn 40; "
+                      "echo \"churn $?\"; i=$((i+1)); done" % (rounds * 5), timeout=60 + 10 * rounds)
+        assert st == 0 and [l for l in out if l.startswith("churn")] == ["churn 3"] * rounds * 5, out
+        for _ in range(rounds):
+            n0 = len(board.lines)
+            board._write_line("sh elf.wild/wild churn 0")
+            assert board.wait_line("SH churning", 30) is not None, board.lines[n0:]
+            time.sleep(0.3)
+            board._write_line("sh ^C")
+            assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
+        _elf_healthy(board, "the churn", f0)
+    finally:
+        code = board.pyval("__import__('moy_elf').stop(%d)" % pid, strict=True)
+    assert code == 0, code
+    for i in range(rounds * 2):
+        why = board.pyval("__import__('moy_elf').service(%r, %d, 'elf.wild', %d)"
+                          % (mod, pid + 1 + i, flags), strict=True)
+        assert why is None, why
+        time.sleep(0.05 * (i % 4))
+        code = board.pyval("__import__('moy_elf').stop(%d)" % (pid + 1 + i), strict=True)
+        assert code in (0, 137), code
+    _elf_healthy(board, "the services stopped while watched")
+    print("\nELF attacks: %d sweep cases in %.1f s, %d teardown rounds"
+          % (len(pick), sweep_s, rounds))
 
 
 def _elf_nc_both_ways(board):
