@@ -193,14 +193,15 @@ TWO_ULP = {"asinf", "log10", "log10f", "sinh", "sinhf", "cosh", "coshf", "tanh",
 
 def test_the_libm_sweeps_within_an_ulp_of_glibc(tmp_path):
     """sdk/libc/m built for the host (glibc's math.h names its own __sin,
-    __cos and __tan, so the copy's take other names here), against glibc's
+    __cos and __tan, and a C23 one sinpi, so the copy's take other names here;
+    fdlibm's __int32_t is sys/types.h's), against glibc's
     own functions, looked up by name in libm.so.6."""
     cc = native_build.cc()
     if cc is None or not os.path.exists("/usr/include/dlfcn.h"):
         pytest.skip("no host C compiler with glibc")
     shim = tmp_path / "shim.h"
-    shim.write_text("#include <math.h>\n#define __sin lc_m__sin\n#define __cos lc_m__cos\n"
-                    "#define __tan lc_m__tan\n")
+    shim.write_text("#include <sys/types.h>\n#include <math.h>\n#define __sin lc_m__sin\n#define __cos lc_m__cos\n"
+                    "#define __tan lc_m__tan\n#define sinpi lc_m_sinpi\n")
     objs = []
     for part, inc in (("libm", "libm"), ("libm_dbl", "libm_dbl"), ("", "libm")):
         for src in sorted(glob.glob(os.path.join(LIBM, part, "*.c"))):
