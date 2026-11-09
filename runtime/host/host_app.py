@@ -9,7 +9,6 @@ the canvas backend, the cart store's filesystem, and the input source differ.
 
 import json
 import os
-import shutil
 import sys
 
 # The shell imports `audio`, `blocks` and the editor cores by their frozen device
@@ -241,20 +240,6 @@ def make_host_cart_net():
     return HostCartNet()
 
 
-_SEED_PRESERVE = ("config.json", "pmem.json")   # the kid's tuning + saves, kept across a re-seed
-
-
-def _manifest_version(cart_dir):
-    """The integer "version" in a cart folder's manifest.json (0 if missing/unreadable),
-    so a newer shipped version supersedes a stale seeded copy -- mirrors the device's
-    _cart_version (#47)."""
-    try:
-        with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
-            return int(json.load(f).get("version", 0))
-    except (OSError, ValueError, TypeError):
-        return 0
-
-
 def _manifest_title(cart_dir):
     with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
         return json.load(f)["title"]
@@ -262,33 +247,17 @@ def _manifest_title(cart_dir):
 
 def _seed_system_carts(carts_dir):
     """Copy the read-only system .moy folders into the user store so the launcher shows
-    them (and the child duplicates/edits copies). Version-aware (#47): a built-in whose
-    shipped manifest "version" is newer than the seeded copy is RE-SEEDED -- code + art
-    refreshed, while the kid's tuning + saves (config.json, pmem.json) are preserved --
-    matching the device's seed_builtins, so a bumped cart actually propagates on the host
-    (it used to seed once and ignore version bumps)."""
+    them (and the child duplicates/edits copies), by the rules a board seeds its
+    built-ins by (#47, moy_seed.seed_folders over the store as a cache): a built-in
+    whose shipped manifest "version" is newer than the seeded copy is RE-SEEDED, its
+    tuning and saves (config.json, pmem.json) kept."""
     os.makedirs(carts_dir, exist_ok=True)
     names = ([n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
              if os.path.isdir(SYSTEM_CARTS) else [])
     moy_carts.sweep_store(carts_dir, [{"title": _manifest_title(
         os.path.join(SYSTEM_CARTS, n))} for n in names])
-    for name in names:
-        src = os.path.join(SYSTEM_CARTS, name)
-        dst = moy_carts.cart_path(carts_dir, name)
-        if not os.path.exists(dst):
-            shutil.copytree(src, dst)
-        elif _manifest_version(src) > _manifest_version(dst):
-            kept = {}
-            for f in _SEED_PRESERVE:                 # snapshot the kid's data
-                p = os.path.join(dst, f)
-                if os.path.isfile(p):
-                    with open(p, "rb") as fh:
-                        kept[f] = fh.read()
-            shutil.rmtree(dst)
-            shutil.copytree(src, dst)                # refresh code + art
-            for f, data in kept.items():             # restore the kid's data
-                with open(os.path.join(dst, f), "wb") as fh:
-                    fh.write(data)
+    if names:
+        moy_carts.seed_folders(SYSTEM_CARTS, carts_dir, record=False)
 
 
 def build_workstation(carts_dir=None, sys_size=None, font_scale=1,

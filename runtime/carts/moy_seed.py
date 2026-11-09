@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   seed_builtins           a roster of cart dicts written to the store, by version
 #   _make_room              the version rule a seed is written by, everywhere
-#   seed_folders            cart folders seeded into the browser's store
+#   seed_folders            cart folders seeded into a store (the browser's, the host's)
 #   adopt_bundle            a served bundle taken whole on a first visit
 #   seed_packed             the packed roster, one cart inflated at a time
 #   prune_retired           the folders of seeds that no longer ship, once per store
@@ -308,10 +308,12 @@ def _copy_cart(src, d, rel, keep):
     return wrote
 
 
-def seed_folders(src, root=CARTS_DIR):
-    """The cart folders under `src` seeded into the store of record `root`:
-    {"first": whether the store had no cart, "wrote": the store-relative paths
-    written, each cart's manifest last, "removed": those a re-seed removed}."""
+def seed_folders(src, root=CARTS_DIR, record=True):
+    """The cart folders under `src` seeded into the store `root`: {"first":
+    whether the store had no cart, "wrote": the store-relative paths written,
+    each cart's manifest last, "removed": those a re-seed removed}. A store of
+    `record` takes every cart only on its first visit; one that is a cache of
+    the built-ins (the host's, as a board's) takes every cart every time."""
     have = _listing(root) or {}
     first = not any(have[n] and n.endswith(CART_EXT) for n in have)
     wrote, removed = [], []
@@ -328,7 +330,8 @@ def seed_folders(src, root=CARTS_DIR):
         d = cart_path(root, name)
         there = _exists(d)
         # A non-system cart after the first visit: only a torn seed of one.
-        if not (first or _is_system(man) or (there and not _has_manifest(d))):
+        if not (first or not record or _is_system(man)
+                or (there and not _has_manifest(d))):
             continue
         before = _folder_files(d, name, []) if there else []
         try:
