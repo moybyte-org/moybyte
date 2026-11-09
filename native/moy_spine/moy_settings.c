@@ -4,6 +4,12 @@
 // that grows by doubling. Lookup is a linear scan: system/settings has dozens of
 // keys, and the scan touches the lengths first.
 
+// The lock's clock and recursive mutex are POSIX's, which a strict C99
+// build on Linux leaves out unless asked.
+#if defined(__linux__) && !defined(_GNU_SOURCE) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE 700
+#endif
+
 #include <string.h>
 
 #include "moy_json.h"
@@ -27,6 +33,60 @@ struct moy_settings {
 };
 
 #define MAX_LEN 0x7fffffffu
+
+// -- the lock (moy_settings.h, THE SETTINGS LOCK) -----------------------------
+
+#if defined(__has_include) && __has_include("esp_heap_caps.h")
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
+static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
+static StaticSemaphore_t s_mu_buf;
+static SemaphoreHandle_t s_mu;
+
+void moy_settings_lock(void) {
+    if (s_mu == NULL) {
+        portENTER_CRITICAL(&s_mux);
+        if (s_mu == NULL) {
+            s_mu = xSemaphoreCreateRecursiveMutexStatic(&s_mu_buf);
+        }
+        portEXIT_CRITICAL(&s_mux);
+    }
+    xSemaphoreTakeRecursive(s_mu, portMAX_DELAY);
+}
+
+void moy_settings_unlock(void) {
+    xSemaphoreGiveRecursive(s_mu);
+}
+#elif !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
+#include <pthread.h>
+
+static pthread_mutex_t s_mu;
+static pthread_once_t s_once = PTHREAD_ONCE_INIT;
+
+static void mu_init(void) {
+    pthread_mutexattr_t at;
+    pthread_mutexattr_init(&at);
+    pthread_mutexattr_settype(&at, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&s_mu, &at);
+    pthread_mutexattr_destroy(&at);
+}
+
+void moy_settings_lock(void) {
+    pthread_once(&s_once, mu_init);
+    pthread_mutex_lock(&s_mu);
+}
+
+void moy_settings_unlock(void) {
+    pthread_mutex_unlock(&s_mu);
+}
+#else
+void moy_settings_lock(void) {
+}
+
+void moy_settings_unlock(void) {
+}
+#endif
 
 // The scanner is moy_json's: a row holds one value, a file one object.
 
@@ -66,7 +126,7 @@ void *moy_settings_saver_ctx(const moy_settings_t *s) {
     return s->save_ctx;
 }
 
-int moy_settings_flush(moy_settings_t *s) {
+static int flush(moy_settings_t *s) {
     if (s->dirty == 0u) {
         return 1;
     }
@@ -86,6 +146,13 @@ int moy_settings_flush(moy_settings_t *s) {
     }
     s->dirty = 0u;
     return 1;
+}
+
+int moy_settings_flush(moy_settings_t *s) {
+    moy_settings_lock();
+    int clean = flush(s);
+    moy_settings_unlock();
+    return clean;
 }
 
 void moy_settings_free(moy_settings_t *s) {
@@ -179,7 +246,7 @@ static int load_row(void *ctx, const char *key, const char *key_end,
     return put_row(l->into, buf, (uint32_t)kn, (uint32_t)jn);
 }
 
-int moy_settings_load(moy_settings_t *s, const char *text, size_t len,
+static int settings_load(moy_settings_t *s, const char *text, size_t len,
                       uint32_t *rows) {
     moy_settings_t tmp = { s->mem, NULL, 0u, 0u, 0u, NULL, NULL, 0u };
     load_t l = { 0, &tmp, 0u };
@@ -209,7 +276,7 @@ int moy_settings_get(const moy_settings_t *s, const char *key, size_t key_len,
     return 1;
 }
 
-int moy_settings_set(moy_settings_t *s, const char *key, size_t key_len,
+static int settings_set(moy_settings_t *s, const char *key, size_t key_len,
                      const char *json, size_t json_len) {
     if (key_len == 0u) {
         return MOY_SETTINGS_BADKEY;
@@ -231,7 +298,7 @@ int moy_settings_set(moy_settings_t *s, const char *key, size_t key_len,
     return rc;
 }
 
-int moy_settings_delete(moy_settings_t *s, const char *key, size_t key_len) {
+static int settings_delete(moy_settings_t *s, const char *key, size_t key_len) {
     int at = find_row(s, key, key_len);
     if (at < 0) {
         return 0;
@@ -361,7 +428,7 @@ static void trim(const char **p, const char **e) {
     }
 }
 
-int moy_settings_load_file(moy_settings_t *s, const char *text, size_t len,
+static int settings_load_file(moy_settings_t *s, const char *text, size_t len,
                            uint32_t *rows, uint32_t *passed) {
     moy_settings_t tmp = { s->mem, NULL, 0u, 0u, 0u, NULL, NULL, 0u };
     uint32_t bad = 0u;
@@ -444,4 +511,34 @@ size_t moy_settings_file(const moy_settings_t *s, char *out, size_t cap) {
             put(&k, "\n", 1);
         }
     }
+}
+
+// -- every write under the settings lock --------------------------------------
+
+int moy_settings_load(moy_settings_t *s, const char *text, size_t len, uint32_t *rows) {
+    moy_settings_lock();
+    int r = settings_load(s, text, len, rows);
+    moy_settings_unlock();
+    return r;
+}
+
+int moy_settings_set(moy_settings_t *s, const char *key, size_t key_len, const char *json, size_t json_len) {
+    moy_settings_lock();
+    int r = settings_set(s, key, key_len, json, json_len);
+    moy_settings_unlock();
+    return r;
+}
+
+int moy_settings_delete(moy_settings_t *s, const char *key, size_t key_len) {
+    moy_settings_lock();
+    int r = settings_delete(s, key, key_len);
+    moy_settings_unlock();
+    return r;
+}
+
+int moy_settings_load_file(moy_settings_t *s, const char *text, size_t len, uint32_t *rows, uint32_t *passed) {
+    moy_settings_lock();
+    int r = settings_load_file(s, text, len, rows, passed);
+    moy_settings_unlock();
+    return r;
 }

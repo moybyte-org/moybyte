@@ -940,32 +940,69 @@ static mp_obj_t settings_adopt(mp_obj_t self, mp_obj_t d) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(settings_adopt_obj, settings_adopt);
 
+// fn(ctx) under the settings lock (moy_settings.h, THE SETTINGS LOCK), let go
+// on a raise too: the kernel's rows are a program's task's as well.
+static mp_obj_t settings_locked(mp_obj_t (*fn)(void *), void *ctx) {
+    moy_settings_lock();
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t r = fn(ctx);
+        nlr_pop();
+        moy_settings_unlock();
+        return r;
+    }
+    moy_settings_unlock();
+    nlr_jump(nlr.ret_val);
+}
+
+typedef struct {
+    moy_settings_t *s;
+    const char *k;
+    size_t kn;
+} row_arg_t;
+
+// The row's text as a str, or MP_OBJ_NULL: copied while the lock holds it.
+static mp_obj_t row_text(void *ctx) {
+    row_arg_t *a = ctx;
+    const char *j;
+    size_t jn;
+    if (!moy_settings_get(a->s, a->k, a->kn, &j, &jn)) {
+        return MP_OBJ_NULL;
+    }
+    return mp_obj_new_str_copy(&mp_type_str, (const byte *)j, jn);
+}
+
 static mp_obj_t settings_get(size_t n_args, const mp_obj_t *args) {
-    size_t kn, jn;
-    const char *k = settings_key(args[1], &kn), *j;
-    if (!moy_settings_get(settings_of(args[0]), k, kn, &j, &jn)) {
+    row_arg_t a = { settings_of(args[0]), NULL, 0 };
+    a.k = settings_key(args[1], &a.kn);
+    mp_obj_t t = settings_locked(row_text, &a);
+    if (t == MP_OBJ_NULL) {
         return n_args > 2 ? args[2] : mp_const_none;
     }
+    size_t jn;
+    const char *j = mp_obj_str_get_data(t, &jn);
     return settings_decode(j, jn);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(settings_get_obj, 2, 3, settings_get);
 
 static mp_obj_t settings_text(mp_obj_t self, mp_obj_t key) {
-    size_t kn, jn;
-    const char *k = settings_key(key, &kn), *j;
-    if (!moy_settings_get(settings_of(self), k, kn, &j, &jn)) {
-        return mp_const_none;
-    }
-    return mp_obj_new_str_copy(&mp_type_str, (const byte *)j, jn);
+    row_arg_t a = { settings_of(self), NULL, 0 };
+    a.k = settings_key(key, &a.kn);
+    mp_obj_t t = settings_locked(row_text, &a);
+    return t == MP_OBJ_NULL ? mp_const_none : t;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(settings_text_obj, settings_text);
 
-static mp_obj_t settings_dump(mp_obj_t self) {
-    moy_settings_t *s = settings_of(self);
+static mp_obj_t dump_locked(void *ctx) {
+    moy_settings_t *s = ctx;
     vstr_t vstr;
     vstr_init_len(&vstr, moy_settings_dump(s, NULL, 0));
     moy_settings_dump(s, vstr.buf, vstr.len);
     return mp_obj_new_str_from_vstr(&vstr);
+}
+
+static mp_obj_t settings_dump(mp_obj_t self) {
+    return settings_locked(dump_locked, settings_of(self));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_dump_obj, settings_dump);
 
@@ -985,12 +1022,16 @@ static MP_DEFINE_CONST_FUN_OBJ_2(settings_load_file_obj, settings_load_file);
 
 // file() -> the settings file's text for the rows (moy_settings_file, its one
 // writer).
-static mp_obj_t settings_file(mp_obj_t self) {
-    moy_settings_t *s = settings_of(self);
+static mp_obj_t file_locked(void *ctx) {
+    moy_settings_t *s = ctx;
     vstr_t vstr;
     vstr_init_len(&vstr, moy_settings_file(s, NULL, 0));
     moy_settings_file(s, vstr.buf, vstr.len);
     return mp_obj_new_str_from_vstr(&vstr);
+}
+
+static mp_obj_t settings_file(mp_obj_t self) {
+    return settings_locked(file_locked, settings_of(self));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_file_obj, settings_file);
 
@@ -1086,8 +1127,8 @@ static mp_obj_t settings_delete(size_t n_args, const mp_obj_t *pos_args,
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(settings_delete_obj, 2, settings_delete);
 
-static mp_obj_t settings_keys(mp_obj_t self) {
-    moy_settings_t *s = settings_of(self);
+static mp_obj_t keys_locked(void *ctx) {
+    moy_settings_t *s = ctx;
     uint32_t n = moy_settings_count(s);
     mp_obj_list_t *out = MP_OBJ_TO_PTR(mp_obj_new_list(n, NULL));
     for (uint32_t i = 0; i < n && i < out->len; i++) {
@@ -1097,6 +1138,10 @@ static mp_obj_t settings_keys(mp_obj_t self) {
         out->items[i] = mp_obj_new_str_copy(&mp_type_str, (const byte *)k, kn);
     }
     return MP_OBJ_FROM_PTR(out);
+}
+
+static mp_obj_t settings_keys(mp_obj_t self) {
+    return settings_locked(keys_locked, settings_of(self));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_keys_obj, settings_keys);
 
@@ -1144,7 +1189,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 // -- CrashGuard: the strike ledger over the settings rows ----------------------------
 
 // runtime/shell/crash_guard.py's CrashGuard, call for call: the slot's text is read
-// with moy_settings_get and written with the same persisting write Settings.set
+// with moy_settings_get, copied under the settings lock, and written with the same persisting write Settings.set
 // makes. The OPEN id is mirrored through the hook set_mirror() was given (the
 // kernel's moy_crash.arm), called as hook(role, id or None).
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_spine_mirror);
@@ -1194,13 +1239,13 @@ static guard_obj_t *guard_of(mp_obj_t self) {
 
 // The slot's text, or NULL when the store has no row for the key.
 static const char *guard_slot(guard_obj_t *g, size_t *n) {
-    size_t kn;
-    const char *k = str_arg(g->key, &kn, MP_ERROR_TEXT("a ledger key is a str"));
-    const char *j;
-    if (!moy_settings_get(settings_of(g->store), k, kn, &j, n)) {
+    row_arg_t a = { settings_of(g->store), NULL, 0 };
+    a.k = str_arg(g->key, &a.kn, MP_ERROR_TEXT("a ledger key is a str"));
+    mp_obj_t t = settings_locked(row_text, &a);
+    if (t == MP_OBJ_NULL) {
         return NULL;
     }
-    return j;
+    return mp_obj_str_get_data(t, n);
 }
 
 static mp_obj_t as_str(mp_obj_t o) {

@@ -104,6 +104,8 @@ _SIGS = (
     ("moy_settings_at", [_P, _U32, _PP, c.POINTER(_SIZE), _PP,
                          c.POINTER(_SIZE)], c.c_int),
     ("moy_settings_dump", [_P, c.c_char_p, _SIZE], _SIZE),
+    ("moy_settings_lock", [], None),
+    ("moy_settings_unlock", [], None),
     ("moy_settings_load_file", [_P, _PCHAR, _SIZE, _PU32, _PU32], c.c_int),
     ("moy_settings_file", [_P, c.c_char_p, _SIZE], _SIZE),
     ("moy_settings_saver", [_P, _P, _P], None),
@@ -463,10 +465,17 @@ def binding(sanitize=False):
         def _text(self, key):
             kb = settings_key(key)
             j, n = c.c_void_p(), c.c_size_t()
-            if not lib.moy_settings_get(self._p, kb, len(kb), c.byref(j),
-                                        c.byref(n)):
-                return None
-            return c.string_at(j.value, n.value).decode()
+            # The settings lock (moy_settings.h): a program's task writes the
+            # kernel's rows too, so a row is copied while the lock holds it.
+            lib.moy_settings_lock()
+            try:
+                if not lib.moy_settings_get(self._p, kb, len(kb), c.byref(j),
+                                            c.byref(n)):
+                    return None
+                t = c.string_at(j.value, n.value)
+            finally:
+                lib.moy_settings_unlock()
+            return t.decode()
 
         def get(self, key, default=None):
             t = self._text(key)
@@ -512,19 +521,30 @@ def binding(sanitize=False):
 
         def keys(self):
             out = []
-            for i in range(lib.moy_settings_count(self._p)):
-                k, kn, j, jn = c.c_void_p(), c.c_size_t(), c.c_void_p(), \
-                    c.c_size_t()
-                lib.moy_settings_at(self._p, i, c.byref(k), c.byref(kn),
-                                    c.byref(j), c.byref(jn))
-                out.append(c.string_at(k.value, kn.value).decode())
-            return out
+            lib.moy_settings_lock()
+            try:
+                for i in range(lib.moy_settings_count(self._p)):
+                    k, kn, j, jn = c.c_void_p(), c.c_size_t(), c.c_void_p(), \
+                        c.c_size_t()
+                    lib.moy_settings_at(self._p, i, c.byref(k), c.byref(kn),
+                                        c.byref(j), c.byref(jn))
+                    out.append(c.string_at(k.value, kn.value))
+            finally:
+                lib.moy_settings_unlock()
+            return [k.decode() for k in out]
+
+        def _sized(self, fn):
+            lib.moy_settings_lock()
+            try:
+                n = fn(self._p, None, 0)
+                buf = c.create_string_buffer(n + 1)
+                fn(self._p, buf, n)
+            finally:
+                lib.moy_settings_unlock()
+            return buf.raw[:n].decode()
 
         def dump(self):
-            n = lib.moy_settings_dump(self._p, None, 0)
-            buf = c.create_string_buffer(n + 1)
-            lib.moy_settings_dump(self._p, buf, n)
-            return buf.raw[:n].decode()
+            return self._sized(lib.moy_settings_dump)
 
         def load_file(self, text):
             b = raw(text, "the settings text is a str")
@@ -536,10 +556,7 @@ def binding(sanitize=False):
             return passed.value
 
         def file(self):
-            n = lib.moy_settings_file(self._p, None, 0)
-            buf = c.create_string_buffer(n + 1)
-            lib.moy_settings_file(self._p, buf, n)
-            return buf.raw[:n].decode()
+            return self._sized(lib.moy_settings_file)
 
     def view(cls, p, **extra):
         # A view of a kernel table: its finaliser frees nothing.

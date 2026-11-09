@@ -80,6 +80,20 @@ int moy_settings_set(moy_settings_t *s, const char *key, size_t key_len,
 // 1 when the key had a row, else 0; the store is dirty after a 1.
 int moy_settings_delete(moy_settings_t *s, const char *key, size_t key_len);
 
+// THE SETTINGS LOCK. The kernel's rows are written by the VM's Python (its
+// Settings binding) and by a program's own task (native/moy_app's prefs rows),
+// so every reader and writer of a store that two tasks reach holds this lock,
+// one for every store, recursive for its holder: around a read and its use
+// of the text moy_settings_get or moy_settings_at handed it, around a size
+// query and the call that fills it (moy_settings_dump, moy_settings_file),
+// and around a write. set, delete, load, load_file and flush take it
+// themselves; flush holds it across the saver, so a write made while the
+// file is written waits and the dump the saver lands is the rows' last. A
+// FreeRTOS mutex on a board, a pthread one on the host and the desktop,
+// nothing in the threadless browser.
+void moy_settings_lock(void);
+void moy_settings_unlock(void);
+
 // What writes the file: called with the dump; nonzero when it landed.
 typedef int (*moy_settings_save_fn)(void *ctx, const char *text, size_t len);
 // Register `fn` (NULL: none) and its `ctx`; moy_settings_saver_ctx reads it back.
