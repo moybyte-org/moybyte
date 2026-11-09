@@ -425,6 +425,7 @@ def test_a_dead_link_stalls_both_consoles_and_neither_runs_ahead():
 
 def test_a_cart_message_crosses_and_is_pumped_not_delivered_mid_send():
     air, clock, a, b = _pair()
+    _see_each_other(a, b, clock)
     got = []
     b.net.on_message(got.append)
     assert a.net.send({"hi": 5}) is True
@@ -441,6 +442,7 @@ def test_net_pump_and_send_import_nothing(monkeypatch):
     Brick Siege and Harpoon Pop on every console board (#66)."""
     import builtins
     air, clock, a, b = _pair()
+    _see_each_other(a, b, clock)
     got = []
     b.net.on_message(got.append)
     assert a.net.send({"hi": 5}) is True
@@ -530,13 +532,15 @@ def test_drain_input_dispatches_inputs_and_parks_everything_else():
     ANY other frame is parked for the tail poll, because a T_START can relaunch
     the cart and a T_BYE can tear down the match from inside the Player's own
     frame."""
-    air, clock, a, _b = _pair()
-
-    a._m.begin(0, 7, 0, None)             # a live session, as a match leaves it
+    air, clock, a, b = _pair(lambda ws, title: True)
+    _see_each_other(a, b, clock)
+    a.offer(_Ws(), "Brick Siege")         # a live session, bound to b
+    del a.radio.inbox[:]                  # b's beacons from the meeting
     peer_mac = b"\xaa" * 6
-    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0] + [0] * 10 + [255, 255, 0, 0, 0] + [5])
+    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, a.session.session, 1, 0, 1, 0]
+                + [0] * 10 + [255, 255, 0, 0, 0] + [5])
     beacon = bytes([moy_espnow.PROTO, netplay.T_BEACON, 0]) + b"kid|tdeck|"
-    a.radio.inbox.append((peer_mac, inp))
+    a.radio.inbox.append((b.mac, inp))
     a.radio.inbox.append((peer_mac, beacon))
     n = a.drain_input()
     assert n == 2
@@ -857,6 +861,52 @@ def test_a_peer_that_says_goodbye_leaves_the_survivor_playing_solo():
     assert [e[1] for e in seen] == [None], "the survivor re-ran the cart solo"
     assert b.mac not in a.peers, "and forgot the console that left"
     assert a.active
+
+
+def test_a_stranger_can_neither_play_nor_end_nor_talk_into_a_match():
+    """Frames carry no signature, so the sender's address is the check: a live
+    match is bound to its peer, and an input frame carrying the match's
+    session id, a BYE or a net message from any other console is dropped,
+    whether the frame lands mid-frame (drain_input) or at the tail."""
+    air, clock, a, b, wsa, wsb = _matched()
+    a.net.on_message(lambda m: None)
+    stranger = b"\x07" * 6
+    session = a.session
+    inp = bytes([netplay.PROTO, netplay.T_INPUT, session.session, 9, 0, 0xFF, 0]
+                + [0x3F] * 10 + [255, 255, 0, 0, 0] + [0, 0])
+    before = session.packets_in
+    a.radio.inbox.append((stranger, inp))
+    a.drain_input()
+    a._dispatch(wsa, stranger, inp)
+    assert session.packets_in == before, "a stranger's input reached the match"
+    a._dispatch(wsa, stranger, bytes([netplay.PROTO, netplay.T_MSG]) + b'"hi"')
+    assert a._m._m.inbox_n == 0, "a stranger's message reached on_net"
+    a._dispatch(wsa, stranger, bytes(bytearray([netplay.PROTO, netplay.T_BYE])))
+    assert a.session is session and wsa.netplay is not None, "a stranger ended the match"
+    a._dispatch(wsa, b.mac, bytes([netplay.PROTO, netplay.T_MSG]) + b'"hi"')
+    assert a._m._m.inbox_n == 1, "the peer's message is taken"
+
+
+def _start_from(src, to, session, cart):
+    return (bytes([netplay.PROTO, netplay.T_START, session, 1, 7, 0, 0, 0]) + bytes(to)
+            + bytes([netplay.TICK_HZ]) + cart.encode() + b"\x00{}")
+
+
+def test_a_start_from_a_stranger_opens_nothing():
+    """A START addressed here used to open any installed cart by its title. It
+    is taken only from a console heard beaconing, and only for the cart this
+    console sits on: it can re-run that cart and nothing else."""
+    launched = []
+    air, clock, a, b = _pair(lambda ws, title: launched.append(title) or True)
+    _see_each_other(a, b, clock)
+    wsb = _Ws()
+    stranger = b"\x07" * 6
+    b._dispatch(wsb, stranger, _start_from(stranger, b.mac, 5, "Brick Siege"))
+    assert b.session is None and launched == [], "a console never heard is a stranger"
+    b._dispatch(wsb, a.mac, _start_from(a.mac, b.mac, 5, "Settings"))
+    assert b.session is None and launched == [], "a START names only the cart this console is on"
+    b._dispatch(wsb, a.mac, _start_from(a.mac, b.mac, 5, "Brick Siege"))
+    assert b.session is not None and launched == ["Brick Siege"], "the lobby's peer is heard"
 
 
 def test_a_run_never_adopts_a_dead_session(tmp_path):

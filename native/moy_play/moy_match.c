@@ -768,6 +768,22 @@ static const char *cfg_or_null(const char *cfg) {
     return *p == '}' ? NULL : cfg;
 }
 
+static void bind_peer(moy_match_t *m, const uint8_t mac[6]) {
+    memcpy(m->s.peer_mac, mac, 6);
+    m->s.bound = true;
+}
+
+// The live match's peer (WHO IS HEARD in moy_match.h).
+static bool from_partner(const moy_match_t *m, const uint8_t mac[6]) {
+    return m->s.live && m->s.bound && memcmp(mac, m->s.peer_mac, 6) == 0;
+}
+
+// A console heard beaconing the cart this one sits on.
+static bool from_lobby(moy_match_t *m, const uint8_t mac[6]) {
+    const moy_match_peer_t *p = peer_of(m, mac);
+    return p != NULL && m->cart[0] && strcmp(p->cart, m->cart) == 0;
+}
+
 static int host(moy_match_t *m, const moy_match_peer_t *p, bool has_seed, uint32_t seed,
                 const char *cart, bool relaunch) {
     if (!has_seed) {
@@ -804,6 +820,7 @@ static int host(moy_match_t *m, const moy_match_peer_t *p, bool has_seed, uint32
     m->start_tries = 0;
     broadcast(m, m->start_frame, at);
     moy_lockstep_begin(m, 0, seed, m->session_id, cfg_or_null(m->cfg));
+    bind_peer(m, p->mac);
     moy_lockstep_rate(m, f[14]);
     m->s.hold = m->hold;
     m->state = 2;
@@ -956,7 +973,7 @@ static bool for_us(const moy_match_t *m, const uint8_t *msg, size_t n, size_t at
 }
 
 static void on_start(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, size_t n) {
-    if (n < 15 || m->s.live) {
+    if (n < 15 || m->s.live || !m->cart[0] || peer_of(m, mac) == NULL) {
         return;
     }
     uint8_t session = msg[2];
@@ -972,6 +989,9 @@ static void on_start(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, s
     }
     char cart[MOY_MATCH_CART + 1];
     copy_str(cart, sizeof(cart), body, cut);
+    if (strcmp(cart, m->cart) != 0) {
+        return;
+    }
     char cfg[MOY_MATCH_CFG + 1] = "";
     if (cut < bn) {
         copy_str(cfg, sizeof(cfg), body + cut + 1, bn - cut - 1u);
@@ -981,6 +1001,7 @@ static void on_start(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, s
     if (moy_lockstep_begin(m, index, seed, session, cfg_or_null(cfg)) != 0) {
         return;
     }
+    bind_peer(m, mac);
     moy_lockstep_rate(m, hz);
     m->state = 2;
     ask(m, cart);
@@ -1031,13 +1052,17 @@ void moy_match_dispatch(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg
     }
     switch (msg[1]) {
         case MOY_MATCH_T_INPUT:
-            moy_lockstep_packet(m, msg, n, now, true);
+            if (from_partner(m, mac)) {
+                moy_lockstep_packet(m, msg, n, now, true);
+            }
             return;
         case MOY_MATCH_T_BEACON:
             on_beacon(m, mac, msg, n, now);
             return;
         case MOY_MATCH_T_MSG:
-            inbox_put(m, msg + 2, n - 2u);
+            if (m->s.live ? from_partner(m, mac) : from_lobby(m, mac)) {
+                inbox_put(m, msg + 2, n - 2u);
+            }
             return;
         case MOY_MATCH_T_START:
             // 8 header bytes, then the destination.
@@ -1050,7 +1075,7 @@ void moy_match_dispatch(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg
             if (p != NULL) {
                 p->used = false;
             }
-            if (m->s.live) {
+            if (from_partner(m, mac)) {
                 lost(m, "peer left");
             }
             return;
@@ -1093,7 +1118,9 @@ int moy_match_drain_input(moy_match_t *m, uint32_t now, int budget) {
         n++;
         m->rx++;
         if (len >= 2 && buf[0] == MOY_MATCH_PROTO && buf[1] == MOY_MATCH_T_INPUT) {
-            moy_lockstep_packet(m, buf, (size_t)len, now, true);
+            if (from_partner(m, mac)) {
+                moy_lockstep_packet(m, buf, (size_t)len, now, true);
+            }
         } else if (m->defer_n < MOY_MATCH_DEFER) {
             memcpy(m->defer_mac[m->defer_n], mac, 6);
             memcpy(m->defer[m->defer_n], buf, (size_t)len);

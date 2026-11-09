@@ -806,7 +806,7 @@ class _Lockstep(ctypes.Structure):
                 ("hz0", _U16), ("step_hz", _U8), ("step_from", _I32), ("stepped", _B),
                 ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32), ("has_lock", _B),
                 ("lock_at", _U32), ("late_ms", _U32), ("stall_ms", _U32),
-                ("slew_ms", _I32)]
+                ("slew_ms", _I32), ("peer_mac", _U8 * 6), ("bound", _B)]
 
 
 class _MatchS(ctypes.Structure):

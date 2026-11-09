@@ -184,6 +184,16 @@ invites, while a hand-sent unicast to the same MAC in that session was fine
 back. The invite re-sends until the guest's first input frame lands; one dropped
 START used to deadlock both consoles for good.
 
+**A match hears only its peer** (2026-11-09). Frames are neither signed nor
+encrypted, so the sender's MAC is the one check (`moy_match.h`, WHO IS HEARD):
+a live match is bound to its peer's address, and an input frame, a BYE or a
+`net` message from any other console is dropped; outside a match a `net`
+message is taken from a console heard beaconing this cart. A START is taken
+only from a console heard beaconing and only for the cart this console sits
+on, so it re-runs that cart and opens nothing else. A console that takes the
+peer's address can still do all of it: the check narrows who, it does not
+authenticate.
+
 ## 3. Nothing waits forever — every death has one exit
 
 A frozen screen with no explanation is what this removes. Every way a match can

@@ -48,6 +48,13 @@
 // whose session declares itself dead, a peer's BYE and an unanswered START
 // all end the match and ask the console to re-run the cart solo.
 //
+// WHO IS HEARD. Frames are neither signed nor encrypted, so the sender's
+// address is the one check: a live match is bound to its peer's MAC, and an
+// INPUT, a BYE or a net message from anyone else is dropped (outside a match
+// a net message is taken from a console heard beaconing this cart). A START
+// is taken only for the cart this console sits on (announce) and from a
+// console heard beaconing, so it can re-run that cart and open nothing else.
+//
 // THE CONSOLE'S HALF. What the link cannot do itself -- open the cart a host
 // named, re-run the cart from frame zero -- it leaves as one ACTION the
 // console takes (moy_match_action): a VM's console on its frame, the kernel's
@@ -241,6 +248,10 @@ typedef struct {
     // `slew` is the guest's phase moved later.
     uint32_t late_ms, stall_ms;
     int32_t slew_ms;
+    // The peer's MAC a link-formed match is bound to (WHO IS HEARD); a
+    // session begun alone is not bound and the link's dispatch feeds it nothing.
+    uint8_t peer_mac[6];
+    bool bound;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };
