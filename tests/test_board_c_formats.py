@@ -18,8 +18,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 NATIVE = ROOT / "native"
 
 # Vendored: their own tracing is compiled out, and an edit there is a re-vendor.
-VENDORED = ("moy_net/mbedtls/", "moy_ssh/dropbear/", "moy_wasm/", "moycore/lua/",
-            "moy_sh/dash/")
+VENDORED = ("moy_net/mbedtls/", "moy_net/monocypher/", "moy_ssh/dropbear/", "moy_wasm/",
+            "moycore/lua/", "moy_sh/dash/")
 # Compiled only off a board: the host's glibc, the browser's musl, the fuzzers.
 OFF_BOARD = re.compile(r"(^|/)host/|_host\.c$|_web\.c$|(^|/)fuzz_[^/]*\.c$")
 
