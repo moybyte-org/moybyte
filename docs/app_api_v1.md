@@ -608,9 +608,9 @@ The calls a program reaches on more than one tier, each by its name there
 | `files.load` | `files` | `ctx.files.load`, `files.load`, `files.load_text` | `files.load`, `files.load_text` | `files_load` | `moy_files_load` |
 | `files.save` | `files` | `ctx.files.save`, `files.save`, `files.save_text` | `files.save`, `files.save_text` | `files_save` | `moy_files_save` |
 | `files.delete` | `files` | `ctx.files.delete`, `files.delete` | `files.delete` | `files_delete` | `moy_files_delete` |
-| `files.duplicate` | `files` | `ctx.files.duplicate`, `files.duplicate` | `files.duplicate` |  |  |
-| `files.rename` | `files` | `ctx.files.rename`, `files.rename` | `files.rename` |  |  |
-| `files.new_name` | `files` | `ctx.files.new_name`, `files.new_name` | `files.new_name` |  |  |
+| `files.duplicate` | `files` | `ctx.files.duplicate`, `files.duplicate` | `files.duplicate` | `files_duplicate` | `moy_files_duplicate` |
+| `files.rename` | `files` | `ctx.files.rename`, `files.rename` | `files.rename` | `files_rename` | `moy_files_rename` |
+| `files.new_name` | `files` | `ctx.files.new_name`, `files.new_name` | `files.new_name` | `files_new_name` | `moy_files_new_name` |
 | `nav.open_app` | `launch`, `front` | `ctx.nav.open_app`, `open_app` | `open_app` | `nav_open_app` | `moy_nav_open_app` |
 | `prefs.get` | `prefs` | `ctx.prefs.get`, `prefs.get` | `prefs.get` | `prefs_get`, `moybyte.os.prefs_get` | `moy_prefs_get` |
 | `prefs.set` | `prefs` | `ctx.prefs.set`, `prefs.set` | `prefs.set` | `prefs_set`, `moybyte.os.prefs_set` | `moy_prefs_set` |

@@ -220,6 +220,7 @@ def test_a_compiled_app_talks_to_a_service_notifies_awards_and_hears_its_alarm(t
     at = [ln for ln in lines if ln.startswith("at ")]
     assert at and int(at[0].split()[1]) > 0, lines
     assert "heard moybyte.at from system [%s]" % at[0].split()[1] in lines, lines
+    assert "new_name note" in lines, lines          # a files row its permission grants
 
 
 def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(talk):

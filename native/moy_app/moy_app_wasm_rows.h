@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 82
+#define MOY_APP_WASM_N 85
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -138,6 +138,24 @@ static int32_t w_files_delete(void *e, const uint8_t *kind, uint32_t kind_n, con
     span_t f[2] = { { kind, kind_n }, { name, name_n } };
     return run(e, HOP, MOY_T_FILES_DELETE, f, 2, trashed, trashed_cap);
 }
+static int32_t w_files_duplicate(void *e, const uint8_t *kind, uint32_t kind_n,
+                                 const uint8_t *name, uint32_t name_n, uint8_t *copy,
+                                 uint32_t copy_cap) {
+    span_t f[2] = { { kind, kind_n }, { name, name_n } };
+    return run(e, HOP, MOY_T_FILES_DUPLICATE, f, 2, copy, copy_cap);
+}
+static int32_t w_files_rename(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
+                              uint32_t name_n, const uint8_t *title, uint32_t title_n,
+                              uint8_t *renamed, uint32_t renamed_cap) {
+    span_t f[3] = { { kind, kind_n }, { name, name_n }, { title, title_n } };
+    return run(e, HOP, MOY_T_FILES_RENAME, f, 3, renamed, renamed_cap);
+}
+static int32_t w_files_new_name(void *e, const uint8_t *kind, uint32_t kind_n,
+                                const uint8_t *title, uint32_t title_n, uint8_t *name,
+                                uint32_t name_cap) {
+    span_t f[2] = { { kind, kind_n }, { title, title_n } };
+    return run(e, HOP, MOY_T_FILES_NEW_NAME, f, 2, name, name_cap);
+}
 static int32_t w_nav_open_app(void *e, const uint8_t *id, uint32_t id_n) {
     span_t f[1] = { { id, id_n } };
     return run(e, HOP, MOY_T_NAV_OPEN_APP, f, 1, NULL, 0);
@@ -267,6 +285,9 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "files_load", FN(w_files_load), "(*~*~*~)i", NULL },
     { "files_save", FN(w_files_save), "(*~*~*~*~)i", NULL },
     { "files_delete", FN(w_files_delete), "(*~*~*~)i", NULL },
+    { "files_duplicate", FN(w_files_duplicate), "(*~*~*~)i", NULL },
+    { "files_rename", FN(w_files_rename), "(*~*~*~*~)i", NULL },
+    { "files_new_name", FN(w_files_new_name), "(*~*~*~)i", NULL },
     { "nav_open_app", FN(w_nav_open_app), "(*~)i", NULL },
     { "prefs_get", FN(w_prefs_get), "(*~*~)i", NULL },
     { "prefs_set", FN(w_prefs_set), "(*~*~)i", NULL },
@@ -339,20 +360,20 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_THEME_TOKEN, MOY_T_THEME_GEN, MOY_T_THEME_LIGHT, MOY_T_THEME_NAME,
     MOY_T_THEME_VARIANT, MOY_T_THEME_SET, MOY_T_THEME_SET_VARIANT, MOY_T_THEME_EDIT_FILE,
     MOY_T_FILES_READABLE, MOY_T_FILES_READY, MOY_T_FILES_LIST, MOY_T_FILES_COUNT,
-    MOY_T_FILES_LOAD, MOY_T_FILES_SAVE, MOY_T_FILES_DELETE, MOY_T_NAV_OPEN_APP,
-    MOY_T_PREFS_GET, MOY_T_PREFS_SET, MOY_T_PREFS_CLEAR, MOY_T_CLIPBOARD_PUT_TEXT,
-    MOY_T_CLIPBOARD_TEXT, MOY_T_CLIPBOARD_KIND, MOY_T_CLIPBOARD_SEQ, MOY_T_UI_PAGE,
-    MOY_T_UI_LABEL, MOY_T_UI_BUTTON, MOY_T_UI_TOGGLE, MOY_T_UI_SLIDER, MOY_T_UI_LIST,
-    MOY_T_UI_PART, MOY_T_UI_FOCUS, MOY_T_UI_KEYS_TAKEN, MOY_T_UI_AT, MOY_T_UI_GROUP,
-    MOY_T_UI_INFO, MOY_T_UI_LINK, MOY_T_UI_CYCLE, MOY_T_UI_SEG, MOY_T_UI_SWATCHES,
-    MOY_T_UI_HINTS, MOY_T_UI_ICON, MOY_T_UI_PROGRESS, MOY_T_UI_TABLE, MOY_T_UI_SCROLL,
-    MOY_T_UI_FIELD, MOY_T_UI_DIALOG, MOY_T_UI_TABS, MOY_T_UI_GRID, MOY_T_UI_CARD,
-    MOY_T_UI_POPOVER, MOY_T_UI_MENU, MOY_T_UI_TOOL, MOY_T_UI_BAR, MOY_T_UI_RULE,
-    MOY_T_UI_TEXT_VIEW, MOY_T_UI_TABLE_PART, MOY_T_UI_PART_AT, MOY_T_UI_SPLIT,
-    MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
-    MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
-    MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
-    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY, MOY_T_MOYBYTE_AFTER,
-    MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG, MOY_T_MOYBYTE_RECV,
-    MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
+    MOY_T_FILES_LOAD, MOY_T_FILES_SAVE, MOY_T_FILES_DELETE, MOY_T_FILES_DUPLICATE,
+    MOY_T_FILES_RENAME, MOY_T_FILES_NEW_NAME, MOY_T_NAV_OPEN_APP, MOY_T_PREFS_GET,
+    MOY_T_PREFS_SET, MOY_T_PREFS_CLEAR, MOY_T_CLIPBOARD_PUT_TEXT, MOY_T_CLIPBOARD_TEXT,
+    MOY_T_CLIPBOARD_KIND, MOY_T_CLIPBOARD_SEQ, MOY_T_UI_PAGE, MOY_T_UI_LABEL, MOY_T_UI_BUTTON,
+    MOY_T_UI_TOGGLE, MOY_T_UI_SLIDER, MOY_T_UI_LIST, MOY_T_UI_PART, MOY_T_UI_FOCUS,
+    MOY_T_UI_KEYS_TAKEN, MOY_T_UI_AT, MOY_T_UI_GROUP, MOY_T_UI_INFO, MOY_T_UI_LINK,
+    MOY_T_UI_CYCLE, MOY_T_UI_SEG, MOY_T_UI_SWATCHES, MOY_T_UI_HINTS, MOY_T_UI_ICON,
+    MOY_T_UI_PROGRESS, MOY_T_UI_TABLE, MOY_T_UI_SCROLL, MOY_T_UI_FIELD, MOY_T_UI_DIALOG,
+    MOY_T_UI_TABS, MOY_T_UI_GRID, MOY_T_UI_CARD, MOY_T_UI_POPOVER, MOY_T_UI_MENU,
+    MOY_T_UI_TOOL, MOY_T_UI_BAR, MOY_T_UI_RULE, MOY_T_UI_TEXT_VIEW, MOY_T_UI_TABLE_PART,
+    MOY_T_UI_PART_AT, MOY_T_UI_SPLIT, MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD,
+    MOY_T_UI_SLOTS, MOY_T_UI_SLOT, MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL,
+    MOY_T_MOYBYTE_NOTIFY, MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND,
+    MOY_T_MOYBYTE_AWARD, MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY,
+    MOY_T_MOYBYTE_AFTER, MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG,
+    MOY_T_MOYBYTE_RECV, MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
 };

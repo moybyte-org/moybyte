@@ -91,3 +91,6 @@
 85 moy_after | int32_t moy_after(int32_t ms)
 86 moy_cancel | int32_t moy_cancel(int32_t id)
 87 moy_at | int32_t moy_at(int32_t t)
+88 moy_files_duplicate | int32_t moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap)
+89 moy_files_rename | int32_t moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap)
+90 moy_files_new_name | int32_t moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap)

@@ -173,6 +173,31 @@ int32_t moy_os_moy_at(int32_t t) {
     return moy_os_call(176u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.at
 }
 
+int32_t moy_os_moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap) {
+    const moy_os_arg_t a[2] = {
+        { kind, 0u, 0, MOY_OS_ARG_STR },
+        { name, 0u, 0, MOY_OS_ARG_STR },
+    };
+    return moy_os_call(33u, MOY_OS_HOP, a, 2, copy, copy_cap);   // files.duplicate
+}
+
+int32_t moy_os_moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap) {
+    const moy_os_arg_t a[3] = {
+        { kind, 0u, 0, MOY_OS_ARG_STR },
+        { name, 0u, 0, MOY_OS_ARG_STR },
+        { title, 0u, 0, MOY_OS_ARG_STR },
+    };
+    return moy_os_call(34u, MOY_OS_HOP, a, 3, renamed, renamed_cap);   // files.rename
+}
+
+int32_t moy_os_moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap) {
+    const moy_os_arg_t a[2] = {
+        { kind, 0u, 0, MOY_OS_ARG_STR },
+        { title, 0u, 0, MOY_OS_ARG_OPT },
+    };
+    return moy_os_call(35u, MOY_OS_HOP, a, 2, name, name_cap);   // files.new_name
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -284,6 +309,9 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_after,
         (void *)moy_os_moy_cancel,
         (void *)moy_os_moy_at,
+        (void *)moy_os_moy_files_duplicate,
+        (void *)moy_os_moy_files_rename,
+        (void *)moy_os_moy_files_new_name,
     },
 };
 
@@ -376,4 +404,7 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_after",
     "moy_cancel",
     "moy_at",
+    "moy_files_duplicate",
+    "moy_files_rename",
+    "moy_files_new_name",
 };

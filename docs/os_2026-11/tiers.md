@@ -101,9 +101,9 @@ costs are #227's.
   `at`, `every`, `after`, `cancel`) is a row of the role table too, so its
   import has a door to cross.
 - **A native module's app calls.** The app verbs a compiled app imports are
-  rows of this table too (ordinals 62 to 79 and 82 to 87): the files role
+  rows of this table too (ordinals 62 to 79 and 82 to 90): the files role
   (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
-  `delete`), prefs (`moy_prefs_get`, `set`, `clear`), the clipboard
+  `delete`, `duplicate`, `rename`, `new_name`), prefs (`moy_prefs_get`, `set`, `clear`), the clipboard
   (`moy_clipboard_put_text`, `text`, `kind`, `seq`), `moy_nav_open_app`, and
   the console calls `moy_notify`, `moy_open_with`, `moy_share`, `moy_award`
   and `moy_progress`, and the wakes `moy_every`, `moy_after`, `moy_cancel`

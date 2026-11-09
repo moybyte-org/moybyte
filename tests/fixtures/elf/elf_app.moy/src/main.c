@@ -38,6 +38,12 @@ int main(void) {
     }
     said("files.list", r, buf);
     said("files.load.other", moy_files_load("drawings", "x", buf, sizeof buf), NULL);
+    char copy[64];
+    r = moy_files_duplicate("docs", "note", copy, sizeof copy);
+    said("files.duplicate", r, copy);
+    said("files.rename", moy_files_rename("docs", copy, "Kept", buf, sizeof buf), buf);
+    said("files.new_name", moy_files_new_name("docs", "note", buf, sizeof buf), buf);
+    said("files.new_name.untitled", moy_files_new_name("docs", NULL, buf, sizeof buf), buf);
     said("notify", moy_notify("Hello", "from C") >= 0 ? 1 : -1, NULL);
     said("nav.open_app", moy_nav_open_app("calc"), NULL);
     said("award", moy_award("first"), NULL);

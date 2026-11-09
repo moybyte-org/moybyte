@@ -165,5 +165,8 @@ int32_t moy_os_moy_every(int32_t ms);
 int32_t moy_os_moy_after(int32_t ms);
 int32_t moy_os_moy_cancel(int32_t id);
 int32_t moy_os_moy_at(int32_t t);
+int32_t moy_os_moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap);
+int32_t moy_os_moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap);
+int32_t moy_os_moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap);
 
 #endif // MOY_OS_ROWS_H

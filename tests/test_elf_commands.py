@@ -104,7 +104,8 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     """The app calls a native command makes (sdk/include/moybyte/os.h, the
     rows native/os_calls.json gives the ELF tier) reach the console's role
     table for its own grant: prefs, the clipboard, its files folder and a
-    notification under the permissions it was granted, a buffer too small
+    notification under the permissions it was granted (a document
+    duplicated, renamed and a free name found), a buffer too small
     ERANGE, a folder it was not granted and a role it lacks EACCES; award and
     progress reach the achievements process, which finds the badge it
     declares; a timer it makes is its own to cancel, once, and an alarm needs
@@ -114,7 +115,8 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     assert out(app, "elf.app/app; echo status $?") == [
         "prefs.set 0", "prefs.get 42", "clipboard.put_text 0", "clipboard.text from C",
         "clipboard.short -1 ERANGE", "files.save note", "files.load # hi", "",
-        "files.list note,", "files.load.other -1 EACCES", "notify 1",
+        "files.list note,", "files.load.other -1 EACCES", "files.duplicate note_2",
+        "files.rename kept", "files.new_name note_2", "files.new_name.untitled doc_1", "notify 1",
         "nav.open_app -1 EACCES", "award 1", "progress 1", "after 1", "every 1", "cancel 1",
         "cancel.again 0", "cancel.every 1", "at -1 EACCES", "status 0"]
     assert [(n.app, n.summary, n.body) for n in NOTES.list if n.summary == "Hello"] == [

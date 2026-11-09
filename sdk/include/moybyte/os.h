@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 88
+#define MOY_OS_VERSION 91
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -304,6 +304,9 @@ int32_t moy_every(int32_t ms);   // moybyte.every
 int32_t moy_after(int32_t ms);   // moybyte.after
 int32_t moy_cancel(int32_t id);   // moybyte.cancel
 int32_t moy_at(int32_t t);   // moybyte.at
+int32_t moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap);   // files.duplicate
+int32_t moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap);   // files.rename
+int32_t moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap);   // files.new_name
 
 #endif // __wasm__
 

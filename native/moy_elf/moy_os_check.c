@@ -401,6 +401,31 @@ static int u_check_83(const moy_u_space_t *u, const char *id, int32_t value) {
     return U_STR(id);
 }
 
+// 88 moy_files_duplicate
+_Static_assert(U_REGS(const char *) + U_REGS(const char *) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_files_duplicate's registers");
+static int u_check_88(const moy_u_space_t *u, const char *kind, const char *name, void *copy, size_t copy_cap) {
+    return U_STR(kind)
+        && U_STR(name)
+        && U_BUF(copy, u_n((size_t)copy_cap, 1), MOY_U_W);
+}
+
+// 89 moy_files_rename
+_Static_assert(U_REGS(const char *) + U_REGS(const char *) + U_REGS(const char *) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_files_rename's registers");
+static int u_check_89(const moy_u_space_t *u, const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap) {
+    return U_STR(kind)
+        && U_STR(name)
+        && U_STR(title)
+        && U_BUF(renamed, u_n((size_t)renamed_cap, 1), MOY_U_W);
+}
+
+// 90 moy_files_new_name
+_Static_assert(U_REGS(const char *) + U_REGS(const char *) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_files_new_name's registers");
+static int u_check_90(const moy_u_space_t *u, const char *kind, const char *title, void *name, size_t name_cap) {
+    return U_STR(kind)
+        && U_STR0(title)
+        && U_BUF(name, u_n((size_t)name_cap, 1), MOY_U_W);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -461,6 +486,9 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 81: fn = (u_check_fn *)(void *)u_check_81; break;
     case 82: fn = (u_check_fn *)(void *)u_check_82; break;
     case 83: fn = (u_check_fn *)(void *)u_check_83; break;
+    case 88: fn = (u_check_fn *)(void *)u_check_88; break;
+    case 89: fn = (u_check_fn *)(void *)u_check_89; break;
+    case 90: fn = (u_check_fn *)(void *)u_check_90; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

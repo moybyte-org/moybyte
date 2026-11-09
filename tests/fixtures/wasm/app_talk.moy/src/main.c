@@ -5,8 +5,8 @@
 //
 // At _init it listens on "pong", pings the Echo service (local.echo), posts a
 // notification, awards the badge its manifest declares, sets an alarm that is
-// already due, a timer that goes off once and one that repeats, and writes
-// the OS log. Every _update reads the messages queued for it, one record
+// already due, a timer that goes off once and one that repeats, asks its
+// documents for a free name, and writes the OS log. Every _update reads the messages queued for it, one record
 // each (moy_evq_ev_t, sdk/include/moybyte/os.h, its arguments a JSON array
 // after it), and logs what it heard: a timer is the system's message
 // "moybyte.timer" carrying its id, and the repeating one's first tick
@@ -35,6 +35,8 @@ int32_t moybyte_at(int32_t t) APP(moybyte_at);
 int32_t moybyte_after(int32_t ms) APP(moybyte_after);
 int32_t moybyte_every(int32_t ms) APP(moybyte_every);
 int32_t moybyte_cancel(int32_t id) APP(moybyte_cancel);
+int32_t files_new_name(const char *kind, uint32_t kind_n, const char *title, uint32_t title_n,
+                       char *name, uint32_t cap) APP(files_new_name);
 int32_t moybyte_log(int32_t level, const char *text, uint32_t text_n) APP(moybyte_log);
 int32_t moybyte_item_read(int32_t item, char *data, uint32_t cap) APP(moybyte_item_read);
 void cls(int32_t c) MOY(cls);
@@ -99,6 +101,15 @@ EXPORT(_init) void init(void) {
     say();
     put(S("after "));
     put_int(moybyte_after(0));
+    say();
+    static char name[32];
+    int32_t k = files_new_name(S("docs"), S("note"), name, sizeof name);
+    put(S("new_name "));
+    if (k >= 0) {
+        put(name, (uint32_t)k);
+    } else {
+        put_int(k);
+    }
     say();
     ticker = moybyte_every(1);
     put(S("every "));

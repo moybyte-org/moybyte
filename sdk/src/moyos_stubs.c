@@ -906,3 +906,33 @@ int32_t moy_at(int32_t t)
     return ((moy_os_fn_moy_at *)__moy_os->fn[87])(t);
 }
 #endif
+
+#if MOY_OS_ROW(88)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap);
+MOY_OS_USED(88);
+int32_t moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap)
+{
+    return ((moy_os_fn_moy_files_duplicate *)__moy_os->fn[88])(kind, name, copy, copy_cap);
+}
+#endif
+
+#if MOY_OS_ROW(89)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap);
+MOY_OS_USED(89);
+int32_t moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap)
+{
+    return ((moy_os_fn_moy_files_rename *)__moy_os->fn[89])(kind, name, title, renamed, renamed_cap);
+}
+#endif
+
+#if MOY_OS_ROW(90)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap);
+MOY_OS_USED(90);
+int32_t moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap)
+{
+    return ((moy_os_fn_moy_files_new_name *)__moy_os->fn[90])(kind, title, name, name_cap);
+}
+#endif
