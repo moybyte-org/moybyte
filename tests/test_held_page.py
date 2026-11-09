@@ -412,3 +412,21 @@ def test_a_held_layer_with_no_room_is_asked_once_a_modal(tmp_path, monkeypatch):
     assert len(asks) == 2, asks
     ws.pause.close()
     frame(2)
+
+
+def test_the_desk_root_reads_no_last_buffer_as_the_desk_boards_do(tmp_path):
+    """A wash over the last frame reads that frame's buffer in place only
+    where the compositor names it (the S3s' banded one). The P4s' DSI and
+    rotated compositors copy it out instead, so the host's desk root has no
+    `last_buffer` either and every desk ring above runs the boards' path."""
+    from runtime import glass_binding
+    for comp in (glass_binding.DsiCompositor, glass_binding.RotatedCompositor):
+        assert getattr(comp, "copy_last", None) is not None
+        assert getattr(comp, "last_buffer", None) is None
+    desk = host_app.build_workstation(str(tmp_path / "desk"), sys_size=(1024, 600),
+                                      font_scale=2, windowed=True)
+    root = desk.wm._root_canvas
+    assert getattr(root, "last_buffer", None) is None
+    assert getattr(root, "copy_last", None) is not None
+    hand = host_app.build_workstation(str(tmp_path / "hand"))
+    assert getattr(hand.sys_canvas, "last_buffer", None) is not None

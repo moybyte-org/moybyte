@@ -338,7 +338,8 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         canvas = host_canvas.make_system_canvas(WIDTH, HEIGHT)
     else:
         canvas = host_canvas.make_canvas(WIDTH, HEIGHT)   # the fixed 320x240 GAME canvas
-        sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale)
+        sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale,
+                                                    desk=windowed)
     for cv in (canvas, sys_canvas):
         if cv is not None:
             cv._owners = owners

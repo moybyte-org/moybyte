@@ -986,7 +986,8 @@ still writing it (`moy_dsi_last`), whole rows through the AXI GDMA
 copy on the CPU, the panel's feeder reading the same buffer alongside
 (`moy_banded_last`). One persistent buffer copies nothing; no frame yet
 answers False and the caller draws. `last_buffer()`, bound the same way where the
-compositor has it (the S3s' banded one, the host's), answers that buffer
+compositor has it (the S3s' banded one, the host's but on the windowed
+desk, whose `DeskCompositor` lacks it as the P4s' do), answers that buffer
 itself where it is not the drawn-into one, None otherwise: for a pass that
 reads it instead of copying it out (a wash over the last frame, §14.5). It is the frame's first
 write to what it copies. The host compositor's `last` is a test's ring of
