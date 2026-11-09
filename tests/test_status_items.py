@@ -159,13 +159,19 @@ def test_a_vm_stop_kept_by_the_music_asks_first(tmp_path, monkeypatch):
     from runtime import player as P
 
     class Leases:
-        def holders(self):
-            return ("media",)
+        media = True
+
+        def held(self, tag):
+            return self.media and tag == "media"
+
+        def mask(self):
+            return int(self.media)
 
     ended = []
     monkeypatch.setattr(P._moy_play, "info", lambda run: (0,) * 11 + ("lease", 0), raising=False)
     monkeypatch.setattr(P._moy_play, "end", lambda run, *a: ended.append(run), raising=False)
-    monkeypatch.setattr(ws, "leases", Leases(), raising=False)
+    leases = Leases()
+    monkeypatch.setattr(ws, "leases", leases, raising=False)
     asked = []
     monkeypatch.setattr(ws, "ask_stop_music", lambda cart: asked.append(cart))
     cart = {"title": "Doom", "runtime": "wasm"}
@@ -176,5 +182,5 @@ def test_a_vm_stop_kept_by_the_music_asks_first(tmp_path, monkeypatch):
     # the declined run's process is over: the dialog's answer, which stops
     # the shell's stream, runs as the shell
     assert moy_log.current() == moy_log.SHELL and ws.run.player.pid is None
-    monkeypatch.setattr(ws, "leases", None, raising=False)
+    leases.media = False
     assert not ws.run.player._music_keeps_the_vm(5, cart), "no music: the verdict stands"
