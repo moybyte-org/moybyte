@@ -10,7 +10,8 @@
 # serves is native/moy_web's, where the image takes that too. The sign-in's
 # crypto (moy_seal.c) and the crypto rows' body (moy_crypto.c, which
 # native/moy_app's door calls) are the ESP-IDF's mbedTLS here; the host and
-# the browser compile the vendored copy (mbedtls/README.md).
+# the browser compile the vendored copy (mbedtls/README.md). The crypto rows'
+# Ed25519 is the vendored Monocypher on every tier (monocypher/README.md).
 
 add_library(usermod_moy_net INTERFACE)
 
@@ -25,6 +26,8 @@ target_sources(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_webauth.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_seal.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_crypto.c
+    ${CMAKE_CURRENT_LIST_DIR}/monocypher/monocypher.c
+    ${CMAKE_CURRENT_LIST_DIR}/monocypher/monocypher-ed25519.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ota.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_webconsole.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_gpio.c
@@ -39,6 +42,7 @@ target_sources(usermod_moy_net INTERFACE
 
 target_include_directories(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/monocypher
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine
     ${CMAKE_CURRENT_LIST_DIR}/../moy_store
     ${CMAKE_CURRENT_LIST_DIR}/../moy_web)

@@ -58,6 +58,9 @@
     X(dev_xfer, "(i*~*~)i") \
     X(dev_set, "(i*~)i") \
     X(dev_get, "(i*~)i") \
+    X(ed25519_public, "(*~*~)i") \
+    X(ed25519_sign, "(*~*~*~)i") \
+    X(ed25519_verify, "(*~*~*~)i") \
 
 #endif // MOY_WASI_OS_ROWS_H
 
@@ -321,6 +324,26 @@ static int32_t w_os_dev_set(wasm_exec_env_t e, int32_t h, const char *cfg, uint3
 static int32_t w_os_dev_get(wasm_exec_env_t e, int32_t h, const char *what, uint32_t what_n) {
     const os_arg_t a[2] = { OS_I(h), OS_O(what, what_n) };
     return os_role(e, MOY_T_MOYBYTE_DEV_GET, false, a, 2, NULL, 0);
+}
+
+static int32_t w_os_ed25519_public(wasm_exec_env_t e, const uint8_t *secret, uint32_t secret_n,
+                                   uint8_t *pub, uint32_t pub_cap) {
+    const os_arg_t a[1] = { OS_O((const char *)secret, secret_n) };
+    return os_role(e, MOY_T_MOYBYTE_ED25519_PUBLIC, true, a, 1, pub, pub_cap);
+}
+
+static int32_t w_os_ed25519_sign(wasm_exec_env_t e, const uint8_t *secret, uint32_t secret_n,
+                                 const uint8_t *msg, uint32_t msg_n, uint8_t *sig,
+                                 uint32_t sig_cap) {
+    const os_arg_t a[2] = { OS_O((const char *)secret, secret_n), OS_O((const char *)msg, msg_n) };
+    return os_role(e, MOY_T_MOYBYTE_ED25519_SIGN, true, a, 2, sig, sig_cap);
+}
+
+static int32_t w_os_ed25519_verify(wasm_exec_env_t e, const uint8_t *pub, uint32_t pub_n,
+                                   const uint8_t *msg, uint32_t msg_n, const uint8_t *sig,
+                                   uint32_t sig_n) {
+    const os_arg_t a[3] = { OS_O((const char *)pub, pub_n), OS_O((const char *)msg, msg_n), OS_O((const char *)sig, sig_n) };
+    return os_role(e, MOY_T_MOYBYTE_ED25519_VERIFY, true, a, 3, NULL, 0);
 }
 
 #endif // MOY_WASI_OS_BODIES

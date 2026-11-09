@@ -3,7 +3,7 @@
 reaches on each tier, with the permissions each answers under (any one of
 them), from native/os_calls.json."""
 
-VERSION = 110
+VERSION = 113
 SPEC_NAMES = ('print',)
 
 # a wasm app's "moybyte.app" imports
@@ -35,6 +35,9 @@ WASM_APP = {
     'moybyte_dev_set': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins'),
     'moybyte_dev_write': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins'),
     'moybyte_dev_xfer': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins'),
+    'moybyte_ed25519_public': (),
+    'moybyte_ed25519_sign': (),
+    'moybyte_ed25519_verify': (),
     'moybyte_every': (),
     'moybyte_hmac_sha256': (),
     'moybyte_item_read': (),
@@ -130,6 +133,9 @@ WASM_OS = {
     'dev_set': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins'),
     'dev_write': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins'),
     'dev_xfer': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins'),
+    'ed25519_public': (),
+    'ed25519_sign': (),
+    'ed25519_verify': (),
     'every': (),
     'files_count': ('files',),
     'files_delete': ('files',),
@@ -273,6 +279,9 @@ ELF = {
     107: ('moy_dev_xfer', ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins')),
     108: ('moy_dev_set', ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins')),
     109: ('moy_dev_get', ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins')),
+    110: ('moy_ed25519_public', ()),
+    111: ('moy_ed25519_sign', ()),
+    112: ('moy_ed25519_verify', ()),
 }
 
 # the ordinals of the retired rows, which no module built now calls
@@ -304,6 +313,9 @@ PY = {
     'moybyte.ble': ('ble',),
     'moybyte.camera': ('camera',),
     'moybyte.cancel': (),
+    'moybyte.ed25519_public': (),
+    'moybyte.ed25519_sign': (),
+    'moybyte.ed25519_verify': (),
     'moybyte.every': (),
     'moybyte.hmac_sha256': (),
     'moybyte.http': ('http',),
@@ -364,6 +376,9 @@ LUA = {
     'moybyte.at': ('alarms',),
     'moybyte.award': (),
     'moybyte.cancel': (),
+    'moybyte.ed25519_public': (),
+    'moybyte.ed25519_sign': (),
+    'moybyte.ed25519_verify': (),
     'moybyte.every': (),
     'moybyte.hmac_sha256': (),
     'moybyte.log': (),

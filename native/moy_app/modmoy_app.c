@@ -2060,8 +2060,9 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_kinds_obj, mod_kinds);
 // -- the crypto rows (native/moy_net/moy_crypto.h) ------------------------------------
 //
 // A Python program's moybyte.random, sha256, hmac_sha256, aes_gcm_seal,
-// aes_gcm_open and x25519 (runtime/system/moybyte.py): the C body every tier
-// reaches, over a str's UTF-8 or any buffer, answered as bytes.
+// aes_gcm_open, x25519, ed25519_public, ed25519_sign and ed25519_verify
+// (runtime/system/moybyte.py): the C body every tier reaches, over a str's
+// UTF-8 or any buffer, answered as bytes (ed25519_verify as a bool).
 
 static const uint8_t *bytes_of(mp_obj_t o, size_t *n) {
     if (mp_obj_is_str(o)) {
@@ -2155,6 +2156,35 @@ static mp_obj_t mod_x25519(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_x25519_obj, 1, 2, mod_x25519);
 
+static mp_obj_t mod_ed25519_public(mp_obj_t secret) {
+    size_t sn;
+    const uint8_t *sec = bytes_of(secret, &sn);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_KEY25519);
+    return crypto_answer(&v, moy_crypto_ed25519_public(sec, sn, v.buf, MOY_CRYPTO_KEY25519));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_ed25519_public_obj, mod_ed25519_public);
+
+static mp_obj_t mod_ed25519_sign(mp_obj_t secret, mp_obj_t msg) {
+    size_t sn, n;
+    const uint8_t *sec = bytes_of(secret, &sn), *p = bytes_of(msg, &n);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_SIG25519);
+    return crypto_answer(&v, moy_crypto_ed25519_sign(sec, sn, p, n, v.buf, MOY_CRYPTO_SIG25519));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_ed25519_sign_obj, mod_ed25519_sign);
+
+static mp_obj_t mod_ed25519_verify(mp_obj_t pub, mp_obj_t msg, mp_obj_t sig) {
+    size_t pn, n, gn;
+    const uint8_t *k = bytes_of(pub, &pn), *p = bytes_of(msg, &n), *g = bytes_of(sig, &gn);
+    int32_t r = moy_crypto_ed25519_verify(k, pn, p, n, g, gn);
+    if (r < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a length the call refuses"));
+    }
+    return mp_obj_new_bool(r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_ed25519_verify_obj, mod_ed25519_verify);
+
 // -- the module ----------------------------------------------------------------------------
 
 static const mp_rom_map_elem_t moy_app_globals_table[] = {
@@ -2191,6 +2221,9 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_aes_gcm_seal), MP_ROM_PTR(&mod_aes_gcm_seal_obj) },
     { MP_ROM_QSTR(MP_QSTR_aes_gcm_open), MP_ROM_PTR(&mod_aes_gcm_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_x25519), MP_ROM_PTR(&mod_x25519_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ed25519_public), MP_ROM_PTR(&mod_ed25519_public_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ed25519_sign), MP_ROM_PTR(&mod_ed25519_sign_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ed25519_verify), MP_ROM_PTR(&mod_ed25519_verify_obj) },
     { MP_ROM_QSTR(MP_QSTR_CLIP_MAX), MP_ROM_INT(MOY_APP_CLIP_MAX) },
     { MP_ROM_QSTR(MP_QSTR_SLOTS), MP_ROM_INT(MOY_GRANT_SLOTS) },
 };

@@ -1126,3 +1126,33 @@ int32_t moy_dev_get(int32_t h, const char *what)
     return ((moy_os_fn_moy_dev_get *)__moy_os->fn[109])(h, what);
 }
 #endif
+
+#if MOY_OS_ROW(110)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap);
+MOY_OS_USED(110);
+int32_t moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap)
+{
+    return ((moy_os_fn_moy_ed25519_public *)__moy_os->fn[110])(secret, secret_len, pub, pub_cap);
+}
+#endif
+
+#if MOY_OS_ROW(111)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap);
+MOY_OS_USED(111);
+int32_t moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap)
+{
+    return ((moy_os_fn_moy_ed25519_sign *)__moy_os->fn[111])(secret, secret_len, msg, msg_len, sig, sig_cap);
+}
+#endif
+
+#if MOY_OS_ROW(112)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len);
+MOY_OS_USED(112);
+int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len)
+{
+    return ((moy_os_fn_moy_ed25519_verify *)__moy_os->fn[112])(pub, pub_len, msg, msg_len, sig, sig_len);
+}
+#endif

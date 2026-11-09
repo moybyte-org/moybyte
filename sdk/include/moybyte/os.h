@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 110
+#define MOY_OS_VERSION 113
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -600,6 +600,39 @@ static inline int32_t moy_dev_get(int32_t h, const char *what) {
     return (int)r;
 }
 
+int32_t __moy_os_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap)
+    __attribute__((import_module("moybyte.os"), import_name("ed25519_public")));
+static inline int32_t moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap) {
+    int32_t r = __moy_os_ed25519_public(secret, secret_len, pub, pub_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap)
+    __attribute__((import_module("moybyte.os"), import_name("ed25519_sign")));
+static inline int32_t moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap) {
+    int32_t r = __moy_os_ed25519_sign(secret, secret_len, msg, msg_len, sig, sig_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len)
+    __attribute__((import_module("moybyte.os"), import_name("ed25519_verify")));
+static inline int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len) {
+    int32_t r = __moy_os_ed25519_verify(pub, pub_len, msg, msg_len, sig, sig_len);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 #else
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
@@ -667,6 +700,9 @@ int32_t moy_dev_write(int32_t h, const void *data, size_t data_len);   // moybyt
 int32_t moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap);   // moybyte.dev_xfer
 int32_t moy_dev_set(int32_t h, const char *cfg);   // moybyte.dev_set
 int32_t moy_dev_get(int32_t h, const char *what);   // moybyte.dev_get
+int32_t moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap);   // moybyte.ed25519_public
+int32_t moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap);   // moybyte.ed25519_sign
+int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len);   // moybyte.ed25519_verify
 
 #endif // __wasm__
 

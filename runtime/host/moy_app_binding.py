@@ -244,7 +244,7 @@ def _scalar(v):
 
 # The crypto rows' C (native/moy_net/moy_crypto.h), its codes and sizes.
 _C_BAD, _C_FULL, _C_FORGED, _C_POINT, _C_ABSENT, _C_NOMEM = -1, -2, -3, -4, -5, -6
-_C_HASH, _C_SEAL_OVER, _C_KEY25519, _C_RANDOM_MAX = 32, 28, 32, 4096
+_C_HASH, _C_SEAL_OVER, _C_KEY25519, _C_SIG25519, _C_RANDOM_MAX = 32, 28, 32, 64, 4096
 _SPAN = [c.c_void_p, c.c_size_t]
 _CRYPTO_SIGS = (
     ("moy_crypto_random", [c.c_int32, c.c_void_p, c.c_size_t]),
@@ -253,6 +253,9 @@ _CRYPTO_SIGS = (
     ("moy_crypto_aes_gcm_seal", _SPAN * 3),
     ("moy_crypto_aes_gcm_open", _SPAN * 3),
     ("moy_crypto_x25519", _SPAN * 3),
+    ("moy_crypto_ed25519_public", _SPAN * 2),
+    ("moy_crypto_ed25519_sign", _SPAN * 3),
+    ("moy_crypto_ed25519_verify", _SPAN * 3),
 )
 
 
@@ -323,8 +326,24 @@ def _crypto(lib):
         buf = c.create_string_buffer(_C_KEY25519)
         return answer(buf, lib.moy_crypto_x25519(*a, buf, _C_KEY25519))
 
+    def ed25519_public(secret):
+        buf = c.create_string_buffer(_C_KEY25519)
+        return answer(buf, lib.moy_crypto_ed25519_public(*spans(secret), buf, _C_KEY25519))
+
+    def ed25519_sign(secret, msg):
+        buf = c.create_string_buffer(_C_SIG25519)
+        return answer(buf, lib.moy_crypto_ed25519_sign(*spans(secret, msg), buf, _C_SIG25519))
+
+    def ed25519_verify(pub, msg, sig):
+        r = lib.moy_crypto_ed25519_verify(*spans(pub, msg, sig))
+        if r < 0:
+            raise ValueError("a length the call refuses")
+        return bool(r)
+
     return dict(random=random, sha256=sha256, hmac_sha256=hmac_sha256,
-                aes_gcm_seal=aes_gcm_seal, aes_gcm_open=aes_gcm_open, x25519=x25519)
+                aes_gcm_seal=aes_gcm_seal, aes_gcm_open=aes_gcm_open, x25519=x25519,
+                ed25519_public=ed25519_public, ed25519_sign=ed25519_sign,
+                ed25519_verify=ed25519_verify)
 
 
 def _canvas_handle(cv):

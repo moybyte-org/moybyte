@@ -210,10 +210,10 @@ eight readers are not spent one a process. `tests/test_radio_events.py` holds it
 
 ## 5. Crypto
 
-Random bytes, SHA-256, HMAC-SHA256, AES-GCM and X25519 are rows of the one
-table (`native/os_calls.json`, `moybyte.random`, `sha256`, `hmac_sha256`,
-`aes_gcm_seal`, `aes_gcm_open`, `x25519`; `docs/app_api_v1.md` §10 names
-each tier's), so a mesh stack (Reticulum, Meshtastic) can be an app on any
+Random bytes, SHA-256, HMAC-SHA256, AES-GCM, X25519 and Ed25519 are rows of
+the one table (`native/os_calls.json`, `moybyte.random`, `sha256`,
+`hmac_sha256`, `aes_gcm_seal`, `aes_gcm_open`, `x25519`, `ed25519_public`,
+`ed25519_sign`, `ed25519_verify`; `docs/app_api_v1.md` §10 names each tier's), so a mesh stack (Reticulum, Meshtastic) can be an app on any
 tier. Decisions (2026-11-09):
 
 - **One C body, over the image's mbedTLS.** `native/moy_net/moy_crypto.c`,
@@ -242,17 +242,21 @@ tier. Decisions (2026-11-09):
 - **Curve25519 is a board's sdkconfig line** (`CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED`
   in each console board's `sdkconfig.board`; MicroPython's base config
   turns it off); an image without it answers `x25519` ABSENT.
-- **Ed25519 is not here yet: mbedTLS 3.x has no EdDSA.** The plan is to
-  vendor Monocypher (Loup Vaillant; CC0 or BSD-2-Clause; audited by Cure53
-  in 2020): `monocypher.c` and `optional/monocypher-ed25519.c`, RFC 8032's
-  Ed25519 over SHA-512, pinned and stamped as mbedTLS is, compiled beside
-  `moy_crypto.c` on every tier, with rows `ed25519_public(seed)`,
-  `ed25519_sign(seed, message)` and `ed25519_verify(public, message,
-  signature)` appended to the table. Dropbear's TweetNaCl-derived
-  `curve25519.c` (`native/moy_ssh`) is in every console image already, but
-  it compiles only inside Dropbear's configuration, is absent from the
-  host's library and the browser, and is TweetNaCl's slow reference
-  arithmetic; a hand-written Ed25519 is not an option.
+- **Ed25519 is the vendored Monocypher's (owner, 2026-11-09, #246):**
+  mbedTLS 3.x has no EdDSA. Monocypher 4.0.3 (Loup Vaillant; CC0 or
+  BSD-2-Clause; audited by Cure53 in 2020), its `monocypher.c` and
+  `monocypher-ed25519.c` (RFC 8032's Ed25519 over SHA-512), is pinned and
+  hashed in `native/moy_net/monocypher/` (`make vendor-monocypher`) and
+  compiled beside `moy_crypto.c` on every tier, a board's image included.
+  The secret is RFC 8032's 32-byte seed: `ed25519_public(seed)` answers
+  the 32-byte public key, `ed25519_sign(seed, message)` the deterministic
+  64-byte signature, `ed25519_verify(public, message, signature)` 1 or 0
+  (a key or a signature that does not decode is 0, a length refused BAD).
+  Dropbear's TweetNaCl-derived `curve25519.c` (`native/moy_ssh`) is in
+  every console image too, but it compiles only inside Dropbear's
+  configuration, is absent from the host's library and the browser, and is
+  TweetNaCl's slow reference arithmetic; a hand-written Ed25519 was not an
+  option.
 - **What a mesh stack adds later:** Reticulum's token is AES-CBC with HMAC,
   Meshtastic's channel AES-CTR and its direct messages AES-CCM; those modes
   are interop rows of their own, named for the protocol that needs them,

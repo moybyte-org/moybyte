@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MOYBYTE_APP_VERSION 110
+#define MOYBYTE_APP_VERSION 113
 
 #define MOYBYTE_APP_IMPORT(name) __attribute__((import_module("moybyte.app"), import_name(#name)))
 
@@ -296,6 +296,17 @@ int32_t moybyte_dev_set(int32_t h, const char *cfg,
 // moybyte.dev_get: lease, http, lora, mic, ble, usb, midi, camera, media, media:url, pins
 int32_t moybyte_dev_get(int32_t h, const char *what,
                         uint32_t what_n) MOYBYTE_APP_IMPORT(moybyte_dev_get);
+// moybyte.ed25519_public
+int32_t moybyte_ed25519_public(const void *secret, uint32_t secret_n, void *pub,
+                               uint32_t pub_cap) MOYBYTE_APP_IMPORT(moybyte_ed25519_public);
+// moybyte.ed25519_sign
+int32_t moybyte_ed25519_sign(const void *secret, uint32_t secret_n, const void *msg,
+                             uint32_t msg_n, void *sig,
+                             uint32_t sig_cap) MOYBYTE_APP_IMPORT(moybyte_ed25519_sign);
+// moybyte.ed25519_verify
+int32_t moybyte_ed25519_verify(const void *pub, uint32_t pub_n, const void *msg, uint32_t msg_n,
+                               const void *sig,
+                               uint32_t sig_n) MOYBYTE_APP_IMPORT(moybyte_ed25519_verify);
 
 #ifdef __cplusplus
 }

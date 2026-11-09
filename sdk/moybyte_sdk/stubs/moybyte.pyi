@@ -96,3 +96,12 @@ def aes_gcm_open(*args: Any, **kwargs: Any) -> Any:
 
 def x25519(*args: Any, **kwargs: Any) -> Any:
     """moybyte.x25519(secret: bytes, peer: bytes): the row moybyte.x25519"""
+
+def ed25519_public(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.ed25519_public(secret: bytes): the row moybyte.ed25519_public"""
+
+def ed25519_sign(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.ed25519_sign(secret: bytes, msg: bytes): the row moybyte.ed25519_sign"""
+
+def ed25519_verify(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.ed25519_verify(pub: bytes, msg: bytes, sig: bytes): the row moybyte.ed25519_verify"""

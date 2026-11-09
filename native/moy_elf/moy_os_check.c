@@ -528,6 +528,29 @@ static int u_check_109(const moy_u_space_t *u, int32_t h, const char *what) {
     return U_STR(what);
 }
 
+// 110 moy_ed25519_public
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_ed25519_public's registers");
+static int u_check_110(const moy_u_space_t *u, const void *secret, size_t secret_len, void *pub, size_t pub_cap) {
+    return U_BUF(secret, u_n((size_t)secret_len, 1), MOY_U_R)
+        && U_BUF(pub, u_n((size_t)pub_cap, 1), MOY_U_W);
+}
+
+// 111 moy_ed25519_sign
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_ed25519_sign's registers");
+static int u_check_111(const moy_u_space_t *u, const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap) {
+    return U_BUF(secret, u_n((size_t)secret_len, 1), MOY_U_R)
+        && U_BUF(msg, u_n((size_t)msg_len, 1), MOY_U_R)
+        && U_BUF(sig, u_n((size_t)sig_cap, 1), MOY_U_W);
+}
+
+// 112 moy_ed25519_verify
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) <= 7, "moy_ed25519_verify's registers");
+static int u_check_112(const moy_u_space_t *u, const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len) {
+    return U_BUF(pub, u_n((size_t)pub_len, 1), MOY_U_R)
+        && U_BUF(msg, u_n((size_t)msg_len, 1), MOY_U_R)
+        && U_BUF(sig, u_n((size_t)sig_len, 1), MOY_U_R);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -606,6 +629,9 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 107: fn = (u_check_fn *)(void *)u_check_107; break;
     case 108: fn = (u_check_fn *)(void *)u_check_108; break;
     case 109: fn = (u_check_fn *)(void *)u_check_109; break;
+    case 110: fn = (u_check_fn *)(void *)u_check_110; break;
+    case 111: fn = (u_check_fn *)(void *)u_check_111; break;
+    case 112: fn = (u_check_fn *)(void *)u_check_112; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

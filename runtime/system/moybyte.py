@@ -8,7 +8,7 @@
 #   send                     a message to an app (open_with, share, pick)
 #   service_start            this app's own service (service_stop, service_running)
 #   log                      a line of the OS log
-#   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519)
+#   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519, ed25519_*)
 #   __getattr__              the device APIs (http, ble, camera, ...) by name
 """moybyte: what a Python app asks the OS for that has no standard name
 (docs/os_2026-11/processes.md sections 1 and 3). The clock is the standard
@@ -160,6 +160,14 @@ it refuses (a key, a secret, a count) raises ValueError.
                      32-byte public key: the shared secret; with no peer the
                      secret's own public key. A peer key of small order raises
                      ValueError, a build without the curve NotImplementedError
+  ed25519_public(secret)
+                     RFC 8032's Ed25519 public key of a 32-byte secret (the
+                     seed), 32 bytes
+  ed25519_sign(secret, msg)
+                     the secret's Ed25519 signature of `msg`, 64 bytes
+  ed25519_verify(pub, msg, sig)
+                     True where the 64-byte `sig` is the 32-byte public key
+                     `pub`'s signature of `msg`, else False
 
 on/every/after/at answer the wake's id. A timer means "no earlier than": a wake is
 served in the shell loop's slack, so up to a frame late, and a late `every`
@@ -1126,6 +1134,18 @@ def aes_gcm_open(key, sealed):
 
 def x25519(secret, peer=None):
     return _app().x25519(secret, peer)
+
+
+def ed25519_public(secret):
+    return _app().ed25519_public(secret)
+
+
+def ed25519_sign(secret, msg):
+    return _app().ed25519_sign(secret, msg)
+
+
+def ed25519_verify(pub, msg, sig):
+    return _app().ed25519_verify(pub, msg, sig)
 
 
 def clock_synced():

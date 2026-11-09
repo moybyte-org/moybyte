@@ -9,6 +9,7 @@
 #include "mbedtls/gcm.h"
 #include "mbedtls/md.h"
 #include "mbedtls/sha256.h"
+#include "monocypher-ed25519.h"
 
 static const uint8_t NONE[1];
 
@@ -189,4 +190,49 @@ int32_t moy_crypto_x25519(const void *secret, size_t sn, const void *peer, size_
     (void)peer;
     return MOY_CRYPTO_EABSENT;
 #endif
+}
+
+// Monocypher's key pair from a copy of the seed, which it wipes: the 64-byte
+// secret key (the seed, then the public key) and the public key.
+static void ed25519_pair(const void *secret, uint8_t sk[64], uint8_t pk[MOY_CRYPTO_KEY25519]) {
+    uint8_t seed[MOY_CRYPTO_KEY25519];
+    memcpy(seed, secret, sizeof seed);
+    crypto_ed25519_key_pair(sk, pk, seed);
+}
+
+int32_t moy_crypto_ed25519_public(const void *secret, size_t sn, void *out, size_t cap) {
+    if (secret == NULL || sn != MOY_CRYPTO_KEY25519) {
+        return MOY_CRYPTO_EBAD;
+    }
+    if (cap < MOY_CRYPTO_KEY25519 || out == NULL) {
+        return MOY_CRYPTO_EFULL;
+    }
+    uint8_t sk[64];
+    ed25519_pair(secret, sk, out);
+    crypto_wipe(sk, sizeof sk);
+    return MOY_CRYPTO_KEY25519;
+}
+
+int32_t moy_crypto_ed25519_sign(const void *secret, size_t sn, const void *p, size_t n,
+                                void *out, size_t cap) {
+    if (secret == NULL || sn != MOY_CRYPTO_KEY25519 || (p == NULL && n)) {
+        return MOY_CRYPTO_EBAD;
+    }
+    if (cap < MOY_CRYPTO_SIG25519 || out == NULL) {
+        return MOY_CRYPTO_EFULL;
+    }
+    uint8_t sk[64], pk[MOY_CRYPTO_KEY25519];
+    ed25519_pair(secret, sk, pk);
+    crypto_ed25519_sign(out, sk, bytes(p, n), n);
+    crypto_wipe(sk, sizeof sk);
+    return MOY_CRYPTO_SIG25519;
+}
+
+int32_t moy_crypto_ed25519_verify(const void *pub, size_t pn, const void *p, size_t n,
+                                  const void *sig, size_t gn) {
+    if (pub == NULL || pn != MOY_CRYPTO_KEY25519 || sig == NULL || gn != MOY_CRYPTO_SIG25519
+        || (p == NULL && n)) {
+        return MOY_CRYPTO_EBAD;
+    }
+    return crypto_ed25519_check(sig, pub, bytes(p, n), n) == 0;
 }

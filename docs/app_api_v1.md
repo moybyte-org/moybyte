@@ -746,6 +746,9 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
 | `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
 | `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
+| `moybyte.ed25519_public` | none | `moybyte.ed25519_public` | `moybyte.ed25519_public` | `moybyte_ed25519_public`, `moybyte.os.ed25519_public` | `moy_ed25519_public` |
+| `moybyte.ed25519_sign` | none | `moybyte.ed25519_sign` | `moybyte.ed25519_sign` | `moybyte_ed25519_sign`, `moybyte.os.ed25519_sign` | `moy_ed25519_sign` |
+| `moybyte.ed25519_verify` | none | `moybyte.ed25519_verify` | `moybyte.ed25519_verify` | `moybyte_ed25519_verify`, `moybyte.os.ed25519_verify` | `moy_ed25519_verify` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -774,14 +777,20 @@ in C; WASI preview1 in wasm; Lua's `io` and `os`.
 
 **Crypto** (`docs/os_2026-11/between_apps.md` §5): `moybyte.random(n)`,
 `sha256(data)`, `hmac_sha256(key, data)`, `aes_gcm_seal(key, plain)`,
-`aes_gcm_open(key, sealed)` and `x25519(secret, peer)` are every program's,
-with no permission, one C body on every tier (`native/moy_net/moy_crypto.h`).
+`aes_gcm_open(key, sealed)`, `x25519(secret, peer)`, `ed25519_public(secret)`,
+`ed25519_sign(secret, msg)` and `ed25519_verify(pub, msg, sig)` are every
+program's, with no permission, one C body on every tier
+(`native/moy_net/moy_crypto.h`; Ed25519 is the vendored Monocypher's).
 Bytes in and bytes out (a Python `str` is its UTF-8). A seal is a fresh
 nonce, the ciphertext and the tag, 28 bytes longer than what it sealed, under
 a 16-, 24- or 32-byte key; an open that does not authenticate answers `None`
 in Python, `nil` in Lua, FORGED (10) negated to a compiled app and `EBADMSG`
 to a native or WASI program. `x25519` with no peer answers the secret's
-public key, with one the shared secret. A buffer too small is FULL
+public key, with one the shared secret. Ed25519 is RFC 8032's: a 32-byte
+secret (the seed) gives a 32-byte public key and deterministic 64-byte
+signatures; `ed25519_verify` answers 1 or 0 (`True` or `False` in Python,
+`true` or `false` in Lua), 0 for any signature that does not check, a key or
+a signature that does not decode among them. A buffer too small is FULL
 (`ERANGE`), a length refused BAD (`EINVAL`; a `ValueError` in Python).
 
 **A compiled app (#224)** is `"runtime": "wasm"` with `"extensions":

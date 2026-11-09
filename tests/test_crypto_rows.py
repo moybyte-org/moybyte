@@ -1,6 +1,6 @@
 """The crypto rows (native/os_calls.json's moybyte.random, sha256, hmac_sha256,
-aes_gcm_seal, aes_gcm_open and x25519; native/moy_net/moy_crypto.h, the one C
-body) answer the same known answers on every tier, with no permission, and a
+aes_gcm_seal, aes_gcm_open, x25519, ed25519_public, ed25519_sign and
+ed25519_verify; native/moy_net/moy_crypto.h, the one C body) answer the same known answers on every tier, with no permission, and a
 length the call refuses is an error answered, never a crash:
 
   * Python: the `moybyte` module's functions over the module moy_app (the
@@ -42,6 +42,28 @@ def test_python_s_moybyte_functions_answer_the_known_answers():
     assert moybyte.x25519(H(V.X25519_BOB), H(V.X25519_ALICE_PUB)).hex() == V.X25519_SHARED
 
 
+def test_python_s_ed25519_answers_rfc_8032_s_vectors():
+    for secret, pub, msg, sig in V.ED25519:
+        assert moybyte.ed25519_public(H(secret)).hex() == pub
+        assert moybyte.ed25519_sign(H(secret), H(msg)).hex() == sig
+        assert moybyte.ed25519_verify(H(pub), H(msg), H(sig)) is True
+
+
+def test_python_s_ed25519_verify_refuses_what_was_not_signed():
+    secret, pub, msg, sig = (H(v) for v in V.ED25519[2])
+    assert moybyte.ed25519_verify(pub, msg + b"!", sig) is False
+    assert moybyte.ed25519_verify(pub, msg[:1], sig) is False
+    assert moybyte.ed25519_verify(H(V.ED25519[1][1]), msg, sig) is False
+    for at in (0, 31, 32, 63):
+        changed = bytearray(sig)
+        changed[at] ^= 1
+        assert moybyte.ed25519_verify(pub, msg, bytes(changed)) is False, at
+    assert moybyte.ed25519_verify(bytes(32), msg, sig) is False, "a key that does not decode"
+    mine = moybyte.random(32)
+    said = moybyte.ed25519_sign(mine, "a mesh packet")
+    assert moybyte.ed25519_verify(moybyte.ed25519_public(mine), b"a mesh packet", said)
+
+
 def test_python_s_seal_opens_under_its_key_alone():
     key = moybyte.random(32)
     sealed = moybyte.aes_gcm_seal(key, b"a mesh packet")
@@ -62,6 +84,9 @@ def test_python_s_seal_opens_under_its_key_alone():
     lambda: moybyte.aes_gcm_open(bytes(33), bytes(40)),
     lambda: moybyte.x25519(bytes(31)), lambda: moybyte.x25519(bytes(32), bytes(31)),
     lambda: moybyte.x25519(H(V.X25519_ALICE), bytes(32)),
+    lambda: moybyte.ed25519_public(bytes(31)), lambda: moybyte.ed25519_sign(bytes(33), b"x"),
+    lambda: moybyte.ed25519_verify(bytes(31), b"x", bytes(64)),
+    lambda: moybyte.ed25519_verify(bytes(32), b"x", bytes(63)),
 ])
 def test_python_s_length_mistakes_raise_value_error(call):
     with pytest.raises(ValueError):
@@ -94,6 +119,12 @@ function _init()
   BADKEY = err(moybyte.aes_gcm_seal, "short", "x")
   BADN = err(moybyte.random, 5000)
   SMALL = err(moybyte.x25519, unhex("@ALICE@"), string.rep("\\0", 32))
+  local sk, msg = unhex("@ED_SK@"), unhex("@ED_MSG@")
+  EDPUB = hex(moybyte.ed25519_public(sk))
+  EDSIG = hex(moybyte.ed25519_sign(sk, msg))
+  EDOK = tostring(moybyte.ed25519_verify(moybyte.ed25519_public(sk), msg, unhex(EDSIG)))
+  EDBAD = tostring(moybyte.ed25519_verify(moybyte.ed25519_public(sk), msg .. "!", unhex(EDSIG)))
+  EDLEN = err(moybyte.ed25519_verify, sk, msg, "short")
   LOG = type(moybyte.log)
 end
 function _draw() cls(0) end
@@ -117,7 +148,8 @@ def test_a_lua_app_s_moybyte_table_answers_the_known_answers(tmp_path):
     no permission; a forged seal is nil, a length refused an error."""
     key, sealed = V.GCM[0]
     src = (LUA.replace("@KEY@", key).replace("@SEALED@", V.GCM_NONCE + sealed)
-           .replace("@ALICE@", V.X25519_ALICE).replace("@BOB_PUB@", V.X25519_BOB_PUB))
+           .replace("@ALICE@", V.X25519_ALICE).replace("@BOB_PUB@", V.X25519_BOB_PUB)
+           .replace("@ED_SK@", V.ED25519[3][0]).replace("@ED_MSG@", V.ED25519[3][2]))
     _write_lua_app(tmp_path / "carts", "Lua Crypto", src)
     ws = build_ws(tmp_path)
     assert select_on_home(ws, "Lua Crypto") is not None
@@ -136,6 +168,9 @@ def test_a_lua_app_s_moybyte_table_answers_the_known_answers(tmp_path):
     assert g("BADKEY") == "a length the call refuses"
     assert g("BADN") == "a length the call refuses"
     assert g("SMALL") == "a peer key of small order"
+    assert (g("EDPUB"), g("EDSIG")) == (V.ED25519[3][1], V.ED25519[3][3])
+    assert (g("EDOK"), g("EDBAD")) == ("true", "false")
+    assert g("EDLEN") == "a length the call refuses"
     assert g("LOG") == "function", "the prelude kept its own names"
 
 
@@ -151,7 +186,8 @@ def _binding_or_skip():
 
 def test_a_compiled_app_s_imports_answer_the_known_answers(tmp_path):
     """Crypto Wasm, a C app with no permission, calls each row through its
-    moybyte.app imports: the answers, and FULL, BAD and FORGED negated."""
+    moybyte.app imports: the answers, RFC 8032's TEST 3 signed and checked,
+    and FULL, BAD and FORGED negated."""
     import shutil
     from runtime import host_app
     from runtime import moy_log as L
@@ -184,6 +220,9 @@ def test_a_compiled_app_s_imports_answer_the_known_answers(tmp_path):
         "aes_gcm_seal 35", "aes_gcm_seal.opened " + binascii.hexlify(b"moybyte").decode(),
         "x25519.public " + V.X25519_ALICE_PUB, "x25519.shared " + V.X25519_SHARED,
         "x25519.small -7",
+        "ed25519.public " + V.ED25519[2][1], "ed25519.sign " + V.ED25519[2][3],
+        "ed25519.verify 1", "ed25519.verify.changed 0", "ed25519.verify.sig -7",
+        "ed25519.sign.short -2",
     ], lines
 
 

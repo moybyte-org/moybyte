@@ -11,10 +11,11 @@ SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_http.c $(MOY_NET_DIR)/moy_sync.c $(MOY_N
 # The sign-in's crypto over the vendored mbedTLS (mbedtls/README.md): the
 # browser's client end (moy_seal_web.c) on every port, the board's end with
 # the webhost; and the crypto rows' body (moy_crypto.c), which native/moy_app's
-# door calls.
+# door calls, its Ed25519 the vendored Monocypher's (monocypher/README.md).
 SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_seal.c $(MOY_NET_DIR)/moy_seal_web.c $(MOY_NET_DIR)/moy_crypto.c \
-    $(wildcard $(MOY_NET_DIR)/mbedtls/library/*.c)
-CFLAGS_USERMOD += -I$(MOY_NET_DIR)/mbedtls/include -DMBEDTLS_CONFIG_FILE='"moy_seal_mbedtls.h"'
+    $(wildcard $(MOY_NET_DIR)/mbedtls/library/*.c) \
+    $(MOY_NET_DIR)/monocypher/monocypher.c $(MOY_NET_DIR)/monocypher/monocypher-ed25519.c
+CFLAGS_USERMOD += -I$(MOY_NET_DIR)/mbedtls/include -I$(MOY_NET_DIR)/monocypher -DMBEDTLS_CONFIG_FILE='"moy_seal_mbedtls.h"'
 ifeq ($(MOY_NET_SERVE),0)
 CFLAGS_USERMOD += -DMOY_NET_SERVE=0
 else

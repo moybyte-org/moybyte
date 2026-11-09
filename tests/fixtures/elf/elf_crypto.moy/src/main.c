@@ -2,9 +2,11 @@
 // printed as its first 8 bytes in hex (a line the terminal does not wrap) or
 // its length, or with its errno where it fails: FIPS 180-2's
 // "abc", RFC 4231's case 2, the GCM spec's test case 3 opened (the nonce
-// first, no AAD), a seal opened, RFC 7748 section 6.1's keys; then a buffer
-// too short (ERANGE), a length refused (EINVAL), a changed byte (EBADMSG) and
-// a peer key of small order (EINVAL). tests/fixtures/wasm/wasi_crypto.moy
+// first, no AAD), a seal opened, RFC 7748 section 6.1's keys, RFC 8032
+// section 7.1's Ed25519 TEST 3 (signed, checked, then a changed message and
+// another key answering 0); then a buffer too short (ERANGE), a length
+// refused (EINVAL), a changed byte (EBADMSG) and a peer key of small order
+// (EINVAL). tests/fixtures/wasm/wasi_crypto.moy
 // builds this same file for the WASI tier; tests/crypto_vectors.py holds the
 // lines both print.
 #include <errno.h>
@@ -80,5 +82,20 @@ int main(void) {
     memset(b, 0, sizeof b);
     said("x25519.small", moy_x25519(a, 32, b, 32, buf, sizeof buf), NULL);
     said("x25519.secret", moy_x25519(a, 31, NULL, 0, buf, sizeof buf), NULL);
+    static uint8_t sk[32], pk[32], sig[64], msg[2];
+    unhex("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7", sk);
+    unhex("6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac"
+          "18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a", sig);
+    unhex("af82", msg);
+    said("ed25519.public", moy_ed25519_public(sk, 32, pk, sizeof pk), pk);
+    r = moy_ed25519_sign(sk, 32, msg, 2, buf, sizeof buf);
+    said("ed25519.sign", r, buf);
+    said("ed25519.sign.same", r == 64 && memcmp(buf, sig, 64) == 0, NULL);
+    said("ed25519.verify", moy_ed25519_verify(pk, 32, msg, 2, sig, 64), NULL);
+    said("ed25519.verify.changed", moy_ed25519_verify(pk, 32, msg, 1, sig, 64), NULL);
+    said("ed25519.verify.key", moy_ed25519_verify(a, 32, msg, 2, sig, 64), NULL);
+    said("ed25519.verify.sig", moy_ed25519_verify(pk, 32, msg, 2, sig, 63), NULL);
+    said("ed25519.sign.short", moy_ed25519_sign(sk, 32, msg, 2, buf, 63), NULL);
+    said("ed25519.secret", moy_ed25519_public(sk, 31, pk, sizeof pk), NULL);
     return 0;
 }

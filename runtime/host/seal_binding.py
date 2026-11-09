@@ -7,7 +7,9 @@ Its headers keep their folder (`mbedtls/aes.h`), so it is a static archive of
 its own, as the shell's is (runtime/host/moy_sh.py), which the one library
 (runtime/host/host_native.py) links whole. Everything else of the sign-in
 (moy_webauth.c, moy_seal_web.c) includes moy_seal.h alone and compiles in
-moy_net's part.
+moy_net's part. The rows' Ed25519 is the vendored Monocypher's
+(native/moy_net/monocypher/README.md), on every tier, compiled into the same
+archive.
 """
 
 from __future__ import annotations
@@ -25,17 +27,19 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 
 NET = os.path.join(native_build.ROOT, "native", "moy_net")
 MBEDTLS = os.path.join(NET, "mbedtls")
+MONOCYPHER = os.path.join(NET, "monocypher")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host")
 FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w", "-I", NET, "-I", os.path.join(MBEDTLS, "include"),
-         "-I", os.path.join(MBEDTLS, "library"),
+         "-I", os.path.join(MBEDTLS, "library"), "-I", MONOCYPHER,
          "-DMBEDTLS_CONFIG_FILE=\"moy_seal_mbedtls.h\""]
 
 
 def sources():
     """The translation units: moy_seal.c, moy_crypto.c (the crypto rows'
-    body, native/moy_net/moy_crypto.h) and the vendored library."""
+    body, native/moy_net/moy_crypto.h), the vendored mbedTLS and Monocypher."""
     return [os.path.join(NET, "moy_seal.c"), os.path.join(NET, "moy_crypto.c")] + sorted(
-        glob.glob(os.path.join(MBEDTLS, "library", "*.c")))
+        glob.glob(os.path.join(MBEDTLS, "library", "*.c"))) + sorted(
+        glob.glob(os.path.join(MONOCYPHER, "*.c")))
 
 
 def archive(cflags=(), verbose=False):
@@ -46,6 +50,7 @@ def archive(cflags=(), verbose=False):
     flags = FLAGS + list(cflags)
     h = hashlib.sha256(" ".join(flags).encode())
     paths = sources() + sorted(glob.glob(os.path.join(MBEDTLS, "**", "*.h"), recursive=True))
+    paths += sorted(glob.glob(os.path.join(MONOCYPHER, "*.h")))
     paths += [os.path.join(NET, "moy_seal.h"), os.path.join(NET, "moy_crypto.h"),
               os.path.join(NET, "moy_seal_mbedtls.h")]
     for path in paths:

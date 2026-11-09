@@ -106,6 +106,9 @@ static const wild_row_t WILD_ROWS[] = {
     { 107, "moy_dev_xfer", 5, { A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { -1, 2, -1, 4, -1 } },
     { 108, "moy_dev_set", 2, { A_VAL, A_STR }, { -1, -1 } },
     { 109, "moy_dev_get", 2, { A_VAL, A_STR }, { -1, -1 } },
+    { 110, "moy_ed25519_public", 4, { A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1 } },
+    { 111, "moy_ed25519_sign", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
+    { 112, "moy_ed25519_verify", 6, { A_BUF, A_VAL, A_BUF, A_VAL, A_BUF, A_VAL }, { 1, -1, 3, -1, 5, -1 } },
 };
 
 #define WILD_NROWS (sizeof WILD_ROWS / sizeof WILD_ROWS[0])

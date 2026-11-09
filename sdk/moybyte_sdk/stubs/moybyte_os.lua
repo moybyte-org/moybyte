@@ -106,3 +106,9 @@ function moybyte.aes_gcm_seal(...) end
 function moybyte.aes_gcm_open(...) end
 --- moybyte.x25519(secret: bytes, peer: bytes): the row moybyte.x25519
 function moybyte.x25519(...) end
+--- moybyte.ed25519_public(secret: bytes): the row moybyte.ed25519_public
+function moybyte.ed25519_public(...) end
+--- moybyte.ed25519_sign(secret: bytes, msg: bytes): the row moybyte.ed25519_sign
+function moybyte.ed25519_sign(...) end
+--- moybyte.ed25519_verify(pub: bytes, msg: bytes, sig: bytes): the row moybyte.ed25519_verify
+function moybyte.ed25519_verify(...) end

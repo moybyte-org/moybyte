@@ -187,5 +187,8 @@ int32_t moy_os_moy_dev_write(int32_t h, const void *data, size_t data_len);
 int32_t moy_os_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap);
 int32_t moy_os_moy_dev_set(int32_t h, const char *cfg);
 int32_t moy_os_moy_dev_get(int32_t h, const char *what);
+int32_t moy_os_moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap);
+int32_t moy_os_moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap);
+int32_t moy_os_moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len);
 
 #endif // MOY_OS_ROWS_H

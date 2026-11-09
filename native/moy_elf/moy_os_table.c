@@ -336,6 +336,30 @@ int32_t moy_os_moy_dev_get(int32_t h, const char *what) {
     return moy_os_call(192u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.dev_get
 }
 
+int32_t moy_os_moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap) {
+    const moy_os_arg_t a[1] = {
+        { secret, secret_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(193u, MOY_OS_SEQ, a, 1, pub, pub_cap);   // moybyte.ed25519_public
+}
+
+int32_t moy_os_moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap) {
+    const moy_os_arg_t a[2] = {
+        { secret, secret_len, 0, MOY_OS_ARG_BYTES },
+        { msg, msg_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(194u, MOY_OS_SEQ, a, 2, sig, sig_cap);   // moybyte.ed25519_sign
+}
+
+int32_t moy_os_moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len) {
+    const moy_os_arg_t a[3] = {
+        { pub, pub_len, 0, MOY_OS_ARG_BYTES },
+        { msg, msg_len, 0, MOY_OS_ARG_BYTES },
+        { sig, sig_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(195u, MOY_OS_SEQ, a, 3, NULL, 0u);   // moybyte.ed25519_verify
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -469,6 +493,9 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_dev_xfer,
         (void *)moy_os_moy_dev_set,
         (void *)moy_os_moy_dev_get,
+        (void *)moy_os_moy_ed25519_public,
+        (void *)moy_os_moy_ed25519_sign,
+        (void *)moy_os_moy_ed25519_verify,
     },
 };
 
@@ -583,4 +610,7 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_dev_xfer",
     "moy_dev_set",
     "moy_dev_get",
+    "moy_ed25519_public",
+    "moy_ed25519_sign",
+    "moy_ed25519_verify",
 };

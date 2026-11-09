@@ -352,6 +352,18 @@ def run(sp, ap, say, mi, root):
     bob = h("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb")
     say("x25519", x(ap.x25519(alice)), x(ap.x25519(bob, None)),
         x(ap.x25519(alice, ap.x25519(bob))), ap.x25519(bob, ap.x25519(alice)) == ap.x25519(alice, ap.x25519(bob)))
+    # RFC 8032 section 7.1's TEST 2 and TEST SHA(abc): the public key, the
+    # signature, the check; a changed byte, another key; the lengths refused
+    for sk, m in (("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb", "72"),
+                  ("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42",
+                   "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
+                   "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f")):
+        sk, m = h(sk), h(m)
+        pk, sig = ap.ed25519_public(sk), ap.ed25519_sign(sk, m)
+        say("ed25519", x(pk), x(sig), ap.ed25519_verify(pk, m, sig),
+            ap.ed25519_verify(pk, m + b"!", sig), ap.ed25519_verify(ap.ed25519_public(alice), m, sig),
+            ap.ed25519_sign(bytearray(sk), m) == sig)
+    say("ed25519 empty", x(ap.ed25519_sign(alice, b"")), x(ap.ed25519_sign(alice, "moybyte")))
     r = ap.random(16)
     say("random", len(r), len(ap.random(0)), len(ap.random(4096)), r != ap.random(16))
     for what, fn, args in (("random 4097", ap.random, (4097,)), ("random -1", ap.random, (-1,)),
@@ -359,7 +371,11 @@ def run(sp, ap, say, mi, root):
                            ("open key", ap.aes_gcm_open, (b"", c3)),
                            ("x25519 secret", ap.x25519, (b"x",)),
                            ("x25519 peer", ap.x25519, (alice, b"y")),
-                           ("x25519 small", ap.x25519, (alice, bytes(32)))):
+                           ("x25519 small", ap.x25519, (alice, bytes(32))),
+                           ("ed25519 secret", ap.ed25519_public, (b"x",)),
+                           ("ed25519 sign secret", ap.ed25519_sign, (bytes(33), b"")),
+                           ("ed25519 pub", ap.ed25519_verify, (bytes(31), b"", bytes(64))),
+                           ("ed25519 sig", ap.ed25519_verify, (alice, b"", bytes(63)))):
         try:
             fn(*args)
             say(what, "answered")

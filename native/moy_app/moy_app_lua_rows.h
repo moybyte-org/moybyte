@@ -42,6 +42,9 @@
     X(MOY_ROLE_MOYBYTE, "moybyte", "aes_gcm_seal", l_moybyte_aes_gcm_seal, MOY_T_MOYBYTE_AES_GCM_SEAL, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "aes_gcm_open", l_moybyte_aes_gcm_open, MOY_T_MOYBYTE_AES_GCM_OPEN, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "x25519", l_moybyte_x25519, MOY_T_MOYBYTE_X25519, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_public", l_moybyte_ed25519_public, MOY_T_MOYBYTE_ED25519_PUBLIC, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_sign", l_moybyte_ed25519_sign, MOY_T_MOYBYTE_ED25519_SIGN, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_verify", l_moybyte_ed25519_verify, MOY_T_MOYBYTE_ED25519_VERIFY, 1) \
 
 #define MOY_APP_LUA_CALLS(X) \
     X("notify") \

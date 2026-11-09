@@ -50,7 +50,8 @@ enum {
     MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
     MOY_ROW_UI_HELD_ALL, MOY_ROW_MOYBYTE_RANDOM, MOY_ROW_MOYBYTE_SHA256,
     MOY_ROW_MOYBYTE_HMAC_SHA256, MOY_ROW_MOYBYTE_AES_GCM_SEAL, MOY_ROW_MOYBYTE_AES_GCM_OPEN,
-    MOY_ROW_MOYBYTE_X25519, MOY_ROW_N,
+    MOY_ROW_MOYBYTE_X25519, MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
+    MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
     "damage.all", "damage.again", "surface.canvas", "surface.size", "surface.font_scale", \
@@ -73,7 +74,8 @@ enum {
     "ui.table_part", "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", \
     "ui.held", "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last", "ui.held_all", \
     "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256", "moybyte.aes_gcm_seal", \
-    "moybyte.aes_gcm_open", "moybyte.x25519", \
+    "moybyte.aes_gcm_open", "moybyte.x25519", "moybyte.ed25519_public", \
+    "moybyte.ed25519_sign", "moybyte.ed25519_verify", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -127,9 +129,10 @@ enum {
     MOY_T_MOYBYTE_AES_GCM_SEAL, MOY_T_MOYBYTE_AES_GCM_OPEN, MOY_T_MOYBYTE_X25519,
     MOY_T_MOYBYTE_DEV_OPEN, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_READ,
     MOY_T_MOYBYTE_DEV_WRITE, MOY_T_MOYBYTE_DEV_XFER, MOY_T_MOYBYTE_DEV_SET,
-    MOY_T_MOYBYTE_DEV_GET,
+    MOY_T_MOYBYTE_DEV_GET, MOY_T_MOYBYTE_ED25519_PUBLIC, MOY_T_MOYBYTE_ED25519_SIGN,
+    MOY_T_MOYBYTE_ED25519_VERIFY,
 };
-#define MOY_APP_TABLE_N 193u
+#define MOY_APP_TABLE_N 196u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -326,6 +329,9 @@ enum {
     { "moybyte.dev_xfer", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.dev_set", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.dev_get", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.ed25519_public", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_PUBLIC }, \
+    { "moybyte.ed25519_sign", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_SIGN }, \
+    { "moybyte.ed25519_verify", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_VERIFY }, \
 }
 
 // The permission each role is granted by: a role absent here is never

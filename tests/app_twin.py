@@ -56,7 +56,8 @@ _ROWS = ("damage.all", "damage.again",
          "ui.held_all",
          # the crypto rows: native/moy_net/moy_crypto.h's, counted by nothing here
          "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256",
-         "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519")
+         "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519",
+         "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",
@@ -159,6 +160,36 @@ def x25519(secret, peer=None):
         return k.exchange(cx.X25519PublicKey.from_public_bytes(_bytes(peer)))
     except ValueError:
         raise ValueError("a peer key of small order")
+
+
+def _ed25519_key(secret):
+    from cryptography.hazmat.primitives.asymmetric import ed25519 as ced
+    secret = _bytes(secret)
+    if len(secret) != 32:
+        raise ValueError("a length the call refuses")
+    return ced.Ed25519PrivateKey.from_private_bytes(secret)
+
+
+def ed25519_public(secret):
+    from cryptography.hazmat.primitives import serialization as ser
+    return _ed25519_key(secret).public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw)
+
+
+def ed25519_sign(secret, msg):
+    return _ed25519_key(secret).sign(_bytes(msg))
+
+
+def ed25519_verify(pub, msg, sig):
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric import ed25519 as ced
+    pub, sig = _bytes(pub), _bytes(sig)
+    if len(pub) != 32 or len(sig) != 64:
+        raise ValueError("a length the call refuses")
+    try:
+        ced.Ed25519PublicKey.from_public_bytes(pub).verify(sig, _bytes(msg))
+    except (InvalidSignature, ValueError):
+        return False
+    return True
 
 
 def tokens():

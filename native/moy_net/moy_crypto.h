@@ -1,12 +1,14 @@
 // moy_crypto: the crypto an app calls (native/os_calls.json's rows
-// moybyte.random, sha256, hmac_sha256, aes_gcm_seal, aes_gcm_open and x25519,
-// docs/app_api_v1.md section 10), one body every tier reaches: a compiled
+// moybyte.random, sha256, hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519,
+// ed25519_public, ed25519_sign and ed25519_verify, docs/app_api_v1.md section
+// 10), one body every tier reaches: a compiled
 // app's and a native or WASI program's through the app ABI's door
 // (native/moy_app), a Lua run's through its role names, a Python program's
 // through the module moy_app. A board compiles it against the ESP-IDF's
 // mbedTLS (AES and SHA in hardware), the host's library and the browser's
 // wasm against the vendored copy of the same release (mbedtls/README.md),
-// beside moy_seal.c, whose random source it shares.
+// beside moy_seal.c, whose random source it shares. Ed25519 is the vendored
+// Monocypher's on every tier (monocypher/README.md): mbedTLS has no EdDSA.
 //
 // Pure computation over the caller's buffers: nothing is kept, no key leaves
 // but into the buffer the caller handed, and every call answers the length
@@ -29,6 +31,14 @@
 //                (the secret's public key): 32 bytes. A peer key of small
 //                order answers POINT; an image built without the curve
 //                (MBEDTLS_ECP_DP_CURVE25519_ENABLED) ABSENT.
+//   ed25519_public  RFC 8032's Ed25519 public key of a 32-byte secret (the
+//                seed RFC 8032 section 5.1.5 hashes): 32 bytes.
+//   ed25519_sign the secret's Ed25519 signature of a message of any length
+//                (deterministic, section 5.1.6): 64 bytes.
+//   ed25519_verify  1 where the 64-byte signature is the 32-byte public
+//                key's of the message, else 0 (a changed byte, another key,
+//                a key or a signature that does not decode); a length
+//                refused is BAD.
 
 #ifndef MOY_CRYPTO_H
 #define MOY_CRYPTO_H
@@ -41,6 +51,7 @@
 #define MOY_CRYPTO_TAG 16
 #define MOY_CRYPTO_SEAL_OVER (MOY_CRYPTO_NONCE + MOY_CRYPTO_TAG)
 #define MOY_CRYPTO_KEY25519 32
+#define MOY_CRYPTO_SIG25519 64
 #define MOY_CRYPTO_RANDOM_MAX 4096
 
 enum {
@@ -62,5 +73,10 @@ int32_t moy_crypto_aes_gcm_open(const void *key, size_t kn, const void *p, size_
                                 void *out, size_t cap);
 int32_t moy_crypto_x25519(const void *secret, size_t sn, const void *peer, size_t pn,
                           void *out, size_t cap);
+int32_t moy_crypto_ed25519_public(const void *secret, size_t sn, void *out, size_t cap);
+int32_t moy_crypto_ed25519_sign(const void *secret, size_t sn, const void *p, size_t n,
+                                void *out, size_t cap);
+int32_t moy_crypto_ed25519_verify(const void *pub, size_t pn, const void *p, size_t n,
+                                  const void *sig, size_t gn);
 
 #endif // MOY_CRYPTO_H

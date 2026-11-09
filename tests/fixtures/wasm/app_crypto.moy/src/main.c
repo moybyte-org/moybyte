@@ -5,7 +5,10 @@
 // length, or the app ABI's code negated where it fails (FULL 2, BAD 7,
 // FORGED 10): FIPS 180-2's "abc", RFC 4231's case 2, the GCM spec's test
 // case 3 opened and changed, a seal opened, RFC 7748 section 6.1's keys, a
-// peer key of small order. tests/test_crypto_rows.py reads the lines.
+// peer key of small order, RFC 8032 section 7.1's Ed25519 TEST 3 (its
+// public key and signature, checked, then a changed message answering 0, a
+// short signature BAD, a short buffer FULL). tests/test_crypto_rows.py reads
+// the lines.
 
 #include <stdint.h>
 
@@ -26,6 +29,12 @@ int32_t moybyte_aes_gcm_open(const void *key, uint32_t kn, const void *sealed, u
                              uint8_t *plain, uint32_t cap) APP(moybyte_aes_gcm_open);
 int32_t moybyte_x25519(const void *secret, uint32_t sn, const void *peer, uint32_t pn,
                        uint8_t *shared, uint32_t cap) APP(moybyte_x25519);
+int32_t moybyte_ed25519_public(const void *secret, uint32_t sn, uint8_t *pub, uint32_t cap)
+    APP(moybyte_ed25519_public);
+int32_t moybyte_ed25519_sign(const void *secret, uint32_t sn, const void *msg, uint32_t n,
+                             uint8_t *sig, uint32_t cap) APP(moybyte_ed25519_sign);
+int32_t moybyte_ed25519_verify(const void *pub, uint32_t pn, const void *msg, uint32_t n,
+                               const void *sig, uint32_t gn) APP(moybyte_ed25519_verify);
 int32_t moybyte_log(int32_t level, const char *text, uint32_t text_n) APP(moybyte_log);
 void cls(int32_t c) MOY(cls);
 
@@ -87,7 +96,7 @@ static void said(const char *what, int32_t r, const uint8_t *buf) {
     at = 0;
 }
 
-static uint8_t buf[128], key[32], sealed[128], a[32], b[32];
+static uint8_t buf[128], key[32], sealed[128], a[32], b[32], sig[64], msg[2];
 
 EXPORT(_init) void init(void) {
     said("random", moybyte_random(16, buf, sizeof buf), 0);
@@ -117,6 +126,14 @@ EXPORT(_init) void init(void) {
         b[i] = 0;
     }
     said("x25519.small", moybyte_x25519(a, 32, b, 32, buf, sizeof buf), 0);
+    unhex("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7", a);
+    unhex("af82", msg);
+    said("ed25519.public", moybyte_ed25519_public(a, 32, b, sizeof b), b);
+    said("ed25519.sign", moybyte_ed25519_sign(a, 32, msg, 2, sig, sizeof sig), sig);
+    said("ed25519.verify", moybyte_ed25519_verify(b, 32, msg, 2, sig, 64), 0);
+    said("ed25519.verify.changed", moybyte_ed25519_verify(b, 32, msg, 1, sig, 64), 0);
+    said("ed25519.verify.sig", moybyte_ed25519_verify(b, 32, msg, 2, sig, 63), 0);
+    said("ed25519.sign.short", moybyte_ed25519_sign(a, 32, msg, 2, buf, 63), 0);
 }
 
 EXPORT(_update) void update(float dt) {

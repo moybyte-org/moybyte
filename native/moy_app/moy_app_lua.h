@@ -60,7 +60,8 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
                          moy_app_lua_hop_fn hop);
 
 // The crypto rows (native/moy_net/moy_crypto.h: moybyte.random, sha256,
-// hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519) put into `L`'s global
+// hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519, ed25519_public,
+// ed25519_sign, ed25519_verify) put into `L`'s global
 // `moybyte` table, made where it has none: they need no grant, so a Lua
 // service with none holds them too (native/moycore/moycore_svc.c). 1.
 int moy_app_lua_open_crypto(lua_State *L);

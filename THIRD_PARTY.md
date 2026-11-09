@@ -773,10 +773,12 @@ by §2.4, not by this table.
 | Emscripten / emsdk | <https://github.com/emscripten-core/emsdk> | MIT (with NCSA for legacy components) |
 | Lua 5.4.7 | vendored, §2.1 | MIT |
 | mbedTLS 3.6.4, its crypto subset | vendored, §2.8 | Apache-2.0 |
+| Monocypher 4.0.3, its core and Ed25519 | vendored, §2.9 | CC0-1.0 OR BSD-2-Clause |
 
 The published `micropython.wasm` / `micropython.mjs` bundle therefore contains
-MicroPython, Emscripten runtime support and Lua — all MIT — and mbedTLS's
-crypto under Apache-2.0, and any page hosting them should carry those notices.
+MicroPython, Emscripten runtime support and Lua — all MIT — mbedTLS's
+crypto under Apache-2.0 and Monocypher under CC0-1.0 (or BSD-2-Clause), and
+any page hosting them should carry those notices.
 
 ### 5.5 Guition JC3248W535, ESP32-S3 (`firmware/guition_jc3248w535/build.sh`)
 

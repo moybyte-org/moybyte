@@ -827,11 +827,43 @@ static int l_moybyte_x25519(lua_State *L) {
     return crypto_answer(L, moy_crypto_x25519(sec, sn, peer, pn, o, MOY_CRYPTO_KEY25519));
 }
 
+// moybyte.ed25519_public(secret): the 32-byte secret's Ed25519 public key.
+static int l_moybyte_ed25519_public(lua_State *L) {
+    size_t sn;
+    const char *sec = crypto_arg(L, 1, &sn, 0);
+    void *o = crypto_out(L, MOY_CRYPTO_KEY25519);
+    return crypto_answer(L, moy_crypto_ed25519_public(sec, sn, o, MOY_CRYPTO_KEY25519));
+}
+
+// moybyte.ed25519_sign(secret, msg): the 64-byte signature.
+static int l_moybyte_ed25519_sign(lua_State *L) {
+    size_t sn, n;
+    const char *sec = crypto_arg(L, 1, &sn, 0), *p = crypto_arg(L, 2, &n, 0);
+    void *o = crypto_out(L, MOY_CRYPTO_SIG25519);
+    return crypto_answer(L, moy_crypto_ed25519_sign(sec, sn, p, n, o, MOY_CRYPTO_SIG25519));
+}
+
+// moybyte.ed25519_verify(pub, msg, sig): true where the signature checks, else false.
+static int l_moybyte_ed25519_verify(lua_State *L) {
+    size_t pn, n, gn;
+    const char *pub = crypto_arg(L, 1, &pn, 0), *p = crypto_arg(L, 2, &n, 0),
+               *sig = crypto_arg(L, 3, &gn, 0);
+    int32_t r = moy_crypto_ed25519_verify(pub, pn, p, n, sig, gn);
+    if (r < 0) {
+        return luaL_error(L, "a length the call refuses");
+    }
+    lua_pushboolean(L, r);
+    return 1;
+}
+
 int moy_app_lua_open_crypto(lua_State *L) {
     static const luaL_Reg fns[] = {
         { "random", l_moybyte_random }, { "sha256", l_moybyte_sha256 },
         { "hmac_sha256", l_moybyte_hmac_sha256 }, { "aes_gcm_seal", l_moybyte_aes_gcm_seal },
         { "aes_gcm_open", l_moybyte_aes_gcm_open }, { "x25519", l_moybyte_x25519 },
+        { "ed25519_public", l_moybyte_ed25519_public },
+        { "ed25519_sign", l_moybyte_ed25519_sign },
+        { "ed25519_verify", l_moybyte_ed25519_verify },
         { NULL, NULL },
     };
     if (lua_getglobal(L, "moybyte") != LUA_TTABLE) {

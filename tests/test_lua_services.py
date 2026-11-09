@@ -77,6 +77,9 @@ moybyte.after(1, function()
     local d = moybyte.sha256("abc"):sub(1, 4)
     print("sha256 " .. d:gsub(".", function(c) return string.format("%02x", c:byte()) end))
     print("random " .. #moybyte.random(8) .. " " .. type(moybyte.every))
+    local sk = moybyte.sha256("seed")
+    local sig = moybyte.ed25519_sign(sk, "msg")
+    print("ed25519 " .. #sig .. " " .. tostring(moybyte.ed25519_verify(moybyte.ed25519_public(sk), "msg", sig)))
     moybyte.exit(0)
 end)
 """
@@ -349,7 +352,7 @@ def test_a_lua_service_holds_the_crypto_rows_beside_its_own_names(desk):
     since = L.next()
     pid = S.SCHED.start(_cart(CRYPTO), ws=ws)
     _frames(drv, 40)
-    assert _texts(since, pid)[1:3] == ["sha256 ba7816bf", "random 8 function"]
+    assert _texts(since, pid)[1:4] == ["sha256 ba7816bf", "random 8 function", "ed25519 64 true"]
 
 
 def test_a_service_runs_on_through_an_app_switch(desk):
