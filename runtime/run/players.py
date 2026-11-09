@@ -7,7 +7,7 @@
 #   Peer              a console the link can hear
 #   EspNowNet         net.* over the link
 #   EspNowLink        the radio's bring-up and the link's actions
-#   open_port         a process's port: its messages, apart from the game's
+#   EspNowLink.open_port  a process's port: its messages, apart from the game's
 #   launch_cart       the guest's half: open the cart a host named
 """The unified, transport-neutral MULTIPLAYER layer (#65).
 
