@@ -108,53 +108,53 @@ static int32_t w_theme_edit_file(void *e) {
     return run(e, HOP, MOY_T_THEME_EDIT_FILE, NULL, 0, NULL, 0);
 }
 static int32_t w_files_readable(void *e) {
-    return run(e, HOP, MOY_T_FILES_READABLE, NULL, 0, NULL, 0);
+    return run(e, HERE, MOY_T_FILES_READABLE, NULL, 0, NULL, 0);
 }
 static int32_t w_files_ready(void *e) {
-    return run(e, HOP, MOY_T_FILES_READY, NULL, 0, NULL, 0);
+    return run(e, HERE, MOY_T_FILES_READY, NULL, 0, NULL, 0);
 }
 static int32_t w_files_list(void *e, const uint8_t *kind, uint32_t kind_n, uint8_t *names,
                             uint32_t names_cap) {
     span_t f[1] = { { kind, kind_n } };
-    return run(e, HOP, MOY_T_FILES_LIST, f, 1, names, names_cap);
+    return run(e, HERE, MOY_T_FILES_LIST, f, 1, names, names_cap);
 }
 static int32_t w_files_count(void *e, const uint8_t *kind, uint32_t kind_n) {
     span_t f[1] = { { kind, kind_n } };
-    return run(e, HOP, MOY_T_FILES_COUNT, f, 1, NULL, 0);
+    return run(e, HERE, MOY_T_FILES_COUNT, f, 1, NULL, 0);
 }
 static int32_t w_files_load(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
                             uint32_t name_n, uint8_t *data, uint32_t data_cap) {
     span_t f[2] = { { kind, kind_n }, { name, name_n } };
-    return run(e, HOP, MOY_T_FILES_LOAD, f, 2, data, data_cap);
+    return run(e, HERE, MOY_T_FILES_LOAD, f, 2, data, data_cap);
 }
 static int32_t w_files_save(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
                             uint32_t name_n, const uint8_t *data, uint32_t data_n, uint8_t *saved,
                             uint32_t saved_cap) {
     span_t f[3] = { { kind, kind_n }, { name, name_n }, { data, data_n } };
-    return run(e, HOP, MOY_T_FILES_SAVE, f, 3, saved, saved_cap);
+    return run(e, HERE, MOY_T_FILES_SAVE, f, 3, saved, saved_cap);
 }
 static int32_t w_files_delete(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
                               uint32_t name_n, uint8_t *trashed, uint32_t trashed_cap) {
     span_t f[2] = { { kind, kind_n }, { name, name_n } };
-    return run(e, HOP, MOY_T_FILES_DELETE, f, 2, trashed, trashed_cap);
+    return run(e, HERE, MOY_T_FILES_DELETE, f, 2, trashed, trashed_cap);
 }
 static int32_t w_files_duplicate(void *e, const uint8_t *kind, uint32_t kind_n,
                                  const uint8_t *name, uint32_t name_n, uint8_t *copy,
                                  uint32_t copy_cap) {
     span_t f[2] = { { kind, kind_n }, { name, name_n } };
-    return run(e, HOP, MOY_T_FILES_DUPLICATE, f, 2, copy, copy_cap);
+    return run(e, HERE, MOY_T_FILES_DUPLICATE, f, 2, copy, copy_cap);
 }
 static int32_t w_files_rename(void *e, const uint8_t *kind, uint32_t kind_n, const uint8_t *name,
                               uint32_t name_n, const uint8_t *title, uint32_t title_n,
                               uint8_t *renamed, uint32_t renamed_cap) {
     span_t f[3] = { { kind, kind_n }, { name, name_n }, { title, title_n } };
-    return run(e, HOP, MOY_T_FILES_RENAME, f, 3, renamed, renamed_cap);
+    return run(e, HERE, MOY_T_FILES_RENAME, f, 3, renamed, renamed_cap);
 }
 static int32_t w_files_new_name(void *e, const uint8_t *kind, uint32_t kind_n,
                                 const uint8_t *title, uint32_t title_n, uint8_t *name,
                                 uint32_t name_cap) {
     span_t f[2] = { { kind, kind_n }, { title, title_n } };
-    return run(e, HOP, MOY_T_FILES_NEW_NAME, f, 2, name, name_cap);
+    return run(e, HERE, MOY_T_FILES_NEW_NAME, f, 2, name, name_cap);
 }
 static int32_t w_nav_open_app(void *e, const uint8_t *id, uint32_t id_n) {
     span_t f[1] = { { id, id_n } };
@@ -163,16 +163,16 @@ static int32_t w_nav_open_app(void *e, const uint8_t *id, uint32_t id_n) {
 static int32_t w_prefs_get(void *e, const uint8_t *key, uint32_t key_n, uint8_t *json,
                            uint32_t json_cap) {
     span_t f[1] = { { key, key_n } };
-    return run(e, HOP, MOY_T_PREFS_GET, f, 1, json, json_cap);
+    return run(e, HERE, MOY_T_PREFS_GET, f, 1, json, json_cap);
 }
 static int32_t w_prefs_set(void *e, const uint8_t *key, uint32_t key_n, const uint8_t *json,
                            uint32_t json_n) {
     span_t f[2] = { { key, key_n }, { json, json_n } };
-    return run(e, HOP, MOY_T_PREFS_SET, f, 2, NULL, 0);
+    return run(e, HERE, MOY_T_PREFS_SET, f, 2, NULL, 0);
 }
 static int32_t w_prefs_clear(void *e, const uint8_t *key, uint32_t key_n) {
     span_t f[1] = { { key, key_n } };
-    return run(e, HOP, MOY_T_PREFS_CLEAR, f, 1, NULL, 0);
+    return run(e, HERE, MOY_T_PREFS_CLEAR, f, 1, NULL, 0);
 }
 static int32_t w_clipboard_put_text(void *e, const uint8_t *text, uint32_t text_n) {
     span_t f[1] = { { text, text_n } };

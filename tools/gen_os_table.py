@@ -1375,6 +1375,14 @@ def gen_lua_h(src):
     o += ["", "#define MOY_APP_LUA_CALLS(X) \\"]
     for v in lua_calls(src):
         o.append('    X("%s") \\' % v)
+    o += ["", "// The rows a Lua name calls that run where they are called (how \"here\"),",
+          "// on a Lua service's own task too, hopped only where they answer NEEDS_VM.",
+          "#define MOY_APP_LUA_HERE(X) \\"]
+    here = []
+    for _role, _tbl, _fn, _c, row, _read in lua_names(src):
+        if row not in here and next(r for r in door_rows(src) if r["name"] == row).get("how") == "here":
+            here.append(row)
+            o.append("    X(MOY_T_%s) \\" % upper(row))
     o += ["", "#endif // MOY_APP_LUA_ROWS_H", ""]
     return "\n".join(o)
 

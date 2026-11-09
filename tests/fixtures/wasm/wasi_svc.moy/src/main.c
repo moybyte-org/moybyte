@@ -31,7 +31,9 @@
 // opened (nav_open_app, under `launch` and the front's gate), a document
 // shared and one picked; the pick reaches it as "moy_open" (handle, mime,
 // mode, name), whose item it reads, writes and reads again through its
-// handle, and a handle it was never given; a "wake" carrying ["rearm"] sets a
+// handle, and a handle it was never given; a "wake" carrying ["files", rounds] runs
+// a round of documents saved, loaded, renamed and listed and prefs set
+// (files_round); a "wake" carrying ["rearm"] sets a
 // timer 10 ms off that its own message sets again, printing "rearmed" each
 // time; a "wake" carrying ["pass", app] sends that app a "ping" of its own,
 // printing how many took it; a "wake" carrying ["edges"] opens gpio5 as an
@@ -67,6 +69,58 @@ static long now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+// The files round (a "wake" carrying ["files", rounds]): each round saves a
+// document "wasi-<i>", loads it back, renames it "wasi-r<i>" and loads that,
+// and sets the pref "wasi" to <i>; then lists the documents. Prints "files
+// <ok> <listed>" and, for a failure, the call, its answer and its errno.
+static void files_round(int rounds) {
+    static char saved[64], renamed[64], got[128], names[4096];
+    int ok = 0;
+    for (int i = 0; i < rounds; i++) {
+        char title[32], body[64], again[32], pref[16];
+        snprintf(title, sizeof title, "wasi-%d", i);
+        int b = snprintf(body, sizeof body, "wasi body %d", i);
+        snprintf(again, sizeof again, "wasi-r%d", i);
+        snprintf(pref, sizeof pref, "%d", i);
+        int n = moy_files_save("docs", title, body, (size_t)b, saved, sizeof saved - 1);
+        if (n < 0) {
+            printf("save %d errno %d\n", n, errno);
+            continue;
+        }
+        saved[n] = 0;
+        n = moy_files_load("docs", saved, got, sizeof got);
+        if (n != b || memcmp(got, body, (size_t)b) != 0) {
+            printf("load %s %d errno %d\n", saved, n, errno);
+            continue;
+        }
+        n = moy_files_rename("docs", saved, again, renamed, sizeof renamed - 1);
+        if (n < 0) {
+            printf("rename %d errno %d\n", n, errno);
+            continue;
+        }
+        renamed[n] = 0;
+        n = moy_files_load("docs", renamed, got, sizeof got);
+        if (n != b || memcmp(got, body, (size_t)b) != 0) {
+            printf("reload %s %d errno %d\n", renamed, n, errno);
+            continue;
+        }
+        if (moy_prefs_set("wasi", pref) < 0) {
+            printf("prefs errno %d\n", errno);
+            continue;
+        }
+        ok++;
+    }
+    int n = moy_files_list("docs", names, sizeof names);
+    int listed = 0;
+    for (int at = 0; n > 0 && at < n;) {
+        size_t len = strnlen(names + at, (size_t)(n - at));
+        listed += len > 6 && memcmp(names + at, "wasi_r", 6) == 0;
+        at += (int)len + 1;
+    }
+    printf("files %d %d\n", ok, listed);
+    fflush(stdout);
 }
 
 int main(void) {
@@ -166,6 +220,9 @@ int main(void) {
             int r = moy_service_running();
             printf("service_running %d errno %d\n", r, r < 0 ? errno : 0);
             fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strncmp(m.b + sizeof m.ev, "[\"files\",", 9) == 0) {
+            files_round(atoi(m.b + sizeof m.ev + 9));
         } else if (strcmp(m.ev.name, "wake") == 0 && strcmp(m.b + sizeof m.ev, "[\"dev\"]") == 0) {
             int pin = (int)moy_dev_open("gpio6", "mode=out value=1");
             printf("dev_open.gpio6 %d errno %d\n", pin > 0 ? 1 : pin, pin < 0 ? errno : 0);

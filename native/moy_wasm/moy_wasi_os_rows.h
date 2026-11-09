@@ -82,64 +82,64 @@
 #define MOY_WASI_OS_BODIES_DONE
 
 static int32_t w_os_files_readable(wasm_exec_env_t e) {
-    return os_role(e, MOY_T_FILES_READABLE, OS_HOP, NULL, 0, NULL, 0);
+    return os_role(e, MOY_T_FILES_READABLE, OS_HERE, NULL, 0, NULL, 0);
 }
 
 static int32_t w_os_files_ready(wasm_exec_env_t e) {
-    return os_role(e, MOY_T_FILES_READY, OS_HOP, NULL, 0, NULL, 0);
+    return os_role(e, MOY_T_FILES_READY, OS_HERE, NULL, 0, NULL, 0);
 }
 
 static int32_t w_os_files_list(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                uint8_t *names, uint32_t names_cap) {
     const os_arg_t a[1] = { OS_O(kind, kind_n) };
-    return os_role(e, MOY_T_FILES_LIST, OS_HOP, a, 1, names, names_cap);
+    return os_role(e, MOY_T_FILES_LIST, OS_HERE, a, 1, names, names_cap);
 }
 
 static int32_t w_os_files_count(wasm_exec_env_t e, const char *kind, uint32_t kind_n) {
     const os_arg_t a[1] = { OS_O(kind, kind_n) };
-    return os_role(e, MOY_T_FILES_COUNT, OS_HOP, a, 1, NULL, 0);
+    return os_role(e, MOY_T_FILES_COUNT, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_files_load(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                const char *name, uint32_t name_n, uint8_t *data,
                                uint32_t data_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(name, name_n) };
-    return os_role(e, MOY_T_FILES_LOAD, OS_HOP, a, 2, data, data_cap);
+    return os_role(e, MOY_T_FILES_LOAD, OS_HERE, a, 2, data, data_cap);
 }
 
 static int32_t w_os_files_save(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                const char *name, uint32_t name_n, const uint8_t *data,
                                uint32_t data_n, uint8_t *saved, uint32_t saved_cap) {
     const os_arg_t a[3] = { OS_O(kind, kind_n), OS_O(name, name_n), OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_FILES_SAVE, OS_HOP, a, 3, saved, saved_cap);
+    return os_role(e, MOY_T_FILES_SAVE, OS_HERE, a, 3, saved, saved_cap);
 }
 
 static int32_t w_os_files_delete(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                  const char *name, uint32_t name_n, uint8_t *trashed,
                                  uint32_t trashed_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(name, name_n) };
-    return os_role(e, MOY_T_FILES_DELETE, OS_HOP, a, 2, trashed, trashed_cap);
+    return os_role(e, MOY_T_FILES_DELETE, OS_HERE, a, 2, trashed, trashed_cap);
 }
 
 static int32_t w_os_files_duplicate(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                     const char *name, uint32_t name_n, uint8_t *copy,
                                     uint32_t copy_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(name, name_n) };
-    return os_role(e, MOY_T_FILES_DUPLICATE, OS_HOP, a, 2, copy, copy_cap);
+    return os_role(e, MOY_T_FILES_DUPLICATE, OS_HERE, a, 2, copy, copy_cap);
 }
 
 static int32_t w_os_files_rename(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                  const char *name, uint32_t name_n, const char *title,
                                  uint32_t title_n, uint8_t *renamed, uint32_t renamed_cap) {
     const os_arg_t a[3] = { OS_O(kind, kind_n), OS_O(name, name_n), OS_O(title, title_n) };
-    return os_role(e, MOY_T_FILES_RENAME, OS_HOP, a, 3, renamed, renamed_cap);
+    return os_role(e, MOY_T_FILES_RENAME, OS_HERE, a, 3, renamed, renamed_cap);
 }
 
 static int32_t w_os_files_new_name(wasm_exec_env_t e, const char *kind, uint32_t kind_n,
                                    const char *title, uint32_t title_n, uint8_t *name,
                                    uint32_t name_cap) {
     const os_arg_t a[2] = { OS_O(kind, kind_n), OS_O(title, title_n) };
-    return os_role(e, MOY_T_FILES_NEW_NAME, OS_HOP, a, 2, name, name_cap);
+    return os_role(e, MOY_T_FILES_NEW_NAME, OS_HERE, a, 2, name, name_cap);
 }
 
 static int32_t w_os_nav_open_app(wasm_exec_env_t e, const char *id, uint32_t id_n) {
@@ -150,18 +150,18 @@ static int32_t w_os_nav_open_app(wasm_exec_env_t e, const char *id, uint32_t id_
 static int32_t w_os_prefs_get(wasm_exec_env_t e, const char *key, uint32_t key_n, uint8_t *json,
                               uint32_t json_cap) {
     const os_arg_t a[1] = { OS_O(key, key_n) };
-    return os_role(e, MOY_T_PREFS_GET, OS_HOP, a, 1, json, json_cap);
+    return os_role(e, MOY_T_PREFS_GET, OS_HERE, a, 1, json, json_cap);
 }
 
 static int32_t w_os_prefs_set(wasm_exec_env_t e, const char *key, uint32_t key_n,
                               const char *json, uint32_t json_n) {
     const os_arg_t a[2] = { OS_O(key, key_n), OS_O(json, json_n) };
-    return os_role(e, MOY_T_PREFS_SET, OS_HOP, a, 2, NULL, 0);
+    return os_role(e, MOY_T_PREFS_SET, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_prefs_clear(wasm_exec_env_t e, const char *key, uint32_t key_n) {
     const os_arg_t a[1] = { OS_O(key, key_n) };
-    return os_role(e, MOY_T_PREFS_CLEAR, OS_HOP, a, 1, NULL, 0);
+    return os_role(e, MOY_T_PREFS_CLEAR, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_clipboard_put_text(wasm_exec_env_t e, const char *text, uint32_t text_n) {

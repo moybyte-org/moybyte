@@ -560,6 +560,121 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     moy_evq.close(peer_w)
 
 
+def test_an_elf_and_a_wasi_service_work_files_and_prefs_on_their_own_tasks_through_a_vm_stop(
+        tmp_path, elf_built, wasi_built, fresh, monkeypatch):
+    """`files.*` and `prefs.*` run on each program's own task (native/os_calls.json,
+    how "here", under the store's lock): with the VM down and nothing serving
+    the hops, an ELF and a WASI service each save, load back, rename, load
+    again and list documents and set a pref. Once the VM is back the documents
+    read back from the store, and the console's next frame saves both prefs
+    into system/settings."""
+    from runtime.carts.moy_docs import system_store_path
+    from runtime.host_app import build_workstation
+    rounds = 6
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    for built, name, perms, hears in (
+            (elf_built, "elf_svc.moy", ["full_access", "files", "prefs"], "files"),
+            (wasi_built, "wasi_svc.moy", ["files", "prefs"], "wake")):
+        shutil.copytree(built, str(carts / name))
+        man_path = carts / name / "manifest.json"
+        man = json.loads(man_path.read_text())
+        man["moybyte"]["permissions"] = perms
+        man["moybyte"]["receives"] = [hears]
+        man_path.write_text(json.dumps(man))
+    ws = build_workstation(str(carts))
+    if "elf" not in ws.runtimes or "wasm" not in ws.runtimes:
+        pytest.skip("no ELF or wasm tier on this host")
+    s = fresh
+    since = L.next()
+    elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
+    wasi = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "t.peer", "", False) == moy_evq.OK
+    assert _polled(s, lambda: all(any(t in ("listening", "started") for t in _texts(since, p))
+                                  for p in (elf, wasi)))
+    rec, door = _stop(ws, s)
+    assert moy_evq.send(peer, "elf.svc", "files", "[%d]" % rounds)[0] == 1
+    assert moy_evq.send(peer, "wasi.svc", "wake", '["files",%d]' % rounds)[0] == 1
+
+    def said(pid):
+        return [t for t in _texts(since, pid) if t.startswith("files ")]
+    t0 = time.monotonic()
+    while not (said(elf) and said(wasi)):
+        assert time.monotonic() - t0 < 20, "a files round runs with nothing serving the hops: %r" % (
+            _texts(since, elf) + _texts(since, wasi))
+        time.sleep(0.01)
+    for pid in (elf, wasi):
+        ok, listed = (int(x) for x in said(pid)[0].split()[1:])
+        assert ok == rounds and listed >= rounds, _texts(since, pid)
+    s2, _started = _back(ws, rec, door, monkeypatch)
+    bodies = {}
+    for dirpath, _dirs, names in os.walk(str(tmp_path)):
+        for n in names:
+            if n.startswith(("elf_r", "wasi_r")):
+                with open(os.path.join(dirpath, n)) as fh:
+                    bodies[n.rsplit(".", 1)[0]] = fh.read()
+    for tier in ("elf", "wasi"):
+        for i in range(rounds):
+            assert bodies.get("%s_r%d" % (tier, i)) == "%s body %d" % (tier, i), sorted(bodies)
+    ws.app_abi.files_end_all()
+    with open(system_store_path(str(carts))) as fh:
+        text = fh.read()
+    for tier in ("elf", "wasi"):
+        assert any(line.split(" = ")[0].endswith("_" + tier)
+                   and line.split(" = ")[1] == str(rounds - 1)
+                   for line in text.splitlines()), text
+    for p in (elf, wasi):
+        assert s2.stop(p) and s2.procs[p].code == 0
+    moy_evq.close(peer)
+
+
+def test_a_program_s_prefs_and_the_console_s_settings_writes_interleave_and_both_survive(
+        tmp_path, wasi_built, fresh):
+    """A WASI service sets its pref on its own task (prefs.set, how "here")
+    while the console's Python writes system/settings over and over: the
+    settings lock keeps the rows whole, the pref written off the VM's task is
+    saved by the console's next frame, and the file holds both last values."""
+    from runtime.carts.moy_docs import system_store_path
+    from runtime.host_app import build_workstation
+    rounds = 40
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    shutil.copytree(wasi_built, str(carts / "wasi_svc.moy"))
+    man_path = carts / "wasi_svc.moy" / "manifest.json"
+    man = json.loads(man_path.read_text())
+    man["moybyte"]["permissions"] = ["files", "prefs"]
+    man["moybyte"]["receives"] = ["wake"]
+    man_path.write_text(json.dumps(man))
+    ws = build_workstation(str(carts))
+    if "wasm" not in ws.runtimes:
+        pytest.skip("no wasm tier on this host")
+    s = fresh
+    since = L.next()
+    wasi = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "t.peer", "", False) == moy_evq.OK
+    assert _polled(s, lambda: "listening" in _texts(since, wasi))
+    assert moy_evq.send(peer, "wasi.svc", "wake", '["files",%d]' % rounds)[0] == 1
+    n = 0
+    t0 = time.monotonic()
+    while not any(t.startswith("files ") for t in _texts(since, wasi)):
+        assert time.monotonic() - t0 < 20, _texts(since, wasi)
+        ws.system.set("t_console", n)
+        ws.app_abi.files_end_all()
+        n += 1
+    ws.system.set("t_console", n)
+    ws.app_abi.files_end_all()
+    assert "files %d %d" % (rounds, rounds) in _texts(since, wasi), _texts(since, wasi)
+    assert n > 0
+    with open(system_store_path(str(carts))) as fh:
+        rows = dict(line.split(" = ", 1) for line in fh.read().splitlines() if " = " in line)
+    assert rows["t_console"] == str(n), rows
+    assert [v for k, v in rows.items() if k.endswith("_wasi")] == [str(rounds - 1)], rows
+    assert s.stop(wasi)
+    moy_evq.close(peer)
+
+
 # -- on the VM a board runs ---------------------------------------------------------
 
 VM_STOP = """

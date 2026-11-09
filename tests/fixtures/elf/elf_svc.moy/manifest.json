@@ -4,8 +4,10 @@
   "moybyte": {
     "type": "service",
     "permissions": [
+      "files",
       "full_access",
-      "notifications"
+      "notifications",
+      "prefs"
     ]
   }
 }

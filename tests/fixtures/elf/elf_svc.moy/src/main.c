@@ -11,7 +11,9 @@
 // that its timer's message sets again each time it answers "timed"; a "quit"
 // returns 7; a "pin" opens gpio4 as an output driven high, reads it back,
 // drives it low, reads it again and answers "pinned" with the two levels
-// (or the failing answer and its errno), closing it; a "spin" runs
+// (or the failing answer and its errno), closing it; a "files" runs a round
+// of documents saved, loaded, renamed and listed and prefs set
+// (files_round); a "spin" runs
 // on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. A thread it makes sleeps until the process's end
 // sweeps it.
@@ -43,6 +45,97 @@ static void say(const char *what, int n) {
     moy_log(MOY_LOG_INFO, b);
 }
 
+// "<a> <b>" to the log.
+static void say2(const char *a, const char *b) {
+    char line[160];
+    size_t k = strlen(a), n = strlen(b);
+    if (k + n + 2 > sizeof line) {
+        n = sizeof line - k - 2;
+    }
+    memcpy(line, a, k);
+    line[k++] = ' ';
+    memcpy(line + k, b, n);
+    line[k + n] = 0;
+    moy_log(MOY_LOG_INFO, line);
+}
+
+// `n` in decimal after `out`'s first `k` bytes; the new length.
+static size_t num(char *out, size_t k, unsigned n) {
+    char d[12];
+    int i = sizeof d;
+    do {
+        d[--i] = (char)('0' + n % 10);
+        n /= 10;
+    } while (n);
+    memcpy(out + k, d + i, sizeof d - (size_t)i);
+    return k + sizeof d - (size_t)i;
+}
+
+// The files round (a "files" carrying [rounds]): each round saves a document
+// "elf-<i>", loads it back, renames it "elf-r<i>" and loads that, and sets
+// the pref "elf" to <i>; then lists the documents. Logs "files <ok> <listed>"
+// and, for the first failure, the call and its answer.
+static void files_round(int rounds) {
+    static char saved[64], renamed[64], got[128], names[4096];
+    int ok = 0;
+    for (int i = 0; i < rounds; i++) {
+        char title[32], body[64], again[32], pref[16];
+        size_t t = num(title, 4, (unsigned)i);
+        memcpy(title, "elf-", 4);
+        title[t] = 0;
+        size_t b = num(body, 9, (unsigned)i);
+        memcpy(body, "elf body ", 9);
+        body[b] = 0;
+        size_t r = num(again, 5, (unsigned)i);
+        memcpy(again, "elf-r", 5);
+        again[r] = 0;
+        int32_t n = moy_files_save("docs", title, body, b, saved, sizeof saved - 1);
+        if (n < 0) {
+            say("save", errno);
+            continue;
+        }
+        saved[n] = 0;
+        n = moy_files_load("docs", saved, got, sizeof got);
+        if (n != (int32_t)b || memcmp(got, body, b) != 0) {
+            say("load", n);
+            continue;
+        }
+        n = moy_files_rename("docs", saved, again, renamed, sizeof renamed - 1);
+        if (n < 0) {
+            say("rename", errno);
+            continue;
+        }
+        renamed[n] = 0;
+        n = moy_files_load("docs", renamed, got, sizeof got);
+        if (n != (int32_t)b || memcmp(got, body, b) != 0) {
+            say2("reload", renamed);
+            continue;
+        }
+        pref[num(pref, 0, (unsigned)i)] = 0;
+        if (moy_prefs_set("elf", pref) < 0) {
+            say("prefs", errno);
+            continue;
+        }
+        ok++;
+    }
+    int32_t n = moy_files_list("docs", names, sizeof names);
+    int listed = 0;
+    for (int32_t at = 0; n > 0 && at < n;) {
+        size_t len = 0;
+        while (at + (int32_t)len < n && names[at + len] != 0) {
+            len++;
+        }
+        listed += len > 5 && memcmp(names + at, "elf_r", 5) == 0;
+        at += (int32_t)len + 1;
+    }
+    char line[48];
+    size_t k = num(line, 0, (unsigned)ok);
+    line[k++] = ' ';
+    k = num(line, k, (unsigned)listed);
+    line[k] = 0;
+    say2("files", line);
+}
+
 static long now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -62,7 +155,7 @@ int main(int argc, char **argv) {
     pthread_t t;
     say("start", 0);
     static const char *const hears[] = { "ping", "note", "quit", "spin", "wake", "rearm",
-                                         "pin" };
+                                         "pin", "files" };
     int rearm = 0;
     static char waker[MOY_EVQ_APP];
     for (unsigned i = 0; i < sizeof hears / sizeof hears[0]; i++) {
@@ -135,6 +228,12 @@ int main(int argc, char **argv) {
                 b[3] = (char)('0' + (errno % 10));
             }
             moy_send(m.ev.app, "pinned", b);
+        } else if (strcmp(m.ev.name, "files") == 0) {
+            int rounds = 0;
+            for (const char *d = m.b + sizeof m.ev + 1; *d >= '0' && *d <= '9'; d++) {
+                rounds = rounds * 10 + (*d - '0');
+            }
+            files_round(rounds);
         } else if (strcmp(m.ev.name, "quit") == 0) {
             return 7;
         } else if (strcmp(m.ev.name, "spin") == 0) {

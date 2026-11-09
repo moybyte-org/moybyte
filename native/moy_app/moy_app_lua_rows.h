@@ -57,4 +57,20 @@
     X("service_stop") \
     X("service_running") \
 
+// The rows a Lua name calls that run where they are called (how "here"),
+// on a Lua service's own task too, hopped only where they answer NEEDS_VM.
+#define MOY_APP_LUA_HERE(X) \
+    X(MOY_T_FILES_READY) \
+    X(MOY_T_FILES_LIST) \
+    X(MOY_T_FILES_LOAD) \
+    X(MOY_T_FILES_SAVE) \
+    X(MOY_T_FILES_DELETE) \
+    X(MOY_T_FILES_DUPLICATE) \
+    X(MOY_T_FILES_RENAME) \
+    X(MOY_T_FILES_NEW_NAME) \
+    X(MOY_T_PREFS_GET) \
+    X(MOY_T_PREFS_SET) \
+    X(MOY_T_PREFS_CLEAR) \
+    X(MOY_T_CLIPBOARD_PUT_TEXT) \
+
 #endif // MOY_APP_LUA_ROWS_H

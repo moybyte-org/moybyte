@@ -135,10 +135,13 @@ costs are #227's.
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and
   the console calls pass the front's gate and `notifications` as the
-  process. A service has no session: its rows hop to the VM's task on the
-  VM's queue (`native/moy_kernel/moy_vmq.h`), its thread waiting until the
-  scheduler's poll runs them, and answer EAGAIN only when that queue is
-  full. The toolkit's `ui` rows are deferred for this tier.
+  process. A service has no session: a row over the kernel's own locked
+  state (`how` "here": its messages, timers and log, the store's `files`
+  and `prefs` rows, the clipboard's write, the device handles and
+  `service_running`) runs on its own thread, and
+  any other hops to the VM's task on the VM's queue
+  (`native/moy_kernel/moy_vmq.h`), its thread waiting until the scheduler's
+  poll runs it, and answers EAGAIN only when that queue is full. The toolkit's `ui` rows are deferred for this tier.
 - **A permission's tiers are derived.** The permission table's tiers column
   is the set of tiers that serve the calls the permission hands an app (the
   rows of its role, the rows naming it, and moy-spec's tiers where its verbs
@@ -228,7 +231,9 @@ state also opens the role names its app's run would (owner, 2026-11-08,
 permissions, owned by its pid, and hands its run to the state, which opens
 `files`, `io`, `prefs`, `set_theme`, `open_app`, `clipboard` and the
 theme's reads through the one binding, `moy_app_lua.c`, as a Lua app's
-does. A role row runs on the VM's task: on a
+does. A row of `how` "here" (the store's `files` and `prefs` rows, the
+clipboard's write) runs on the service's own task; any other role row runs
+on the VM's task: on a
 P4 the binding's HOP is a hop on the VM's queue and the task waits until the
 VM's task runs it at the poll (`moy_vmq_serve`), its wait not counted
 against its budget; a stepped service is on the VM's task and calls it in
@@ -298,9 +303,9 @@ service posts on the VM's queue, their natives generated from the source;
 `log`; the files, `nav_open_app`, prefs, clipboard, device-handle (`dev_*`)
 and item rows, `service_running` and `share`, each its role table row for
 the grant the program's start made, run as a C program's is: hopped to the
-VM's task, or, for a row `how` "here" (the clipboard's write, the device
-handles, `service_running`), run on the program's own task, hopped only
-where the kernel's half answers NEEDS_VM (`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
+VM's task, or, for a row `how` "here" (the files, prefs and clipboard-write
+rows, the device handles, `service_running`), run on the program's own task,
+hopped only where the kernel's half answers NEEDS_VM (`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
 row's types give, and the adapter's natives and the toolkit's are generated
@@ -315,7 +320,10 @@ row's `how` says. The console calls are imported too (`moybyte_notify`,
 (`runtime/shell/shell_servers.py`, ConsoleCalls), under the permission it
 names there; `send`, `log` and the wakes `every`, `after` and `cancel` are
 the kernel's, C rows run on the app's own task as its process (`how`
-"here", `native/moy_app/moy_app.c`), so they need no VM. **A compiled app
+"here", `native/moy_app/moy_app.c`), so they need no VM, and so are the
+store's `files` and `prefs` rows and the clipboard's write, under the
+store's lock, the settings lock and the kernel's writer lock
+(`native/moy_app/README.md`). **A compiled app
 polls its messages (2026-11-08)**: `moybyte_on` is the kernel's listen and
 `moybyte_recv` takes the next event of its process's queue (opened at its
 launch, `runtime/system/moybyte.py`'s `_compiled_events`), a C row run on

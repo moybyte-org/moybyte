@@ -169,6 +169,30 @@ static void role_run(void *p) {
     c->why = moy_app_why(c->run->a);
 }
 
+// Whether row `k` runs where it is called (moy_app_lua_rows.h's HERE).
+static int row_here(int k) {
+    switch (k) {
+#define HERE(row) case row:
+        MOY_APP_LUA_HERE(HERE)
+#undef HERE
+        return 1;
+        default:
+            return 0;
+    }
+}
+
+// A row that runs where it is called, on the state's own task: its answer,
+// or NEEDS_VM where only the VM's task can serve it.
+static void role_here(role_t *c) {
+    if (!moy_app_run_live(c->run)) {
+        c->r = -MOY_APP_STALE;
+        c->why = EIO;
+        return;
+    }
+    c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->ans, c->cap);
+    c->why = moy_app_why(c->run->a);
+}
+
 static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
     lrun_t *u = lrun(L);
     int row = k;
@@ -182,7 +206,12 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
         uint8_t *p = lua_newuserdatauv(L, cap, 0);
         role_t c = { &u->run, (uint32_t)row, b != NULL ? b->p : NULL, b != NULL ? b->n : 0u,
                      p, cap, -MOY_APP_NEEDS_VM, EIO };
-        on_vm(L, u->hop, role_run, &c);
+        if (u->hop != NULL && row_here(row)) {
+            role_here(&c);
+        }
+        if (c.r == -MOY_APP_NEEDS_VM) {
+            on_vm(L, u->hop, role_run, &c);
+        }
         u->why = c.why;
         if (c.r != -MOY_APP_FULL || cap >= (64u << 20)) {
             *ans = p;

@@ -59,8 +59,7 @@ struct moy_app {
     char variant[MOY_APP_NAME_MAX + 1];
     const moy_uf_ops_t *uf;     // the user-files layer the store rows reach, or NULL
     uint8_t readable, writable;
-    int gated;                  // the gate a store row holds now, -1 for none
-    int why;                    // the errno value of the last IO answer
+    uint32_t prefs_owed;        // prefs written off the VM's task, not yet saved
     uint32_t sessions;          // files sessions open
     uint32_t copy_gen;
     char root[MOY_APP_ROOT_MAX + 1];
@@ -93,6 +92,19 @@ static void seq_close(moy_appabi_t *a) {
         moy_lock_give();
     }
 }
+
+// A store row's state is its task's: the gate it holds (-1 for none) and the
+// errno value of its last IO answer, which the caller reads after the row.
+static _Thread_local int t_gated = -1;
+static _Thread_local int t_why;
+
+// The VM's task (native/moy_store's binding says, where the image has it;
+// else the task that bound the door, the host's console): a prefs write
+// made there is saved at once, through the rows' saver, which is Python's.
+int moy_store_on_vm(void) __attribute__((weak));
+uintptr_t moy_store_me(void) __attribute__((weak));
+static uintptr_t s_door_who;
+static int on_vm(void);
 
 uint32_t moy_app_seq_begin(const moy_appabi_t *a) {
     return __atomic_load_n(&a->seq, __ATOMIC_ACQUIRE);
@@ -155,7 +167,6 @@ moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
     memset(a, 0, sizeof(*a));
     a->mem = mem;
     a->prefs = prefs;
-    a->gated = -1;
     for (uint32_t i = 0; i < MOY_APP_TOKENS; i++) {
         a->tokens[i] = a->near[i] = MOY_TOKEN_ABSENT;
     }
@@ -839,14 +850,31 @@ static int prefs_read(moy_appabi_t *a, uint32_t g, const char *key, size_t n,
     if (kn == 0u) {
         return MOY_APP_BAD;
     }
-    if (a->prefs == NULL || !moy_settings_get(a->prefs, k, kn, &j, &jn)) {
+    if (a->prefs == NULL) {
+        return MOY_APP_ABSENT;
+    }
+    moy_settings_lock();
+    if (!moy_settings_get(a->prefs, k, kn, &j, &jn)) {
+        moy_settings_unlock();
         return MOY_APP_ABSENT;
     }
     if (out != NULL) {
         memcpy(out, j, jn < cap ? jn : cap);
     }
+    moy_settings_unlock();
     *len = jn;
     return MOY_APP_OK;
+}
+
+// A prefs write persisted: saved now on the VM's task; from any other task
+// left in the rows and owed, saved by the VM's next frame (moy_app_files_end_all)
+// or, with no VM, by the next start's load, which flushes the rows first.
+static void prefs_save(moy_appabi_t *a) {
+    if (on_vm()) {
+        moy_settings_flush(a->prefs);
+    } else {
+        __atomic_add_fetch(&a->prefs_owed, 1u, __ATOMIC_RELAXED);
+    }
 }
 
 // A size query that finds the row is not a call: the read after it is.
@@ -877,7 +905,7 @@ int moy_app_prefs_set(moy_appabi_t *a, uint32_t g, const char *key, size_t n,
     if (rc != MOY_SETTINGS_OK) {
         return rc == MOY_SETTINGS_NOMEM ? MOY_APP_NOMEM : MOY_APP_BAD;
     }
-    moy_settings_flush(a->prefs);
+    prefs_save(a);
     return MOY_APP_OK;
 }
 
@@ -896,7 +924,7 @@ int moy_app_prefs_clear(moy_appabi_t *a, uint32_t g, const char *key, size_t n) 
     if (a->prefs == NULL || !moy_settings_delete(a->prefs, k, kn)) {
         return MOY_APP_ABSENT;
     }
-    moy_settings_flush(a->prefs);
+    prefs_save(a);
     return MOY_APP_OK;
 }
 
@@ -1000,10 +1028,13 @@ static long json_str(const char *j, size_t jn, char *out, size_t cap) {
 static long art_row(const moy_appabi_t *a, const char *key, char *out, size_t cap) {
     const char *j;
     size_t jn;
-    if (a->prefs == NULL || !moy_settings_get(a->prefs, key, strlen(key), &j, &jn)) {
+    if (a->prefs == NULL) {
         return -1;
     }
-    return json_str(j, jn, out, cap);
+    moy_settings_lock();
+    long r = moy_settings_get(a->prefs, key, strlen(key), &j, &jn) ? json_str(j, jn, out, cap) : -1;
+    moy_settings_unlock();
+    return r;
 }
 
 #define ART_KIND MOY_APP_ARTWORK_NS "_doc_kind"
@@ -1097,14 +1128,15 @@ int moy_app_store_bind(moy_appabi_t *a, const moy_uf_ops_t *ops, const char *roo
 }
 
 void moy_app_store_unwind(moy_appabi_t *a) {
-    if (a->gated >= 0 && a->uf != NULL) {
-        a->uf->gate_leave(a->gated);
+    if (t_gated >= 0 && a->uf != NULL) {
+        a->uf->gate_leave(t_gated);
     }
-    a->gated = -1;
+    t_gated = -1;
 }
 
 int moy_app_why(const moy_appabi_t *a) {
-    return a->why;
+    (void)a;
+    return t_why;
 }
 
 void moy_app_buf_free(moy_appabi_t *a, moy_buf_t *b) {
@@ -1118,6 +1150,9 @@ void moy_app_buf_free(moy_appabi_t *a, moy_buf_t *b) {
 uint32_t moy_app_files_end_all(moy_appabi_t *a) {
     uint32_t n = a->sessions;
     a->sessions = 0u;
+    if (__atomic_exchange_n(&a->prefs_owed, 0u, __ATOMIC_RELAXED) != 0u && a->prefs != NULL) {
+        moy_settings_flush(a->prefs);
+    }
     return n;
 }
 
@@ -1139,7 +1174,7 @@ static int uf_rc(moy_appabi_t *a, int rc) {
     if (rc == MOY_ENOMEM) {
         return MOY_APP_NOMEM;
     }
-    a->why = rc;
+    t_why = rc;
     return MOY_APP_IO;
 }
 
@@ -1171,16 +1206,23 @@ static const moy_grant_t *files_row(moy_appabi_t *a, uint32_t g, int row,
     return gr;
 }
 
-// The gate around one store op.
-static void gate_on(moy_appabi_t *a) {
-    a->gated = a->uf->gate_enter(a->root);
+// The gate around one store op, with the store's lock (native/moy_store/
+// moy_vol.h): 0, or NEEDS_VM where the calling task cannot reach the store
+// (a task other than the VM's, a store the volume table does not hold), the
+// row then run on the VM's task.
+static int gate_on(moy_appabi_t *a) {
+    t_gated = a->uf->gate_enter(a->root);
+    return t_gated < 0 ? MOY_APP_NEEDS_VM : 0;
 }
 
 static int gate_off(moy_appabi_t *a, int rc) {
-    a->uf->gate_leave(a->gated);
-    a->gated = -1;
-    return uf_rc(a, rc);
+    int r = uf_rc(a, rc);
+    a->uf->gate_leave(t_gated);
+    t_gated = -1;
+    return r;
 }
+
+#define GATE_ON(a) do { int g_ = gate_on(a); if (g_) { return g_; } } while (0)
 
 int32_t moy_app_files_readable(moy_appabi_t *a, uint32_t g) {
     int rc;
@@ -1230,7 +1272,7 @@ int moy_app_files_list(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_LIST, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->list(a->root, kind, out, count));
 }
 
@@ -1240,7 +1282,7 @@ int moy_app_files_count(moy_appabi_t *a, uint32_t g, const char *kind, uint32_t 
     if (files_row(a, g, MOY_ROW_FILES_COUNT, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->count(a->root, kind, n));
 }
 
@@ -1253,7 +1295,7 @@ int moy_app_files_load(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_LOAD, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->load(a->root, kind, name, out, binary));
 }
 
@@ -1264,7 +1306,7 @@ int moy_app_files_save(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_SAVE, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->save(a->root, kind, name, data, n, name_out));
 }
 
@@ -1277,7 +1319,7 @@ static int named(moy_appabi_t *a, uint32_t g, int row, named_fn fn, const char *
     if (files_row(a, g, row, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, fn(a->root, kind, name, name_out));
 }
 
@@ -1306,7 +1348,7 @@ int moy_app_files_rename(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_RENAME, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->rename(a->root, kind, name, title, name_out));
 }
 
@@ -1317,7 +1359,7 @@ int moy_app_files_new_name(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_NEW_NAME, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     rc = title != NULL && *title ? a->uf->free_name(a->root, kind, title, name_out)
          : a->uf->new_name(a->root, kind, NULL, name_out);
     return gate_off(a, rc);
@@ -1332,7 +1374,7 @@ int moy_app_files_trash_list(moy_appabi_t *a, uint32_t g, moy_buf_t *out,
     if (files_row(a, g, MOY_ROW_FILES_TRASH_LIST, NULL, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->trash_list(a->root, out, count));
 }
 
@@ -1341,7 +1383,7 @@ int moy_app_files_empty_trash(moy_appabi_t *a, uint32_t g) {
     if (files_row(a, g, MOY_ROW_FILES_EMPTY_TRASH, NULL, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->prune_trash(a->root, 0u));
 }
 
@@ -1353,7 +1395,7 @@ int moy_app_files_history(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_HISTORY, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->history(a->root, kind, name, out));
 }
 
@@ -1365,7 +1407,7 @@ int moy_app_files_history_ops(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_HISTORY_OPS, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->history_ops(a->root, kind, name, out));
 }
 
@@ -1377,7 +1419,7 @@ int moy_app_files_history_commit(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_HISTORY_COMMIT, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->history_commit(a->root, kind, name, ops, ops_n, kf, kf_n,
                                              prune_err));
 }
@@ -1493,7 +1535,7 @@ int moy_app_wallpaper_load_copy(moy_appabi_t *a, uint32_t g, moy_buf_t *out) {
     if (rc != MOY_APP_OK) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->copy_load(a->root, out));
 }
 
@@ -1503,7 +1545,7 @@ int moy_app_wallpaper_save_copy(moy_appabi_t *a, uint32_t g, const char *data,
     if (rc != MOY_APP_OK) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     rc = gate_off(a, a->uf->copy_save(a->root, data, n));
     if (rc == MOY_APP_OK) {
         a->copy_gen++;
@@ -1596,6 +1638,19 @@ static moy_app_door_fn s_door;
 
 void moy_app_door_bind(moy_app_door_fn fn) {
     s_door = fn;
+    if (fn != NULL && moy_store_me != NULL) {
+        s_door_who = moy_store_me();
+    }
+}
+
+// Where no door was ever bound (a harness with no console) every caller is
+// the console's; once one was, its binder's task is, bound or not (a VM stop
+// lets the door go and the console's task stays the VM's).
+static int on_vm(void) {
+    if (moy_store_on_vm != NULL) {
+        return moy_store_on_vm();
+    }
+    return moy_store_me == NULL || s_door_who == 0u || s_door_who == moy_store_me();
 }
 
 // The packed arguments, read in order; the table row they were packed for,
