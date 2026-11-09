@@ -23,7 +23,8 @@ only), and writes make/break state and the typed byte into the kernel table's
 `ble` source, which the frame takes before its edge snapshot. There is no
 `bluetooth` module and nothing of it runs Python, so a soft reset leaves the
 link up. `bt status` names the machine's state. Settings' picker lists every
-nearby HOGP keyboard and reconnects only the one picked. Report-only keyboards
+nearby HOGP keyboard; no keyboard is connected until one is picked there, and
+then only that one, reconnected after a reboot. Report-only keyboards
 are decoded as the standard eight-byte report; arbitrary/NKRO Report Maps,
 Classic-Bluetooth-only keyboards, media keys and gamepads are not supported.
 The console's own USB keyboard and mouse are #83's.
@@ -282,7 +283,8 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
   already enables MicroPython Bluetooth central/GATT client + pairing/bonding
   (`CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI`); HCI shares the C6's SDIO transport with
   WiFi. Only BLE/HOGP keyboards can work — a Bluetooth 3.0/BR-EDR-only keyboard
-  will never appear in the scan. Discovery retries with a 5-second idle gap so
+  will never appear in the scan. With no keyboard picked nothing scans in the
+  background; the picked one's discovery retries with a 5-second idle gap so
   an absent keyboard does not keep the shared radio in a continuous scan. The
   ESP-IDF 5.5 DPI driver restarts its full-frame DSI DW-GDMA transfer from a
   default low-priority completion interrupt; ESP-Hosted SDIO bursts during BLE

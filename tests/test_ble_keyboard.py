@@ -77,12 +77,20 @@ def _machine(cart=True, **kw):
     return table, stack, m
 
 
-def _ready(m, conn=3, handle=3):
-    """Through scan, connect, discovery and the one subscription to ready,
-    with a Report-only keyboard whose input report is `handle`."""
+def _pick(m, addr=ADDR):
+    """Settings' flow: the radio up, the picker's scan hears `addr`, a kid
+    picks it, and the scan's end starts its connection."""
     m.started(True)
-    m.scan_result(ADDR, -40, HID_ADV)
+    m.discover()
+    m.scan_result(addr, -40, HID_ADV)
+    assert m.pick(addr)
     m.on_scan_done()
+
+
+def _ready(m, conn=3, handle=3):
+    """Picked, then through connect, discovery and the one subscription to
+    ready, with a Report-only keyboard whose input report is `handle`."""
+    _pick(m)
     m.connected(conn, ADDR)
     m.on_svc(conn, 1, 12, mi.HID_SERVICE)
     m.on_svc_done(conn, 0)
@@ -318,9 +326,11 @@ def test_a_report_on_another_handle_is_not_input():
 def test_the_machine_scans_pairs_discovers_subscribes_and_feeds_input():
     table, stack, m = _machine()
     m.started(True)
-    assert m.state == "scanning" and ("scan", False) in stack.calls
+    m.discover()
+    assert m.state == "scanning" and ("scan", True) in stack.calls
     m.scan_result(ADDR, -40, HID_ADV)
-    assert m.state == "found" and ("scan_stop",) in stack.calls
+    assert m.state == "scanning" and ("connect", ADDR) not in stack.calls
+    assert m.pick(ADDR) and ("scan_stop",) in stack.calls
     m.on_scan_done()
     assert ("connect", ADDR) in stack.calls
     m.connected(3, ADDR)
@@ -349,9 +359,7 @@ def test_the_machine_scans_pairs_discovers_subscribes_and_feeds_input():
 
 def test_boot_keyboard_is_selected_and_protocol_mode_is_written():
     _table, stack, m = _machine()
-    m.started(True)
-    m.scan_result(ADDR, -40, HID_ADV)
-    m.on_scan_done()
+    _pick(m)
     m.connected(4, ADDR)
     m.on_svc(4, 1, 12, mi.HID_SERVICE)
     m.on_svc_done(4, 0)
@@ -370,9 +378,7 @@ def test_boot_keyboard_is_selected_and_protocol_mode_is_written():
 
 def test_security_gated_cccd_is_retried_after_encryption():
     _table, stack, m = _machine()
-    m.started(True)
-    m.scan_result(ADDR, -40, HID_ADV)
-    m.on_scan_done()
+    _pick(m)
     m.connected(9, ADDR)
     m.on_svc(9, 1, 50, mi.HID_SERVICE)
     m.on_svc_done(9, 0)
@@ -395,9 +401,7 @@ def test_a_report_is_input_only_on_an_encrypted_link():
     encrypt the link with, so its reports must type nothing; a link whose
     encryption fails is dropped and says why."""
     table, stack, m = _machine()
-    m.started(True)
-    m.scan_result(ADDR, -40, HID_ADV)
-    m.on_scan_done()
+    _pick(m)
     m.connected(3, ADDR)
     m.on_svc(3, 1, 12, mi.HID_SERVICE)
     m.on_svc_done(3, 0)
@@ -416,11 +420,32 @@ def test_a_report_is_input_only_on_an_encrypted_link():
     assert m.state != "ready"
 
 
+def test_with_none_picked_a_heard_keyboard_is_not_connected():
+    """The owner's rule (2026-11-09, #246): a Bluetooth keyboard is picked in
+    Settings; the console never connects the first HID keyboard it hears.
+    With none picked the radio comes up and waits, scanning for nothing."""
+    _table, stack, m = _machine()
+    m.started(True)
+    assert m.state == "choose" and not any(c[0] == "scan" for c in stack.calls)
+    stack.t += 60000
+    m.tick()
+    assert m.state == "choose" and not any(c[0] == "scan" for c in stack.calls)
+    assert not m.scan()                         # the dev channel's `bt scan` too
+    m.scan_result(ADDR, -30, HID_ADV)           # a keyboard advertising nearby
+    m.discover()                                # the picker hears it ...
+    m.scan_result(ADDR, -30, HID_ADV)
+    m.on_scan_done()
+    assert m.state == "choose" and [d[0] for d in m.devices()] == [ADDR]
+    assert not any(c[0] == "connect" for c in stack.calls)   # ... and waits
+    m.set_enabled(False)
+    m.set_enabled(True)
+    assert m.state == "choose" and not any(c[0] == "connect" for c in stack.calls)
+
+
 def test_picker_lists_all_hid_devices_and_connects_only_the_picked_one():
     _table, stack, m = _machine()
     m.started(True)
     m.discover()
-    m.on_scan_done()                            # the boot scan ends, the picker starts
     assert m.state == "scanning" and ("scan", True) in stack.calls
     addr_b = (1, b"\x11\x12\x13\x14\x15\x16")
     m.scan_result(ADDR, -35, HID_ADV)
@@ -436,10 +461,48 @@ def test_picker_lists_all_hid_devices_and_connects_only_the_picked_one():
 def test_a_picked_keyboard_is_the_only_one_reconnected():
     _table, stack, m = _machine(preferred=(1, b"\x11\x12\x13\x14\x15\x16"), name="Air")
     m.started(True)
+    assert ("scan", False) in stack.calls
     m.scan_result(ADDR, -30, HID_ADV)           # another keyboard, closer
     assert m.state == "scanning"
     m.scan_result((1, b"\x11\x12\x13\x14\x15\x16"), -60, HID_ADV)
     assert m.state == "found"
+
+
+def test_a_picked_keyboard_reconnects_after_a_reboot():
+    """What a pick saves (enabled, address, name) is what the next boot
+    loads: the new machine scans for that address alone and connects it."""
+    _table, stack, m = _machine()
+    _ready(m, conn=7)
+    m.tick()
+    enabled, preferred, name = stack.saved[-1]
+    assert (enabled, preferred) == (True, ADDR)
+    _table, stack, m = _machine(enabled=enabled, preferred=preferred, name=name)
+    m.started(True)
+    assert m.state == "scanning" and ("scan", False) in stack.calls
+    other = (1, b"\x11\x12\x13\x14\x15\x16")
+    m.scan_result(other, -30, HID_ADV)
+    m.scan_result(ADDR, -60, HID_ADV)
+    m.on_scan_done()
+    assert ("connect", ADDR) in stack.calls and ("connect", other) not in stack.calls
+    assert m.name == name
+
+
+def test_forgetting_the_keyboard_stops_its_reconnection():
+    _table, stack, m = _machine()
+    _ready(m, conn=7)
+    m.forget()
+    m.on_disconnect(7)
+    m.tick()
+    assert stack.saved[-1][1] is None           # the next boot has none picked
+    stack.calls.clear()
+    stack.t += 60000
+    m.tick()
+    m.scan_result(ADDR, -40, HID_ADV)
+    assert m.state == "choose" and stack.calls == []
+    _table, stack, m = _machine(preferred=stack.saved[-1][1])
+    m.started(True)
+    m.scan_result(ADDR, -40, HID_ADV)
+    assert m.state == "choose" and stack.calls == []
 
 
 def test_disable_disconnects_without_forgetting_and_enable_rescans():
@@ -463,7 +526,7 @@ def test_forget_drops_the_keyboard_and_every_bond():
 
 
 def test_timeouts_retry_and_a_stalled_discovery_disconnects():
-    _table, stack, m = _machine()
+    _table, stack, m = _machine(preferred=ADDR)
     m.started(True)
     m.on_scan_done()                            # nothing found
     assert m.state == "idle"
@@ -479,7 +542,7 @@ def test_timeouts_retry_and_a_stalled_discovery_disconnects():
 
 
 def test_the_player_slot_is_held_only_while_connected():
-    table, _stack, m = _machine()
+    table, _stack, m = _machine(preferred=ADDR)
     m.set_player(1)
     m.started(True)
     m.frame()
@@ -505,9 +568,7 @@ def test_a_boot_mouse_is_subscribed_beside_the_keyboard_and_its_motion_taken():
     """#26 (owner 2026-10-07): a boot mouse is the second report shape over the
     same central -- buttons and deltas, taken by the frame for the pointer."""
     table, stack, m = _machine()
-    m.started(True)
-    m.scan_result(ADDR, -40, HID_ADV)
-    m.on_scan_done()
+    _pick(m)
     m.connected(5, ADDR)
     m.on_svc(5, 1, 20, mi.HID_SERVICE)
     m.on_svc_done(5, 0)
@@ -539,6 +600,38 @@ def test_a_keyboard_with_no_mouse_has_no_mouse_to_take():
 
 
 # -- the boards' wiring --------------------------------------------------------------
+class _BleService:
+    """moy_input.ble() as the boot sees it: its saved settings, and start()."""
+
+    def __init__(self, enabled, preferred):
+        self.status = (enabled, "off", None, preferred, None)
+        self.started = 0
+
+    def settings_status(self):
+        return self.status
+
+    def start(self):
+        self.started += 1
+
+
+@pytest.mark.parametrize("enabled,preferred,starts", [
+    (True, ADDR, 1), (True, None, 0), (False, ADDR, 0)])
+def test_a_second_keyboards_radio_starts_at_boot_only_for_a_picked_keyboard(
+        monkeypatch, enabled, preferred, starts):
+    """The T-Deck's Bluetooth keyboard beside its own: a picked one
+    reconnects from boot; with none picked the radio waits for Settings."""
+    import sys
+    import types
+    monkeypatch.syspath_prepend(str(ROOT / "device"))
+    monkeypatch.setitem(sys.modules, "console", types.SimpleNamespace(Pointer=None))
+    monkeypatch.delitem(sys.modules, "wire_input", raising=False)
+    import wire_input
+    ws, ble, census = types.SimpleNamespace(), _BleService(enabled, preferred), []
+    wire_input.start_keyboards(ws, None, ble, census.append)
+    assert ws.ble_keyboard is ble and ble.started == starts
+    assert census == ["ble keyboard"] * starts
+
+
 
 def test_every_console_takes_the_kernels_central_and_no_bluetooth_module():
     for board in ("lilygo_t_deck_plus_mainline", "guition_jc3248w535",

@@ -860,13 +860,11 @@ LIFECYCLE = {
         # getattr saying no.
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): Kernel(None, "moy_input_board_kick();"),
-        ("ble_keyboard", "start"): Lazy(
-            "runtime/system/settings_layer.py", "open_bluetooth",
-            "auto_start=False on purpose -- scanning is what makes BLE "
-            "expensive and this board's keyboard already works, so the radio "
-            "comes up when a kid opens the picker. The touch-only boards start "
-            "theirs at boot because a paired keyboard is their only way out of "
-            "a cart"),
+        # At boot only for a keyboard picked in Settings (this board's own
+        # keyboard already works); otherwise when a kid opens the picker,
+        # which test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for
+        # pins.
+        ("ble_keyboard", "start"): HERE,
         ("ble_keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/run/player.py", "start"),
@@ -1219,8 +1217,7 @@ def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
     assert 'getattr(ws, "ble_keyboard", None)' in spine, (
         "the T-Deck stopped binding ws.ble_keyboard into the kernel's input "
         "stage -- a paired keyboard cannot produce a keypress (#26)")
-    start = LIFECYCLE["tdeck"][("ble_keyboard", "start")]
-    assert ("ble_keyboard", "start") in _module_handles(start.path).verbs(
-        start.func), (
+    assert ("ble_keyboard", "start") in _module_handles(
+        "runtime/system/settings_layer.py").verbs("open_bluetooth"), (
         "nothing calls ble_keyboard.start() on the T-Deck -- the Bluetooth "
         "panel opens onto a radio that has never scanned (#26)")

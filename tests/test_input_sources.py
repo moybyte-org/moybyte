@@ -525,13 +525,13 @@ class _AnyStack:
 
 
 class _Ble:
-    """The kernel's BLE keyboard machine, connected, its input report on handle
-    7; `press(usages)` is a report and poll() the frame's half."""
+    """The kernel's BLE keyboard machine, its picked keyboard connected, its
+    input report on handle 7; `press(usages)` is a report and poll() the frame's half."""
 
     def __init__(self, inp):
-        m = self.m = _mi.HidMachine(inp, _AnyStack())
-        self.src = m.src
         addr = (0, b"\x01\x02\x03\x04\x05\x06")
+        m = self.m = _mi.HidMachine(inp, _AnyStack(), preferred=addr)
+        self.src = m.src
         m.started(True)
         m.scan_result(addr, -40, bytes((3, 0x03, 0x12, 0x18)))
         m.on_scan_done()

@@ -318,7 +318,7 @@ Free pins).
   PPA live, settings window, picker, a Python cart and a Lua cart run and
   exit, idle blank + wake, PERF lines, 0 underruns after the tour).
 - **WiFi/BLE run on Guition's ESP-Hosted 2.3.2 slave** (`JC-C6-slave_v2.3.2.bin`,
-  the C6 section below): BLE comes up (the keyboard scanner runs from the
+  the C6 section below): BLE comes up (the keyboard central runs from the
   first frame), the slave answers ESP-Hosted 2.12.12's `Req_FeatureControl`,
   and WiFi joins a saved network when a holder brings the radio up (it is a
   lease, `.claude/rules/boards.md`). A sustained download needs ESP-Hosted's

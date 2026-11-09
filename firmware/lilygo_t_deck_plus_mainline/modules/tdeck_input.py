@@ -30,10 +30,10 @@ class TDeckInput:
         # ws.ble_keyboard. Both write into the same table, so nothing in the
         # shared console needs to know which one a keypress came from.
         #
-        # Not started here, deliberately: scanning is what makes BLE
-        # expensive, and a board whose keyboard already works should not pay
-        # for a radio nobody asked for. Settings starts it when the kid opens
-        # the panel.
+        # Not started here: a board whose keyboard already works pays for
+        # the radio only once a Bluetooth keyboard is picked
+        # (wire_input.start_keyboards starts it at boot then), or while the
+        # kid has Settings' picker open.
         self.ble_keyboard = moy_input.ble()
 
     def build(self, w, h):

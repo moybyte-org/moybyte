@@ -556,7 +556,8 @@ class SettingsLayer:
 
         The touch-only boards start their service at boot (a paired keyboard
         is their only way out of a cart); a board that already has a keyboard
-        (the T-Deck) starts nothing until a kid opens this picker. `start()`
+        (the T-Deck) starts it at boot only for a picked keyboard, else when
+        a kid opens this picker. `start()`
         early-returns on an available service, so a live link is not
         disturbed (found on glass)."""
         svc = self._bt_service()
@@ -605,7 +606,8 @@ class SettingsLayer:
                            "subscribe-retry", "found"):
                 self.bt_msg = "Connecting..."
             elif state == "choose":
-                self.bt_msg = "Pick a keyboard."
+                self.bt_msg = ("Pick a keyboard." if self.bt_devices
+                               else "Scan, then pick a keyboard.")
             else:
                 self.bt_msg = "Ready to scan."
             self._bt_state = state

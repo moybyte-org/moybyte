@@ -27,8 +27,11 @@
 // owns the keys; a text surface gets the key and no alias but the arrows.
 // A key event carries the report's modifiers (moy_input.h).
 //
-// RECONNECT. Once a keyboard is picked only that address is reconnected; with
-// none picked, the first HOGP keyboard seen is. Background scans are passive
+// RECONNECT. A keyboard is picked in Settings (the picker's scan, then a
+// pick), and only that address is ever connected: its address and name are
+// saved, so it reconnects after a reboot. With none picked the machine waits
+// in `choose` and scans for nothing: a keyboard nobody picked is never
+// connected. Background scans look only for the picked keyboard, passive
 // and 10% duty (the radio is shared with WiFi and ESP-NOW, #7); the picker's
 // scan is active and continuous, and it waits for an explicit pick.
 
@@ -211,7 +214,7 @@ void moy_hid_set_enabled(moy_hid_t *h, bool on);
 void moy_hid_discover(moy_hid_t *h);                // the picker's scan
 bool moy_hid_pick(moy_hid_t *h, const moy_hid_addr_t *addr);
 void moy_hid_forget(moy_hid_t *h);
-bool moy_hid_scan(moy_hid_t *h);                    // a background scan now
+bool moy_hid_scan(moy_hid_t *h);                    // a background scan now, for the picked keyboard
 
 void moy_hid_on_scan_result(moy_hid_t *h, const moy_hid_addr_t *addr, int8_t rssi,
                             const uint8_t *adv, size_t n);

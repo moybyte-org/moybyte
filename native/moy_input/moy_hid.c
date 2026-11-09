@@ -352,8 +352,18 @@ static void reset_connection(moy_hid_t *h) {
     clear_reports(h);
 }
 
+// A background scan looks only for the picked keyboard: with none picked
+// there is nothing for it to find, and the machine waits for a pick.
 static bool start_scan(moy_hid_t *h, bool picker) {
     if (!h->available || !h->enabled || h->conn >= 0) {
+        return false;
+    }
+    if (!picker && !h->has_pref) {
+        h->has_cand = false;
+        h->cand_name[0] = 0;
+        h->scan_picker = false;
+        set_error(h, NULL);
+        set_state(h, MOY_HID_CHOOSE);
         return false;
     }
     h->has_cand = false;
@@ -609,7 +619,7 @@ void moy_hid_on_scan_result(moy_hid_t *h, const moy_hid_addr_t *addr, int8_t rss
     if (h->scan_picker || at < 0) {
         return;
     }
-    if ((!h->has_pref && hid) || preferred) {
+    if (preferred) {
         h->cand = *addr;
         h->has_cand = true;
         copy_name(h->cand_name, h->devs[at].name);
