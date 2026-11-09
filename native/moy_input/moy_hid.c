@@ -874,7 +874,9 @@ void moy_hid_on_write_done(moy_hid_t *h, uint16_t conn, uint16_t handle, int sta
 }
 
 void moy_hid_on_notify(moy_hid_t *h, uint16_t conn, uint16_t handle, const uint8_t *r, size_t n) {
-    if (conn != h->conn) {
+    // A report is input only on an encrypted link: a device that takes the
+    // picked keyboard's address has no bond to encrypt it with.
+    if (conn != h->conn || !h->encrypted) {
         return;
     }
     uint8_t mods, keys[6], nkeys;
@@ -934,6 +936,10 @@ void moy_hid_on_enc_change(moy_hid_t *h, uint16_t conn, bool encrypted, bool bon
         return;
     }
     h->encrypted = encrypted;
+    if (!encrypted) {
+        disconnect(h, "pairing failed: forget it, pick it again");
+        return;
+    }
     if (bonded) {
         h->dirty = true;
     }

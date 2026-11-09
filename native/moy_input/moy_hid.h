@@ -14,7 +14,10 @@
 // report. A Report-only keyboard is subscribed and its eight-byte reports
 // decoded the same way; other layouts are ignored. Security is Just Works
 // with bonding; a CCCD write the keyboard rejects before encryption is
-// retried once, when the link is encrypted.
+// retried once, when the link is encrypted. A report is input only once the
+// link is encrypted, and a link whose encryption fails is dropped with the
+// error saying so (a keyboard that lost its bond is forgotten and picked
+// again).
 //
 // THE KEYMAP is the arrow-key hosts' (owner call, 2026-08-14): arrows are the
 // d-pad, W A S D too, Z and SPACE are A, X is B, ENTER is `run`, ESC `stop`,

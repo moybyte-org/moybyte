@@ -91,6 +91,7 @@ def _ready(m, conn=3, handle=3):
     m.on_dsc(conn, handle + 1, mi.HID_CCCD)
     m.on_dsc_done(conn, 0)
     m.on_write_done(conn, handle + 1, 0)
+    m.on_enc_change(conn, True, True)
     assert m.state == "ready"
 
 
@@ -334,6 +335,7 @@ def test_the_machine_scans_pairs_discovers_subscribes_and_feeds_input():
     assert ("write", 3, 4, b"\x01\x00", True) in stack.calls
     m.on_write_done(3, 4, 0)
     assert m.state == "ready" and m.protocol == "report"
+    m.on_enc_change(3, True, True)
     # Left Shift + A -> upper-case A and the held `left` alias.
     m.notify(3, 3, b"\x02\x00\x04\x00\x00\x00\x00\x00")
     _frame(m, table)
@@ -386,6 +388,32 @@ def test_security_gated_cccd_is_retried_after_encryption():
     assert ("write", 9, 44, b"\x01\x00", True) in stack.calls
     m.on_write_done(9, 44, 0)
     assert m.state == "ready"
+
+
+def test_a_report_is_input_only_on_an_encrypted_link():
+    """A device that takes the picked keyboard's address has no bond to
+    encrypt the link with, so its reports must type nothing; a link whose
+    encryption fails is dropped and says why."""
+    table, stack, m = _machine()
+    m.started(True)
+    m.scan_result(ADDR, -40, HID_ADV)
+    m.on_scan_done()
+    m.connected(3, ADDR)
+    m.on_svc(3, 1, 12, mi.HID_SERVICE)
+    m.on_svc_done(3, 0)
+    m.on_chr(3, 2, 3, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr_done(3, 0)
+    m.on_dsc(3, 4, mi.HID_CCCD)
+    m.on_dsc_done(3, 0)
+    m.on_write_done(3, 4, 0)
+    assert m.state == "ready"
+    m.notify(3, 3, b"\x00\x00\x1a\x00\x00\x00\x00\x00")      # W, in the clear
+    _frame(m, table)
+    assert table.last_key == 0 and not table.held("up") and m.notify_count == 0
+    m.on_enc_change(3, False, False)
+    assert ("disconnect", 3) in stack.calls and "pairing failed" in m.error
+    m.on_disconnect(3)
+    assert m.state != "ready"
 
 
 def test_picker_lists_all_hid_devices_and_connects_only_the_picked_one():
@@ -493,6 +521,7 @@ def test_a_boot_mouse_is_subscribed_beside_the_keyboard_and_its_motion_taken():
     assert ("write", 5, 3, b"\x00", False) in stack.calls
     m.on_write_done(5, 6, 0)
     m.on_write_done(5, 9, 0)
+    m.on_enc_change(5, True, True)
     assert m.state == "ready"
     m.notify(5, 8, bytes((1, 5, 0xFE)))           # left down, +5, -2
     m.notify(5, 8, bytes((1, 3, 0x01)))

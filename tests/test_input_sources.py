@@ -543,6 +543,7 @@ class _Ble:
         m.on_dsc(3, 8, _mi.HID_CCCD)
         m.on_dsc_done(3, 0)
         m.on_write_done(3, 8, 0)
+        m.on_enc_change(3, True, True)
 
     def press(self, *usages):
         self.m.notify(3, 7, bytes((0, 0) + usages + (0,) * (6 - len(usages))))
