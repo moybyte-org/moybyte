@@ -2572,12 +2572,12 @@ def test_a_command_runs_its_module_for_this_console_with_its_folders(tmp_path):
     try:
         rt = world.mod.WasmRuntime(FakeWs())
         assert rt.command(cart, ["cat", "x"], ["files", "files/docs"], 0, 30000) == (0, None)
-        (path, sha, interp, unsigned_ok, argv, roots, bg, budget), = calls
+        (path, sha, interp, unsigned_ok, argv, roots, bg, budget, run), = calls
         assert path == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         main = open(cart["path"] + "/main.wasm", "rb").read()
         assert sha == hashlib.sha256(main).hexdigest() and interp is False
         assert unsigned_ok is False and argv == ("cat", "x")
-        assert roots == "files\0files/docs\0" and (bg, budget) == (0, 30000)
+        assert roots == "files\0files/docs\0" and (bg, budget, run) == (0, 30000, None)
     finally:
         world.close()
 
@@ -2608,7 +2608,7 @@ def test_a_foreground_command_is_a_job_in_steps(tmp_path):
     try:
         rt = world.mod.WasmRuntime(FakeWs())
         assert rt.start(cart, ["probe", "sleep"], (), 42, 30000) == (0, None)
-        assert calls[0][6:] == (0, 30000)           # the foreground: no bg pid
+        assert calls[0][6:] == (0, 30000, None)     # the foreground: no bg pid
         assert [rt.step(42, 8) for _ in range(3)] == [
             (rt.RUNNING, None), (rt.RUNNING, None), (7, None)]
         assert rt.start(cart, ["probe"], (), 43, 30000) == (0, None)
@@ -2656,7 +2656,7 @@ def test_a_wasi_service_starts_on_its_module_and_is_reaped_through_the_engine(tm
         mod.service_info = lambda pid: (65536, 120)
         assert rt.service(cart, 9, run=b"grant") is None
         assert [a[2] for a in starts] == [False, True]          # its module, then main.wasm
-        assert starts[1][0] == cart["path"] + "/main.wasm" and starts[1][4:] == (9, cart.get("id") or "")
+        assert starts[1][0] == cart["path"] + "/main.wasm" and starts[1][4:] == (9, cart.get("id") or "", b"grant")
         assert rt.figures(9) == (65536, 120) and rt.reap() == [(9, 7)] and rt.stop(9) == 0
         starts.clear()
         answers[:] = ["refused: bad signature"]
