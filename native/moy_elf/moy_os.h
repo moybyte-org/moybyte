@@ -196,11 +196,11 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
 moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
                            const char *id, int w, int h, int depth, const moy_app_run_t *run,
                            char *err, size_t errlen);
-// On the console's task, once a frame: the frame the last call took let go,
-// the frame message posted unless the game has read nothing since the last
-// (its arguments followed by the `n_in` words at `in`, MOY_OS_FRAME_IN at most),
-// then up to `max_us` waiting for a present, the game's hops served
-// meanwhile. A mask, MOY_OS_FRAME_SENT where the message was posted and
+// On the console's task, once a frame: its screen slot's frame call
+// (native/moy_kernel/moy_screen_slot.h): the frame the last call took let
+// go, the frame message posted unless one waits unread (its arguments
+// followed by the `n_in` words at `in`, MOY_OS_FRAME_IN at most), then up to
+// `max_us` waiting for a present, the game's hops served meanwhile. A mask, MOY_OS_FRAME_SENT where the message was posted and
 // MOY_OS_FRAME_SHOWN where a frame was presented, taken until the next call;
 // MOY_OS_ENDED once main has ended (moy_os_game_stop answers its status); -1
 // for no such game.

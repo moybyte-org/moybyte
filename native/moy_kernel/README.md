@@ -15,8 +15,8 @@ caller's own task, and the buses they drive, `moy_devbus.h`), the lock the app A
 Lua or compiled run the Player launches), the service model's three pieces
 (`moy_evq.h`, every process's event queue and the one wait; `moy_super.h`,
 the one supervisor of background callbacks; `moy_vmq.h`, the one queue of
-calls into the VM's task; the module `moy_evq`, `modmoy_evq.c`), a WASI
-app's screen handed to the console (`moy_screen_slot.h`) and the
+calls into the VM's task; the module `moy_evq`, `modmoy_evq.c`), a compiled
+app's or game's screen handed to the console (`moy_screen_slot.h`) and the
 kernel's I2C bus (`moy_bus.h`). Each header states how
 its piece works; `moy_kernel.h` holds the rules every kernel module keeps
 (handles, PSRAM, stopping the VM), and `native/moy_play/moy_play.h` the

@@ -26,6 +26,7 @@
 #include "moy_proc.h"
 #include "moy_sh_prog.h"
 #include "moy_super.h"
+#include "moy_screen_slot.h"
 #include "moy_vmq.h"
 
 #ifdef MOY_OS_UMODE
@@ -78,8 +79,6 @@ int moy_net_link(uint32_t *ip) __attribute__((weak));
 uint32_t moy_lease_sweep(uint32_t owner) __attribute__((weak));
 
 #define MAGIC 0x6d6f796fu
-
-enum { FB_FREE = 0, FB_WRITING, FB_READY, FB_TAKEN };
 
 // -- the platform: memory, clocks, semaphores, tasks, timers -------------------------
 
@@ -327,15 +326,7 @@ struct moy_os_proc {
     moy_app_run_t run;          // its app run: what its app calls are answered for
     volatile uint8_t net_held;
     uint32_t wakes, events;
-    // a game's (moy_os_game): its screen, and the frame moy_present hands over
-    uint8_t game;
-    volatile uint8_t fb_state;  // FB_FREE, FB_WRITING, FB_READY, FB_TAKEN
-    uint8_t fb_posted;          // a frame message posted, the last when the game had
-    uint32_t fb_mark;           // read `fb_mark` records: the next waits for another read
-    int fb_w, fb_h, fb_depth;
-    uint8_t *fb;                // fb_w * fb_h pixels of fb_depth bytes each
-    sem_t_ fb_room;             // the frame let go: a present may write it
-    sem_t_ fb_shown;            // a present made it READY
+    uint8_t game;               // a game's (moy_os_game): its screen is a slot, moy_screen_slot.h
 #ifdef MOY_OS_UMODE
     moy_u_proc_t *u;            // its memory, when its module runs in U-mode
     char **uargv;               // argv and the environment, in its main thread's U area
@@ -892,12 +883,6 @@ typedef struct {
     int32_t r;
 } role_call_t;
 
-// A game's frame call, woken for a hop just queued: it serves the hop at
-// once instead of at its next look.
-static void hop_queued(void *arg) {
-    sem_give(&((moy_os_proc_t *)arg)->fb_shown);
-}
-
 // fn(arg) on the VM's task for service `p`, the calling thread waiting until
 // it has run (moy_vmq_hop): its wait is moved out of the wake that made it.
 // False when the queue is full, fn not run.
@@ -906,7 +891,7 @@ static bool vm_hop(moy_os_proc_t *p, void (*fn)(void *), void *arg) {
     lock();
     p->hopping++;
     unlock();
-    int rc = moy_vmq_hop_wake(p->pid, fn, arg, &waited, p->game ? hop_queued : NULL, p);
+    int rc = moy_vmq_hop(p->pid, fn, arg, &waited);
     lock();
     p->hopping--;
     if (p->woke_us != 0) {
@@ -2013,22 +1998,22 @@ int moy_os_moy_term_size(int *cols, int *rows) {
 
 // -- the rows: a game's screen -------------------------------------------------------
 //
-// A game's frame (moy_os_game): moy_present copies the module's pixels into
-// the process's frame while it is FREE, making it READY; the console's frame
-// call takes a READY frame (TAKEN) and lets it go (FREE) at its next call,
-// once it has drawn it. A present while the frame is not FREE waits for it.
+// A game's screen is its pid's slot (native/moy_kernel/moy_screen_slot.h),
+// opened with the game and closed at its stop: moy_present copies the
+// module's pixels in, waiting while the console holds the last frame.
 
 int moy_os_moy_screen(int *w, int *h) {
     thr_t *t = enter();
+    int sw = 0, sh = 0, depth = 0;
     int r = -1;
-    if (t == NULL || !t->p->game) {
+    if (t == NULL || !t->p->game || moy_screen_slot_size(t->p->pid, &sw, &sh, &depth) != 0) {
         moy_os_errno_set(ENODEV);
     } else {
         if (w != NULL) {
-            *w = t->p->fb_w;
+            *w = sw;
         }
         if (h != NULL) {
-            *h = t->p->fb_h;
+            *h = sh;
         }
         r = 0;
     }
@@ -2043,36 +2028,14 @@ int moy_os_moy_present(const void *px, size_t n) {
         leave(t);
         return -1;
     }
-    moy_os_proc_t *p = t->p;
-    if (px == NULL || n != (size_t)p->fb_w * (size_t)p->fb_h * (size_t)p->fb_depth) {
-        moy_os_errno_set(EINVAL);
-        leave(t);
-        return -1;
+    int r = moy_screen_slot_present(t->p->pid, px, n);
+    if (r != 0) {
+        // a game's slot gone is its stop
+        moy_os_errno_set(r == -ENODEV ? EINTR : -r);
+        r = -1;
     }
-    for (;;) {
-        lock();
-        bool free_ = p->fb_state == FB_FREE;
-        if (free_) {
-            p->fb_state = FB_WRITING;
-        }
-        unlock();
-        if (free_) {
-            break;
-        }
-        if (ending(t)) {
-            moy_os_errno_set(EINTR);
-            leave(t);
-            return -1;
-        }
-        sem_take(&p->fb_room, MOY_OS_SLICE_US);
-    }
-    memcpy(p->fb, px, n);
-    lock();
-    p->fb_state = FB_READY;
-    unlock();
-    sem_give(&p->fb_shown);
     leave(t);
-    return 0;
+    return r;
 }
 
 // The toolkit's theme as a block (moy_ui.h's moy_ui_theme_pull), which a copy
@@ -3194,8 +3157,6 @@ static void proc_free(moy_os_proc_t *p) {
     sem_fini(&p->hop_done);
     sem_fini(&p->hop_lock);
     sem_fini(&p->stopped);
-    sem_fini(&p->fb_room);
-    sem_fini(&p->fb_shown);
     p->magic = 0;
     os_free(p);
 }
@@ -3259,8 +3220,6 @@ static moy_os_proc_t *proc_new(const moy_os_module_t *m, const moy_os_caps_t *ca
     sem_init(&p->hop_done, false);
     sem_init(&p->hop_lock, true);
     sem_init(&p->stopped, false);
-    sem_init(&p->fb_room, false);
-    sem_init(&p->fb_shown, false);
 #ifdef MOY_OS_UMODE
     if (m->ulo != 0) {
         p->u = os_alloc(sizeof *p->u);
@@ -3304,6 +3263,9 @@ static bool proc_end(moy_os_proc_t *p) {
     unlock();
     moy_evq_kick(p->pid);
     moy_evq_unwait(p->pid);             // a task deleted below may be its waiter
+    if (p->game) {
+        moy_screen_slot_close(p->pid);  // a present waiting answers EINTR
+    }
     sem_give(&p->hop_done);
     int64_t end = mono_us() + MOY_OS_REAP_US;
     while (live_threads(p) > 0) {
@@ -3417,7 +3379,6 @@ static bool proc_end(moy_os_proc_t *p) {
     }
     os_free(p->argv);
     os_free(p->env);
-    os_free(p->fb);
 #ifdef MOY_OS_UMODE
     while (p->retired != NULL) {
         retired_t *r = p->retired;
@@ -3431,8 +3392,6 @@ static bool proc_end(moy_os_proc_t *p) {
     sem_fini(&p->hop_done);
     sem_fini(&p->hop_lock);
     sem_fini(&p->stopped);
-    sem_fini(&p->fb_room);
-    sem_fini(&p->fb_shown);
     p->magic = 0;
     os_free(p);
     return true;
@@ -3632,16 +3591,13 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
         p->own_q = 1;
     }
     if (w > 0) {
-        p->game = 1;
-        p->fb_w = w;
-        p->fb_h = h;
-        p->fb_depth = depth;
-        p->fb = os_alloc((size_t)w * (size_t)h * (size_t)depth);
-        if (p->fb == NULL) {
-            snprintf(err, errlen, "out of memory");
+        int rc = moy_screen_slot_open(pid, w, h, depth);
+        if (rc != 0) {
+            snprintf(err, errlen, rc == -ENOMEM ? "out of memory" : "no screen for it");
             proc_end(p);
             return NULL;
         }
+        p->game = 1;
         if (moy_evq_listen(pid, MOY_OS_FRAME, true) != MOY_EVQ_OK) {
             snprintf(err, errlen, "its event queue hears no frames");
             proc_end(p);
@@ -3865,6 +3821,9 @@ uint32_t moy_os_services_end(void) {
 static int loop_stop(moy_os_proc_t *p) {
     uint32_t pid = p->pid;
     p->hup = 1;
+    if (p->game) {
+        moy_screen_slot_close(pid);     // a present waiting answers EINTR
+    }
     moy_evq_kick(pid);
     int64_t end = mono_us() + MOY_OS_STOP_US;
     while (!p->main_done && mono_us() < end) {
@@ -3912,67 +3871,20 @@ int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms
     if (p == NULL) {
         return -1;
     }
-    int out = 0;
-    lock();
-    if (p->fb_state == FB_TAKEN) {
-        p->fb_state = FB_FREE;
-        sem_give(&p->fb_room);
+    bool done = p->main_done;
+    int r = moy_screen_slot_frame(pid, held, pressed, ms, in, n_in,
+                                  done ? 0u : (max_us + 999u) / 1000u);
+    if (r < 0) {
+        return -1;
     }
-    bool send = !p->main_done && (!p->fb_posted || p->events != p->fb_mark);
-    uint32_t mark = p->events;
-    unlock();
-    if (send) {
-        char args[40 + 12 * MOY_OS_FRAME_IN];
-        int n = snprintf(args, sizeof args, "[%u,%u,%u", (unsigned)held, (unsigned)pressed,
-                         (unsigned)ms);
-        for (int i = 0; i < n_in && i < MOY_OS_FRAME_IN; i++) {
-            n += snprintf(args + n, sizeof args - (size_t)n, ",%ld", (long)in[i]);
-        }
-        args[n++] = ']';
-        if (moy_evq_post(pid, 0, MOY_OS_FRAME, args, (size_t)n) == MOY_EVQ_OK) {
-            lock();
-            p->fb_posted = 1;
-            p->fb_mark = mark;
-            unlock();
-            out |= MOY_OS_FRAME_SENT;
-        }
+    if (r & MOY_SCREEN_SLOT_SHOWN) {
+        return r;
     }
-    int64_t end = mono_us() + max_us;
-    for (;;) {
-        lock();
-        bool ready = p->fb_state == FB_READY;
-        if (ready) {
-            p->fb_state = FB_TAKEN;
-        }
-        bool done = p->main_done;
-        bool hop = p->hopping != 0;
-        unlock();
-        if (ready) {
-            return out | MOY_OS_FRAME_SHOWN;
-        }
-        if (done) {
-            return MOY_OS_ENDED;
-        }
-        int64_t left = end - mono_us();
-        if (left <= 0) {
-            return out;
-        }
-        if (hop) {
-            moy_vmq_serve();            // its app call is this task's to run
-        }
-        sem_take(&p->fb_shown, hop ? 1000 : left);
-    }
+    return p->main_done ? MOY_OS_ENDED : r;
 }
 
 const uint8_t *moy_os_game_screen(uint32_t pid, int *w, int *h, int *depth) {
-    moy_os_proc_t *p = game_of(pid);
-    if (p == NULL) {
-        return NULL;
-    }
-    *w = p->fb_w;
-    *h = p->fb_h;
-    *depth = p->fb_depth;
-    return p->fb;
+    return game_of(pid) != NULL ? moy_screen_slot_pixels(pid, w, h, depth) : NULL;
 }
 
 int moy_os_game_stop(uint32_t pid) {

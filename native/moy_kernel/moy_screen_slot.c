@@ -14,11 +14,14 @@
 
 #include "moy_evq.h"
 #include "moy_sync.h"
+#include "moy_vmq.h"
 
 #ifdef MOY_SYNC_RTOS
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #define SLOT_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
 #else
+#include <time.h>
 #define SLOT_ALLOC(n) malloc(n)
 #endif
 
@@ -34,13 +37,25 @@ typedef struct {
     volatile uint8_t state;
     volatile uint8_t closed;
     volatile uint32_t room;     // moved where the frame is let go or the slot closed
-    volatile uint32_t shown;    // moved where a present made it READY
+    volatile uint32_t shown;    // moved where a present made it READY, or a hop was queued
+    volatile uint32_t hops;     // the program's hops queued (moy_screen_slot_kick)
+    uint32_t served;            // `hops` when the console's frame call last served them
     moy_sync_who_t presenter;   // the program's task waiting on `room`
     moy_sync_who_t console;     // the console's task waiting on `shown`
 } slot_t;
 
 static slot_t s_slots[MOY_SCREEN_SLOTS];
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
+
+static int64_t now_us(void) {
+    #ifdef MOY_SYNC_RTOS
+    return esp_timer_get_time();
+    #else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+    #endif
+}
 
 static slot_t *slot_of(uint32_t pid) {
     for (uint32_t i = 0; i < MOY_SCREEN_SLOTS; i++) {
@@ -176,23 +191,44 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
             out |= MOY_SCREEN_SLOT_SENT;
         }
     }
-    for (uint32_t waited = 0;; waited += SLICE_MS) {
+    int64_t end = now_us() + (int64_t)max_ms * 1000;
+    for (;;) {
         uint32_t seen = __atomic_load_n(&s->shown, __ATOMIC_ACQUIRE);
         MOY_SYNC_LOCK(&s_lock);
         bool ready = s->state == READY;
         if (ready) {
             s->state = TAKEN;
         }
+        uint32_t hops = s->hops;
         MOY_SYNC_UNLOCK(&s_lock);
         if (ready) {
             return out | MOY_SCREEN_SLOT_SHOWN;
         }
-        if (waited >= max_ms) {
+        if (hops != s->served) {
+            s->served = hops;
+            moy_vmq_serve();            // the program's call waits on this task
+        }
+        int64_t left = end - now_us();
+        #if !defined(MOY_SYNC_RTOS) && !defined(MOY_SYNC_THREADS)
+        left = 0;                       // nothing to wait on: the caller is stepped
+        #endif
+        if (left <= 0) {
             return out;
         }
-        uint32_t left = max_ms - waited;
-        moy_sync_wait(&s->shown, seen, left < SLICE_MS ? left : SLICE_MS);
+        uint32_t ms = (uint32_t)((left + 999) / 1000);
+        moy_sync_wait(&s->shown, seen, ms < SLICE_MS ? ms : SLICE_MS);
     }
+}
+
+void moy_screen_slot_kick(uint32_t pid) {
+    slot_t *s = slot_of(pid);
+    if (s == NULL) {
+        return;
+    }
+    MOY_SYNC_LOCK(&s_lock);
+    s->hops++;
+    MOY_SYNC_UNLOCK(&s_lock);
+    moy_sync_wake(&s->shown, s->console);
 }
 
 const uint8_t *moy_screen_slot_pixels(uint32_t pid, int *w, int *h, int *depth) {
