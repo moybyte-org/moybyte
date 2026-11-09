@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from runtime import ssh_service
+from runtime import net_binding, ssh_service
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
@@ -42,9 +42,6 @@ class Server:
     def stats(self):
         return (0, 0, 0, 0, 0, 0, 0, bool(self.calls) and self.calls[-1][0] == "start")
 
-    def hash(self, password, salt):
-        return "$moy1$%s$x" % salt
-
 
 @pytest.fixture
 def zero(tmp_path, monkeypatch):
@@ -58,7 +55,8 @@ def zero(tmp_path, monkeypatch):
 
     def no_radio(*a):
         raise AssertionError("the Zero's radio and name are the board's")
-    monkeypatch.setitem(sys.modules, "moy_net", type("N", (), {"wifi_mdns": staticmethod(no_radio)}))
+    monkeypatch.setitem(sys.modules, "moy_net", type("N", (), {
+        "wifi_mdns": staticmethod(no_radio), "pw_hash": staticmethod(net_binding.pw_hash)}))
     ws = zero_shell.Console(str(tmp_path / "carts"), "Pocket Zero")
     io = IO()
     return zero_shell.Door(ws, io), io, server, tmp_path
@@ -74,7 +72,7 @@ def test_passwd_crosses_the_door_and_serves_without_a_lease(zero):
     assert io.out[1].startswith(b"password not set\n")
     assert cross(door, "role", "j1", "passwd", "short") == 1
     assert cross(door, "role", "j1", "passwd", "s3cret-pw") == 0
-    assert (tmp / "password").read_text().startswith("$moy1$")
+    assert (tmp / "password").read_text().startswith("$moy2$")
     assert server.calls == [("start", str(tmp))]
     io.out[1] = b""
     assert cross(door, "role", "j1", "passwd") == 0

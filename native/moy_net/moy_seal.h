@@ -17,11 +17,15 @@
 //   a token      a QR's single-use 128-bit token T pairs a browser:
 //                mac = HMAC(T, "moy1 token" 0 id nb nc name); the board mints
 //                K and sends it XOR HMAC(T, "moy1 wrap" 0 id nb nc).
-//   a password   SPAKE2 over P-256 (RFC 9382's M and N, its transcript and
-//                key schedule) with w from the password's stored hash
-//                (moy_seal_pw_hash), A = "moy1 browser" nc, B = "moy1 board"
-//                id nb; once both confirmations check, the board mints K
-//                and sends it XOR HMAC(Ke, "moy1 wrap" 0 id nb nc).
+//   a password   SPAKE2+ (RFC 9383, P256-SHA256-HKDF-SHA256-HMAC-SHA256,
+//                its M and N, transcript and key schedule), the browser the
+//                prover with w0 and w1 from the password, the board the
+//                verifier with the record's w0 and L = w1*G (THE PASSWORD
+//                below); context "moy2 SPAKE2+-P256-SHA256-HKDF-SHA256-HMAC-
+//                SHA256", idProver "moy1 browser" nc, idVerifier "moy1
+//                board" id nb. Ke is K_shared's first 16 bytes; once both
+//                confirmations check, the board mints K and sends it XOR
+//                HMAC(Ke, "moy1 wrap" 0 id nb nc).
 //
 //   A SEALED REQUEST carries `s=<sid>&n=<seq>` in its query; its body is
 //   AES-128-GCM under kc, nonce (1, 0, seq), AAD "moy1 req" 0 METHOD 0 TARGET
@@ -74,10 +78,12 @@ typedef struct {
 } moy_seal_keys_t;
 
 typedef struct {
-    uint8_t s[32];                      // this side's secret scalar
-    uint8_t w[32];                      // the password's scalar
+    uint8_t s[32];                      // this side's secret scalar, x or y
+    uint8_t w0[32];
+    uint8_t w1[32];                     // the prover's
+    uint8_t l[MOY_SEAL_POINT];          // the verifier's, w1*G
     uint8_t mine[MOY_SEAL_POINT];       // X (the browser's) or Y (the board's)
-    uint8_t board;
+    uint8_t board;                      // the verifier
 } moy_seal_spake_t;
 
 // THE RANDOM SOURCE every key, nonce and token the console makes draws from:
@@ -102,12 +108,36 @@ void moy_seal_wipe(void *p, size_t n);
 int moy_seal_unhex(const char *s, size_t n, uint8_t *out, size_t want);
 void moy_seal_hex(const uint8_t *p, size_t n, char *out);  // 2n digits and a NUL
 
-// The console password's hash as system/password keeps it ("$moy1$SALT$HEX",
-// runtime/system/ssh_service.py): SHA-256 of SALT PASSWORD, then 4095 times
-// of the digest and PASSWORD.
-void moy_seal_pw_hash(const char *pw, size_t pn, const char *salt, size_t sn, uint8_t out[32]);
-// That file's text: its salt (NUL-terminated) and digest, 1; else 0.
-int moy_seal_pw_parse(const char *text, size_t n, char *salt, size_t salt_cap, uint8_t h[32]);
+// THE PASSWORD's record, as system/password keeps it (runtime/system/
+// ssh_service.py) and the SSH server and the sign-in read it:
+//   $moy2$ITER$SALT$W0$L
+// k = PBKDF2-HMAC-SHA256(password, SALT, ITER rounds, 32 bytes); w0s || w1s
+// = HKDF-SHA256(no salt, k, "moy2 spake2+ w0 w1", 80 bytes); w0 and w1 each
+// 40-byte half mod P-256's order (a zero read as 1); W0 is w0's 32 bytes and
+// L the uncompressed w1*G, in hex. The record verifies a password (the SSH
+// server, moy_seal_pw_check) and is the SPAKE2+ verifier's: it holds no w1,
+// so a copy of it pairs no browser, and a guess against it costs ITER rounds.
+// SALT is 1 to MOY_SEAL_PW_SALT_MAX printable characters, no '$'. A record of
+// another form, or ITER outside MIN..MAX, reads as no password.
+#define MOY_SEAL_PW_ITER (1u << 15)
+#define MOY_SEAL_PW_ITER_MIN (1u << 15)
+#define MOY_SEAL_PW_ITER_MAX (1u << 22)
+#define MOY_SEAL_PW_SALT_MAX 32
+#define MOY_SEAL_PW_RECORD 256          // the longest record and its NUL
+// w0 and w1 of a password: MOY_SEAL_OK, else MOY_SEAL_EBAD (a salt or ITER
+// out of bounds) or MOY_SEAL_ENOMEM.
+int moy_seal_pw_derive(const char *pw, size_t pn, const char *salt, size_t sn, uint32_t iter,
+                       uint8_t w0[32], uint8_t w1[32]);
+// The record into out (cap at least MOY_SEAL_PW_RECORD): its length, or -1.
+int moy_seal_pw_record(const char *pw, size_t pn, const char *salt, size_t sn, uint32_t iter,
+                       char *out, size_t cap);
+// A record's text up to its line's end: ITER, SALT (NUL-terminated), w0 and
+// L, 1; else 0.
+int moy_seal_pw_parse(const char *text, size_t n, uint32_t *iter, char *salt, size_t salt_cap,
+                      uint8_t w0[32], uint8_t l[MOY_SEAL_POINT]);
+// Whether `pw` is the password a record was made from (w0 compared in
+// constant time): 1, else 0.
+int moy_seal_pw_check(const char *pw, size_t pn, const char *text, size_t n);
 
 // The protocol's MACs and keys (the header).
 void moy_seal_key_mac(const moy_seal_hs_t *h, const uint8_t kid[MOY_SEAL_KID],
@@ -123,9 +153,22 @@ void moy_seal_token_mac(const moy_seal_hs_t *h, const uint8_t token[MOY_SEAL_RAN
 void moy_seal_wrap(const moy_seal_hs_t *h, const uint8_t *secret, size_t sn,
                    uint8_t key[MOY_SEAL_KEY]);
 
-// SPAKE2: this side's point from the password's digest, then the peer's
-// point to the session's Ke and both confirmations, cA the browser's.
-int moy_seal_spake_start(moy_seal_spake_t *s, int board, const uint8_t digest[32]);
+// SPAKE2+: this side's share (X = x*G + w0*M, the prover's; Y = y*G + w0*N,
+// the verifier's, after L is checked on the curve), from the scalar given or,
+// with NULL, a fresh one; then the peer's share to K_shared and both
+// confirmations, confirmP = HMAC(K_confirmP, Y) the prover's and confirmV =
+// HMAC(K_confirmV, X) the verifier's, under the transcript's context and
+// identities (moy_seal_spake_keys, each at most 64 bytes), or under the
+// console's (moy_seal_spake_end: Ke, cA the browser's, cB the board's). A peer
+// share off the curve, or one that leaves Z or V the identity, is
+// MOY_SEAL_EPOINT.
+int moy_seal_spake_prover(moy_seal_spake_t *s, const uint8_t w0[32], const uint8_t w1[32],
+                          const uint8_t *x);
+int moy_seal_spake_verifier(moy_seal_spake_t *s, const uint8_t w0[32],
+                            const uint8_t l[MOY_SEAL_POINT], const uint8_t *y);
+int moy_seal_spake_keys(moy_seal_spake_t *s, const void *context, size_t cn, const void *idp,
+                        size_t pn, const void *idv, size_t vn, const uint8_t peer[MOY_SEAL_POINT],
+                        uint8_t shared[32], uint8_t cp[MOY_SEAL_MAC], uint8_t cv[MOY_SEAL_MAC]);
 int moy_seal_spake_end(moy_seal_spake_t *s, const moy_seal_hs_t *h,
                        const uint8_t peer[MOY_SEAL_POINT], uint8_t ke[MOY_SEAL_KEY],
                        uint8_t ca[MOY_SEAL_MAC], uint8_t cb[MOY_SEAL_MAC]);

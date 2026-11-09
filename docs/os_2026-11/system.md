@@ -280,8 +280,10 @@ setup (on the Zero, on its webhost page), never a shared default; keys in
 `system/authorized_keys`, so `ssh-copy-id` works; passwords and keys are
 both valid, and an advanced user turns passwords off
 with one line in the sshd_config-like `system/ssh` (`password_auth = no`).
-With no password set there is no SSH. The password's hash is
-`system/password`, set with the shell's `passwd`; the shell's `/etc` is
+With no password set there is no SSH. The password's record is
+`system/password` (`native/moy_net/moy_seal.h`, THE PASSWORD: PBKDF2-HMAC-SHA256
+at 32768 rounds, then SPAKE2+'s w0 and L = w1·G; a record of another form
+reads as no password), set with the shell's `passwd`; the shell's `/etc` is
 `system/`, and `/etc/dropbear` names it too, where ssh-copy-id puts a key
 for a Dropbear server. The server holds the radio (the `ssh` lease) while a
 password is set (`runtime/system/ssh_service.py`). Every console serves
@@ -333,9 +335,12 @@ host's and the wasm's the same release vendored (`native/moy_net/mbedtls/README.
   of the board's id after the address's `#`, which never reaches a server or
   a log. A browser that cannot scan types the console's password, the one
   `passwd` sets for SSH (eight characters or more, as the Zero's setup form
-  asks): SPAKE2 over P-256 (RFC 9382's M and N and key
-  schedule) from the stored hash, so the password never crosses the network
-  and a recorded exchange gives nothing to guess against offline. With no
+  asks): SPAKE2+ over P-256 (RFC 9383, held to its test vector), the
+  browser the prover with w0 and w1 from the password, the board the
+  verifier with the record's w0 and L, so the password never crosses the
+  network, a recorded exchange gives nothing to guess against offline, and a
+  copy of the record (whoever reads the card) cannot pair a browser, though
+  it can be guessed against at the record's PBKDF2 cost. With no
   password set a browser pairs by the QR alone; the Zero, with no screen,
   sets its password in its setup form or `provision.sh --password`. A pairing
   mints a random 128-bit device key with an id and the browser's name, kept in

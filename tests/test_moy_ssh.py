@@ -142,12 +142,9 @@ def harness(built):
 
 
 def hashed(password):
-    """moy_ssh_hash's `$moy1$SALT$HEX`, SHA-256 iterated (moy_ssh.h)."""
-    import hashlib
-    d = hashlib.sha256((SALT + password).encode()).digest()
-    for _ in range(4095):
-        d = hashlib.sha256(d + password.encode()).digest()
-    return "$moy1$%s$%s" % (SALT, d.hex())
+    """The password's record (moy_seal.h's THE PASSWORD), as passwd writes it."""
+    from runtime.host import net_binding
+    return net_binding.pw_hash(password, SALT)
 
 
 def set_password(h, password):
@@ -334,7 +331,7 @@ def test_with_no_card_the_session_and_ssh_copy_id_use_the_internal_store(built, 
     h = serve(exe, tmp_path, store="moy")
     try:
         assert h["system"] == tmp_path / "tree" / "moy" / "system"
-        r = ssh(h, PASSWORD, "moy@127.0.0.1", "pwd; grep -c moy1 /etc/password")
+        r = ssh(h, PASSWORD, "moy@127.0.0.1", "pwd; grep -c moy2 /etc/password")
         assert r.returncode == 0, r.stderr
         assert r.stdout.decode().split("\n")[:2] == ["/moy/files", "1"]
         pub = (h["key"].parent / "id_ed25519.pub").read_text().strip()

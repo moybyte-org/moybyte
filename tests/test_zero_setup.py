@@ -130,7 +130,7 @@ def test_setup_writes_the_consoles_own_wifi_shape_and_this_boards_identity():
     assert written["/moy/zero.json"] == {"name": "attic"}
     stored = texts["/moy/system/password"]
     assert "board-pass" not in stored
-    salt = stored.split("$")[2]
+    salt = stored.split("$")[3]
     assert stored == ssh_service.hashed("board-pass", salt) + "\n"
 
 
@@ -143,7 +143,7 @@ def test_a_real_round_trip_through_files(tmp_path):
                           str(wifi), str(zero), str(tmp_path / "system"))
     assert json.loads(wifi.read_text())["networks"][0]["ssid"] == "home"
     assert json.loads(zero.read_text()) == {"name": "attic"}
-    assert (tmp_path / "system" / "password").read_text().startswith("$moy1$")
+    assert (tmp_path / "system" / "password").read_text().startswith("$moy2$")
 
 
 # -- the server --------------------------------------------------------------
@@ -671,7 +671,7 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
         {"ssid": "Café", "password": "hunter2xyz"},
         {"ssid": "school", "password": "sssssssss"}]
     assert seen["zero"] == {"name": "atticzero"}
-    assert seen["password"].startswith("$moy1$")
+    assert seen["password"].startswith("$moy2$")
 
     assert log == ["ap up", "sta up", "dns start 192.168.4.1",
                    "server stop", "dns stop", "ap down", "reset"]

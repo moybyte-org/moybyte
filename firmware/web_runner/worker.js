@@ -870,7 +870,7 @@ async function importP8(name, buf) {
 //   the board's id (the page keeps them, page_tail.js), the QR's single-use
 //   token from the url's # (which pairs this browser: the board mints its key
 //   and the page stores it), or nothing -- the page asks to pair: by the
-//   console's password (SPAKE2, `{t:"password"}`), or by scanning the code.
+//   console's password (SPAKE2+, `{t:"password"}`), or by scanning the code.
 //
 // A credential whose hello's nonce the board no longer holds is answered 409
 // {"error":"nonce"} (other hellos took its place, or it ran out): the page
@@ -1063,7 +1063,7 @@ function signIn() {
     return signingIn;
 }
 
-// Pairing by the console's password (the page's prompt): SPAKE2, then the
+// Pairing by the console's password (the page's prompt): SPAKE2+, then the
 // key, then a fresh load signed in with it.
 async function pairPassword(pw, name) {
     let why = "";
@@ -1072,6 +1072,7 @@ async function pairPassword(pw, name) {
             const h = await hello();
             if (!h.id) return need(h.r, true);
             const n = swCall(sw().pake, pw, name || auth.name);
+            if (n < 0) { why = "the console's answer did not check -- try again"; break; }
             let r = await authPost(utf8d.decode(swGet(n)));
             if (r.status === 409) continue;            // the nonce went: ask again
             if (r.status === 200) {

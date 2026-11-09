@@ -30,7 +30,7 @@
 #define KEYS_MAX (16u * 1024u)
 
 // The server's own state, PSRAM (moy_ssh_globals): the jump an exit takes,
-// the stored hash and what getpwnam and crypt answer with.
+// the stored record and what getpwnam and crypt answer with.
 typedef struct {
     jmp_buf jmp;
     char hash[MOY_SSH_HASH_MAX];
@@ -215,10 +215,14 @@ static void conf_here(void *arg) {
     c->hash[0] = 0;
     if (sys_read("password", &b) == 0) {
         size_t n = strcspn(b.p, "\r\n");
-        if (n < sizeof c->hash && n == strspn(b.p, "$moy1abcdef0123456789")) {
+        uint32_t iter;
+        char salt[MOY_SEAL_PW_SALT_MAX + 1];
+        uint8_t w0[32], l[MOY_SEAL_POINT];
+        if (n < sizeof c->hash && moy_seal_pw_parse(b.p, n, &iter, salt, sizeof salt, w0, l)) {
             memcpy(c->hash, b.p, n);
             c->hash[n] = 0;
         }
+        moy_seal_wipe(w0, sizeof w0);
         moy_buf_free(&b);
     }
     c->password_auth = 1;
@@ -340,60 +344,19 @@ void moy_ssh_exit_jump(int code) {
 
 // -- the password ---------------------------------------------------------------
 
-static void hex(const unsigned char *p, size_t n, char *out) {
-    static const char d[] = "0123456789abcdef";
-    for (size_t i = 0; i < n; i++) {
-        out[2 * i] = d[p[i] >> 4];
-        out[2 * i + 1] = d[p[i] & 15];
-    }
-    out[2 * n] = '\0';
-}
+_Static_assert(MOY_SSH_HASH_MAX >= MOY_SEAL_PW_RECORD, "a record fits");
 
-int moy_ssh_hash(const char *password, const char *salt, char *out, size_t cap) {
-    size_t sl = strlen(salt);
-    if (sl == 0 || sl > 32 || strspn(salt, "0123456789abcdef") != sl
-            || cap < 6 + sl + 1 + 64 + 1) {
-        return -1;
-    }
-    unsigned char d[32];
-    hash_state hs;
-    sha256_init(&hs);
-    sha256_process(&hs, (const unsigned char *)salt, sl);
-    sha256_process(&hs, (const unsigned char *)password, strlen(password));
-    sha256_done(&hs, d);
-    for (int i = 1; i < MOY_SSH_HASH_ROUNDS; i++) {
-        sha256_init(&hs);
-        sha256_process(&hs, d, sizeof d);
-        sha256_process(&hs, (const unsigned char *)password, strlen(password));
-        sha256_done(&hs, d);
-    }
-    char h[65];
-    hex(d, sizeof d, h);
-    m_burn(d, sizeof d);
-    snprintf(out, cap, "$moy1$%s$%s", salt, h);
-    return 0;
-}
-
-// Dropbear compares crypt(password, stored) with stored.
+// Dropbear compares crypt(password, stored) with stored: the record itself
+// when the password is the one it was made from (moy_seal_pw_check), else a
+// string no record equals.
 char *moy_ssh_crypt(const char *key, const char *stored) {
     char *out = g->crypt;
-    char salt[33];
-    const char *p = stored;
-    if (strncmp(p, "$moy1$", 6) != 0) {
-        return NULL;
-    }
-    p += 6;
-    const char *e = strchr(p, '$');
-    if (e == NULL || e - p > 32) {
-        return NULL;
-    }
-    memcpy(salt, p, e - p);
-    salt[e - p] = '\0';
-    if (moy_ssh_hash(key, salt, out, MOY_SSH_HASH_MAX) != 0) {
-        return NULL;
-    }
-    if (strcmp(out, stored) != 0) {
+    size_t n = strlen(stored);
+    if (n < sizeof g->crypt && moy_seal_pw_check(key, strlen(key), stored, n)) {
+        memcpy(out, stored, n + 1u);
+    } else {
         s_stats.refused++;
+        strcpy(out, "*");
     }
     return out;
 }

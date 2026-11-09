@@ -114,7 +114,7 @@ typedef struct {
     int state;                          // JOB_*, read and written atomically
     int slot;
     moy_seal_hs_t hs;
-    uint8_t digest[32], x[MOY_SEAL_POINT];
+    uint8_t w0[32], l[MOY_SEAL_POINT], x[MOY_SEAL_POINT];
     uint8_t y[MOY_SEAL_POINT], ke[MOY_SEAL_KEY], ca[MOY_SEAL_MAC], cb[MOY_SEAL_MAC];
     int err;
 } job_t;
@@ -322,10 +322,12 @@ static void load(void) {
     }
 }
 
-// The password's digest and salt from system/password: 1, else 0 (none set).
-static int password(uint8_t digest[32], char salt[SALT_MAX]) {
+// The password's record from system/password (moy_seal.h, THE PASSWORD): its
+// rounds, salt, w0 and L, 1; else 0 (none set, or a record of another form).
+static int password(uint32_t *iter, char salt[SALT_MAX], uint8_t w0[32],
+                    uint8_t l[MOY_SEAL_POINT]) {
     int n = read_text(PW_FILE);
-    int ok = n > 0 && moy_seal_pw_parse(A->text, (size_t)n, salt, SALT_MAX, digest);
+    int ok = n > 0 && moy_seal_pw_parse(A->text, (size_t)n, iter, salt, SALT_MAX, w0, l);
     moy_seal_wipe(A->text, sizeof A->text);
     return ok;
 }
@@ -816,13 +818,13 @@ static void *job_thread(void *arg);
 static void run_job(void) {
     job_t *j = &A->job;
     moy_seal_spake_t s;
-    int r = moy_seal_spake_start(&s, 1, j->digest);
+    int r = moy_seal_spake_verifier(&s, j->w0, j->l, NULL);
     if (r == MOY_SEAL_OK) {
         memcpy(j->y, s.mine, MOY_SEAL_POINT);
         r = moy_seal_spake_end(&s, &j->hs, j->x, j->ke, j->ca, j->cb);
     }
     moy_seal_wipe(&s, sizeof s);
-    moy_seal_wipe(j->digest, sizeof j->digest);
+    moy_seal_wipe(j->w0, sizeof j->w0);
     j->err = r;
     __atomic_store_n(&j->state, JOB_DONE, __ATOMIC_RELEASE);
 }
@@ -907,13 +909,15 @@ static int hello(uint32_t peer, char *doc, size_t cap) {
     c->at = moy_net_ms64();
     moy_seal_random(c->nb, MOY_SEAL_RAND);
     char id[2 * MOY_SEAL_RAND + 1], nb[2 * MOY_SEAL_RAND + 1], salt[SALT_MAX];
-    uint8_t digest[32];
-    int pw = password(digest, salt);
-    moy_seal_wipe(digest, sizeof digest);
+    uint8_t w0[32], l[MOY_SEAL_POINT];
+    uint32_t iter = 0;
+    int pw = password(&iter, salt, w0, l);
+    moy_seal_wipe(w0, sizeof w0);
     moy_seal_hex(A->id, MOY_SEAL_RAND, id);
     moy_seal_hex(c->nb, MOY_SEAL_RAND, nb);
-    snprintf(doc, cap, "{\"v\":1,\"id\":\"%s\",\"nb\":\"%s\",\"pw\":%s,\"salt\":\"%s\"}", id, nb,
-             pw ? "true" : "false", pw ? salt : "");
+    snprintf(doc, cap,
+             "{\"v\":1,\"id\":\"%s\",\"nb\":\"%s\",\"pw\":%s,\"salt\":\"%s\",\"iter\":%u}", id,
+             nb, pw ? "true" : "false", pw ? salt : "", pw ? (unsigned)iter : 0u);
     return 200;
 }
 
@@ -1048,7 +1052,8 @@ int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap
         return refuse(doc, cap, 503, "busy");
     }
     char salt[SALT_MAX];
-    if (!password(j->digest, salt)) {
+    uint32_t iter;
+    if (!password(&iter, salt, j->w0, j->l)) {
         return refuse(doc, cap, 403, "nopw");
     }
     moy_wa_note(peer, 0);

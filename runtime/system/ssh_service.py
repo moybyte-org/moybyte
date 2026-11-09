@@ -23,7 +23,7 @@ name stay until the run reports its tasks parked: a shell wake looks every
 PARK_MS. A start before then cancels the wake and keeps both.
 
   boot(ws)                 at the console's first frame: serve if a password is set
-  set_password(ws, pw)     store the password's hash (None: remove it), sign
+  set_password(ws, pw)     store the password's record (None: remove it), sign
                            every browser out (its key kept), and serve or
                            stop to match; False for one under MIN_PASSWORD
                            characters
@@ -39,9 +39,9 @@ PARK_MS. A start before then cancels the wake and keeps both.
   passwd(door, args)       the shell's `passwd` (runtime/shell/sh_roles.py's
                            role command, the Zero's door): its exit code
 
-The hash is moy_ssh's (`$moy1$SALT$HEX`, SHA-256 iterated), the same C on a
-board; the host computes it with hashlib, the formula tests/test_moy_ssh.py
-holds equal.
+The password is kept as moy_seal.h's record (THE PASSWORD: `$moy2$ITER$SALT$
+W0$L`, PBKDF2 then SPAKE2+'s w0 and L = w1*G), made by moy_net.pw_hash, the
+same C on every port; a record of another form reads as no password.
 """
 
 try:
@@ -81,7 +81,7 @@ except ImportError:  # host: the runtime package
 TAG = "ssh"
 PASSWORD = "password"
 MIN_PASSWORD = 8                # the Zero's setup form's floor too (zero_setup.CONSOLE_MIN)
-ROUNDS = 4096
+RECORD = "$moy2$"
 NAME_MAX = 63
 PREFIX = "moybyte"
 HOST_MAC = b"\x02\x00\x00\x00\xbe\xef"
@@ -105,19 +105,17 @@ def _path(ws, name):
 def is_set(ws):
     try:
         with open(_path(ws, PASSWORD)) as f:
-            return f.read().startswith("$moy1$")
+            return f.read().startswith(RECORD)
     except OSError:
         return False
 
 
 def hashed(password, salt):
-    if _N is not None:
-        return _N.hash(password, salt)
-    import hashlib
-    d = hashlib.sha256((salt + password).encode()).digest()
-    for _ in range(ROUNDS - 1):
-        d = hashlib.sha256(d + password.encode()).digest()
-    return "$moy1$%s$%s" % (salt, "".join("%02x" % b for b in d))
+    try:
+        import moy_net
+    except ImportError:  # host: the runtime package
+        from runtime import net_binding as moy_net
+    return moy_net.pw_hash(password, salt)
 
 
 def _salt():
@@ -310,7 +308,7 @@ def _sign_out():
 
 
 def set_password(ws, password):
-    """The password's hash into system/password, or the file removed; every
+    """The password's record into system/password, or the file removed; every
     browser signed out and the server started or stopped to match. False for
     a password under MIN_PASSWORD characters, which changes nothing."""
     if password is None:

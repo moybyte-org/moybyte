@@ -9,7 +9,8 @@ both ends share through moy_seal.c (a label, a nonce layout, a transcript)
 fails here instead of agreeing with itself.
 
 What it holds: pairing by the QR's token and by the console's password
-(SPAKE2, RFC 9382's M and N), a key login after either; a token used once and
+(SPAKE2+, RFC 9383, held to its test vector; a copy of the password's
+record pairs nothing), a key login after either; a token used once and
 gone after its ten minutes; a wrong token, key or password counted by the
 backoff, per address and from anywhere; a recorded login, a replayed or
 tampered request and a tampered, truncated or reordered answer refused; a
@@ -26,7 +27,6 @@ and the page's own end (signin_test.mjs).
 """
 
 import ctypes
-import hashlib
 import hmac
 import json
 import os
@@ -50,6 +50,8 @@ import seal_client  # noqa: E402
 from seal_client import Refused, split  # noqa: E402
 from runtime import net_binding as nb  # noqa: E402
 from runtime import ssh_service  # noqa: E402
+from p256_ref import (CB, CONTEXT, G, M, N, NP, P, RFC_M, RFC_N, ec_add, ec_dec,  # noqa: E402
+                      ec_enc, ec_mul, ec_neg, hkdf, hm, pw_scalars, record, spake2p_keys)
 
 AESGCM = pytest.importorskip("cryptography.hazmat.primitives.ciphers.aead").AESGCM
 
@@ -102,80 +104,8 @@ def doc(resp):
 
 # -- a second page, from the protocol's text ---------------------------------------
 
-P = 2 ** 256 - 2 ** 224 + 2 ** 192 + 2 ** 96 - 1
-CB = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
-N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
-G = (0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
-     0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5)
-# RFC 9382 section 6, P-256's M and N, compressed as the RFC prints them.
-RFC_M = "02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f"
-RFC_N = "03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49"
-
-
-def ec_add(a, b):
-    if a is None:
-        return b
-    if b is None:
-        return a
-    if a[0] == b[0] and (a[1] + b[1]) % P == 0:
-        return None
-    if a == b:
-        m = (3 * a[0] * a[0] - 3) * pow(2 * a[1], -1, P)
-    else:
-        m = (b[1] - a[1]) * pow(b[0] - a[0], -1, P)
-    x = (m * m - a[0] - b[0]) % P
-    return x, (m * (a[0] - x) - a[1]) % P
-
-
-def ec_mul(k, pt):
-    out = None
-    while k:
-        if k & 1:
-            out = ec_add(out, pt)
-        pt = ec_add(pt, pt)
-        k >>= 1
-    return out
-
-
-def ec_neg(pt):
-    return pt[0], (-pt[1]) % P
-
-
-def ec_dec(raw):
-    if raw[0] == 4:
-        return int.from_bytes(raw[1:33], "big"), int.from_bytes(raw[33:], "big")
-    x = int.from_bytes(raw[1:], "big")
-    y = pow((x ** 3 - 3 * x + CB) % P, (P + 1) // 4, P)
-    return x, y if y % 2 == raw[0] % 2 else P - y
-
-
-def ec_enc(pt):
-    return b"\x04" + pt[0].to_bytes(32, "big") + pt[1].to_bytes(32, "big")
-
-
-def hm(key, *parts):
-    return hmac.new(key, b"".join(parts), hashlib.sha256).digest()
-
-
-def hkdf(salt, ikm, info, n):
-    prk = hm(salt or bytes(32), ikm)
-    out, t, i = b"", b"", 1
-    while len(out) < n:
-        t = hm(prk, t, info, bytes([i]))
-        out += t
-        i += 1
-    return out[:n]
-
-
 def nonce(kind, index, seq):
     return bytes([kind]) + index.to_bytes(3, "big") + seq.to_bytes(8, "big")
-
-
-def pw_digest(password, salt):
-    d = hashlib.sha256((salt + password).encode()).digest()
-    for _ in range(4095):
-        d = hashlib.sha256(d + password.encode()).digest()
-    return d
 
 
 class Ref:
@@ -199,6 +129,7 @@ class Ref:
         self.id, self.nb = bytes.fromhex(d["id"]), bytes.fromhex(d["nb"])
         self.nc = os.urandom(16)
         self.salt = d.get("salt")
+        self.iter = d.get("iter")
         return d
 
     def _ids(self):
@@ -231,28 +162,26 @@ class Ref:
                         "kid": kid.hex(), "mac": mac.hex()})
         self._signed(d, key, kid)
 
-    def pair_password(self, password):
+    def pair_password(self, password, scalars=None):
+        """SPAKE2+'s prover (RFC 9383) with w0 and w1 from the password, or
+        `scalars` given: (w0, w1) as someone who holds only the record would
+        try them."""
         self.hello()
-        w = int.from_bytes(hkdf(None, pw_digest(password, self.salt), b"moy1 spake2 w", 40),
-                           "big") % N or 1
-        M, Nn = ec_dec(bytes.fromhex(RFC_M)), ec_dec(bytes.fromhex(RFC_N))
+        w0, w1 = scalars or pw_scalars(password, self.salt, self.iter)
         x = random.SystemRandom().randrange(1, N)
-        X = ec_enc(ec_add(ec_mul(x, G), ec_mul(w, M)))
+        X = ec_enc(ec_add(ec_mul(x, G), ec_mul(w0, M)))
         d = self._auth({"op": "pake", "nb": self.nb.hex(), "nc": self.nc.hex(),
                         "X": X.hex(), "name": self.name})
         Y = bytes.fromhex(d["Y"])
-        K = ec_enc(ec_mul(x, ec_add(ec_dec(Y), ec_neg(ec_mul(w, Nn)))))
-
-        def lp(b):
-            return len(b).to_bytes(8, "little") + b
-        tt = (lp(b"moy1 browser" + self.nc) + lp(b"moy1 board" + self.id + self.nb)
-              + lp(X) + lp(Y) + lp(K) + lp(w.to_bytes(32, "big")))
-        h = hashlib.sha256(tt).digest()
-        ke, kca = h[:16], hkdf(None, h[16:], b"ConfirmationKeys", 32)
-        assert hmac.compare_digest(bytes.fromhex(d["cB"]), hm(kca[16:], tt)), \
-            "the board's confirmation does not check"
-        d = self._auth({"op": "confirm", "nb": self.nb.hex(), "cA": hm(kca[:16], tt).hex()})
-        pad = hm(ke, b"moy1 wrap\0", self._ids())[:16]
+        t = ec_add(ec_dec(Y), ec_neg(ec_mul(w0, NP)))
+        shared, cp, cv = spake2p_keys(CONTEXT, b"moy1 browser" + self.nc,
+                                      b"moy1 board" + self.id + self.nb, X, Y,
+                                      ec_mul(x, t), ec_mul(w1, t), w0)
+        if not hmac.compare_digest(bytes.fromhex(d["cB"]), cv):
+            self.confirm_p = cp
+            raise AssertionError("the board's confirmation does not check")
+        d = self._auth({"op": "confirm", "nb": self.nb.hex(), "cA": cp.hex()})
+        pad = hm(shared[:16], b"moy1 wrap\0", self._ids())[:16]
         key = bytes(a ^ b for a, b in zip(bytes.fromhex(d["key"]), pad))
         self._signed(d, key, bytes.fromhex(d["kid"]))
 
@@ -297,6 +226,126 @@ def test_the_spake2_points_are_rfc_9382s():
         pt = ec_dec(bytes.fromhex(rfc))
         assert raw == ec_enc(pt), name
         assert (pt[1] ** 2 - pt[0] ** 3 + 3 * pt[0] - CB) % P == 0
+
+
+# RFC 9383 appendix C, the P256-SHA256-HKDF-SHA256-HMAC-SHA256 vector.
+V9383 = dict(
+    context=b"SPAKE2+-P256-SHA256-HKDF-SHA256-HMAC-SHA256 Test Vectors",
+    w0="bb8e1bbcf3c48f62c08db243652ae55d3e5586053fca77102994f23ad95491b3",
+    w1="7e945f34d78785b8a3ef44d0df5a1a97d6b3b460409a345ca7830387a74b1dba",
+    L="04eb7c9db3d9a9eb1f8adab81b5794c1f13ae3e225efbe91ea487425854c7fc00f00bfedcbd09b2400142d"
+      "40a14f2064ef31dfaa903b91d1faea7093d835966efd",
+    x="d1232c8e8693d02368976c174e2088851b8365d0d79a9eee709c6a05a2fad539",
+    X="04ef3bd051bf78a2234ec0df197f7828060fe9856503579bb1733009042c15c0c1de127727f418b5966afa"
+      "dfdd95a6e4591d171056b333dab97a79c7193e341727",
+    y="717a72348a182085109c8d3917d6c43d59b224dc6a7fc4f0483232fa6516d8b3",
+    Y="04c0f65da0d11927bdf5d560c69e1d7d939a05b0e88291887d679fcadea75810fb5cc1ca7494db39e82ff2"
+      "f50665255d76173e09986ab46742c798a9a68437b048",
+    Z="04bbfce7dd7f277819c8da21544afb7964705569bdf12fb92aa388059408d50091a0c5f1d3127f56813b53"
+      "37f9e4e67e2ca633117a4fbd559946ab474356c41839",
+    V="0458bf27c6bca011c9ce1930e8984a797a3419797b936629a5a937cf2f11c8b9514b82b993da8a46e664f2"
+      "3db7c01edc87faa530db01c2ee405230b18997f16b68",
+    confirmP="926cc713504b9b4d76c9162ded04b5493e89109f6d89462cd33adc46fda27527",
+    confirmV="9747bcc4f8fe9f63defee53ac9b07876d907d55047e6ff2def2e7529089d3e68",
+    shared="0c5f8ccd1413423a54f6c1fb26ff01534a87f893779c6e68666d772bfd91f3e7",
+)
+
+
+def _c_side(prover, v):
+    """One side of the vector through moy_seal.c: (share, shared, cp, cv)."""
+    import ctypes
+    lib = nb._lib()
+    s = ctypes.create_string_buffer(512)            # a moy_seal_spake_t
+    H = bytes.fromhex
+    if prover:
+        assert lib.moy_seal_spake_prover(s, H(v["w0"]), H(v["w1"]), H(v["x"])) == 0
+    else:
+        assert lib.moy_seal_spake_verifier(s, H(v["w0"]), H(v["L"]), H(v["y"])) == 0
+    share = s.raw[32 * 3 + 65:32 * 3 + 130]          # moy_seal_spake_t's mine
+    shared, cp, cv = (ctypes.create_string_buffer(32) for _ in range(3))
+    peer = H(v["Y"] if prover else v["X"])
+    assert lib.moy_seal_spake_keys(s, v["context"], len(v["context"]), b"client", 6, b"server", 6,
+                                   peer, shared, cp, cv) == 0
+    return share.hex(), shared.raw.hex(), cp.raw.hex(), cv.raw.hex()
+
+
+def test_spake2_plus_answers_rfc_9383_s_vector_on_both_sides():
+    v = V9383
+    for prover in (True, False):
+        share, shared, cp, cv = _c_side(prover, v)
+        assert share == (v["X"] if prover else v["Y"])
+        assert (shared, cp, cv) == (v["shared"], v["confirmP"], v["confirmV"])
+    # and the reference, from the RFC's text
+    w0, w1 = int(v["w0"], 16), int(v["w1"], 16)
+    X, Y = bytes.fromhex(v["X"]), bytes.fromhex(v["Y"])
+    assert ec_enc(ec_mul(w1, G)).hex() == v["L"]
+    assert ec_enc(ec_add(ec_mul(int(v["x"], 16), G), ec_mul(w0, M))) == X
+    t = ec_add(ec_dec(Y), ec_neg(ec_mul(w0, NP)))
+    z, vv = ec_mul(int(v["x"], 16), t), ec_mul(w1, t)
+    assert (ec_enc(z).hex(), ec_enc(vv).hex()) == (v["Z"], v["V"])
+    got = spake2p_keys(v["context"], b"client", b"server", X, Y, z, vv, w0)
+    assert [b.hex() for b in got] == [v["shared"], v["confirmP"], v["confirmV"]]
+
+
+def test_the_password_s_record_is_the_reference_s_and_checks_its_password_alone():
+    rec = nb.pw_hash(PASSWORD, "5a1t")
+    assert rec == record(PASSWORD, "5a1t") and rec.startswith("$moy2$32768$5a1t$")
+    assert nb.pw_check(PASSWORD, rec) and nb.pw_check(PASSWORD, rec + "\n")
+    assert not nb.pw_check(PASSWORD + "!", rec)
+    w0, l = rec.split("$")[4:6]
+    # strict: every other shape is no password
+    for bad in (rec.replace("$moy2$", "$moy1$"), rec.replace("$32768$", "$32767$"),
+                rec.replace("$32768$", "$032768$"), rec.replace("$32768$", "$8388608$"),
+                rec[:-2], rec + "00", rec.replace(w0, w0[:-1] + "g"),
+                rec.replace("$5a1t$", "$$"), rec.replace("$5a1t$", "$" + "s" * 33 + "$"),
+                "$moy1$5a1t$" + "ab" * 32):
+        assert not nb.pw_check(PASSWORD, bad), bad
+    for bad_salt in ("", "a$b", "a b", "s" * 33):
+        with pytest.raises(ValueError):
+            nb.pw_hash(PASSWORD, bad_salt)
+    assert len(l) == 130 and l.startswith("04")
+
+
+def test_a_copy_of_the_record_pairs_no_browser(tmp_path):
+    """The record holds w0 and L = w1*G, never w1: whoever read the card can
+    run the PAKE with w0 but not finish it, and the board refuses its
+    confirmation; the password still pairs."""
+    h = _host(tmp_path, password=PASSWORD)
+    rec = (tmp_path / "system" / "password").read_text()
+    w0 = int(rec.split("$")[4], 16)
+    thief = Ref(h.handle_http, name="Thief")
+    with pytest.raises(AssertionError, match="confirmation"):
+        thief.pair_password(None, scalars=(w0, random.randrange(1, N)))
+    with pytest.raises(Refused) as e:
+        thief._auth({"op": "confirm", "nb": thief.nb.hex(), "cA": thief.confirm_p.hex()})
+    assert e.value.status == 403
+    ref = Ref(h.handle_http)
+    ref.pair_password(PASSWORD)
+    assert ref.call("GET", "/carts.json")[0] == 200
+
+
+def test_an_older_record_reads_as_no_password(tmp_path, monkeypatch):
+    h = _host(tmp_path)
+    (tmp_path / "system" / "password").write_text("$moy1$5a1t$" + "ab" * 32 + "\n")
+    d = Ref(h.handle_http).hello()
+    assert d["pw"] is False and d["salt"] == "" and d["iter"] == 0
+    monkeypatch.setattr(ssh_service, "_path", lambda ws, name: str(tmp_path / "system" / name))
+    assert not ssh_service.is_set(None)
+
+
+def test_the_browser_s_c_holds_the_hello_s_rounds_to_the_floor(tmp_path):
+    """A forged hello asking for cheap rounds gets no PAKE from the page."""
+    h = _host(tmp_path, password=PASSWORD)
+
+    def send(method, path, body):
+        resp = h.handle_http(method, path, body)
+        if b'"op":"hello"' in body:
+            return resp.replace(b'"iter":32768', b'"iter":1024 ')
+        return resp
+    page = seal_client.Browser(send)
+    with pytest.raises(AssertionError, match="refused to build"):
+        page.pair_password(PASSWORD)
+    _page(h).pair_password(PASSWORD)
 
 
 def test_a_reference_page_pairs_by_token_and_its_calls_seal_both_ways(tmp_path):

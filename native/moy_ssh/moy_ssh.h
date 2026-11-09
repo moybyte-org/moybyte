@@ -15,10 +15,12 @@
 // as the SFTP server (native/moy_tty/moy_tty_sftp.c).
 //
 // SIGN-IN (docs/os_2026-11/system.md section 3): a password against the
-// stored hash (moy_ssh_hash) or a key in authorized_keys, any user name the
-// console's one account. The store's system folder holds what the server
-// reads at every connection's start, so a change is in force at the next:
-//   password          the hash, one line; none (or an empty file): no SSH
+// stored record (moy_seal_pw_check; native/moy_net/moy_seal.h's THE PASSWORD)
+// or a key in authorized_keys, any user name the console's one account. The
+// store's system folder holds what the server reads at every connection's
+// start, so a change is in force at the next:
+//   password          the record, one line; none, an empty file or a record
+//                     of another form: no SSH
 //   ssh               `key = value` lines, sshd_config-like: `password_auth =
 //                     no` turns passwords off (keys still sign in)
 //   authorized_keys   OpenSSH's format, a key a line (ssh-copy-id writes it)
@@ -45,8 +47,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MOY_SSH_HASH_ROUNDS 4096
-#define MOY_SSH_HASH_MAX 128
+#define MOY_SSH_HASH_MAX 256          // moy_seal.h's MOY_SEAL_PW_RECORD
 
 typedef struct {
     uint32_t sessions;          // connections served
@@ -71,10 +72,6 @@ int moy_ssh_listen(int port);
 // Serve one connection from `lfd` to its end; 0 when one was served, 1 when
 // none came within `wait_ms`, -1 on an error of the listening socket.
 int moy_ssh_serve_one(int lfd, int wait_ms);
-
-// The stored form of `password` with `salt` (hex, up to 32 characters):
-// `$moy1$SALT$HEX`, SHA-256 iterated MOY_SSH_HASH_ROUNDS times.
-int moy_ssh_hash(const char *password, const char *salt, char *out, size_t cap);
 
 void moy_ssh_stats(moy_ssh_stats_t *out);
 // The store's system folder setup was given.

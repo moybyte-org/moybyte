@@ -35,7 +35,7 @@
 // nonce and whether a password is set (and its salt); "key" signs a paired
 // browser in with its device key; "token" pairs a browser with the QR's
 // single-use token; "pake" and "confirm" pair one with the console's password
-// by SPAKE2, its curve work on a worker while this poll goes on (the request
+// by SPAKE2+, its curve work on a worker while this poll goes on (the request
 // is held, `afd`, and answered at a later poll). docs/os_2026-11/system.md
 // section 3 is the threat model.
 //

@@ -730,7 +730,7 @@ def _frozen_or_pushed(names=("zero_host", "zero_setup", "zero_shell",
 def _has_password():
     try:
         with open(SYSTEM_DIR + "/password") as f:
-            return f.read(6) == "$moy1$"
+            return f.read(6) == "$moy2$"
     except OSError:
         return False
 

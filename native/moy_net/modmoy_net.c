@@ -835,28 +835,6 @@ static mp_obj_t mod_web_signout(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_signout_obj, mod_web_signout);
 
-// pw_hash(password, salt) -> "$moy1$SALT$HEX", the console password's stored
-// form (moy_seal_pw_hash; runtime/system/ssh_service.py), for a board that
-// sets one with no SSH server (the Zero's setup).
-static mp_obj_t mod_pw_hash(mp_obj_t pw, mp_obj_t salt) {
-    size_t pn, sn;
-    const char *p = mp_obj_str_get_data(pw, &pn);
-    const char *s = mp_obj_str_get_data(salt, &sn);
-    if (sn == 0 || sn > 32 || memchr(s, '$', sn) != NULL) {
-        mp_raise_ValueError(MP_ERROR_TEXT("salt"));
-    }
-    uint8_t d[32];
-    moy_seal_pw_hash(p, pn, s, sn, d);
-    char out[6 + 32 + 1 + 64 + 1];
-    memcpy(out, "$moy1$", 6);
-    memcpy(out + 6, s, sn);
-    out[6 + sn] = '$';
-    moy_seal_hex(d, sizeof d, out + 7 + sn);
-    moy_seal_wipe(d, sizeof d);
-    return mp_obj_new_str(out, 7 + sn + 64);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_pw_hash_obj, mod_pw_hash);
-
 static mp_obj_t mod_web_poll(void) {
     int did = 0;
     WEB_GUARD_BEGIN
@@ -1207,12 +1185,29 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_http_close_obj, mod_http_close);
 
 #endif // MOY_NET_SERVE
 
+// pw_hash(password, salt) -> the console password's record, "$moy2$ITER$SALT$
+// W0$L" (moy_seal.h's THE PASSWORD; runtime/system/ssh_service.py), on every
+// port: the shell's passwd, the Zero's setup and provision.sh make it here.
+static mp_obj_t mod_pw_hash(mp_obj_t pw, mp_obj_t salt) {
+    size_t pn, sn;
+    const char *p = mp_obj_str_get_data(pw, &pn);
+    const char *s = mp_obj_str_get_data(salt, &sn);
+    char out[MOY_SEAL_PW_RECORD];
+    int n = moy_seal_pw_record(p, pn, s, sn, MOY_SEAL_PW_ITER, out, sizeof out);
+    if (n < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("salt"));
+    }
+    return mp_obj_new_str(out, (size_t)n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_pw_hash_obj, mod_pw_hash);
+
 static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_net)},
     {MP_ROM_QSTR(MP_QSTR_encode_batch), MP_ROM_PTR(&mod_encode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_apply), MP_ROM_PTR(&mod_sync_apply_obj)},
+    {MP_ROM_QSTR(MP_QSTR_pw_hash), MP_ROM_PTR(&mod_pw_hash_obj)},
     #if MOY_NET_SERVE
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},
     {MP_ROM_QSTR(MP_QSTR_query_param), MP_ROM_PTR(&mod_query_param_obj)},
@@ -1225,7 +1220,6 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_web_keys), MP_ROM_PTR(&mod_web_keys_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_key_drop), MP_ROM_PTR(&mod_web_key_drop_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_signout), MP_ROM_PTR(&mod_web_signout_obj)},
-    {MP_ROM_QSTR(MP_QSTR_pw_hash), MP_ROM_PTR(&mod_pw_hash_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&mod_web_events_obj)},

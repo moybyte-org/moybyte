@@ -27,6 +27,7 @@
 
 #include "moy_lease.h"
 #include "moy_loop.h"
+#include "moy_seal.h"
 #include "moy_ssh.h"
 #include "moy_tty.h"
 
@@ -122,7 +123,8 @@ static int32_t passwd(const char *arg, size_t n) {
     memcpy(pw, arg, n);
     pw[n] = 0;
     FILE *f;
-    if (moy_ssh_hash(pw, "00112233445566778899aabbccddeeff", out, sizeof out) != 0
+    if (moy_seal_pw_record(pw, n, "00112233445566778899aabbccddeeff", 32, MOY_SEAL_PW_ITER, out,
+                           sizeof out) < 0
             || (f = fopen(path, "w")) == NULL) {
         return 1;
     }

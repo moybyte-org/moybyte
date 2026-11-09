@@ -8,6 +8,7 @@
 #define _DEFAULT_SOURCE                 // getentropy
 #endif
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,7 +30,7 @@
 #include "mbedtls/md.h"
 #include "mbedtls/sha256.h"
 
-// RFC 9382's M and N for P-256, uncompressed.
+// RFC 9382's M and N for P-256 (RFC 9383's too), uncompressed.
 static const uint8_t SPAKE_M[MOY_SEAL_POINT] = {
     0x04, 0x88, 0x6e, 0x2f, 0x97, 0xac, 0xe4, 0x6e, 0x55, 0xba, 0x9d, 0xd7, 0x24, 0x25, 0x79,
     0xf2, 0x99, 0x3b, 0x64, 0xe1, 0x6e, 0xf3, 0xdc, 0xab, 0x95, 0xaf, 0xd4, 0x97, 0x33, 0x3d,
@@ -44,8 +45,6 @@ static const uint8_t SPAKE_N[MOY_SEAL_POINT] = {
     0x7f, 0x51, 0x68, 0xc6, 0x4d, 0x9b, 0xd3, 0x60, 0x34, 0x80, 0x8c, 0xd5, 0x64, 0x49, 0x0b,
     0x1e, 0x65, 0x6e, 0xdb, 0xe7,
 };
-
-#define PW_ROUNDS 4096
 
 // -- the random source (moy_seal.h) ----------------------------------------------------
 
@@ -224,44 +223,6 @@ void moy_seal_hkdf(const uint8_t *salt, size_t sn, const uint8_t *ikm, size_t in
     moy_seal_wipe(t, sizeof t);
 }
 
-void moy_seal_pw_hash(const char *pw, size_t pn, const char *salt, size_t sn, uint8_t out[32]) {
-    mbedtls_sha256_context c;
-    mbedtls_sha256_init(&c);
-    mbedtls_sha256_starts(&c, 0);
-    mbedtls_sha256_update(&c, (const uint8_t *)salt, sn);
-    mbedtls_sha256_update(&c, (const uint8_t *)pw, pn);
-    mbedtls_sha256_finish(&c, out);
-    for (int i = 1; i < PW_ROUNDS; i++) {
-        mbedtls_sha256_starts(&c, 0);
-        mbedtls_sha256_update(&c, out, 32);
-        mbedtls_sha256_update(&c, (const uint8_t *)pw, pn);
-        mbedtls_sha256_finish(&c, out);
-    }
-    mbedtls_sha256_free(&c);
-}
-
-int moy_seal_pw_parse(const char *text, size_t n, char *salt, size_t salt_cap, uint8_t h[32]) {
-    static const char PRE[] = "$moy1$";
-    if (text == NULL || n < sizeof(PRE) - 1u || memcmp(text, PRE, sizeof(PRE) - 1u) != 0) {
-        return 0;
-    }
-    const char *s = text + sizeof(PRE) - 1u, *end = text + n;
-    const char *d = memchr(s, '$', (size_t)(end - s));
-    if (d == NULL || (size_t)(d - s) + 1u > salt_cap || d == s) {
-        return 0;
-    }
-    const char *e = d + 1;
-    while (e < end && *e != '\n' && *e != '\r' && *e != ' ') {
-        e++;
-    }
-    if (!moy_seal_unhex(d + 1, (size_t)(e - d - 1), h, 32)) {
-        return 0;
-    }
-    memcpy(salt, s, (size_t)(d - s));
-    salt[d - s] = '\0';
-    return 1;
-}
-
 // -- the protocol's MACs (the header) -----------------------------------------------------
 
 // HMAC(key, label 0 [id nb nc] a b)
@@ -335,22 +296,81 @@ void moy_seal_wrap(const moy_seal_hs_t *h, const uint8_t *secret, size_t sn,
     moy_seal_wipe(pad, sizeof pad);
 }
 
-// -- SPAKE2 over P-256 ----------------------------------------------------------------------
+// -- the password: its record and SPAKE2+ over P-256 ---------------------------------------
+
+static const char SPAKE_CONTEXT[] = "moy2 SPAKE2+-P256-SHA256-HKDF-SHA256-HMAC-SHA256";
+static const char PRE[] = "$moy2$";
+
+// PBKDF2-HMAC-SHA256 (RFC 8018) of one 32-byte block: the key's inner and
+// outer pads hashed once, every round's two hashes resumed from them, so a
+// round costs this end what it costs a guesser: two SHA-256 blocks.
+static void pbkdf2(const char *pw, size_t pn, const char *salt, size_t sn, uint32_t iter,
+                   uint8_t out[32]) {
+    uint8_t k[64], u[32];
+    static const uint8_t one[4] = {0, 0, 0, 1};
+    memset(k, 0, sizeof k);
+    if (pn > sizeof k) {
+        moy_seal_sha256(pw, pn, k);
+    } else {
+        memcpy(k, pw, pn);
+    }
+    mbedtls_sha256_context ip, op, c;
+    mbedtls_sha256_init(&ip);
+    mbedtls_sha256_init(&op);
+    mbedtls_sha256_init(&c);
+    for (int i = 0; i < 64; i++) {
+        k[i] ^= 0x36;
+    }
+    mbedtls_sha256_starts(&ip, 0);
+    mbedtls_sha256_update(&ip, k, sizeof k);
+    for (int i = 0; i < 64; i++) {
+        k[i] ^= 0x36 ^ 0x5c;
+    }
+    mbedtls_sha256_starts(&op, 0);
+    mbedtls_sha256_update(&op, k, sizeof k);
+    mbedtls_sha256_clone(&c, &ip);
+    mbedtls_sha256_update(&c, (const uint8_t *)salt, sn);
+    mbedtls_sha256_update(&c, one, sizeof one);
+    mbedtls_sha256_finish(&c, u);
+    mbedtls_sha256_clone(&c, &op);
+    mbedtls_sha256_update(&c, u, sizeof u);
+    mbedtls_sha256_finish(&c, u);
+    memcpy(out, u, 32);
+    for (uint32_t r = 1; r < iter; r++) {
+        mbedtls_sha256_clone(&c, &ip);
+        mbedtls_sha256_update(&c, u, sizeof u);
+        mbedtls_sha256_finish(&c, u);
+        mbedtls_sha256_clone(&c, &op);
+        mbedtls_sha256_update(&c, u, sizeof u);
+        mbedtls_sha256_finish(&c, u);
+        for (int i = 0; i < 32; i++) {
+            out[i] ^= u[i];
+        }
+    }
+    mbedtls_sha256_free(&c);
+    mbedtls_sha256_free(&ip);
+    mbedtls_sha256_free(&op);
+    moy_seal_wipe(k, sizeof k);
+    moy_seal_wipe(u, sizeof u);
+}
 
 typedef struct {
     mbedtls_ecp_group g;
-    mbedtls_mpi w, s, one;
-    mbedtls_ecp_point a, b, c;
+    mbedtls_mpi w0, w1, s, one;
+    mbedtls_ecp_point p, q, t, z, v;
 } ec_t;
 
 static int ec_init(ec_t *e) {
     mbedtls_ecp_group_init(&e->g);
-    mbedtls_mpi_init(&e->w);
+    mbedtls_mpi_init(&e->w0);
+    mbedtls_mpi_init(&e->w1);
     mbedtls_mpi_init(&e->s);
     mbedtls_mpi_init(&e->one);
-    mbedtls_ecp_point_init(&e->a);
-    mbedtls_ecp_point_init(&e->b);
-    mbedtls_ecp_point_init(&e->c);
+    mbedtls_ecp_point_init(&e->p);
+    mbedtls_ecp_point_init(&e->q);
+    mbedtls_ecp_point_init(&e->t);
+    mbedtls_ecp_point_init(&e->z);
+    mbedtls_ecp_point_init(&e->v);
     if (mbedtls_ecp_group_load(&e->g, MBEDTLS_ECP_DP_SECP256R1) != 0
         || mbedtls_mpi_lset(&e->one, 1) != 0) {
         return MOY_SEAL_ENOMEM;
@@ -359,10 +379,13 @@ static int ec_init(ec_t *e) {
 }
 
 static void ec_free(ec_t *e) {
-    mbedtls_ecp_point_free(&e->a);
-    mbedtls_ecp_point_free(&e->b);
-    mbedtls_ecp_point_free(&e->c);
-    mbedtls_mpi_free(&e->w);
+    mbedtls_ecp_point_free(&e->p);
+    mbedtls_ecp_point_free(&e->q);
+    mbedtls_ecp_point_free(&e->t);
+    mbedtls_ecp_point_free(&e->z);
+    mbedtls_ecp_point_free(&e->v);
+    mbedtls_mpi_free(&e->w0);
+    mbedtls_mpi_free(&e->w1);
     mbedtls_mpi_free(&e->s);
     mbedtls_mpi_free(&e->one);
     mbedtls_ecp_group_free(&e->g);
@@ -385,53 +408,221 @@ static int add_mul(ec_t *e, mbedtls_ecp_point *out, const mbedtls_ecp_point *p,
     return r;
 }
 
-int moy_seal_spake_start(moy_seal_spake_t *s, int board, const uint8_t digest[32]) {
-    static const char L[] = "moy1 spake2 w";
-    uint8_t wide[40];
-    memset(s, 0, sizeof *s);
-    s->board = board ? 1 : 0;
-    moy_seal_hkdf(NULL, 0, digest, 32, L, sizeof L - 1u, wide, sizeof wide);
+static int put_point(ec_t *e, const mbedtls_ecp_point *p, uint8_t out[MOY_SEAL_POINT]) {
+    size_t olen = 0;
+    int r = mbedtls_ecp_point_write_binary(&e->g, p, MBEDTLS_ECP_PF_UNCOMPRESSED, &olen, out,
+                                           MOY_SEAL_POINT);
+    return r == 0 && olen == MOY_SEAL_POINT ? 0 : -1;
+}
+
+// A share from a peer, or a record's L: on the curve, never the identity.
+static int get_point(ec_t *e, mbedtls_ecp_point *p, const uint8_t in[MOY_SEAL_POINT]) {
+    return mbedtls_ecp_point_read_binary(&e->g, p, in, MOY_SEAL_POINT) == 0
+           && mbedtls_ecp_check_pubkey(&e->g, p) == 0 ? 0 : -1;
+}
+
+// w0 and w1 from the password: PBKDF2's key widened by HKDF to two 40-byte
+// halves, each reduced mod the order (RFC 9383 section 3.2), a zero read as 1.
+static int derive(ec_t *e, const char *pw, size_t pn, const char *salt, size_t sn,
+                  uint32_t iter) {
+    static const char L[] = "moy2 spake2+ w0 w1";
+    uint8_t k[32], wide[80];
+    pbkdf2(pw, pn, salt, sn, iter, k);
+    moy_seal_hkdf(NULL, 0, k, sizeof k, L, sizeof L - 1u, wide, sizeof wide);
+    int r = mbedtls_mpi_read_binary(&e->w0, wide, 40);
+    if (r == 0) {
+        r = mbedtls_mpi_mod_mpi(&e->w0, &e->w0, &e->g.N);
+    }
+    if (r == 0 && mbedtls_mpi_cmp_int(&e->w0, 0) == 0) {
+        r = mbedtls_mpi_lset(&e->w0, 1);
+    }
+    if (r == 0) {
+        r = mbedtls_mpi_read_binary(&e->w1, wide + 40, 40);
+    }
+    if (r == 0) {
+        r = mbedtls_mpi_mod_mpi(&e->w1, &e->w1, &e->g.N);
+    }
+    if (r == 0 && mbedtls_mpi_cmp_int(&e->w1, 0) == 0) {
+        r = mbedtls_mpi_lset(&e->w1, 1);
+    }
+    moy_seal_wipe(k, sizeof k);
+    moy_seal_wipe(wide, sizeof wide);
+    return r;
+}
+
+static int salt_ok(const char *salt, size_t sn) {
+    if (sn == 0 || sn > MOY_SEAL_PW_SALT_MAX) {
+        return 0;
+    }
+    for (size_t i = 0; i < sn; i++) {
+        if (salt[i] <= ' ' || salt[i] > '~' || salt[i] == '$') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int moy_seal_pw_derive(const char *pw, size_t pn, const char *salt, size_t sn, uint32_t iter,
+                       uint8_t w0[32], uint8_t w1[32]) {
+    if (!salt_ok(salt, sn) || iter < MOY_SEAL_PW_ITER_MIN || iter > MOY_SEAL_PW_ITER_MAX) {
+        return MOY_SEAL_EBAD;
+    }
     ec_t e;
     int r = ec_init(&e);
-    size_t olen = 0;
     if (r == 0) {
-        r = mbedtls_mpi_read_binary(&e.w, wide, sizeof wide);
+        r = derive(&e, pw, pn, salt, sn, iter);
     }
     if (r == 0) {
-        r = mbedtls_mpi_mod_mpi(&e.w, &e.w, &e.g.N);
-    }
-    if (r == 0 && mbedtls_mpi_cmp_int(&e.w, 0) == 0) {
-        r = mbedtls_mpi_lset(&e.w, 1);
+        r = mbedtls_mpi_write_binary(&e.w0, w0, 32);
     }
     if (r == 0) {
-        r = mbedtls_ecp_gen_privkey(&e.g, &e.s, rng, NULL);
+        r = mbedtls_mpi_write_binary(&e.w1, w1, 32);
+    }
+    ec_free(&e);
+    return r == 0 ? MOY_SEAL_OK : MOY_SEAL_ENOMEM;
+}
+
+int moy_seal_pw_record(const char *pw, size_t pn, const char *salt, size_t sn, uint32_t iter,
+                       char *out, size_t cap) {
+    if (!salt_ok(salt, sn) || iter < MOY_SEAL_PW_ITER_MIN || iter > MOY_SEAL_PW_ITER_MAX
+        || cap < MOY_SEAL_PW_RECORD) {
+        return -1;
+    }
+    uint8_t w0[32], l[MOY_SEAL_POINT];
+    ec_t e;
+    int r = ec_init(&e);
+    if (r == 0) {
+        r = derive(&e, pw, pn, salt, sn, iter);
     }
     if (r == 0) {
-        r = mbedtls_ecp_point_read_binary(&e.g, &e.b, board ? SPAKE_N : SPAKE_M, MOY_SEAL_POINT);
+        r = mbedtls_ecp_mul(&e.g, &e.p, &e.w1, &e.g.G, rng, NULL);
     }
     if (r == 0) {
-        r = mbedtls_ecp_mul(&e.g, &e.a, &e.s, &e.g.G, rng, NULL);
+        r = mbedtls_mpi_write_binary(&e.w0, w0, sizeof w0);
     }
     if (r == 0) {
-        r = add_mul(&e, &e.c, &e.a, &e.w, &e.b, 0);
+        r = put_point(&e, &e.p, l);
+    }
+    ec_free(&e);
+    if (r != 0) {
+        moy_seal_wipe(w0, sizeof w0);
+        return -1;
+    }
+    int n = snprintf(out, cap, "%s%u$%.*s$", PRE, (unsigned)iter, (int)sn, salt);
+    moy_seal_hex(w0, sizeof w0, out + n);
+    n += 2 * (int)sizeof w0;
+    out[n++] = '$';
+    moy_seal_hex(l, sizeof l, out + n);
+    moy_seal_wipe(w0, sizeof w0);
+    return n + 2 * (int)sizeof l;
+}
+
+int moy_seal_pw_parse(const char *text, size_t n, uint32_t *iter, char *salt, size_t salt_cap,
+                      uint8_t w0[32], uint8_t l[MOY_SEAL_POINT]) {
+    if (text == NULL || n < sizeof PRE - 1u || memcmp(text, PRE, sizeof PRE - 1u) != 0) {
+        return 0;
+    }
+    const char *p = text + sizeof PRE - 1u, *end = text;
+    while (end < text + n && *end != '\n' && *end != '\r') {
+        end++;
+    }
+    uint32_t it = 0;
+    const char *d = p;
+    while (d < end && *d >= '0' && *d <= '9' && d - p < 8) {
+        it = it * 10u + (uint32_t)(*d - '0');
+        d++;
+    }
+    if (d == p || *p == '0' || d >= end || *d != '$' || it < MOY_SEAL_PW_ITER_MIN
+        || it > MOY_SEAL_PW_ITER_MAX) {
+        return 0;
+    }
+    const char *s = d + 1;
+    const char *sd = memchr(s, '$', (size_t)(end - s));
+    if (sd == NULL || !salt_ok(s, (size_t)(sd - s)) || (size_t)(sd - s) + 1u > salt_cap) {
+        return 0;
+    }
+    const char *h = sd + 1;
+    if (end - h != 2 * 32 + 1 + 2 * MOY_SEAL_POINT || h[2 * 32] != '$'
+        || !moy_seal_unhex(h, 2 * 32, w0, 32)
+        || !moy_seal_unhex(h + 2 * 32 + 1, 2 * MOY_SEAL_POINT, l, MOY_SEAL_POINT)) {
+        return 0;
+    }
+    *iter = it;
+    memcpy(salt, s, (size_t)(sd - s));
+    salt[sd - s] = '\0';
+    return 1;
+}
+
+int moy_seal_pw_check(const char *pw, size_t pn, const char *text, size_t n) {
+    uint32_t iter;
+    char salt[MOY_SEAL_PW_SALT_MAX + 1];
+    uint8_t w0[32], l[MOY_SEAL_POINT], mine[32], w1[32];
+    if (!moy_seal_pw_parse(text, n, &iter, salt, sizeof salt, w0, l)) {
+        return 0;
+    }
+    int ok = moy_seal_pw_derive(pw, pn, salt, strlen(salt), iter, mine, w1) == MOY_SEAL_OK
+             && moy_seal_eq(mine, w0, sizeof w0);
+    moy_seal_wipe(mine, sizeof mine);
+    moy_seal_wipe(w1, sizeof w1);
+    moy_seal_wipe(w0, sizeof w0);
+    return ok;
+}
+
+// This side's share: s*G + w0*M (the prover's) or s*G + w0*N (the verifier's),
+// s the given scalar or a fresh one.
+static int share(moy_seal_spake_t *s, const uint8_t *scalar) {
+    ec_t e;
+    int r = ec_init(&e);
+    if (r == 0) {
+        r = mbedtls_mpi_read_binary(&e.w0, s->w0, sizeof s->w0);
+    }
+    if (r == 0 && s->board && get_point(&e, &e.q, s->l) != 0) {
+        ec_free(&e);
+        return MOY_SEAL_EPOINT;
     }
     if (r == 0) {
-        r = mbedtls_ecp_point_write_binary(&e.g, &e.c, MBEDTLS_ECP_PF_UNCOMPRESSED, &olen,
-                                           s->mine, sizeof s->mine);
+        r = scalar != NULL ? mbedtls_mpi_read_binary(&e.s, scalar, 32)
+                           : mbedtls_ecp_gen_privkey(&e.g, &e.s, rng, NULL);
+    }
+    if (r == 0) {
+        r = mbedtls_ecp_point_read_binary(&e.g, &e.q, s->board ? SPAKE_N : SPAKE_M,
+                                          MOY_SEAL_POINT);
+    }
+    if (r == 0) {
+        r = mbedtls_ecp_mul(&e.g, &e.p, &e.s, &e.g.G, rng, NULL);
+    }
+    if (r == 0) {
+        r = add_mul(&e, &e.t, &e.p, &e.w0, &e.q, 0);
+    }
+    if (r == 0) {
+        r = put_point(&e, &e.t, s->mine);
     }
     if (r == 0) {
         r = mbedtls_mpi_write_binary(&e.s, s->s, sizeof s->s);
     }
-    if (r == 0) {
-        r = mbedtls_mpi_write_binary(&e.w, s->w, sizeof s->w);
-    }
     ec_free(&e);
-    moy_seal_wipe(wide, sizeof wide);
-    if (r != 0 || olen != MOY_SEAL_POINT) {
+    if (r != 0) {
         moy_seal_wipe(s, sizeof *s);
         return MOY_SEAL_ENOMEM;
     }
     return MOY_SEAL_OK;
+}
+
+int moy_seal_spake_prover(moy_seal_spake_t *s, const uint8_t w0[32], const uint8_t w1[32],
+                          const uint8_t *x) {
+    memset(s, 0, sizeof *s);
+    memcpy(s->w0, w0, sizeof s->w0);
+    memcpy(s->w1, w1, sizeof s->w1);
+    return share(s, x);
+}
+
+int moy_seal_spake_verifier(moy_seal_spake_t *s, const uint8_t w0[32],
+                            const uint8_t l[MOY_SEAL_POINT], const uint8_t *y) {
+    memset(s, 0, sizeof *s);
+    s->board = 1;
+    memcpy(s->w0, w0, sizeof s->w0);
+    memcpy(s->l, l, sizeof s->l);
+    return share(s, y);
 }
 
 static size_t tt_put(uint8_t *tt, size_t k, const void *p, size_t n) {
@@ -442,79 +633,110 @@ static size_t tt_put(uint8_t *tt, size_t k, const void *p, size_t n) {
     return k + 8 + n;
 }
 
-int moy_seal_spake_end(moy_seal_spake_t *s, const moy_seal_hs_t *h,
-                       const uint8_t peer[MOY_SEAL_POINT], uint8_t ke[MOY_SEAL_KEY],
-                       uint8_t ca[MOY_SEAL_MAC], uint8_t cb[MOY_SEAL_MAC]) {
-    static const char LA[] = "moy1 browser", LB[] = "moy1 board";
-    uint8_t k[MOY_SEAL_POINT];
-    size_t olen = 0;
-    ec_t e;
-    int r = ec_init(&e);
-    if (r != 0) {
-        ec_free(&e);
-        return r;
+#define TT_ID_MAX 64
+
+int moy_seal_spake_keys(moy_seal_spake_t *s, const void *context, size_t cn, const void *idp,
+                        size_t pn, const void *idv, size_t vn, const uint8_t peer[MOY_SEAL_POINT],
+                        uint8_t shared[32], uint8_t cp[MOY_SEAL_MAC], uint8_t cv[MOY_SEAL_MAC]) {
+    if (cn > TT_ID_MAX || pn > TT_ID_MAX || vn > TT_ID_MAX) {
+        return MOY_SEAL_EBAD;
     }
-    int bad = mbedtls_ecp_point_read_binary(&e.g, &e.a, peer, MOY_SEAL_POINT) != 0
-              || mbedtls_ecp_check_pubkey(&e.g, &e.a) != 0;
-    if (!bad) {
-        r = mbedtls_mpi_read_binary(&e.w, s->w, sizeof s->w);
+    uint8_t z[MOY_SEAL_POINT], v[MOY_SEAL_POINT];
+    ec_t e;
+    int r = ec_init(&e), bad = 0;
+    if (r == 0) {
+        bad = get_point(&e, &e.p, peer) != 0;
+    }
+    if (r == 0 && !bad) {
+        r = mbedtls_mpi_read_binary(&e.w0, s->w0, sizeof s->w0);
         if (r == 0) {
             r = mbedtls_mpi_read_binary(&e.s, s->s, sizeof s->s);
         }
         if (r == 0) {
-            r = mbedtls_ecp_point_read_binary(&e.g, &e.b, s->board ? SPAKE_M : SPAKE_N,
+            r = mbedtls_ecp_point_read_binary(&e.g, &e.q, s->board ? SPAKE_M : SPAKE_N,
                                               MOY_SEAL_POINT);
         }
         if (r == 0) {
-            r = add_mul(&e, &e.c, &e.a, &e.w, &e.b, 1);   // the peer's point unmasked
+            r = add_mul(&e, &e.t, &e.p, &e.w0, &e.q, 1);   // the peer's share unmasked
         }
-        if (r == 0 && mbedtls_ecp_is_zero(&e.c)) {
+        if (r == 0 && mbedtls_ecp_is_zero(&e.t)) {
             bad = 1;
         }
         if (r == 0 && !bad) {
-            r = mbedtls_ecp_mul(&e.g, &e.b, &e.s, &e.c, rng, NULL);
-        }
-        if (r == 0 && !bad && mbedtls_ecp_is_zero(&e.b)) {
-            bad = 1;
+            r = mbedtls_ecp_mul(&e.g, &e.z, &e.s, &e.t, rng, NULL);
         }
         if (r == 0 && !bad) {
-            r = mbedtls_ecp_point_write_binary(&e.g, &e.b, MBEDTLS_ECP_PF_UNCOMPRESSED, &olen,
-                                               k, sizeof k);
+            if (s->board) {
+                r = mbedtls_ecp_point_read_binary(&e.g, &e.q, s->l, MOY_SEAL_POINT);
+                if (r == 0) {
+                    r = mbedtls_ecp_mul(&e.g, &e.v, &e.s, &e.q, rng, NULL);
+                }
+            } else {
+                r = mbedtls_mpi_read_binary(&e.w1, s->w1, sizeof s->w1);
+                if (r == 0) {
+                    r = mbedtls_ecp_mul(&e.g, &e.v, &e.w1, &e.t, rng, NULL);
+                }
+            }
+        }
+        if (r == 0 && !bad && (mbedtls_ecp_is_zero(&e.z) || mbedtls_ecp_is_zero(&e.v))) {
+            bad = 1;
+        }
+        if (r == 0 && !bad && (put_point(&e, &e.z, z) != 0 || put_point(&e, &e.v, v) != 0)) {
+            r = -1;
         }
     }
     ec_free(&e);
     if (bad) {
+        moy_seal_wipe(z, sizeof z);
         return MOY_SEAL_EPOINT;
     }
-    if (r != 0 || olen != MOY_SEAL_POINT) {
+    if (r != 0) {
         return MOY_SEAL_ENOMEM;
     }
+    const uint8_t *x = s->board ? peer : s->mine, *y = s->board ? s->mine : peer;
+    uint8_t tt[10 * 8 + 3 * TT_ID_MAX + 6 * MOY_SEAL_POINT + 32];
+    size_t n = 0;
+    n = tt_put(tt, n, context, cn);
+    n = tt_put(tt, n, idp, pn);
+    n = tt_put(tt, n, idv, vn);
+    n = tt_put(tt, n, SPAKE_M, MOY_SEAL_POINT);
+    n = tt_put(tt, n, SPAKE_N, MOY_SEAL_POINT);
+    n = tt_put(tt, n, x, MOY_SEAL_POINT);
+    n = tt_put(tt, n, y, MOY_SEAL_POINT);
+    n = tt_put(tt, n, z, MOY_SEAL_POINT);
+    n = tt_put(tt, n, v, MOY_SEAL_POINT);
+    n = tt_put(tt, n, s->w0, sizeof s->w0);
+    uint8_t main_key[32], kc[64];
+    moy_seal_sha256(tt, n, main_key);
+    moy_seal_hkdf(NULL, 0, main_key, sizeof main_key, "ConfirmationKeys", 16, kc, sizeof kc);
+    moy_seal_hkdf(NULL, 0, main_key, sizeof main_key, "SharedKey", 9, shared, 32);
+    moy_seal_hmac(kc, 32, y, MOY_SEAL_POINT, cp);
+    moy_seal_hmac(kc + 32, 32, x, MOY_SEAL_POINT, cv);
+    moy_seal_wipe(z, sizeof z);
+    moy_seal_wipe(v, sizeof v);
+    moy_seal_wipe(tt, sizeof tt);
+    moy_seal_wipe(main_key, sizeof main_key);
+    moy_seal_wipe(kc, sizeof kc);
+    moy_seal_wipe(s->s, sizeof s->s);
+    return MOY_SEAL_OK;
+}
+
+int moy_seal_spake_end(moy_seal_spake_t *s, const moy_seal_hs_t *h,
+                       const uint8_t peer[MOY_SEAL_POINT], uint8_t ke[MOY_SEAL_KEY],
+                       uint8_t ca[MOY_SEAL_MAC], uint8_t cb[MOY_SEAL_MAC]) {
+    static const char LA[] = "moy1 browser", LB[] = "moy1 board";
     uint8_t ida[sizeof LA - 1 + MOY_SEAL_RAND], idb[sizeof LB - 1 + 2 * MOY_SEAL_RAND];
     memcpy(ida, LA, sizeof LA - 1);
     memcpy(ida + sizeof LA - 1, h->nc, MOY_SEAL_RAND);
     memcpy(idb, LB, sizeof LB - 1);
     memcpy(idb + sizeof LB - 1, h->id, MOY_SEAL_RAND);
     memcpy(idb + sizeof LB - 1 + MOY_SEAL_RAND, h->nb, MOY_SEAL_RAND);
-    uint8_t tt[6 * 8 + sizeof ida + sizeof idb + 3 * MOY_SEAL_POINT + 32];
-    size_t n = 0;
-    n = tt_put(tt, n, ida, sizeof ida);
-    n = tt_put(tt, n, idb, sizeof idb);
-    n = tt_put(tt, n, s->board ? peer : s->mine, MOY_SEAL_POINT);
-    n = tt_put(tt, n, s->board ? s->mine : peer, MOY_SEAL_POINT);
-    n = tt_put(tt, n, k, MOY_SEAL_POINT);
-    n = tt_put(tt, n, s->w, sizeof s->w);
-    uint8_t hash[32], kc[32];
-    moy_seal_sha256(tt, n, hash);
-    memcpy(ke, hash, MOY_SEAL_KEY);
-    moy_seal_hkdf(NULL, 0, hash + 16, 16, "ConfirmationKeys", 16, kc, sizeof kc);
-    moy_seal_hmac(kc, 16, tt, n, ca);
-    moy_seal_hmac(kc + 16, 16, tt, n, cb);
-    moy_seal_wipe(k, sizeof k);
-    moy_seal_wipe(tt, sizeof tt);
-    moy_seal_wipe(hash, sizeof hash);
-    moy_seal_wipe(kc, sizeof kc);
-    moy_seal_wipe(s->s, sizeof s->s);
-    return MOY_SEAL_OK;
+    uint8_t shared[32];
+    int r = moy_seal_spake_keys(s, SPAKE_CONTEXT, sizeof SPAKE_CONTEXT - 1u, ida, sizeof ida, idb,
+                                sizeof idb, peer, shared, ca, cb);
+    memcpy(ke, shared, MOY_SEAL_KEY);
+    moy_seal_wipe(shared, sizeof shared);
+    return r;
 }
 
 // -- the seals --------------------------------------------------------------------------

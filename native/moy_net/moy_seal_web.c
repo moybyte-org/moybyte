@@ -32,6 +32,7 @@ static struct {
     moy_seal_hs_t hs;
     int pw;
     char salt[64];
+    uint32_t iter;
     uint8_t kid[MOY_SEAL_KID], key[MOY_SEAL_KEY];
     uint8_t secret[MOY_SEAL_KEY];       // what wraps a new key: the token, or the PAKE's Ke
     int pairing;
@@ -94,6 +95,9 @@ KEEP int moy_sw_hello(size_t n) {
         && moy_json_strlen(v, ve) < sizeof C.salt) {
         C.salt[moy_json_str(v, ve, C.salt)] = '\0';
     }
+    int64_t it = 0;
+    C.iter = moy_json_get(o, oe, "iter", &v, &ve) && moy_json_int(v, ve, &it) == 1
+             && it >= MOY_SEAL_PW_ITER_MIN && it <= MOY_SEAL_PW_ITER_MAX ? (uint32_t)it : 0;
     moy_seal_random(C.hs.nc, MOY_SEAL_RAND);
     return 0;
 }
@@ -173,12 +177,27 @@ KEEP int moy_sw_token(const char *token_hex, const char *name) {
                mh, quoted(q, sizeof q), "", "");
 }
 
-// The console's password pairs this browser: {"op":"pake",...} with X.
+// The console's password pairs this browser: {"op":"pake",...} with X. The
+// hello's rounds are held to moy_seal.h's bounds, so a forged hello cannot
+// make this end's guess cheap: -1. A console that said it has no password
+// gets an X from no password, which it answers "nopw".
 KEEP int moy_sw_pake(const char *password, const char *name) {
-    uint8_t digest[32];
-    moy_seal_pw_hash(password, strlen(password), C.salt, strlen(C.salt), digest);
-    int r = moy_seal_spake_start(&C.sp, 0, digest);
-    moy_seal_wipe(digest, sizeof digest);
+    uint8_t w0[32], w1[32];
+    int r = MOY_SEAL_OK;
+    if (C.pw) {
+        r = moy_seal_pw_derive(password, strlen(password), C.salt, strlen(C.salt), C.iter, w0,
+                               w1);
+    } else {
+        moy_seal_random(w0, sizeof w0);
+        moy_seal_random(w1, sizeof w1);
+        w0[0] &= 0x7f;                  // below the order
+        w1[0] &= 0x7f;
+    }
+    if (r == MOY_SEAL_OK) {
+        r = moy_seal_spake_prover(&C.sp, w0, w1, NULL);
+    }
+    moy_seal_wipe(w0, sizeof w0);
+    moy_seal_wipe(w1, sizeof w1);
     if (r != MOY_SEAL_OK) {
         return -1;
     }

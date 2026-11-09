@@ -613,7 +613,7 @@ class SetupServer:
 def save_setup(clean, wifi_store, zero_store, system_dir, read=None, write=None,
                write_text=None):
     """Persist one accepted form: the network into the console's own wifi.json
-    (merged), the name into zero.json, and the board's password's hash into
+    (merged), the name into zero.json, and the board's password's record into
     the system folder's `password`.
 
     `read`/`write`/`write_text` are injected for the host test; on the board

@@ -1,11 +1,12 @@
 """The SSH server's console side (runtime/system/ssh_service.py) on the host,
-where no server is built: the password's hash is moy_ssh's form, `passwd`
+where no server is built: the password's record is moy_seal.h's, `passwd`
 sets and removes it, and the mDNS name is Settings' Name as a DNS label."""
 
 import pytest
 
-from runtime import ssh_service, sh_roles
+from runtime import net_binding, ssh_service, sh_roles
 
+import p256_ref
 import test_moy_ssh
 
 
@@ -45,9 +46,9 @@ def system(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_the_hash_is_the_server_s_form():
+def test_the_record_is_the_one_the_text_describes():
     salt = test_moy_ssh.SALT
-    assert ssh_service.hashed("moybyte-test", salt) == test_moy_ssh.hashed("moybyte-test")
+    assert ssh_service.hashed("moybyte-test", salt) == p256_ref.record("moybyte-test", salt)
 
 
 def test_passwd_sets_and_removes_the_password(system):
@@ -56,7 +57,7 @@ def test_passwd_sets_and_removes_the_password(system):
     assert not ssh_service.is_set(ws)
     assert sh_roles.r_passwd(d, ["s3cret-pw"]) == 0
     text = (system / "password").read_text()
-    salt = text.split("$")[2]
+    salt = text.split("$")[3]
     assert text == ssh_service.hashed("s3cret-pw", salt) + "\n"
     assert ssh_service.is_set(ws)
     assert sh_roles.r_passwd(d, []) == 0 and d.text.startswith("password set\nhost key ")
@@ -97,9 +98,6 @@ class Server:
     def stop(self):
         self.calls.append(("stop",))
 
-    def hash(self, password, salt):
-        return test_moy_ssh.hashed(password)
-
 
 class Wlan:
     def __init__(self):
@@ -129,7 +127,8 @@ def test_serving_holds_the_ssh_lease_dials_the_last_network_and_answers_by_name(
     monkeypatch.setattr(ssh_service, "_state", {"serving": False, "name": None, "park": None})
     names = []
     monkeypatch.setitem(__import__("sys").modules, "moy_net",
-                        type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True)}))
+                        type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True),
+                                       "pw_hash": staticmethod(net_binding.pw_hash)}))
     ws = WS("Desk 2")
     ws.wifi = Wifi(up)
     assert not ssh_service.start(ws) and ws.held == []
@@ -173,7 +172,8 @@ def test_a_stop_from_a_session_lets_the_radio_and_the_name_go_once_the_server_pa
     monkeypatch.setattr(ssh_service, "_state", {"serving": False, "name": None, "park": None})
     names = []
     monkeypatch.setitem(__import__("sys").modules, "moy_net",
-                        type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True)}))
+                        type("N", (), {"wifi_mdns": staticmethod(lambda n: names.append(n) or True),
+                                       "pw_hash": staticmethod(net_binding.pw_hash)}))
     ws = WS("Desk")
     ws.wifi = Wifi(True)
     assert ssh_service.set_password(ws, "s3cret-pw")

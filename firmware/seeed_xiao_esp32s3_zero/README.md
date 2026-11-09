@@ -331,7 +331,7 @@ stay on the AP.
 Setup writes three files: the network into `/moy/wifi.json` (**merged** — the
 new one goes first, since `connect()` walks the list in order, and older ones
 are kept so a board set up elsewhere still comes up at home), the name into
-`/moy/zero.json` and the password's hash into `/moy/system/password`. From
+`/moy/zero.json` and the password's record into `/moy/system/password`. From
 then on the name is the mDNS label and the password is how a browser pairs.
 
 ## The sign-in gates everything (2026-11-07)
@@ -343,9 +343,9 @@ it, its keys file `/moy/system/webkeys`. What is true *here*:
 - **A browser pairs with the board's password.** A console pairs by its QR
   too; this board has no screen to draw one, so a board with no password pairs
   no browser. Setup's form takes one; `provision.sh --password` sets one for a
-  board that never saw that form. Pairing runs SPAKE2 from the stored hash, so
-  the password never crosses the network, and the browser keeps a key of its
-  own from then on.
+  board that never saw that form. Pairing runs SPAKE2+ against the stored
+  record, so the password never crosses the network, a copy of the record
+  pairs no browser, and the browser keeps a key of its own from then on.
 - **Every route but the boot files and `GET /sync` is sealed** to a paired
   browser's session: the store's pulls and pushes, and `/gpio`
   and `/update` on both methods — see the Pins and Updates sections for why

@@ -144,7 +144,14 @@ _SIGS = (
     ("moy_web_token", [ctypes.c_void_p], None),
     ("moy_web_keys", [ctypes.c_void_p, _Z], _Z),
     ("moy_web_key_drop", [_P], _I),
-    ("moy_seal_pw_hash", [_P, _Z, _P, _Z, ctypes.c_char_p], None),
+    ("moy_seal_pw_record", [_P, _Z, _P, _Z, ctypes.c_uint32, ctypes.c_char_p, _Z], _I),
+    ("moy_seal_pw_check", [_P, _Z, _P, _Z], _I),
+    ("moy_seal_pw_derive", [_P, _Z, _P, _Z, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_char_p],
+     _I),
+    ("moy_seal_spake_prover", [ctypes.c_void_p, _P, _P, _P], _I),
+    ("moy_seal_spake_verifier", [ctypes.c_void_p, _P, _P, _P], _I),
+    ("moy_seal_spake_keys", [ctypes.c_void_p, _P, _Z, _P, _Z, _P, _Z, _P, ctypes.c_char_p,
+                             ctypes.c_char_p, ctypes.c_char_p], _I),
     ("moy_web_poll", [], _I),
     ("moy_web_state", [ctypes.POINTER(_WebState)], None),
     ("moy_web_events", [], ctypes.c_uint32),
@@ -543,15 +550,24 @@ def web_signout():
     return _lib().moy_web_signout()
 
 
-def pw_hash(password, salt):
-    """The console password's stored form, `$moy1$SALT$HEX` (moy_seal_pw_hash)."""
-    salt = _text(_bytes(salt))
-    if not salt or len(salt) > 32 or "$" in salt:
-        raise ValueError("salt")
+PW_ITER = 1 << 15                       # moy_seal.h's MOY_SEAL_PW_ITER
+
+
+def pw_hash(password, salt, iter=PW_ITER):
+    """The console password's record, `$moy2$ITER$SALT$W0$L`
+    (moy_seal_pw_record, moy_seal.h's THE PASSWORD)."""
     p, s = _bytes(password), _bytes(salt)
-    out = ctypes.create_string_buffer(32)
-    _lib().moy_seal_pw_hash(p, len(p), s, len(s), out)
-    return "$moy1$%s$%s" % (salt, out.raw.hex())
+    out = ctypes.create_string_buffer(256)
+    n = _lib().moy_seal_pw_record(p, len(p), s, len(s), iter, out, len(out))
+    if n < 0:
+        raise ValueError("salt")
+    return _text(out.raw[:n])
+
+
+def pw_check(password, record):
+    """Whether `password` is the one `record` was made from (moy_seal_pw_check)."""
+    p, r = _bytes(password), _bytes(record)
+    return bool(_lib().moy_seal_pw_check(p, len(p), r, len(r)))
 
 
 def web_poll():

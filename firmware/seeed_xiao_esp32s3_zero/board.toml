@@ -150,7 +150,7 @@ went with it -- the RPC it was kept for shipped as plain HTTP."""
 files = ["ssh_service.py"]
 why = """
 The SSH server's Python side (native/moy_ssh), the one every console runs:
-the password's hash in the store's system folder (`/moy/system`), the server
+the password's record in the store's system folder (`/moy/system`), the server
 started while one is set, `passwd`'s command. On this board the radio and the
 mDNS name are the board's, up while it serves its webhost, so the server holds
 no lease and announces nothing of its own (`wifi_hold` is None in the

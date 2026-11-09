@@ -7,7 +7,6 @@
 //   moy_ssh.stats() -> (sessions, signed_in, refused, heap_now, heap_peak,
 //                       session_peak, to_shell_ms, listening, stack_free,
 //                       face_stack_free, arena_peak)
-//   moy_ssh.hash(password, salt) -> the stored form
 //
 // `system_dir` is the store's system folder: the password, `ssh`, the
 // authorized keys and the host key are read there (moy_ssh.h's SIGN-IN). The
@@ -80,22 +79,12 @@ static mp_obj_t ssh_stats(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ssh_stats_obj, ssh_stats);
 
-static mp_obj_t ssh_hash(mp_obj_t pw, mp_obj_t salt) {
-    char out[MOY_SSH_HASH_MAX];
-    if (moy_ssh_hash(mp_obj_str_get_str(pw), mp_obj_str_get_str(salt), out, sizeof out) != 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("salt: 1 to 32 hex digits"));
-    }
-    return mp_obj_new_str(out, strlen(out));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ssh_hash_obj, ssh_hash);
-
 static const mp_rom_map_elem_t moy_ssh_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ssh) },
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&ssh_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&ssh_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_parked), MP_ROM_PTR(&ssh_parked_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&ssh_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hash), MP_ROM_PTR(&ssh_hash_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ssh_globals, moy_ssh_globals_table);
 

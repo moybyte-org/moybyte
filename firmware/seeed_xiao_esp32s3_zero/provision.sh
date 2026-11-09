@@ -187,7 +187,7 @@ assert os.stat('/moy/wifi.json')[6] == $(wc -c < "${WIFI}")"
 fi
 
 # THE BOARD'S PASSWORD. A browser pairs with this board by typing it once
-# (SPAKE2, native/moy_net/moy_webauth.c) and signs in with a device key from
+# (SPAKE2+, native/moy_net/moy_webauth.c) and signs in with a device key from
 # then on; with none set, no browser can pair, because this board has no screen
 # for a pairing code. `--password` asks for one (twice, never echoed) and
 # writes its HASH into /moy/system/password, as `passwd` and the setup form
