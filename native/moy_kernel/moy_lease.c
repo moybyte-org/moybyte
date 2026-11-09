@@ -654,6 +654,19 @@ uint32_t moy_lease_sweep(uint32_t owner) {
     return n;
 }
 
+uint32_t moy_lease_vm_stop(void) {
+    uint32_t n = 0;
+    for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
+        uint32_t at = moy_htab_at(s_tab, s);
+        const moy_lease_row_t *r = at != 0 ? moy_htab_row(s_tab, s) : NULL;
+        if (r != NULL && (is_device(r->cls) || (r->flags & MOY_LEASE_VM))) {
+            moy_lease_drop(at);
+            n++;
+        }
+    }
+    return n;
+}
+
 int moy_lease_get(uint32_t h, moy_lease_row_t *out) {
     const moy_lease_row_t *r = row_of(h);
     if (r == NULL) {

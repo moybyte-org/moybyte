@@ -381,6 +381,94 @@ def test_a_micropython_lib_driver_runs_unchanged_on_a_leased_bus(tmp_path):
 
 
 
+# -- the VM's end ------------------------------------------------------------------
+
+
+def test_the_vms_end_lets_its_devices_and_leases_go_and_keeps_a_c_services():
+    """The kernel's VM down (moy_lease.h's THE VM'S END, a soft reset or a
+    stop): a Python holder of the LoRa radio, the microphone and a pin never
+    ran its end, yet the drivers close and its rows go, so the next VM's
+    process takes them; the webhost's pins and the radio's rows stay."""
+    from runtime import devices
+    from runtime import moy_lora as LORA
+    from runtime import moy_mic as MIC
+    from runtime.host import lora_sim, mic_sim
+    devices.grants = devices.console = None
+    lora_sim.install()
+    mic_sim.install(22050)
+    try:
+        old, new, web = L.spawn("t.old"), L.spawn("t.new"), L.spawn("web")
+        _as(old, moybyte.lora.listen)
+        _as(old, moybyte.mic.open)
+        _as(old, lambda: moybyte.lease("gpio4", mode=1 | 2, value=1))
+        pins = N.take(web, N.GPIO, 0, (5,), N.PINS)
+        N.Wifi().hold("http", old)
+        assert LORA.owner() == MIC.owner() == old and N.pin_state(4) & N.PIN_OUT
+        assert _errno(lambda: _as(new, moybyte.lora.listen)) == errno.EBUSY
+        assert _errno(lambda: _as(new, moybyte.mic.open)) == errno.EBUSY
+
+        assert N.vm_stop() == 3
+        leases.LEASES.held.clear()                # the VM's half went with its heap
+        assert LORA.owner() == MIC.owner() == 0 and N.held(N.VM) == 0
+        assert N.pin_state(4) == N.PIN_SAFE
+        assert N.live(pins) and N.Wifi().holders() == ["http:%d" % old]
+        _as(new, moybyte.lora.listen)
+        _as(new, moybyte.mic.open)
+        assert LORA.owner() == MIC.owner() == new
+        assert N.vm_stop() == 2 and N.live(pins)
+    finally:
+        N.sweep(web)
+        N.wifi_reset()
+        lora_sim.remove()
+        mic_sim.remove()
+
+
+VM_SOFT_RESET = """
+import sys
+sys.path.insert(0, @TREE@)
+sys.path.append(@HOST@)
+import moy_lease as N, moy_log, moy_lora, moy_mic, moybyte, leases, lease_sim
+leases.stand_in(lease_sim, @SPEC@)
+moy_lora.sim(True)
+moy_mic.sim(22050)
+old, new, web = moy_log.spawn("t.old"), moy_log.spawn("t.new"), moy_log.spawn("web")
+moy_log.current(old)
+moybyte.lora.listen()
+moybyte.mic.open()
+moybyte.lease("gpio4", mode=1 | 2, value=1)
+pins = N.take(web, N.GPIO, 0, (5,), N.PINS)
+N.Wifi().hold("http", old)
+print("held", moy_lora.owner() == old, moy_mic.owner() == old, len(N.leases()))
+moy_log.current(new)
+for fn in (moybyte.lora.listen, moybyte.mic.open):
+    try:
+        fn()
+        print("taken")
+    except OSError as e:
+        print("refused", e.errno)
+print("down", N.vm_stop(), moy_lora.owner(), moy_mic.owner(), N.pin_state(4), N.live(pins),
+      N.Wifi().holders() == ["http:%d" % old])
+leases.LEASES.held.clear()
+moybyte.lora.listen()
+moybyte.mic.open()
+print("next", moy_lora.owner() == new, moy_mic.owner() == new)
+"""
+
+
+def test_the_vms_end_lets_its_devices_go_alike_on_the_vm_a_board_runs(tmp_path):
+    exe = require_unix_mp("moy_lease", "moy_lora", "moy_mic",
+                          why="the VM's end on the VM a board runs")
+    script = tmp_path / "soft_reset.py"
+    script.write_text(VM_SOFT_RESET.replace("@TREE@", repr(runtime_tree()))
+                      .replace("@HOST@", repr(str(ROOT / "runtime" / "host")))
+                      .replace("@SPEC@", repr(SPEC)))
+    done = subprocess.run([str(exe), str(script)], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.splitlines() == [
+        "held True True 5", "refused %d" % errno.EBUSY, "refused %d" % errno.EBUSY,
+        "down 3 0 0 %d True True" % N.PIN_SAFE, "next True True"]
+
+
 # -- the radio ---------------------------------------------------------------------
 
 def test_the_radios_tags_are_the_closed_set():

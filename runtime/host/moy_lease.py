@@ -53,6 +53,7 @@ _SIGS = (
     ("moy_lease_take", [_U32, _U8, _U8, _U64, _U8, ctypes.POINTER(_U32)], _I),
     ("moy_lease_drop", [_U32], _I),
     ("moy_lease_sweep", [_U32], _U32),
+    ("moy_lease_vm_stop", [], _U32),
     ("moy_lease_get", [_U32, ctypes.POINTER(_Row)], _I),
     ("moy_lease_live", [_U32], ctypes.c_bool),
     ("moy_lease_slots", [], _U32),
@@ -137,6 +138,12 @@ def drop(h):
 
 def sweep(owner):
     return _lib().moy_lease_sweep(owner)
+
+
+def vm_stop():
+    """The kernel's VM down (moy_lease.h's THE VM'S END): every device row
+    and every VM row dropped; how many."""
+    return _lib().moy_lease_vm_stop()
 
 
 def live(h):

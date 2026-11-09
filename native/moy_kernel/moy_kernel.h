@@ -39,7 +39,9 @@
 // Python held (moy_glass_vm_swept; the theme fonts, moy_text_vm_stop); the
 // VM's processes' event queues closed (moy_evq_vm_stop) and the input
 // table's readers freed (moy_input_vm_stop); the native-code arena freed;
-// mp_deinit; the root section ZEROED (a stale root would mark whatever sits
+// mp_deinit; the VM's leases dropped (moy_lease_vm_stop, a soft reset's
+// too), which closes the drivers a VM process held (the microphone, the LoRa
+// radio, the BLE central's scan and connection); the root section ZEROED (a stale root would mark whatever sits
 // at its address in the next first area); the first heap area freed; the
 // console's stdin ring and the interrupt character taken by the kernel, which
 // drains the ring and re-polls the USB FIFO while no VM runs (a host writing
@@ -47,7 +49,7 @@
 // is NOT deleted: it drives the kernel's frame with no VM until the stop's run
 // ends, then starts the next VM (a RETURN start). What C owns survives: the
 // input task, the BLE central, the ESP-NOW link and its ring, the WiFi station
-// and its lease table, the card's FATFS and the internal flash volume, the
+// and its rows of the lease table, the card's FATFS and the internal flash volume, the
 // driver buffers and native tasks (the audio task silences the cart's sound). A
 // stop is refused while a Python owner holds a WiFi lease or a hardware lease
 // (moy_lease.h's MOY_LEASE_VM) or an OTA write runs.

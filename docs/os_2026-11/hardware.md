@@ -151,7 +151,11 @@ its lease, which closes its edge sources and returns its pins to a safe state
 uninstalled); `moy_lease_pin_state` reads a pin back from the GPIO matrix. An
 object kept past its process raises `OSError(EBADF)`; a compiled process's
 handles close at its end (`dev_handles.sweep`, ahead of the leases' in
-`moybyte.ENDS`), a handle closed answers ABSENT. **A VM stop is refused
+`moybyte.ENDS`), a handle closed answers ABSENT. The VM's end, a soft reset
+as a stop, drops every device row and every `MOY_LEASE_VM` row
+(`moy_lease_vm_stop`, from the kernel's VM down): their holders' Python half
+went with the heap, so the drivers close and the next VM can take them, while
+the radio's rows and a C service's pins (the webhost's) stay. **A VM stop is refused
 while a lease is held** (`MOY_LEASE_VM`, read by
 `native/moy_play/moy_play_stop.c` beside the radio's row): every tier's
 lease is a VM object, a compiled program's too, and its rows are served in

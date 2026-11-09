@@ -17,7 +17,7 @@
 // process ids). A pin is in one lease at most and a unit in one; a take that
 // would share either is BUSY. MOY_LEASE_VM marks a lease a VM process took:
 // a VM stop is refused while one is held (moy_play_stop.c), since the stop
-// would end its holder's heap and leave the lease with no one to drop it.
+// would end its holder with the VM's heap.
 // MOY_LEASE_PINS marks the `pins` permission's digital subset.
 //
 // DROPPING a lease -- moy_lease_drop, or the sweep of its owner on exit, crash
@@ -38,6 +38,14 @@
 // owner word). Dropped any other way -- its owner's sweep, a process's end
 // in any tier -- the row ends the driver's hold too (the driver's
 // moy_<driver>_lease_end, weak: an image without the driver has none).
+//
+// THE VM'S END. A device row and a MOY_LEASE_VM row are the VM's: every
+// tier reaches a device through a Python face (a compiled process's handles
+// are dev_handles.py's), so its holder's half of it lives in the VM's heap.
+// The kernel's VM down (a soft reset and a stop alike, moy_kernel.c) drops
+// them all (moy_lease_vm_stop), each as its owner's sweep would, so the
+// next VM finds the drivers closed and free. What is not the VM's stays:
+// the radio's rows (THE RADIO) and a C service's pins (the webhost's).
 //
 // THE RADIO. The WiFi station is off unless something holds it (the
 // consoles' rule, .claude/rules/boards.md): MOY_LEASE_WIFI is a SHARED class
@@ -151,6 +159,9 @@ int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
 int moy_lease_drop(uint32_t h);
 // Drop every lease of `owner`; answers how many.
 uint32_t moy_lease_sweep(uint32_t owner);
+// The VM's end (THE VM'S END): every device row and every MOY_LEASE_VM row
+// dropped; answers how many.
+uint32_t moy_lease_vm_stop(void);
 int moy_lease_get(uint32_t h, moy_lease_row_t *out);
 bool moy_lease_live(uint32_t h);
 // The live leases in slot order: slots() bounds the walk, at(slot) is a

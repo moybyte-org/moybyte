@@ -12,6 +12,7 @@
 //   edge(h, pin, depth, loop=False) -> src   edge_close(h, pin)
 //   pin_state(pin) -> PIN_* bits
 //   sim_pin(pin, state, level)  sim_level(pin, level)  sim_get(pin)   the host's stand-in
+//   vm_stop() -> n       the VM's end: its device and VM rows dropped (THE VM'S END)
 //   reset()
 //   Wifi()               the radio's holders (moy_lease.h's THE RADIO), a view
 //                        of its rows: hold(tag, owner=1) -> mask,
@@ -108,6 +109,11 @@ static mp_obj_t lease_sweep(mp_obj_t owner) {
     return MP_OBJ_NEW_SMALL_INT(moy_lease_sweep((uint32_t)mp_obj_get_int(owner)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(lease_sweep_obj, lease_sweep);
+
+static mp_obj_t lease_vm_stop(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_lease_vm_stop());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(lease_vm_stop_obj, lease_vm_stop);
 
 static mp_obj_t lease_live(mp_obj_t h) {
     return mp_obj_new_bool(moy_lease_live((uint32_t)mp_obj_get_int(h)));
@@ -323,6 +329,7 @@ static const mp_rom_map_elem_t lease_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&lease_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&lease_drop_obj) },
     { MP_ROM_QSTR(MP_QSTR_sweep), MP_ROM_PTR(&lease_sweep_obj) },
+    { MP_ROM_QSTR(MP_QSTR_vm_stop), MP_ROM_PTR(&lease_vm_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_live), MP_ROM_PTR(&lease_live_obj) },
     { MP_ROM_QSTR(MP_QSTR_leases), MP_ROM_PTR(&lease_leases_obj) },
     { MP_ROM_QSTR(MP_QSTR_get), MP_ROM_PTR(&lease_get_obj) },
