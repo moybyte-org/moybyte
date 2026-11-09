@@ -208,6 +208,10 @@ def run_live(driver, dt, scale):
              pygame.K_PAGEUP: mi.KEY_PGUP, pygame.K_PAGEDOWN: mi.KEY_PGDN}
     for n in range(12):
         named[getattr(pygame, "K_F%d" % (n + 1))] = mi.KEY_F1 + n
+    # A keyboard's media keys, as their consumer-page usages (moy_media.h).
+    media_keys = {getattr(pygame, n): u for n, u in (
+        ("K_AUDIOPLAY", 0xCD), ("K_AUDIONEXT", 0xB5), ("K_AUDIOPREV", 0xB6),
+        ("K_VOLUMEUP", 0xE9), ("K_VOLUMEDOWN", 0xEA)) if hasattr(pygame, n)}
     held_mods = set()
 
     def mods_now():
@@ -238,6 +242,8 @@ def run_live(driver, dt, scale):
             elif ev.type in (pygame.KEYDOWN, pygame.KEYUP) and ev.key in mod_keys:
                 (held_mods.add if ev.type == pygame.KEYDOWN else held_mods.discard)(ev.key)
                 driver.set_mods(mods_now())
+            elif ev.type == pygame.KEYDOWN and ev.key in media_keys:
+                driver.media_key(media_keys[ev.key])
             elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                 if driver.takes_escape() or driver.in_code_editor():
                     driver.escape()       # a menu closes, Settings or an app steps back

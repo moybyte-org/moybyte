@@ -203,8 +203,9 @@ an imported PICO-8 cart always carries its own 30 or 60.
   the player resumes it. A cart can never read the device's console key (a keyboard's
   Super, a gamepad's Start, the Moy button, the T-Deck's Mic), in any input mode;
   tapping it opens the pause menu, whose **Quit** hands control back to whoever
-  launched the cart (the launcher, or the editor's PLAY). BACKSPACE is an ordinary
-  key. A `"tool"`/`"app"` cart runs WITH a minimal console bar (the back chevron, its
+  launched the cart (the launcher, or the editor's PLAY). A keyboard's media keys
+  (play/pause, next, previous, volume) are the console's too: they reach the music
+  playing beside your cart, never your cart. BACKSPACE is an ordinary key. A `"tool"`/`"app"` cart runs WITH a minimal console bar (the back chevron, its
   title and the status) instead, and exits via that back.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
   keyboard types every key to `key()`, but a held key reads every frame it is down

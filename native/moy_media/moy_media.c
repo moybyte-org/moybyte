@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "minimp3.h"
+#include "moy_input.h"
 #include "moy_play.h"
 #include "moy_vol.h"
 
@@ -151,6 +152,10 @@ typedef struct {
     int started;
     volatile uint32_t decoded, pulled, starved;
 
+    // the media keys: a reader of MEDIA records on keys_t, -1 none
+    moy_input_t *keys_t;
+    int keys_r;
+
     uint8_t rd[RD_BYTES];
     char meta[META_MAX + 1];
     char url[MOY_MEDIA_SRC_MAX];
@@ -165,6 +170,7 @@ typedef struct {
 } media_t;
 
 static media_t *s_m;
+static moy_input_t *s_keys_t;           // the table the media keys come on; NULL the kernel's
 
 #ifdef MEDIA_BOARD
 #define LOCK(m) xSemaphoreTake((m)->mtx, portMAX_DELAY)
@@ -1828,11 +1834,95 @@ static void file_pump(media_t *m) {
 }
 
 // Under the life gate: false when there is no service.
+// -- the media keys -------------------------------------------------------------------
+
+static void keys_open(media_t *m);
+static void keys_close(media_t *m);
+
+void moy_media_keys_on(struct moy_input *t) {
+    LIFE_LOCK();
+    media_t *m = s_m;
+    if (m != NULL) {
+        keys_close(m);
+    }
+    s_keys_t = t;
+    if (m != NULL) {
+        keys_open(m);
+    }
+    LIFE_UNLOCK();
+}
+
+int moy_media_key(uint16_t usage) {
+    media_t *m = s_m;
+    if (m == NULL || m->owner == 0u || m->owner == MOY_MEDIA_ORPHAN || m->stop) {
+        return 0;
+    }
+    uint32_t o = m->owner;
+    moy_media_status_t st;
+    moy_media_status(&st);
+    switch (usage) {
+        case MOY_MEDIA_KEY_PLAY_PAUSE:
+            return moy_media_pause(o, !st.paused) == 0;
+        case MOY_MEDIA_KEY_PLAY:
+            return moy_media_pause(o, 0) == 0;
+        case MOY_MEDIA_KEY_PAUSE:
+            return moy_media_pause(o, 1) == 0;
+        case MOY_MEDIA_KEY_NEXT:
+        case MOY_MEDIA_KEY_PREV: {
+            // While the list plays: past its end the face has let its radio go.
+            if (st.state != MOY_MEDIA_OPENING && st.state != MOY_MEDIA_PLAYING) {
+                return 0;
+            }
+            int i = st.entry + (usage == MOY_MEDIA_KEY_NEXT ? 1 : -1);
+            return i >= 0 && i < st.entries && moy_media_go(o, i) == 0;
+        }
+        case MOY_MEDIA_KEY_VOL_UP:
+        case MOY_MEDIA_KEY_VOL_DOWN:
+            return moy_media_volume(o, st.volume + (usage == MOY_MEDIA_KEY_VOL_UP
+                                                     ? MOY_MEDIA_KEY_STEP
+                                                     : -MOY_MEDIA_KEY_STEP)) == 0;
+        default:
+            return 0;
+    }
+}
+
+static void keys_open(media_t *m) {
+    m->keys_t = s_keys_t != NULL ? s_keys_t : moy_input_kernel();
+    m->keys_r = -1;
+    if (m->keys_t != NULL
+        && moy_input_reader(m->keys_t, MOY_EV_BIT(MOY_EV_MEDIA), &m->keys_r) != MOY_INPUT_OK) {
+        m->keys_r = -1;
+    }
+}
+
+static void keys_close(media_t *m) {
+    if (m->keys_r >= 0) {
+        moy_input_reader_free(m->keys_t, m->keys_r);
+        m->keys_r = -1;
+    }
+}
+
+static void keys_answer(media_t *m) {
+    if (m->keys_r < 0) {
+        return;
+    }
+    moy_event_t ev[4];
+    size_t n;
+    while ((n = moy_input_events(m->keys_t, m->keys_r, ev, 4)) > 0) {
+        for (size_t i = 0; i < n; i++) {
+            if (ev[i].kind == MOY_EV_MEDIA && ev[i].b != 0u) {
+                moy_media_key(ev[i].a);
+            }
+        }
+    }
+}
+
 static bool pump_gated(void) {
     media_t *m = s_m;
     if (m == NULL) {
         return false;
     }
+    keys_answer(m);
     file_pump(m);
 #ifndef MEDIA_BOARD
     for (int i = 0; i < 4 && moy_media_run(); i++) {
@@ -1995,6 +2085,7 @@ static int media_open(uint32_t owner, int rate, int channels) {
     m->volume = MOY_MEDIA_VOLUME;
     m->state = MOY_MEDIA_IDLE;
     m->seek_req = NO_SEEK;
+    m->keys_r = -1;
     mp3dec_init(&m->dec);
     LIFE_MAKE();
     if (moy_loop_job == NULL || !moy_loop_job(media_job, NULL)) {
@@ -2029,6 +2120,7 @@ static int media_open(uint32_t owner, int rate, int channels) {
 #else
     s_m = m;
 #endif
+    keys_open(m);
     return 0;
 }
 
@@ -2064,6 +2156,7 @@ static void reap(media_t *m) {
     vSemaphoreDelete(m->mtx);
 #endif
     uint32_t share = m->share;
+    keys_close(m);
     conn_close(m);
     file_close(m, 0);
     block_free(m);

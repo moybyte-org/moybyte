@@ -3,7 +3,8 @@
 # UPSTREAM.md) and the module moy_media. It pulls into native/moy_audio's mix,
 # fetches through native/moy_net's client, reads a file through native/
 # moy_store's volume seam on a job of native/moy_kernel's frame and takes THE
-# SHARES' MEDIA row (native/moy_play), so a board that takes it takes those;
+# SHARES' MEDIA row (native/moy_play) and answers the media keys on
+# native/moy_input's table, so a board that takes it takes those;
 # one without a speaker denies it.
 
 add_library(usermod_moy_media INTERFACE)
@@ -21,6 +22,7 @@ target_include_directories(usermod_moy_media INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/../moy_play
     ${CMAKE_CURRENT_LIST_DIR}/../moy_store
     ${CMAKE_CURRENT_LIST_DIR}/../moy_kernel
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_input
 )
 
 target_link_libraries(usermod INTERFACE usermod_moy_media)

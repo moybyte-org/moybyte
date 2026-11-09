@@ -12,7 +12,8 @@ SRC_USERMOD_C += $(MOY_MEDIA_DIR)/modmoy_media.c
 SRC_USERMOD_LIB_C += $(MOY_MEDIA_DIR)/moy_media.c $(MOY_MEDIA_DIR)/moy_mp3.c
 
 CFLAGS_USERMOD += -I$(MOY_MEDIA_DIR) -I$(MOY_MEDIA_DIR)/../moy_audio -I$(MOY_MEDIA_DIR)/../moy_play \
-    -I$(MOY_MEDIA_DIR)/../moy_store -I$(MOY_MEDIA_DIR)/../moy_kernel -DMOY_MEDIA_MIX=1
+    -I$(MOY_MEDIA_DIR)/../moy_store -I$(MOY_MEDIA_DIR)/../moy_kernel \
+    -I$(MOY_MEDIA_DIR)/../moy_input -DMOY_MEDIA_MIX=1
 ifeq ($(MOY_NET_SERVE),0)
 CFLAGS_USERMOD += -DMOY_MEDIA_CLIENT=0
 else

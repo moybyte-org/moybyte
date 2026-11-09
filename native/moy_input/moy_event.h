@@ -21,6 +21,8 @@
 //   TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP
 //                     id: the touch id; b: x << 16 | y on the source's surface
 //   EDGE              a: the pin; b: the level
+//   MEDIA             a: a media key's consumer-page usage (HID page 0x0C);
+//                     b: 1 down, 0 up (native/moy_media/moy_media.h answers it)
 //   LOST              a reader's gap, written by no source: b records of the
 //                     source in `src` were dropped before this reader read
 //                     them (moy_input_events puts it where the gap was)

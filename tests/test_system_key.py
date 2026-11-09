@@ -640,3 +640,70 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     ws.pause.show()                              # the card over the windowed game
     assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS, \
         "a windowed game goes full screen by its maximise alone"
+
+
+# -- the media keys ------------------------------------------------------------------
+
+KEYS_SEEN = """
+n = 0
+seen = 0
+def _update(dt=None):
+    global n, seen
+    n += 1
+    if key() or any(btnp(b) for b in ("left", "right", "up", "down", "a", "b")):
+        seen += 1
+def _draw():
+    cls(1)
+"""
+
+
+def test_a_media_key_is_the_consoles_from_a_game_in_front(tmp_path, monkeypatch):
+    """A keyboard's media keys are the console's, as Super is: the media
+    service answers them with a game in front owning the keys, the game reads
+    nothing of them and plays on, and no menu opens. The host's keyboard
+    (`media_key`) and a BLE keyboard's Consumer Control report alike."""
+    from pathlib import Path
+    from runtime import dev_media, devices, moybyte
+    from runtime import moy_input as mi
+    from runtime import moy_log as L
+    from test_ble_keyboard import FakeStack, _ready
+    tone = Path(__file__).resolve().parent / "fixtures" / "media" / "tone_1k.mp3"
+    ws = build_ws_with_cart(tmp_path, KEYS_SEEN, title="Keys", type="game")
+    drv = make_drv(ws)
+    _frames(drv, 3)
+    assert ws.screen == "desktop" and ws.wm.keys_to_cart()
+    monkeypatch.setattr(devices, "grants", None)    # every permission
+    pid = L.spawn("t.music")
+    was = L.current()
+    L.current(pid)
+    try:
+        moybyte.media.play(str(tone))
+    finally:
+        L.current(was)
+    try:
+        ns = ws.run.player.ns
+        n0 = ns["n"]
+        drv.media_key(0xCD)                     # the host's Play/Pause
+        _frames(drv)
+        assert moybyte.media.now()["paused"] is True
+        hid = mi.HidMachine(ws.input, FakeStack())
+        _ready(hid)
+        hid.notify(3, 3, b"\xcd\x00")           # a BLE keyboard's
+        hid.frame()
+        _frames(drv)
+        hid.notify(3, 3, b"\x00\x00")
+        hid.frame()
+        _frames(drv)
+        assert moybyte.media.now()["paused"] is False
+        assert ns["seen"] == 0 and ns["n"] > n0
+        assert not ws.pause.open and not ws.sysmenu.open
+    finally:
+        L.current(pid)
+        try:
+            dev_media.stop()
+        finally:
+            L.current(was)
+        for _ in range(20):
+            if not dev_media._s["pid"]:
+                break
+            _frames(drv, 1)

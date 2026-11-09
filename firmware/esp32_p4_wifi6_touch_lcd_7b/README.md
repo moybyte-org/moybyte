@@ -19,14 +19,16 @@ the kernel's (`native/moy_input/moy_hid.c` on NimBLE's host task,
 `moy_ble_task.c`, since 2026-10-07): over the C6 on ESP-Hosted it discovers
 HOGP service `0x1812`, bonds (Just Works, the bonds in NimBLE's NVS store),
 prefers the Boot Host path (Protocol Mode `0x00`, then Boot Keyboard Input
-only), and writes make/break state and the typed byte into the kernel table's
-`ble` source, which the frame takes before its edge snapshot. There is no
+for the keys), and writes make/break state and the typed byte into the kernel
+table's `ble` source, which the frame takes before its edge snapshot. There is no
 `bluetooth` module and nothing of it runs Python, so a soft reset leaves the
 link up. `bt status` names the machine's state. Settings' picker lists every
 nearby HOGP keyboard; no keyboard is connected until one is picked there, and
 then only that one, reconnected after a reboot. Report-only keyboards
-are decoded as the standard eight-byte report; arbitrary/NKRO Report Maps,
-Classic-Bluetooth-only keyboards, media keys and gamepads are not supported.
+are decoded as the standard eight-byte report; a two-byte Consumer Control
+report (one usage) is a media key, which the media service answers
+(`native/moy_input/moy_hid.h`); arbitrary/NKRO Report Maps, bitmap consumer
+reports, Classic-Bluetooth-only keyboards and gamepads are not supported.
 The console's own USB keyboard and mouse are #83's.
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game

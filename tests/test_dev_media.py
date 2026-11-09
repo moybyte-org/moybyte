@@ -22,6 +22,7 @@ import pytest
 
 from runtime import audio_binding, dev_media, devices, moybyte
 from runtime import moy_log as L
+from runtime import moy_input as mi
 from runtime import moy_lease, moy_loop
 from runtime import moy_media as N
 from runtime import moy_play as mp
@@ -451,6 +452,63 @@ def test_the_radio_is_held_while_a_url_may_play(media, server, tmp_path):
     _as(pid, lambda: moybyte.media.play(str(TONE)))
     assert not ws.leases.held("media")            # a file needs no radio
     devices.console = None
+
+
+def test_the_media_keys_answer_the_stream_from_a_game_that_owns_the_keys(media, tmp_path):
+    """A keyboard's media keys are MEDIA records on the console's table, the
+    service's as Super is the console's: the frame's job answers them while a
+    game owns the keys, and the game reads nothing of them."""
+    for name in ("one.mp3", "two.mp3"):
+        shutil.copy(TONE, tmp_path / name)
+    lst = tmp_path / "set.m3u"
+    lst.write_text("one.mp3\ntwo.mp3\n")
+    table = mi.InputTable()
+    table.cart_keys = True                               # a game owns the keys
+    ble = table.source("ble")
+
+    def key(usage):
+        ble.post(mi.EV_MEDIA, usage, 0, 1)
+        ble.post(mi.EV_MEDIA, usage, 0, 0)
+        _frame()
+        table.begin_frame()
+        assert table.last_key == 0 and not table.any_pressed()
+
+    N.keys_on(table)
+    try:
+        pid = L.spawn("t.keys")
+        _as(pid, lambda: moybyte.media.play(str(lst)))
+        assert _drive(lambda: moybyte.media.now()["state"] == "playing")
+        key(0xCD)                                        # Play/Pause
+        assert moybyte.media.now()["paused"] is True
+        key(0xCD)
+        assert moybyte.media.now()["paused"] is False
+        key(0xB1)                                        # Pause
+        key(0xB1)
+        assert moybyte.media.now()["paused"] is True
+        key(0xB0)                                        # Play
+        assert moybyte.media.now()["paused"] is False
+        vol = moybyte.media.now()["volume"]
+        key(0xE9)                                        # Volume Increment
+        assert moybyte.media.now()["volume"] == vol + 10
+        key(0xEA)
+        key(0xEA)
+        assert moybyte.media.now()["volume"] == vol - 10
+        key(0xB5)                                        # Scan Next
+        assert _drive(lambda: moybyte.media.now()["entry"] == 1)
+        key(0xB5)                                        # past the list's last: nothing
+        assert moybyte.media.now()["entry"] == 1
+        key(0xB6)                                        # Scan Previous
+        assert _drive(lambda: moybyte.media.now()["entry"] == 0)
+        key(0xE2)                                        # Mute: not answered
+        assert moybyte.media.now()["volume"] == vol - 10
+        assert N.key(0xCD) is True and moybyte.media.now()["paused"] is True
+    finally:
+        N.keys_on(None)
+
+
+def test_a_media_key_with_no_stream_is_answered_by_nothing(media):
+    assert N.owner() == 0
+    assert N.key(0xCD) is False and N.key(0xE9) is False
 
 
 def test_the_parsers():

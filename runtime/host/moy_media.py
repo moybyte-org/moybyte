@@ -24,9 +24,10 @@ _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
+_INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 
 PART = native_build.Part("media", ("moy_media.h", "moy_media.c", "moy_mp3.c", "minimp3.h"),
-                         (_MEDIA, _NET, _PLAY, _KERNEL, _STORE))
+                         (_MEDIA, _NET, _PLAY, _KERNEL, _STORE, _INPUT))
 
 IDLE, OPENING, PLAYING, ENDED, FAILED = range(5)
 TASK = 0                                # no task: the frame's job runs the loop
@@ -81,6 +82,8 @@ _SIGS = (
     ("moy_media_entry", [_I, ctypes.c_char_p, _SZ, ctypes.c_char_p, _SZ], _I),
     ("moy_media_run", [], _I),
     ("moy_media_close_vm", [], _I),
+    ("moy_media_key", [ctypes.c_uint16], _I),
+    ("moy_media_keys_on", [_P], None),
     ("moy_media_icy_title", [ctypes.c_char_p, _SZ, ctypes.c_char_p, _SZ], _I),
     ("moy_media_list_kind", [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, _SZ], _I),
 )
@@ -242,6 +245,23 @@ def run():
 def close_vm():
     """The kernel's call when a VM ends: the stream stopped and closed."""
     return _lib().moy_media_close_vm()
+
+
+def key(usage):
+    """A media key's consumer usage going down, answered: whether it acted."""
+    return bool(_lib().moy_media_key(usage))
+
+
+_KEYS = [None]
+
+
+def keys_on(table):
+    """The input table (runtime/host/moy_input.py's InputTable; None: the
+    kernel's) whose MEDIA records the service answers: the host console's
+    own table, where a board's console reads the kernel's. Held here while
+    it is bound, so the C never reads a table that was freed."""
+    _lib().moy_media_keys_on(table._t if table is not None else None)
+    _KEYS[0] = table
 
 
 def icy_title(meta):

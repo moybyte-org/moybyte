@@ -212,6 +212,13 @@ static mp_obj_t media_stamp(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_stamp_obj, media_stamp);
 
+// A media key's consumer usage going down, answered: whether it acted (the
+// frame's job answers the keyboard's own).
+static mp_obj_t media_key(mp_obj_t usage) {
+    return mp_obj_new_bool(moy_media_key((uint16_t)mp_obj_get_int(usage)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(media_key_obj, media_key);
+
 static mp_obj_t media_text(mp_obj_t which) {
     char buf[MOY_MEDIA_SRC_MAX];
     int n = moy_media_text(mp_obj_get_int(which), buf, sizeof(buf));
@@ -282,6 +289,7 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_feed_size), MP_ROM_PTR(&media_feed_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&media_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_stamp), MP_ROM_PTR(&media_stamp_obj) },
+    { MP_ROM_QSTR(MP_QSTR_key), MP_ROM_PTR(&media_key_obj) },
     { MP_ROM_QSTR(MP_QSTR_text), MP_ROM_PTR(&media_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_entry), MP_ROM_PTR(&media_entry_obj) },
     { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&media_run_obj) },

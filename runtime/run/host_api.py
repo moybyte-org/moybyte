@@ -333,6 +333,14 @@ class ConsoleDriver:
             if not self._chord:
                 self.system_key()
 
+    def media_key(self, usage):
+        """A keyboard's media key pressed and let go: its consumer-page usage
+        (moy_media.h's MOY_MEDIA_KEY_*) as a MEDIA record down and one up on
+        this driver's source, which the media service answers; nothing a
+        surface or a cart reads."""
+        self._src.post(_mi.EV_MEDIA, usage, 0, 1)
+        self._src.post(_mi.EV_MEDIA, usage, 0, 0)
+
     def wheel(self, dx, dy, mods=0):
         """A mouse wheel's (or a trackpad's) notches, across and down,
         positive right and down, with the modifiers held as it turned."""

@@ -35,8 +35,8 @@
 // is absent or full, before anything is allocated. The service's state, its
 // buffers and its decoder are one PSRAM block, the task's stack is PSRAM and
 // the URL's client buffers are kernel memory (moy_ota.h); close() frees all of
-// it and gives the row back. Nothing is static but a pointer and the life
-// gate's mutex.
+// it and gives the row back. Nothing is static but two pointers (the
+// service, the media keys' table) and the life gate's mutex.
 //
 // WHO RUNS WHAT. The VM's thread opens, closes, commands and feeds; the
 // frame's job reads a file on that same thread, so a store op never runs on
@@ -67,6 +67,17 @@
 // go; close() then frees what it held once the task says it is idle (-EAGAIN
 // until then).
 //
+// MEDIA KEYS. A keyboard's media keys are MEDIA records on the console's
+// input table (native/moy_input/moy_event.h: `a` the consumer-page usage, `b`
+// 1 down and 0 up; a BLE keyboard's driver posts them, moy_hid.h). They are
+// the console's, as Super is: no cart reads them. While a stream is open the
+// frame's job reads them with a reader of its own and answers each usage
+// going down from whatever is in front, a game the kernel runs included:
+// Play/Pause, Play and Pause the stream's pause, Scan Next and Scan Previous
+// the list's next and previous entry while one plays, Volume Increment and
+// Decrement the stream's level by MOY_MEDIA_KEY_STEP. A key with no stream
+// open is answered by nothing.
+//
 // Errors are -errno with Linux's numbers on every tier.
 
 #ifndef MOY_MEDIA_H
@@ -94,6 +105,18 @@
 #define MOY_MEDIA_READ_MIN (4u * 1024u)    // a file is read once this much is free
 #define MOY_MEDIA_LIST_FILE (16u * 1024u)  // the longest playlist file play() reads
 #define MOY_MEDIA_TAG_READ 4096u            // what probe() reads of a tag, and of a first frame
+#define MOY_MEDIA_KEY_STEP 10               // a volume key's step, of 0..100
+
+// The consumer page's usages (HID Usage Tables, page 0x0C) the service answers.
+enum {
+    MOY_MEDIA_KEY_PLAY = 0xB0,
+    MOY_MEDIA_KEY_PAUSE = 0xB1,
+    MOY_MEDIA_KEY_NEXT = 0xB5,
+    MOY_MEDIA_KEY_PREV = 0xB6,
+    MOY_MEDIA_KEY_PLAY_PAUSE = 0xCD,
+    MOY_MEDIA_KEY_VOL_UP = 0xE9,
+    MOY_MEDIA_KEY_VOL_DOWN = 0xEA,
+};
 
 enum {
     MOY_MEDIA_IDLE = 0,
@@ -226,6 +249,16 @@ enum {
 int moy_media_text(int which, char *out, size_t cap);
 // Entry `i`'s source and title: its source's length, or -EINVAL.
 int moy_media_entry(int i, char *src, size_t src_cap, char *title, size_t title_cap);
+
+// A media key's usage going down, answered against the open stream: 1 when
+// it acted, 0 for a usage it does not answer or with no stream to act on.
+int moy_media_key(uint16_t usage);
+// The table whose MEDIA records the service reads (an open stream's reader
+// moves to it): NULL, the default, is the kernel's (moy_input_kernel), which
+// a board's console and drivers share; the host's console has a table of its
+// own and binds it, keeping it alive while it is bound.
+struct moy_input;
+void moy_media_keys_on(struct moy_input *t);
 
 // One pass of the task's loop (the frame's job runs it where there is no
 // task): 1 when it did work.

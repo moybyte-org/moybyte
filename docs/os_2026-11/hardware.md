@@ -497,15 +497,27 @@ made), its decoded tail dropped; a stream has no place. A file's ID3v2 tag
 gives `now()` its title and artist, and `probe(path)` reads a song's length
 and tag without playing it (Music's folder list). An `https` stream verifies
 as `http` does, and `moybyte.media.tls()` says whether one plays here.
-**Media keys** (play, pause, next, previous) on a keyboard are to arrive as
-events of kind `MEDIA` (§2) the service answers when no focused app takes
-them (owner, 2026-11-03); no keyboard driver posts a MEDIA record yet.
+**Media keys** on a keyboard arrive as events of kind `MEDIA` (§2: `a` the
+consumer-page usage, `b` 1 down and 0 up) the service answers when no focused
+app takes them (owner, 2026-11-03). No app or cart reads them today (no wake
+source names the kind, and no cart verb does), so they are the console's as
+Super is: while a stream is open the frame's C job (`moy_media.h`, MEDIA KEYS)
+answers each one going down from whatever is in front, a game the kernel runs
+included: Play/Pause, Play and Pause, Scan Next and Previous while the list
+plays, Volume Increment and Decrement by 10. A BLE keyboard's two-byte
+Consumer Control report posts them (`native/moy_input/moy_hid.h`), and so do
+the host simulator's media keys; the T-Deck's keyboard, the P4s' USB host
+(a process's `usb` device, not console input) and the browser post none.
 **Permissions:** `media` for a file or the console's own library;
 `media:url` and `http` for a URL (a `play(url)` without `http` would be a
 fetch of any URL by an app that never asked for the network). **A stream lives as long as its process (owner, 2026-11-03)**:
 closing the app ends it (its end sweeps it), minimising keeps it
-(`processes.md` §1); a control standing on the glass in kernel chrome, as the
-recording indicator does, is not built. A Python app making
+(`processes.md` §1). No stream plays with the VM down, so the kernel's own
+chrome draws no control for one: the VM's end stops its processes' stream
+before an S3's stopped run loads (`moy_kernel_vm_down`, `moy_media_close_vm`),
+and a run in the kernel's front with the VM up hands Super to the shell's
+pause menu, from which Music's status item is reached
+(`docs/theme_and_shell_2026-11.md` §1.5). A Python app making
 its own sound renders ahead from a thread or its loop (`processes.md` §3), at
 a depth greater than a GC pause.
 

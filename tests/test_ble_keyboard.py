@@ -7,6 +7,7 @@ at the end, and the radio itself on glass."""
 
 import pytest
 import re
+from array import array
 from pathlib import Path
 
 from runtime import moy_input as mi
@@ -373,7 +374,10 @@ def test_boot_keyboard_is_selected_and_protocol_mode_is_written():
     assert m.protocol == "boot"
     assert ("write", 4, 3, b"\x00", False) in stack.calls
     assert ("write", 4, 6, b"\x01\x00", True) in stack.calls
+    # The Report beside it is subscribed after the keyboard, for media keys.
     assert not any(c[:3] == ("write", 4, 9) for c in stack.calls)
+    m.on_write_done(4, 6, 0)
+    assert ("write", 4, 9, b"\x01\x00", True) in stack.calls
 
 
 def test_security_gated_cccd_is_retried_after_encryption():
@@ -591,6 +595,73 @@ def test_a_boot_mouse_is_subscribed_beside_the_keyboard_and_its_motion_taken():
     m.notify(5, 5, b"\x00\x00\x04\x00\x00\x00\x00\x00")
     _frame(m, table)
     assert table.last_key == ord("a")             # the keyboard beside it
+
+
+def _media(table, r):
+    """The MEDIA records reader `r` has waiting, as (usage, down)."""
+    into = array("i", bytes(4 * mi.EV_FIELDS * 16))
+    n = table.events(into, r)
+    out = []
+    for i in range(n):
+        f = into[i * mi.EV_FIELDS:(i + 1) * mi.EV_FIELDS]
+        assert f[mi.EV_KIND] == mi.EV_MEDIA
+        out.append((f[mi.EV_A], f[mi.EV_B]))
+    return out
+
+
+def test_a_consumer_report_is_a_media_record_down_and_up_and_no_key():
+    """A media key is a two-byte Consumer Control report on a Report
+    characteristic: its usage going down and up is a MEDIA record each on
+    the source's ring, and no key, button or typed byte, a game owning the
+    keys or not."""
+    table, _stack, m = _machine()
+    _ready(m)
+    r = table.reader(1 << mi.EV_MEDIA)
+    m.notify(3, 3, b"\xcd\x00")                         # Play/Pause down
+    _frame(m, table)
+    assert table.last_key == 0 and not table.any_pressed()
+    m.notify(3, 3, b"\x00\x00")
+    m.notify(3, 3, b"\xe9\x00")                         # Volume Increment
+    m.notify(3, 3, b"\xe9\x00")                         # held: no change
+    m.notify(3, 3, b"\xea\x00")                         # straight to Decrement
+    _frame(m, table)
+    assert _media(table, r) == [(0xCD, 1), (0xCD, 0), (0xE9, 1), (0xE9, 0), (0xEA, 1)]
+    m.notify(3, 3, b"\x00\x00\x04\x00\x00\x00\x00\x00")   # the keyboard's report still types
+    _frame(m, table)
+    assert table.last_key == ord("a") and _media(table, r) == []
+
+
+def test_beside_a_boot_keyboard_its_reports_are_read_for_media_keys_alone():
+    """A boot keyboard's Report characteristics are subscribed after it, read
+    for consumer reports alone (a keyboard report there types nothing twice),
+    and one that refuses its subscription leaves the keyboard connected."""
+    table, stack, m = _machine()
+    _pick(m)
+    m.connected(4, ADDR)
+    m.on_svc(4, 1, 20, mi.HID_SERVICE)
+    m.on_svc_done(4, 0)
+    m.on_chr(4, 2, 3, 0x04, mi.HID_PROTOCOL)
+    m.on_chr(4, 4, 5, mi.HID_NOTIFY, mi.HID_BOOT_KBD)
+    m.on_chr(4, 7, 8, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr(4, 10, 11, mi.HID_NOTIFY, mi.HID_REPORT)
+    m.on_chr_done(4, 0)
+    for cccd in (6, 9, 12):
+        m.on_dsc(4, cccd, mi.HID_CCCD)
+    m.on_dsc_done(4, 0)
+    m.on_write_done(4, 6, 0)
+    m.on_write_done(4, 9, 5)                    # refused: skipped, the link kept
+    assert ("write", 4, 12, b"\x01\x00", True) in stack.calls
+    m.on_write_done(4, 12, 0)
+    m.on_enc_change(4, True, True)
+    assert m.state == "ready" and m.protocol == "boot"
+    r = table.reader(1 << mi.EV_MEDIA)
+    m.notify(4, 11, b"\x00\x00\x04\x00\x00\x00\x00\x00")  # a keyboard report: not here
+    _frame(m, table)
+    assert table.last_key == 0
+    m.notify(4, 11, b"\xb5\x00")                        # Scan Next
+    m.notify(4, 5, b"\x00\x00\x05\x00\x00\x00\x00\x00")   # the boot keyboard types
+    _frame(m, table)
+    assert table.last_key == ord("b") and _media(table, r) == [(0xB5, 1)]
 
 
 def test_a_keyboard_with_no_mouse_has_no_mouse_to_take():

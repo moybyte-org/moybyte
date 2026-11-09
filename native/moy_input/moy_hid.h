@@ -10,9 +10,19 @@
 // drives the same machine over a fake stack (runtime/host/moy_input.py, the tests).
 //
 // THE PROFILE (HOGP). A Boot Keyboard Input characteristic is preferred: the
-// host writes Protocol Mode = 0 and consumes only the fixed eight-byte boot
-// report. A Report-only keyboard is subscribed and its eight-byte reports
-// decoded the same way; other layouts are ignored. Security is Just Works
+// host writes Protocol Mode = 0 and takes its keys from the fixed eight-byte
+// boot report alone. A Report-only keyboard is subscribed and its eight-byte reports
+// decoded the same way; other layouts are ignored. MEDIA KEYS come in a
+// Consumer Control report: a two-byte report holding one consumer-page usage
+// (little-endian, 0 when nothing is down), the shape most keyboards give
+// their media keys, read from any Report characteristic a keyboard report
+// does not decode from. Beside a Boot Keyboard Input every notifying Report
+// characteristic is subscribed for such reports alone, and a CCCD write it
+// refuses is skipped rather than ending the link. A usage going down or up is
+// a MEDIA record on the source's ring (moy_event.h: `a` the usage, `b` 1 down
+// and 0 up), which the media service answers (native/moy_media/moy_media.h,
+// MEDIA KEYS); a bitmap-shaped consumer report needs the report map, which is
+// not read, so its keys are not heard. Security is Just Works
 // with bonding; a CCCD write the keyboard rejects before encryption is
 // retried once, when the link is encrypted. A report is input only once the
 // link is encrypted, and a link whose encryption fails is dropped with the
@@ -47,7 +57,8 @@
 #define MOY_HID_DEVICES 8
 #define MOY_HID_CHRS 16
 #define MOY_HID_DSCS 24
-#define MOY_HID_INPUTS 4
+#define MOY_HID_INPUTS 6
+#define MOY_HID_MEDIA_Q 8          // media key changes held for the next frame
 #define MOY_HID_NAME 24
 #define MOY_HID_ERROR 48
 
@@ -123,6 +134,8 @@ typedef struct {
     uint8_t keys[6];
     uint8_t nkeys;
     bool mouse;                 // a Boot Mouse Input: buttons and deltas
+    bool media;                 // a Report beside a boot keyboard: consumer reports alone
+    uint16_t usage;             // the consumer usage it holds down, 0 none
 } moy_hid_report_t;
 
 struct moy_hid {
@@ -162,6 +175,7 @@ struct moy_hid {
     uint8_t protocol;           // 0 none, 1 boot, 2 report
     uint16_t subs[MOY_HID_INPUTS];      // the CCCDs to write
     uint8_t nsubs;
+    uint8_t nsubs_core;         // the first this many are the keyboard's and mouse's
     uint8_t sub_next;
     int32_t write_pending;
     uint8_t sub_retries;
@@ -173,6 +187,9 @@ struct moy_hid {
     uint8_t nreports;
     uint8_t pend_usage[32];     // makes seen since the last frame, a bitmap
     uint8_t pend_mods;
+    uint16_t pend_media[MOY_HID_MEDIA_Q];  // consumer usages that went down or up
+    uint8_t pend_down;          // bit i: pend_media[i] went down
+    uint8_t npend_media;
     bool caps;
     bool level_idle;
     uint32_t notify_count;
@@ -190,6 +207,9 @@ size_t moy_hid_adv_name(const uint8_t *adv, size_t n, char *out, size_t cap);
 // A boot-shaped report (eight bytes, or nine with a leading report id) ->
 // modifiers and up to six usages; false for any other layout.
 bool moy_hid_decode(const uint8_t *r, size_t n, uint8_t *mods, uint8_t keys[6], uint8_t *nkeys);
+// A Consumer Control report of one 16-bit usage (two bytes) -> its usage,
+// 0 when nothing is down; false for any other length.
+bool moy_hid_consumer(const uint8_t *r, size_t n, uint16_t *usage);
 // A usage typed with the report's modifiers -> its key event (moy_input.h),
 // 0 for a usage that is no key; moy_hid_keycode is the byte that event types.
 int32_t moy_hid_event(uint8_t usage, uint8_t mods, bool caps);

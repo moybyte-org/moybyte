@@ -94,6 +94,14 @@ bool moy_hid_decode(const uint8_t *r, size_t n, uint8_t *mods, uint8_t keys[6], 
     return true;
 }
 
+bool moy_hid_consumer(const uint8_t *r, size_t n, uint16_t *usage) {
+    if (n != 2) {
+        return false;
+    }
+    *usage = (uint16_t)(r[0] | (r[1] << 8));
+    return true;
+}
+
 // usage 0x2D.. 0x38 and the specials, plain and shifted.
 static int32_t plain_of(uint8_t u) {
     switch (u) {
@@ -324,6 +332,8 @@ static void clear_reports(moy_hid_t *h) {
     h->nreports = 0;
     memset(h->pend_usage, 0, sizeof(h->pend_usage));
     h->pend_mods = 0;
+    h->npend_media = 0;
+    h->pend_down = 0;
     h->level_idle = false;
     MOY_DRV_UNLOCK(&h->lock);
     moy_input_release(h->table, h->src);
@@ -774,6 +784,31 @@ static void write_next(moy_hid_t *h) {
     }
 }
 
+// Characteristic `c`'s CCCD queued for its notifications, its report kept.
+static void subscribe(moy_hid_t *h, const moy_hid_chr_t *c, bool mouse, bool media) {
+    uint32_t next_def = (uint32_t)h->hid_end + 1;
+    for (uint8_t j = 0; j < h->nchrs; j++) {
+        if (h->chrs[j].def > c->def && h->chrs[j].def < next_def) {
+            next_def = h->chrs[j].def;
+        }
+    }
+    for (uint8_t d = 0; d < h->ndscs; d++) {
+        if (h->dscs[d][0] > c->val && h->dscs[d][0] < next_def
+            && h->dscs[d][1] == MOY_HID_UUID_CCCD) {
+            h->subs[h->nsubs++] = h->dscs[d][0];
+            MOY_DRV_LOCK(&h->lock);
+            moy_hid_report_t *r = &h->reports[h->nreports++];
+            memset(r, 0, sizeof(*r));
+            r->handle = c->val;
+            r->mouse = mouse;
+            r->media = media;
+            h->has_mouse = h->has_mouse || mouse;
+            MOY_DRV_UNLOCK(&h->lock);
+            return;
+        }
+    }
+}
+
 void moy_hid_on_dsc_done(moy_hid_t *h, uint16_t conn, int status) {
     if (conn != h->conn) {
         return;
@@ -783,8 +818,9 @@ void moy_hid_on_dsc_done(moy_hid_t *h, uint16_t conn, int status) {
         return;
     }
     // Prefer Boot Host whenever the keyboard exposes it: Protocol Mode = 0 and
-    // only the fixed boot report. Mixing Boot and Report characteristics leaves
-    // the payload layout ambiguous. A Boot Mouse Input is subscribed beside it.
+    // its keys from the fixed boot report alone, since a Report's keyboard
+    // layout is the report map's. A Boot Mouse Input is subscribed beside it,
+    // and its Reports after both, read for consumer reports alone.
     bool boot = false;
     bool mouse = false;
     h->protocol_handle = 0;
@@ -814,34 +850,22 @@ void moy_hid_on_dsc_done(moy_hid_t *h, uint16_t conn, int status) {
     for (uint8_t i = 0; i < h->nchrs && h->nsubs < MOY_HID_INPUTS; i++) {
         moy_hid_chr_t *c = &h->chrs[i];
         bool is_mouse = c->uuid == MOY_HID_UUID_BOOT_MOUSE;
-        if ((c->uuid != want && !is_mouse) || !(c->props & MOY_HID_PROP_NOTIFY)) {
-            continue;
+        if ((c->uuid == want || is_mouse) && (c->props & MOY_HID_PROP_NOTIFY)) {
+            subscribe(h, c, is_mouse, false);
         }
-        uint32_t next_def = (uint32_t)h->hid_end + 1;
-        for (uint8_t j = 0; j < h->nchrs; j++) {
-            if (h->chrs[j].def > c->def && h->chrs[j].def < next_def) {
-                next_def = h->chrs[j].def;
-            }
-        }
-        for (uint8_t d = 0; d < h->ndscs; d++) {
-            if (h->dscs[d][0] > c->val && h->dscs[d][0] < next_def
-                && h->dscs[d][1] == MOY_HID_UUID_CCCD) {
-                h->subs[h->nsubs++] = h->dscs[d][0];
-                MOY_DRV_LOCK(&h->lock);
-                moy_hid_report_t *r = &h->reports[h->nreports++];
-                memset(r, 0, sizeof(*r));
-                r->handle = c->val;
-                r->mouse = is_mouse;
-                h->has_mouse = h->has_mouse || is_mouse;
-                MOY_DRV_UNLOCK(&h->lock);
-                break;
-            }
+    }
+    h->nsubs_core = h->nsubs;
+    // Beside a boot keyboard, its Report characteristics for media keys.
+    for (uint8_t i = 0; boot && i < h->nchrs && h->nsubs < MOY_HID_INPUTS; i++) {
+        moy_hid_chr_t *c = &h->chrs[i];
+        if (c->uuid == MOY_HID_UUID_REPORT && (c->props & MOY_HID_PROP_NOTIFY)) {
+            subscribe(h, c, false, true);
         }
     }
     h->sub_next = 0;
     h->write_pending = -1;
     h->sub_retries = 0;
-    if (h->nsubs == 0) {
+    if (h->nsubs_core == 0) {
         disconnect(h, "no keyboard input report CCCD");
         return;
     }
@@ -865,7 +889,8 @@ void moy_hid_on_write_done(moy_hid_t *h, uint16_t conn, uint16_t handle, int sta
         return;
     }
     h->write_pending = -1;
-    if (status == 0) {
+    // A media report's subscription refused leaves the keyboard as it was.
+    if (status == 0 || h->sub_next > h->nsubs_core) {
         write_next(h);
         return;
     }
@@ -880,6 +905,16 @@ void moy_hid_on_write_done(moy_hid_t *h, uint16_t conn, uint16_t handle, int sta
         }
     } else {
         disconnect(h, "keyboard notification subscribe failed");
+    }
+}
+
+// A consumer usage that went down or up, under the report latch, for the
+// next frame to post; a change past MOY_HID_MEDIA_Q in one frame is dropped.
+static void media_change(moy_hid_t *h, uint16_t usage, bool down) {
+    if (h->npend_media < MOY_HID_MEDIA_Q) {
+        h->pend_down = (uint8_t)((h->pend_down & ~(1u << h->npend_media))
+                                 | ((down ? 1u : 0u) << h->npend_media));
+        h->pend_media[h->npend_media++] = usage;
     }
 }
 
@@ -906,7 +941,8 @@ void moy_hid_on_notify(moy_hid_t *h, uint16_t conn, uint16_t handle, const uint8
         }
     } else if (rep != NULL) {
         h->notify_count++;
-        if (moy_hid_decode(r, n, &mods, keys, &nkeys)) {
+        uint16_t cu;
+        if (!rep->media && moy_hid_decode(r, n, &mods, keys, &nkeys)) {
             for (uint8_t i = 0; i < nkeys; i++) {
                 bool held = false;
                 for (uint8_t j = 0; j < rep->nkeys; j++) {
@@ -930,6 +966,14 @@ void moy_hid_on_notify(moy_hid_t *h, uint16_t conn, uint16_t handle, const uint8
             rep->mods = mods;
             memcpy(rep->keys, keys, sizeof(keys));
             rep->nkeys = nkeys;
+        } else if (moy_hid_consumer(r, n, &cu) && cu != rep->usage) {
+            if (rep->usage != 0) {
+                media_change(h, rep->usage, false);
+            }
+            if (cu != 0) {
+                media_change(h, cu, true);
+            }
+            rep->usage = cu;
         }
     }
     MOY_DRV_UNLOCK(&h->lock);
@@ -991,6 +1035,12 @@ void moy_hid_set_player(moy_hid_t *h, int8_t slot) {
     sync_player(h);
 }
 
+static void post_media(moy_hid_t *h, const uint16_t *usage, uint8_t n, uint8_t down) {
+    for (uint8_t i = 0; i < n; i++) {
+        moy_input_post(h->table, h->src, MOY_EV_MEDIA, usage[i], 0, (down >> i) & 1u);
+    }
+}
+
 void moy_hid_frame(moy_hid_t *h) {
     sync_player(h);
     uint8_t usage[32];
@@ -1005,8 +1055,13 @@ void moy_hid_frame(moy_hid_t *h) {
     for (uint8_t i = 0; i < h->nreports && !held; i++) {
         held = h->reports[i].nkeys || h->reports[i].mods;
     }
+    uint16_t media[MOY_HID_MEDIA_Q];
+    uint8_t nmedia = h->npend_media, mdown = h->pend_down;
+    memcpy(media, h->pend_media, nmedia * sizeof(media[0]));
+    h->npend_media = 0;
     if (h->level_idle && !pending && !held) {
         MOY_DRV_UNLOCK(&h->lock);
+        post_media(h, media, nmedia, mdown);
         return;
     }
     memcpy(usage, h->pend_usage, sizeof(usage));
@@ -1033,6 +1088,7 @@ void moy_hid_frame(moy_hid_t *h) {
     }
     h->gui_seen = (level & MOD_GUI) != 0;
     MOY_DRV_UNLOCK(&h->lock);
+    post_media(h, media, nmedia, mdown);
 
     bool text = moy_input_text_mode(h->table);
     bool cart = moy_input_cart_keys(h->table);

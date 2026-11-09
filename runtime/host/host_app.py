@@ -262,6 +262,16 @@ def _seed_system_carts(carts_dir):
         moy_carts.seed_folders(SYSTEM_CARTS, carts_dir, record=False)
 
 
+def _bind_media_keys(table):
+    """The media service answers the MEDIA records on `table`: none where the
+    host has no C compiler for it."""
+    try:
+        from . import moy_media
+        moy_media.keys_on(table)
+    except (ImportError, OSError):  # pragma: no cover - no host build of the C
+        pass
+
+
 def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
                       windowed=False, panel_diagonal_in=None, first_variant=None):
     """Build the shared console.Workstation wired to host backends.
@@ -321,6 +331,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # The host's inputs: its keyboard, on the table's own source. Its mouse is
     # a mouse, not a finger, so a click leaves the keys showing.
     ws.use_inputs(HOST_INPUTS)
+    # Its media keys are MEDIA records on this table, which the media service
+    # answers (a board's console and the service share the kernel's).
+    _bind_media_keys(inp)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
     ws.make_game_canvas = lambda w, h, owner=None: host_canvas.make_canvas(
