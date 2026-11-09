@@ -90,8 +90,10 @@ end
 folder (`--tier lua|wasm|wasi|c` the others, `--service <tier>` an app's own
 service), `moy app check hello.moy` says what the console would refuse and
 which permissions the code uses that the manifest does not ask for (or asks
-for and never uses), and `moy app stubs hello.moy` gives an editor the
-tier's names. `moy app` is moy-spec's `moy` running Moybyte's plugin,
+for and never uses), `moy app build hello.moy` compiles a wasm or C
+program from its `src/` (`--chip esp32s3|esp32p4|host`, which a C program
+must name; Python and Lua have nothing to build), and `moy app stubs
+hello.moy` gives an editor the tier's names. `moy app` is moy-spec's `moy` running Moybyte's plugin,
 `moy-app`, which `make setup` installs (`sdk/README.md`).
 
 **Run it in the simulator:** `python tools/simulate_desktop.py --cart hello.moy`
@@ -117,7 +119,7 @@ this guide is each step in full.
 | entry points (§7, §11) | `_init`, `_update`, `_draw`; a service's `moy_start`; a command's `main(argv)` | `_init`, `_update`, `_draw`; `moy_start` | the exports `_init`, `_update`, `_draw` | `_start` | `main` |
 | messages and timers (§8, §9) | `moybyte.on`, `send`, `every`, `after`, `at` | the same | `moybyte_on`, `moybyte_recv`, `moybyte_every` | `poll_oneoff` on `MOY_EVQ_FD`, `moybyte.os` | `poll` on `MOY_EVQ_FD`, `moy_on` |
 | files (§5) | `files` | `files`, `io`, `os` | `files_*` imports | WASI's own, in the granted folder | POSIX, in the granted folder |
-| build and test on the host (§12) | `tools/simulate_desktop.py --cart`; `tests/test_app_examples.py` | the same | `tools/wasm_cart.py`, then the simulator | `tools/wasm_cart.py`; the terminal | `tools/elf_cart.py`; the terminal |
+| build and test on the host (§12) | `tools/simulate_desktop.py --cart`; `tests/test_app_examples.py` | the same | `moy app build`, then the simulator | `moy app build`; the terminal | `moy app build --chip host`; the terminal |
 | example | `tests/fixtures/apps/shopping.moy` | `tests/fixtures/apps/echo_lua.moy` | `tests/fixtures/wasm/app_talk.moy` | `tests/fixtures/wasm/wasi_svc.moy` | `tests/fixtures/elf/elf_svc.moy` |
 
 Badges (`award`, `progress`, §9) are a call in every tier and may be called

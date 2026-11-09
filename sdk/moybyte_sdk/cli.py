@@ -15,6 +15,12 @@ have, so with this package installed (`pip install -e .` in moybyte puts
         module imports (wasm), each row a native module links (its
         .moy.rows), each name a script reaches (Python, Lua: a best-effort
         scan), from native/os_calls.json; --strict fails on a warning too
+    moy app build <cart> [--chip esp32s3|esp32p4|host ...] [--unsigned]
+        the cart's compiled programs into its folder, from src/: a wasm main
+        or service (tools/wasm_cart.py: the portable .wasm, and a board
+        chip's AOT module), a native one (tools/elf_cart.py: a module per
+        chip, which a native cart must name); a Python or Lua cart runs from
+        its source and has nothing to build
     moy app stubs <cart>
         the headers or stubs for the cart's tier, for an editor or a build:
         C include/moybyte/*.h and compile_flags.txt, Lua moybyte_os.lua,
@@ -499,15 +505,16 @@ def check_manifest(man, cart, errors, warnings):
         stem = (main or "main.wasm").rsplit(".", 1)[0]
         if not os.path.isfile(os.path.join(cart, main or "main.wasm")):
             if glob.glob(os.path.join(cart, "src", stem + ".*")):
-                warnings.append("%s is not built: tools/wasm_cart.py builds it from src/"
-                                % (main or "main.wasm"))
+                warnings.append("%s is not built: `%s build` builds it from src/"
+                                % (main or "main.wasm", PROG))
             else:
                 errors.append('"main" %r is no file, and src/ has nothing to build it from'
                               % (main,))
     else:
         chips = ven.get("native")
         if chips is None:
-            warnings.append("not built: tools/elf_cart.py builds main.<chip>.elf from src/")
+            warnings.append("not built: `%s build --chip CHIP` builds main.<chip>.elf from "
+                            "src/" % PROG)
         elif not _strs(chips) or any(c not in CHIPS for c in chips):
             errors.append('"native" is not a list of chips (%s)' % ", ".join(CHIPS))
         else:
@@ -536,13 +543,13 @@ def check_manifest(man, cart, errors, warnings):
             errors.append("the service entry %s is no file in the cart" % f)
         elif etier == "wasm" and not os.path.isfile(os.path.join(cart, f)):
             if glob.glob(os.path.join(cart, "src", stem + ".*")):
-                warnings.append("%s is not built: tools/wasm_cart.py builds it from src/" % f)
+                warnings.append("%s is not built: `%s build` builds it from src/" % (f, PROG))
             else:
                 errors.append("the service entry %s is no file, and src/%s.* is none" % (f, stem))
         elif etier == "elf" and not glob.glob(os.path.join(cart, glob.escape(stem) + ".*.elf")):
             if glob.glob(os.path.join(cart, "src", stem, "*.c")):
-                warnings.append("%s is not built: tools/elf_cart.py builds %s.<chip>.elf from "
-                                "src/%s/" % (f, stem, stem))
+                warnings.append("%s is not built: `%s build --chip CHIP` builds %s.<chip>.elf "
+                                "from src/%s/" % (f, PROG, stem, stem))
             else:
                 errors.append("the service entry %s has no %s.<chip>.elf and no src/%s/*.c"
                               % (f, stem, stem))
@@ -703,14 +710,11 @@ def new_cart(name, tier="python", service=None, typ=None, into="."):
 
 
 def _build_hint(folder, tier, service):
-    hints = []
-    if tier in ("wasm", "wasi") or service == "wasi":
-        hints.append("python3 %s %s <out>" % (os.path.join(ROOT, "tools", "wasm_cart.py"),
-                                              folder))
     if tier == "c" or service == "c":
-        hints.append("python3 %s %s <out> --chip esp32s3 --chip esp32p4"
-                     % (os.path.join(ROOT, "tools", "elf_cart.py"), folder))
-    return hints
+        return ["%s build %s --chip esp32s3 --chip esp32p4" % (PROG, folder)]
+    if tier in ("wasm", "wasi") or service == "wasi":
+        return ["%s build %s" % (PROG, folder)]
+    return []
 
 
 def cmd_new(a):
@@ -722,6 +726,92 @@ def cmd_new(a):
     for h in _build_hint(folder, a.tier, a.service):
         print("  build: " + h)
     print("  next: %s check %s" % (PROG, folder))
+    return 0
+
+
+# -- build ----------------------------------------------------------------------
+
+def _compiled(man, cart):
+    """(tier, wasm, elf): the cart's tier, and whether it has a program to
+    compile to wasm (its main, or its service entry) and one to a native
+    module."""
+    tier = tier_of(man, cart)
+    entry = scheduler.entry_of({"entries": vendor(man).get("entries")})
+    etier = entry[1] if entry else None
+    return tier, tier in ("wasm", "wasi") or etier == "wasm", tier == "c" or etier == "elf"
+
+
+def _compiler_failed(e):
+    err = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+    return Refused("the compiler failed:\n" + err.strip())
+
+
+def build_cart(cart, chips=(), signed=True):
+    """Build the cart's compiled programs into its own folder, from its src/:
+    a wasm main or service by tools/wasm_cart.py (the portable .wasm, and an
+    AOT module per board chip in `chips`), a native main or service by
+    tools/elf_cart.py (a module per chip in `chips`, `host` among them).
+    Signed unless `signed` is False, as those tools sign. Returns
+    [(what, path)], empty for a cart that runs from its source."""
+    man = read_manifest(cart)
+    tier, wasm, elf = _compiled(man, cart)
+    if not (wasm or elf):
+        return []
+    for c in chips:
+        if c not in CHIPS:
+            raise Refused("--chip is one of %s" % ", ".join(CHIPS))
+    if elf and not chips:
+        raise Refused("a native module is built per chip: --chip %s" % " --chip ".join(CHIPS))
+    from tools import elf_cart, wasm_cart
+    out = []
+    if wasm:
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = os.path.join(tmp, os.path.basename(os.path.abspath(cart)))
+            try:
+                got = wasm_cart.build(cart, dst, [c for c in chips if c != "host"],
+                                      signed=signed)
+            except wasm_cart.ToolchainMissing as e:
+                raise Refused("cannot build %s: %s" % (cart, e))
+            except subprocess.CalledProcessError as e:
+                raise _compiler_failed(e)
+            for what, path in sorted(got.items()):
+                to = os.path.join(cart, os.path.relpath(path, dst))
+                shutil.copyfile(path, to)
+                out.append((what, to))
+    if elf:
+        try:
+            if tier == "c":
+                got = elf_cart.build(cart, cart, chips, signed=signed)
+            else:
+                stem = elf_cart.service_entry(man)
+                srcs = sorted(glob.glob(os.path.join(cart, "src", glob.escape(stem), "*.c")))
+                if not srcs:
+                    raise Refused("%s has no src/%s/*.c for its service" % (cart, stem))
+                got = {"service." + c: elf_cart.build_module(
+                    srcs, c, os.path.join(cart, "%s.%s.elf" % (stem, c)), signed=signed)
+                    for c in chips}
+        except elf_cart.ToolError as e:
+            raise Refused(str(e))
+        except subprocess.CalledProcessError as e:
+            raise _compiler_failed(e)
+        out += sorted(got.items())
+    return out
+
+
+def cmd_build(a):
+    try:
+        man = read_manifest(a.cart)
+        built = build_cart(a.cart, a.chip, signed=not a.unsigned)
+    except Refused as e:
+        return die(str(e))
+    if not built:
+        tier = tier_of(man, a.cart)
+        print("%s: %s" % (a.cart, "a theme package has no program" if tier == THEME else
+                          "a %s cart runs from its source: nothing to build" % tier))
+        return 0
+    for what, path in built:
+        print("%-16s %s (%d bytes)" % (what, path, os.path.getsize(path)))
+    print("  next: %s check %s" % (PROG, a.cart))
     return 0
 
 
@@ -826,7 +916,7 @@ def parser():
     ap = argparse.ArgumentParser(prog=PROG, description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog="\n\n".join(__doc__.split("\n\n")[2:]))
-    sub = ap.add_subparsers(dest="verb", metavar="{new,check,stubs,push}")
+    sub = ap.add_subparsers(dest="verb", metavar="{new,check,build,stubs,push}")
     p = sub.add_parser("new", help="a cart folder from a template")
     p.add_argument("name")
     p.add_argument("--tier", choices=TIERS, default="python")
@@ -837,6 +927,13 @@ def parser():
     p = sub.add_parser("check", help="the manifest, and the permissions the programs use")
     p.add_argument("cart")
     p.add_argument("--strict", action="store_true", help="a warning fails too")
+    p = sub.add_parser("build", help="the cart's compiled programs, from its src/")
+    p.add_argument("cart")
+    p.add_argument("--chip", action="append", default=[], choices=CHIPS,
+                   help="a module for this chip too (a native cart needs one); repeatable")
+    p.add_argument("--unsigned", action="store_true",
+                   help="leave the modules' signatures off (a board runs them only "
+                        "for a cart granted \"full_access\")")
     p = sub.add_parser("stubs", help="the headers or stubs for the cart's tier")
     p.add_argument("cart")
     p = sub.add_parser("push", help="onto a board's store or the simulator's")
@@ -853,7 +950,8 @@ def main(argv=None):
     if a.verb is None:
         ap.print_help()
         return 0
-    return {"new": cmd_new, "check": cmd_check, "stubs": cmd_stubs, "push": cmd_push}[a.verb](a)
+    return {"new": cmd_new, "check": cmd_check, "build": cmd_build, "stubs": cmd_stubs,
+            "push": cmd_push}[a.verb](a)
 
 
 if __name__ == "__main__":

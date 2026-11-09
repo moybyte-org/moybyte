@@ -15,6 +15,7 @@ subcommand it does not have; Moybyte's is `moy-app`, the package
 ```
 moy app new <name> [--tier python|lua|wasm|wasi|c] [--service python|lua|wasi|c]
 moy app check <cart> [--strict]
+moy app build <cart> [--chip esp32s3|esp32p4|host ...] [--unsigned]
 moy app stubs <cart>
 moy app push <cart> [--board ID | --store DIR]
 ```
@@ -35,6 +36,13 @@ moy app push <cart> [--board ID | --store DIR]
   whether its program reaches it or not. `front` counts only for a program
   that runs in the background (`docs/app_api_v1.md` §6). A compiled program
   not built yet is read from its C source.
+- `build` compiles the cart's programs from its `src/` into its own folder:
+  a wasm main or service by `tools/wasm_cart.py` (the portable `.wasm`, and
+  with a board's `--chip` that chip's AOT module), a native main or service
+  by `tools/elf_cart.py` (a module per `--chip`, which a native cart must
+  name; `host` is the host's, for its tests and terminal). Modules are
+  signed as those tools sign them; `--unsigned` leaves it off. A Python or
+  Lua cart runs from its source and has nothing to build.
 - `stubs` copies what the cart's tier compiles or edits against into it:
   `include/moybyte/os.h` and `app.h` with a `compile_flags.txt` for C,
   `moybyte_os.lua` for the Lua language server, `__builtins__.pyi` and
@@ -46,7 +54,9 @@ moy app push <cart> [--board ID | --store DIR]
 What `check` and `stubs` know is generated from `native/os_calls.json` by
 `tools/gen_os_table.py` (`sdk/moybyte_sdk/os_table.py`, `sdk/moybyte_sdk/stubs/`,
 `include/moybyte/app.h`), so `tests/test_os_table.py` holds them to the
-table; `tests/test_moy_app_cli.py` runs each verb.
+table; `tests/test_moy_app_cli.py` runs each verb, and
+`tests/test_moy_app_carts.py` checks every seed and fixture cart, a warning
+standing only where it lists the reason.
 
 ## The native module
 

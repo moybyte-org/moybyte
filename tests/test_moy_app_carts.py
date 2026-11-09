@@ -32,7 +32,7 @@ CARTS = _carts()
 # Warnings every fixture under tests/ may give, by kind.
 FIXTURE_KINDS = (
     # a fixture carries its source; the test that runs it builds it
-    (r"is not built: tools/wasm_cart\.py|^not built: tools/elf_cart\.py",),
+    (r"not built: `moy app build",),
     # a spec fixture or a minimal game: keyed by its folder, no permissions
     (r'^no "moybyte" object: a game with no permissions$',),
     (r'^no "id" of the form <author>\.<name>',),

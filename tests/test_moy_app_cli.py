@@ -10,12 +10,16 @@ each verb on the host.
     import, a native module's .moy.rows -- each undeclared one warned, each
     declared one nothing uses warned, a row the SDK's C library links only
     noted;
+  * build: a compiled template built into its own folder on the host chip
+    checks with nothing left to build; a script cart has nothing to build,
+    and a native one needs a chip;
   * stubs: what it writes is tools/gen_os_table.py's output byte for byte;
   * push: into a simulator store, the stubs left behind, a cart that does
     not check refused;
   * the package: pyproject's entry point is the CLI's main.
 """
 
+import glob
 import json
 import os
 import shutil
@@ -207,6 +211,47 @@ def test_the_command_line_exits_by_its_verdict(tmp_path):
     _manifest(cart, lambda m: m["moybyte"]["permissions"].append("prefz"))
     p = subprocess.run(run + ["check", cart], env=env, capture_output=True, text=True)
     assert p.returncode == 1 and '"prefz" is no permission' in p.stdout
+
+
+def _wasi_sdk_or_skip():
+    from tools import jet_cart
+    try:
+        jet_cart.wasi_sdk(fetch=True)
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip("no wasi-sdk: %s" % exc)
+
+
+@pytest.mark.parametrize("tier,service", [("c", None), ("lua", "c"), ("wasi", None),
+                                          ("wasm", "c"), ("python", "wasi")])
+def test_build_leaves_a_template_nothing_to_build(tmp_path, tier, service):
+    if "wasi" in (tier, service) or tier == "wasm":
+        _wasi_sdk_or_skip()
+    cart = _new(tmp_path, "b", tier=tier, service=service)
+    built = dict(cli.build_cart(cart, ["host"]))
+    for path in built.values():
+        assert os.path.dirname(path) == cart and os.path.getsize(path) > 0
+    if tier == "c":
+        assert built["host"] == os.path.join(cart, "main.host.elf")
+        assert cli.read_manifest(cart)["moybyte"]["native"] == ["host"]
+    if service == "c":
+        assert built["service.host"] == os.path.join(cart, "service.host.elf")
+    if tier in ("wasm", "wasi"):
+        assert built["main"] == os.path.join(cart, "main.wasm")
+        assert not os.path.exists(os.path.join(cart, "main.host.elf"))
+    errors, warnings, _notes = cli.check_cart(cart)
+    assert errors == [] and warnings == []
+
+
+def test_build_has_nothing_for_a_script_and_needs_a_chip_for_a_module(tmp_path, capsys):
+    cart = _new(tmp_path, "s", tier="lua")
+    assert cli.build_cart(cart) == []
+    assert cli.main(["build", cart]) == 0
+    assert "runs from its source: nothing to build" in capsys.readouterr().out
+    native = _new(tmp_path, "n", tier="c")
+    with pytest.raises(cli.Refused, match="--chip"):
+        cli.build_cart(native)
+    assert cli.main(["build", native]) == 1
+    assert not glob.glob(os.path.join(native, "*.elf"))
 
 
 @pytest.mark.parametrize("tier,service", [("python", None), ("lua", None), ("wasm", None),
