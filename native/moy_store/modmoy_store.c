@@ -1544,8 +1544,10 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lock_stats_obj, 0, 1, mod_lock_st
 // back, renames it <dir>/r<i>.txt and reads that, and lists the folder.
 // task(dir, -ms) walks instead: one op inside the gate that stats the folder
 // entry after entry for `ms` milliseconds, yielding between entries
-// (moy_store_yield), as a listing of a big folder does. task_join() -> (rounds whole, the first failure's round, its errno, the
-// gate's -1s): waits for it.
+// (moy_store_yield), as a free-name search in a big folder does. A third
+// argument picks one of two slots, so two tasks run at once.
+// task_join([slot]) -> (rounds whole, the first failure's round, its errno,
+// the gate's -1s): waits for it.
 #include <pthread.h>
 #include <stdio.h>
 #include <time.h>
@@ -1556,7 +1558,7 @@ typedef struct {
     int rounds, ok, bad_at, bad_rc, refused, running;
 } task_t;
 
-static task_t s_task;
+static task_t s_task[2];
 
 static int task_count(void *ctx, const char *name, size_t len, int is_dir, uint32_t size) {
     (void)name;
@@ -1656,34 +1658,44 @@ static void *task_run(void *arg) {
     return NULL;
 }
 
-static mp_obj_t mod_task(mp_obj_t dir, mp_obj_t rounds) {
-    if (s_task.running) {
+static task_t *task_slot(size_t n_args, const mp_obj_t *args, size_t at) {
+    mp_int_t k = n_args > at ? mp_obj_get_int(args[at]) : 0;
+    if (k < 0 || k >= (mp_int_t)MP_ARRAY_SIZE(s_task)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("task slot"));
+    }
+    return &s_task[k];
+}
+
+static mp_obj_t mod_task(size_t n_args, const mp_obj_t *args) {
+    task_t *k = task_slot(n_args, args, 2);
+    if (k->running) {
         mp_raise_OSError(MP_EBUSY);
     }
-    memset(&s_task, 0, sizeof s_task);
-    snprintf(s_task.dir, sizeof s_task.dir, "%s", mp_obj_str_get_str(dir));
-    s_task.rounds = mp_obj_get_int(rounds);
-    s_task.bad_at = -1;
-    if (pthread_create(&s_task.t, NULL, task_run, &s_task) != 0) {
+    memset(k, 0, sizeof *k);
+    snprintf(k->dir, sizeof k->dir, "%s", mp_obj_str_get_str(args[0]));
+    k->rounds = mp_obj_get_int(args[1]);
+    k->bad_at = -1;
+    if (pthread_create(&k->t, NULL, task_run, k) != 0) {
         mp_raise_OSError(MP_EAGAIN);
     }
-    s_task.running = 1;
+    k->running = 1;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_task_obj, mod_task);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_task_obj, 2, 3, mod_task);
 
-static mp_obj_t mod_task_join(void) {
-    if (s_task.running) {
+static mp_obj_t mod_task_join(size_t n_args, const mp_obj_t *args) {
+    task_t *k = task_slot(n_args, args, 0);
+    if (k->running) {
         MP_THREAD_GIL_EXIT();
-        pthread_join(s_task.t, NULL);
+        pthread_join(k->t, NULL);
         MP_THREAD_GIL_ENTER();
-        s_task.running = 0;
+        k->running = 0;
     }
-    mp_obj_t t[4] = { MP_OBJ_NEW_SMALL_INT(s_task.ok), MP_OBJ_NEW_SMALL_INT(s_task.bad_at),
-                      MP_OBJ_NEW_SMALL_INT(s_task.bad_rc), MP_OBJ_NEW_SMALL_INT(s_task.refused) };
+    mp_obj_t t[4] = { MP_OBJ_NEW_SMALL_INT(k->ok), MP_OBJ_NEW_SMALL_INT(k->bad_at),
+                      MP_OBJ_NEW_SMALL_INT(k->bad_rc), MP_OBJ_NEW_SMALL_INT(k->refused) };
     return mp_obj_new_tuple(4, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_task_join_obj, mod_task_join);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_task_join_obj, 0, 1, mod_task_join);
 #define MOY_STORE_TASK 1
 #endif
 

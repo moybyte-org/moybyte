@@ -140,13 +140,14 @@ void moy_vol_unwind(void);                      // close every file still open
 //
 // An op that walks a folder entry by entry (a free name tried after another,
 // a tree copied file by file) calls moy_store_yield between entries: where
-// the VM's task waits for the lock and the caller is another task, the
-// caller lets its holds and its bus gate go, the VM's op runs, and the caller
-// takes them back at the same depth, the bus gate draining whatever frame the
-// VM began. A caller holding a working folder (moy_vol_enter) does not let
-// go. So the VM, and the T-Deck's next frame, wait for one entry of a
-// program's walk, never for the walk. The walk's entries are read again
-// after it, so an entry the VM changed meanwhile reads as it now is.
+// any task waits for the lock and the caller is not the VM's task, the caller
+// lets its holds and its bus gate go, waits until a waiter has taken the
+// lock, and takes them back at the same depth (the VM's task still first),
+// the bus gate draining whatever frame the VM began. The VM's task lets go for
+// nobody, and a caller holding a working folder (moy_vol_enter) does not let
+// go. So the VM, the T-Deck's next frame and another program each wait for
+// one entry of a program's walk, never for the walk; an entry another op
+// changed meanwhile is read as it now is.
 //
 // moy_store_unlock_to drops the calling task's holds down to `depth`, what a
 // raised call's unwind does with the depth it entered at. moy_store_lock_stats

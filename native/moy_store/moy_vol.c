@@ -166,6 +166,10 @@ int moy_store_on_vm(void) __attribute__((weak));
 // lock it let go, so the VM waits for one op at most, never for a task that
 // takes the lock again and again (a mutex hands it to whoever asks next).
 static uint32_t s_vm_wants;
+// Every task blocked on the lock, the VM's among them, and the outermost takes
+// so far: what moy_store_yield lets go for and waits on.
+static uint32_t s_waiting;
+static uint32_t s_takes;
 
 void moy_store_lock(void) {
     uintptr_t me = moy_store_me();
@@ -182,7 +186,9 @@ void moy_store_lock(void) {
         if (vm) {
             __atomic_add_fetch(&s_vm_wants, 1u, __ATOMIC_RELEASE);
         }
+        __atomic_add_fetch(&s_waiting, 1u, __ATOMIC_RELEASE);
         take();
+        __atomic_sub_fetch(&s_waiting, 1u, __ATOMIC_RELEASE);
         if (vm) {
             __atomic_sub_fetch(&s_vm_wants, 1u, __ATOMIC_RELEASE);
         }
@@ -198,6 +204,7 @@ void moy_store_lock(void) {
     __atomic_store_n(&s_owner, me, __ATOMIC_RELAXED);
     s_depth = 1;
     s_held_at = now_us();
+    __atomic_add_fetch(&s_takes, 1u, __ATOMIC_RELEASE);
 }
 
 void moy_store_unlock(void) {
@@ -706,7 +713,8 @@ enum { GATE_BUS = 1, GATE_LOCK = 2 };
 static int s_bus;
 
 void moy_store_yield(void) {
-    if (__atomic_load_n(&s_vm_wants, __ATOMIC_ACQUIRE) == 0u
+    if ((__atomic_load_n(&s_waiting, __ATOMIC_ACQUIRE) == 0u
+         && __atomic_load_n(&s_vm_wants, __ATOMIC_ACQUIRE) == 0u)
         || (moy_store_on_vm != NULL && moy_store_on_vm())) {
         return;
     }
@@ -725,7 +733,14 @@ void moy_store_yield(void) {
         gate(0);
     }
     s_bus = 0;
+    uint32_t took = __atomic_load_n(&s_takes, __ATOMIC_ACQUIRE);
     moy_store_unlock_to(0);
+    // A mutex hands the lock to whoever asks next, this task included: it
+    // waits until a waiter has taken it, or none waits any more.
+    while (__atomic_load_n(&s_waiting, __ATOMIC_ACQUIRE) != 0u
+           && __atomic_load_n(&s_takes, __ATOMIC_ACQUIRE) == took) {
+        nap();
+    }
     for (int i = 0; i < depth; i++) {
         moy_store_lock();               // the VM's op first (its want)
     }

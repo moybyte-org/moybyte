@@ -159,3 +159,41 @@ def test_a_long_walk_lets_the_vm_in_between_its_entries(tmp_path, board_model):
     assert out[0] == "walk True 0", out
     worst, vm_wait = (int(x) for x in out[1].split()[1:])
     assert worst < ms * 1000 // 4 and vm_wait < ms * 1000 // 4, out
+
+
+TWO = """
+import time, vfs, moy_store
+vfs.mount(moy_store.card_ram(16384), "/v")
+moy_store.mkdir("/v/w")
+moy_store.mkdir("/v/t")
+moy_store.lock_stats(True)
+moy_store.task("/v/w", -@MS@, 0)
+time.sleep_ms(50)
+moy_store.task("/v/t", @ROUNDS@, 1)
+b = moy_store.task_join(1)
+a = moy_store.task_join(0)
+holds, hold_us, wait_us, vm_wait_us, waits = moy_store.lock_stats()
+print("tasks", a[0] > 0, a[3], b)
+print("wait", wait_us)
+"""
+
+
+@pytest.mark.parametrize("board_model", [False, True])
+def test_a_long_walk_lets_another_program_in_between_its_entries(tmp_path, board_model):
+    """Two programs' tasks and no VM in the way: while one walks a folder
+    inside one gate, the other's rounds each wait for one entry of the walk
+    (moy_store_yield lets go for any waiter and waits until one has taken
+    the lock), never for the walk."""
+    exe = (find_unix_mp("moy_store", board_model=True) if board_model
+           else require_unix_mp("moy_store", why="the store from a task that is not the VM's"))
+    if exe is None:
+        pytest.skip("no 32-bit desktop MicroPython (gcc-multilib)")
+    ms, rounds = 1000, 40
+    script = tmp_path / "two.py"
+    script.write_text(TWO.replace("@MS@", str(ms)).replace("@ROUNDS@", str(rounds)))
+    done = subprocess.run([str(exe), "-X", "heapsize=32M", str(script)], capture_output=True,
+                          text=True, timeout=120)
+    assert done.returncode == 0, done.stdout + done.stderr
+    out = done.stdout.splitlines()
+    assert out[0] == "tasks True 0 (%d, -1, 0, 0)" % rounds, out
+    assert int(out[1].split()[1]) < ms * 1000 // 4, out
