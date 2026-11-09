@@ -258,6 +258,14 @@ void moy_fold_fence(void);
 // way), bounded; one compare when nothing is in flight.
 void moy_fold_snap_fence(void);
 
+// VM side, at a run's end (the system canvas's release_fold): the snapshot
+// engine uninstalled, any copy waited out first; the next snapshot installs
+// it again. Its GDMA channels and the descriptor lists of its last copies are
+// internal DMA memory, about 2.9 KB on the Guition S3 after one Lua cart,
+// which an engine kept for the session left in the middle of the internal
+// heap, splitting its largest block.
+void moy_fold_snap_release(void);
+
 // Clear the latches (soft reset / free-all), waiting any snapshot out first
 // (its buffers are about to be freed). `frames` and the snapshot counters are
 // since-boot meters and deliberately survive.

@@ -21,7 +21,7 @@ moy_fold_t moy_fold;
 // The snapshot engine
 // ---------------------------------------------------------------------------
 
-static async_memcpy_handle_t s_snap;     // installed on the first snapshot
+static async_memcpy_handle_t s_snap;     // installed on a run's first snapshot
 static bool s_snap_dead;                 // never installed, or a copy that never landed
 static SemaphoreHandle_t s_snap_sem;     // the landing's wake (NULL: the waits poll)
 static volatile uint32_t s_snap_parked;  // waiters parked on it
@@ -324,6 +324,23 @@ void moy_fold_fence(void) {
         esp_rom_delay_us(20);
     }
     MP_THREAD_GIL_ENTER();
+}
+
+void moy_fold_snap_release(void) {
+    moy_fold_snap_fence();
+    // The landing's interrupt clears `copying` before the driver is idle
+    // again, so an uninstall straight after the fence may be refused once.
+    for (int i = 0; i < 50 && s_snap != NULL; i++) {
+        if (esp_async_memcpy_uninstall(s_snap) == ESP_OK) {
+            s_snap = NULL;
+        } else {
+            esp_rom_delay_us(20);
+        }
+    }
+    if (s_snap == NULL && s_snap_sem != NULL && s_snap_parked == 0) {
+        vSemaphoreDelete(s_snap_sem);
+        s_snap_sem = NULL;
+    }
 }
 
 void moy_fold_reset(void) {

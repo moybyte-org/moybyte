@@ -215,6 +215,19 @@ static mp_obj_t banded_disarm(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(banded_disarm_obj, banded_disarm);
 
+#if MOY_GLASS_BANDED
+#include "moy_fold.h"
+
+// fold_release(): a run's end gives the fold's snapshot engine back
+// (moy_fold_snap_release). Present where the panel folds.
+static mp_obj_t banded_fold_release(mp_obj_t self_in) {
+    (void)self_in;
+    moy_fold_snap_release();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(banded_fold_release_obj, banded_fold_release);
+#endif
+
 // A fold verb forwards to the panel's: (the compositor's name, the panel's).
 static const qstr banded_fold[][2] = {
     { MP_QSTR_fold_fence, MP_QSTR_fold_fence },
@@ -277,6 +290,15 @@ static void banded_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
                 dest[0] = mp_call_method_n_kw(0, 0, probe);
             }
             return;
+#if MOY_GLASS_BANDED
+        case MP_QSTR_fold_release:
+            mp_load_method_maybe(c->panel, MP_QSTR_arm_fold_snap, probe);
+            if (probe[0] != MP_OBJ_NULL) {
+                dest[0] = MP_OBJ_FROM_PTR(&banded_fold_release_obj);
+                dest[1] = self_in;
+            }
+            return;
+#endif
         case MP_QSTR_disarm_scale_fold:
             mp_load_method_maybe(c->panel, MP_QSTR_disarm_fold, probe);
             if (probe[0] != MP_OBJ_NULL) {

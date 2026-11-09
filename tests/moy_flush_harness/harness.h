@@ -126,6 +126,9 @@ void h_dma_refuse(int err);         // every submit returns this (0 = none)
 void h_dma_stall(bool on);          // submits are taken but never complete
 void h_dma_set_rate(int64_t fixed_us, int64_t us_per_kb);
 int h_dma_installs(void);
+int h_dma_uninstalls(void);
+bool h_dma_installed(void);
+bool h_sem_live(struct h_sem *sem);  // created and not deleted
 int h_dma_submits(void);
 int64_t h_dma_lands_at(void);       // when the last submitted copy completes
 

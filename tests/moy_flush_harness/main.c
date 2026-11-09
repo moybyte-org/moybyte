@@ -1712,6 +1712,39 @@ static void sc_fold_snap_timeout_retires_the_engine(void) {
     CHECK_EQ(memcmp(f_got, f_ref, (size_t)FOLD_LW * FOLD_LH * 2), 0);
 }
 
+static void sc_fold_snap_release_gives_the_engine_back(void) {
+    // A run's end: the copy in flight waited out, then the engine
+    // uninstalled; the next snapshot installs it again and lands as before.
+    // With no engine it is a no-op.
+    moy_fold_snap_release();
+    CHECK_EQ(h_dma_uninstalls(), 0);
+    CHECK(SNAP_NATIVE());
+    CHECK_EQ(moy_fold.copying, true);
+    moy_fold_snap_release();
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK(h_now() >= h_dma_lands_at());
+    CHECK_EQ(f_scr[0], f_game[0]);
+    CHECK_EQ(h_dma_uninstalls(), 1);
+    CHECK(!h_dma_installed());
+    CHECK_EQ(h_gil_depth(), 0);
+    memset(f_scr, 0x11, sizeof f_scr);
+    CHECK(SNAP_NATIVE());
+    CHECK_EQ(h_dma_installs(), 2);
+    CHECK(h_dma_installed());
+    moy_fold_snap_fence();
+    CHECK_EQ(f_scr[0], f_game[0]);
+    moy_fold_snap_release();
+    CHECK_EQ(h_dma_uninstalls(), 2);
+    // A copy that never lands keeps its engine: the fence's deadline retires
+    // it, and the driver refuses an uninstall while the copy is queued.
+    h_dma_stall(true);
+    CHECK(SNAP_NATIVE());
+    moy_fold_snap_release();
+    CHECK_EQ(moy_fold.snap_timeouts, 1);
+    CHECK_EQ(h_dma_uninstalls(), 2);
+    CHECK(h_dma_installed());
+}
+
 static void sc_fold_snap_timeout_on_the_feeder_is_bounded(void) {
     // The same bug fence from the FEEDER's side: band 0 gives up at the
     // deadline instead of holding the transport forever, the frame is the
@@ -2213,6 +2246,8 @@ static const scenario_t SCENARIOS[] = {
       sc_fold_snap_fence_parks_until_the_copy_lands },
     { "fold_snap_timeout_retires_the_engine",
       sc_fold_snap_timeout_retires_the_engine },
+    { "fold_snap_release_gives_the_engine_back",
+      sc_fold_snap_release_gives_the_engine_back },
     { "fold_snap_timeout_on_the_feeder_is_bounded",
       sc_fold_snap_timeout_on_the_feeder_is_bounded },
     { "fold_snap_crop_bands_match_the_raster",

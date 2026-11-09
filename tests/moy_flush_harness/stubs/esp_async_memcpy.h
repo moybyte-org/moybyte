@@ -37,6 +37,7 @@ typedef struct {
 
 esp_err_t esp_async_memcpy_install(const async_memcpy_config_t *config,
                                    async_memcpy_handle_t *mcp);
+esp_err_t esp_async_memcpy_uninstall(async_memcpy_handle_t mcp);
 esp_err_t esp_async_memcpy(async_memcpy_handle_t mcp, void *dst, void *src,
                            size_t n, async_memcpy_isr_cb_t cb_isr,
                            void *cb_args);

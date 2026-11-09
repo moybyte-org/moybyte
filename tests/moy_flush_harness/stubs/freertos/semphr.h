@@ -14,5 +14,6 @@ SemaphoreHandle_t xSemaphoreCreateMutex(void);
 BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t ticks);
 BaseType_t xSemaphoreGive(SemaphoreHandle_t sem);
 BaseType_t xSemaphoreGiveFromISR(SemaphoreHandle_t sem, BaseType_t *woken);
+void vSemaphoreDelete(SemaphoreHandle_t sem);
 
 #endif // H_STUB_FREERTOS_SEMPHR_H

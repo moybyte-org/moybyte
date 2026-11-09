@@ -1425,10 +1425,15 @@ class DeviceCanvas:
         320x240 game's snapshot is 150 KB of PSRAM the desk would otherwise
         keep until the next run. Waits out whatever still reads them first,
         as the compiled cart's frame scratch does at its close. The next
-        blit_game makes them again."""
+        blit_game makes them again. The fold's snapshot engine goes with
+        them, its copy waited out (`fold_release`, moy_fold.h): the next
+        snapshot installs it again."""
+        comp = self._comp
+        fr = getattr(comp, "fold_release", None)
+        if fr is not None:
+            fr()
         if self._snap_scratch is None and self._view_scratch is None:
             return
-        comp = self._comp
         for name in ("fold_fence", "snap_fence", "disarm_scale_fold"):
             fn = getattr(comp, name, None)
             if fn is not None:
