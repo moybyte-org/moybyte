@@ -281,18 +281,15 @@ OS reads:
   **several entry points** sharing one grant and one prefs namespace
   (`"entries": {"app": "...", "service": "..."}`): the LoRa node and
   its radio app are one cart;
-- **permissions**: names from the one table (below): a role (`files:docs`,
-  `prefs`, `appearance`, `launch`, `clipboard`), the ungated floor
-  (`graphics`, `input`, `audio`), a device API (`mic`, `battery`, `brightness`,
-  `alarms` (`between_apps.md` §3), `gps`, `lora`, `ble`, `usb:hid`, `midi`,
-  `camera`, `http`, `network`, `multiplayer`, `media`, `media:url`,
-  `notifications` §7), `front` (below), `autostart` (§5), a lease
+- **permissions**: names from the one table (below): the ungated floor, a
+  role, a device API, `front` (below), `autostart` (§5), a lease
   (`lease:<resource>` naming a row of the board's resource table,
-  `hardware.md` §1), or `full_access` (full access: what a native cart must
-  ask for, and what admits a module with no signature on either compiled
-  tier, `moy_ota_admit_module`). A permission the manifest also lists in `"moybyte": {"required": [...]}`
-  is required: absent, it makes the launch refused with a message naming
-  it, where any other absent permission reads `None`;
+  `hardware.md` §1), or `full_access` (what a native cart must ask for, and
+  what admits a module with no signature on either compiled tier,
+  `moy_ota_admit_module`). A permission the manifest also lists in
+  `"moybyte": {"required": [...]}` is required: absent, it makes the launch
+  refused with a message naming it, where any other absent permission reads
+  `None`;
 - **handles**: the MIME types its app opens (`between_apps.md` §1), what
   `open_with` and `share` route by;
 - **background**: a service's one-line reason the OS shows ("LoRa node"),
@@ -354,38 +351,29 @@ carries no manifest (`cart_index.Install`'s `ask`); a denied install
 removes the build, and Remove forgets the record.
 
 **The permission table.** One JSON source, `native/os_calls.json`'s
-`"permissions"` beside the rows of every call (`tiers.md` §1), generated
-into `app_perms.TABLE` and the C policy's allowlist (`MOY_APP_PERMS`) by
-`tools/gen_os_table.py`, which the prompt, the install check, the launch
-check and Settings all read. Each row: the name (`files` also matches
-`files:<folder>`), what it grants (`floor`, `role:<role>`, `api:<service>`,
-`boot`, or `marker`: a shipped app's claim on its cart, granting nothing),
-the tiers that may hold it (derived: the tiers that serve the calls it hands
-an app, so a prompt names nothing the cart's tier cannot do and a cart of
-another tier is not asked for it, `tests/test_app_perms.py`), its line of
-the install prompt (None for the
-floor and the markers: nothing to consent to and nothing to turn off), the
-console service it needs (`wifi`, `net`, `gpio`), and the names a Python
-cart's namespace holds while it is granted, each `None` while it is turned
-off.
-The rows Python holds in phase 1 are the floor, the roles, `network`,
-`multiplayer`, `pins`, `console`, `notifications`, `autostart` and the
-markers (`notifications` with no names: its verb lives on the shared
-`moybyte` module and checks the poster's grant, §7); a Python app's prompt also says it is a trusted app. Phase 2 adds
-`lease` (P2.3): `lease:<row>`, granting `lease`, Python's for now, its
-prompt `"full"` ("Full access to the console's uart1", `app_perms.FULL`; the
-overview's §4), needing the board to offer the row (`app_perms.leasable`
-names each as `lease:<row>`), with no names: `moybyte.lease` checks the
-caller's grant (`Procs.granted`), the shell's always passing. P2.3 adds
-the device API rows `http`, `mic`, `lora` and `ble`, `api:<name>`, Python's
-for now, with no names: `moybyte.http` and the rest are the faces
-`runtime/system/devices.py` hands out, each checking the caller's grant the
-same way. `http` needs `wifi`; the others need the board's class, which
-`devices.apis()` adds to the console's services. P2.4 adds `media` (it
-needs the board's media service, `hardware.md` §3) and `media:url` (it needs
-`wifi`), both granting `api:media`. The later rows (USB host,
-`midi`, `camera`, `full_access`) arrive with their APIs, each saying whether it
-is enforced on its tier or informational (above).
+`"permissions"` beside the rows of every call (`tiers.md` §1), which
+`tools/gen_os_table.py` writes into `app_perms.TABLE` (what the prompt, the
+install check, the launch check and Settings read), the C policy's allowlist
+(`MOY_APP_PERMS`) and the guide's table (`docs/app_api_v1.md` §6, every
+permission and what it hands an app). Each row: the name (`files` also
+matches `files:<folder>`), what it grants (`floor`, `role:<role>`,
+`api:<service>`, `boot`, `lease`, `full_access`, or `marker`: a shipped app's
+claim on its cart, granting nothing), the tiers that may hold it (derived:
+the tiers that serve the calls it hands an app, so a prompt names nothing the
+cart's tier cannot do and a cart of another tier is not asked for it,
+`tests/test_app_perms.py`), its line of the install prompt (None for the
+floor and the markers: nothing to consent to and nothing to turn off; `full`
+for a lease, "Full access to the console's uart1", `app_perms.FULL`), the
+console service it needs (`wifi`, `net`, `gpio`, a device class
+`devices.apis()` adds to the console's services, or `lease`: the board
+offers the row, `app_perms.leasable` naming each as `lease:<row>`), and the
+names a Python cart's namespace holds while it is granted, each `None` while
+it is turned off. A permission with no names is checked where its verb runs:
+`notifications` by the shared `moybyte` module (§7), `lease` by
+`moybyte.lease` and a device API by its face in `runtime/system/devices.py`,
+each reading the caller's grant (`Procs.granted`), the shell's always
+passing. Whether a permission binds on a tier or only informs is the
+paragraph above's.
 
 **`front`: taking the screen from the background (owner, 2026-11-08).**
 `api:front`, every tier's, its line "Take over the screen from the
