@@ -54,6 +54,7 @@
 #include "moy_proc_exit.h"
 #include "moy_sh.h"
 #include "moy_wasi.h"
+#include "moy_vmq.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
@@ -1005,10 +1006,16 @@ static int svc_end(wasi_svc *v)
 }
 
 /* Waits up to `us` for `_start` to return: whether it has. */
+/* The wait for a service to return runs on the VM's task, so it serves the
+ * VM's queue: a row the service hops with (a device handle's read on its
+ * tick) is answered, and the service reaches its poll and its end. */
 static int svc_wait(wasi_svc *v, int64_t us)
 {
     struct timespec ms = { 0, 1000000 };
-    for (; us > 0 && !svc_returned(v); us -= 1000) nanosleep(&ms, NULL);
+    for (; us > 0 && !svc_returned(v); us -= 1000) {
+        moy_vmq_serve();
+        nanosleep(&ms, NULL);
+    }
     return svc_returned(v);
 }
 

@@ -68,6 +68,7 @@ void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 #include "moy_sh.h"
 #include "moy_log.h"
 #include "moy_evq.h"
+#include "moy_vmq.h"
 #include "moy_loop.h"
 #include "moy_proc_exit.h"
 #include "../moy_net/moy_ota.h"
@@ -1859,10 +1860,14 @@ static int svc_end(wsvc_t *v)
 }
 
 // Waits up to `us` for `_start` to return, the task's watchdog fed: whether it has.
+// The wait runs on the VM's task, so it serves the VM's queue: a row the
+// service hops with (a device handle's read on its tick) is answered, and the
+// service reaches its poll and its end.
 static bool svc_wait(wsvc_t *v, int64_t us)
 {
     int64_t end = esp_timer_get_time() + us;
     while (!v->returned && esp_timer_get_time() < end) {
+        moy_vmq_serve();
         vTaskDelay(1);
         if (esp_task_wdt_status(NULL) == ESP_OK) {
             esp_task_wdt_reset();
