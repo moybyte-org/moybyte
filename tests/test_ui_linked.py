@@ -105,7 +105,8 @@ def _wasi_or_skip():
 @pytest.fixture(scope="module")
 def runs(tmp_path_factory):
     """Each tier's shots and how its run ended: {name: (shots, error, screen)}.
-    Both carts are titled "Native page", so the run's bar draws alike."""
+    Both carts are titled "Native page" and the bar's clock reads one time, so
+    the run's bar draws alike."""
     from runtime import host_app
     from tools import elf_cart
     out = {}
@@ -128,6 +129,7 @@ def runs(tmp_path_factory):
             continue
         ws.look.set_theme("moy", persist=False)
         ws.pointer.visible = False
+        ws.bar_layer._clock_text = lambda: "10:30"
         open_cart(ws, "Native page")
         if ws.confirm.open:             # a copied app's consent: Open
             act = ws.confirm._act
