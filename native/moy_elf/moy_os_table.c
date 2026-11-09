@@ -360,6 +360,38 @@ int32_t moy_os_moy_ed25519_verify(const void *pub, size_t pub_len, const void *m
     return moy_os_call(195u, MOY_OS_SEQ, a, 3, NULL, 0u);   // moybyte.ed25519_verify
 }
 
+int32_t moy_os_moy_status_show(const char *icon, int32_t state, int32_t order) {
+    const moy_os_arg_t a[3] = {
+        { icon, 0u, 0, MOY_OS_ARG_STR },
+        { NULL, 0u, state, MOY_OS_ARG_INT },
+        { NULL, 0u, order, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(196u, MOY_OS_HOP, a, 3, NULL, 0u);   // moybyte.status_show
+}
+
+int32_t moy_os_moy_status_state(int32_t item, int32_t state) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, item, MOY_OS_ARG_INT },
+        { NULL, 0u, state, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(197u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.status_state
+}
+
+int32_t moy_os_moy_status_panel(int32_t item, const char *rows) {
+    const moy_os_arg_t a[2] = {
+        { NULL, 0u, item, MOY_OS_ARG_INT },
+        { rows, 0u, 0, MOY_OS_ARG_OPT },
+    };
+    return moy_os_call(198u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.status_panel
+}
+
+int32_t moy_os_moy_status_remove(int32_t item) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, item, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(199u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.status_remove
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -496,6 +528,10 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_ed25519_public,
         (void *)moy_os_moy_ed25519_sign,
         (void *)moy_os_moy_ed25519_verify,
+        (void *)moy_os_moy_status_show,
+        (void *)moy_os_moy_status_state,
+        (void *)moy_os_moy_status_panel,
+        (void *)moy_os_moy_status_remove,
     },
 };
 
@@ -613,4 +649,8 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_ed25519_public",
     "moy_ed25519_sign",
     "moy_ed25519_verify",
+    "moy_status_show",
+    "moy_status_state",
+    "moy_status_panel",
+    "moy_status_remove",
 };

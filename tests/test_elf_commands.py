@@ -169,6 +169,38 @@ def test_a_native_command_picks_an_item_and_hears_it_as_a_message(term):
     assert ws.carts_store.load_file("docs", "picked", ws.carts_root) == "# kept\n"
 
 
+def test_a_native_command_s_status_item_hears_its_panel_and_its_end_sweeps_it(term):
+    """`moy_status_*` from C (elf_app.moy's `app status`): an item in the bar
+    with a described panel, a slider whose range is empty EINVAL, a handle it
+    never had ENOENT; a press in the panel (status_items.Panel's) reaches the
+    command as the system's message "moybyte.status" carrying its item on
+    its event descriptor, and its end sweeps the item."""
+    from runtime import moy_sh
+    from runtime.status_items import ITEMS, PAUSED
+    _ws, app = term
+    app.face.take()
+    before = app.face.lines()
+    app.face.set_line("elf.app/app status; echo status $?")
+    app.face.submit()
+    seen = []
+    t0 = time.monotonic()
+    while app.face.busy() and time.monotonic() - t0 < 20:
+        moy_sh.jobs()
+        for it in ITEMS.shown:
+            if getattr(it.section, "n", 0) == 3 and it.state == PAUSED and not seen:
+                seen.append((it.icon, it.section.label[1], it.section.v[2]))
+                it.section._press(1, 1)
+        time.sleep(0.002)
+    app.face.take()
+    lines = [re.sub("\x1b\\[[0-9;]*m", "", ln) for ln in app.face.lines()][len(before):]
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("status_show "))
+    assert lines[at:] == [
+        "status_show 1", "status_panel 0", "status_bad -1 EINVAL", "status_state 0",
+        "status_none -1 ENOENT", "heard.status 1", "status 0"], lines
+    assert seen == [("star", "Go", 1)], seen
+    assert ITEMS.count() == 0 and all(not it.pid for it in ITEMS.slots), "its end sweeps it"
+
+
 def test_a_native_command_hears_its_timers_and_alarm_and_its_end_sweeps_them(term):
     """`moy_after`, `moy_every` and `moy_at` from C (elf_app.moy's `app
     timer`) answer the wake's id and go off as the system's message on the

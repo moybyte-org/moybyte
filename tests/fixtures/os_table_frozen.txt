@@ -116,3 +116,7 @@
 110 moy_ed25519_public | int32_t moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap)
 111 moy_ed25519_sign | int32_t moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap)
 112 moy_ed25519_verify | int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len)
+113 moy_status_show | int32_t moy_status_show(const char *icon, int32_t state, int32_t order)
+114 moy_status_state | int32_t moy_status_state(int32_t item, int32_t state)
+115 moy_status_panel | int32_t moy_status_panel(int32_t item, const char *rows)
+116 moy_status_remove | int32_t moy_status_remove(int32_t item)

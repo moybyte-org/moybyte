@@ -432,7 +432,8 @@
   },
   "p4_1024x600_cs2_fs1_status": {
     "status_desk_bar": [0, 1],
-    "status_desk_menu": [9, 9]
+    "status_desk_menu": [9, 9],
+    "status_desk_panel": [13, 11]
   },
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": [6, 31],
@@ -967,6 +968,7 @@
     "status_battery_charging": [0, 0],
     "status_battery_low": [0, 0],
     "status_cc": [49, 16],
+    "status_cc_panel": [55, 19],
     "status_cc_scrolled": [38, 14],
     "status_paused_bar": [6, 14],
     "status_vmstop": [4, 5]

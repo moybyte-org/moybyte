@@ -130,9 +130,10 @@ enum {
     MOY_T_MOYBYTE_DEV_OPEN, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_READ,
     MOY_T_MOYBYTE_DEV_WRITE, MOY_T_MOYBYTE_DEV_XFER, MOY_T_MOYBYTE_DEV_SET,
     MOY_T_MOYBYTE_DEV_GET, MOY_T_MOYBYTE_ED25519_PUBLIC, MOY_T_MOYBYTE_ED25519_SIGN,
-    MOY_T_MOYBYTE_ED25519_VERIFY,
+    MOY_T_MOYBYTE_ED25519_VERIFY, MOY_T_MOYBYTE_STATUS_SHOW, MOY_T_MOYBYTE_STATUS_STATE,
+    MOY_T_MOYBYTE_STATUS_PANEL, MOY_T_MOYBYTE_STATUS_REMOVE,
 };
-#define MOY_APP_TABLE_N 196u
+#define MOY_APP_TABLE_N 200u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -332,6 +333,10 @@ enum {
     { "moybyte.ed25519_public", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_PUBLIC }, \
     { "moybyte.ed25519_sign", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_SIGN }, \
     { "moybyte.ed25519_verify", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_VERIFY }, \
+    { "moybyte.status_show", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.status_state", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.status_panel", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.status_remove", MOY_ROLE_MOYBYTE, -1 }, \
 }
 
 // The permission each role is granted by: a role absent here is never

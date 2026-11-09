@@ -551,6 +551,18 @@ static int u_check_112(const moy_u_space_t *u, const void *pub, size_t pub_len, 
         && U_BUF(sig, u_n((size_t)sig_len, 1), MOY_U_R);
 }
 
+// 113 moy_status_show
+_Static_assert(U_REGS(const char *) + U_REGS(int32_t) + U_REGS(int32_t) <= 7, "moy_status_show's registers");
+static int u_check_113(const moy_u_space_t *u, const char *icon, int32_t state, int32_t order) {
+    return U_STR(icon);
+}
+
+// 115 moy_status_panel
+_Static_assert(U_REGS(int32_t) + U_REGS(const char *) <= 7, "moy_status_panel's registers");
+static int u_check_115(const moy_u_space_t *u, int32_t item, const char *rows) {
+    return U_STR0(rows);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -632,6 +644,8 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 110: fn = (u_check_fn *)(void *)u_check_110; break;
     case 111: fn = (u_check_fn *)(void *)u_check_111; break;
     case 112: fn = (u_check_fn *)(void *)u_check_112; break;
+    case 113: fn = (u_check_fn *)(void *)u_check_113; break;
+    case 115: fn = (u_check_fn *)(void *)u_check_115; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

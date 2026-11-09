@@ -17,6 +17,10 @@
 // as the system's message carrying its id, then asks for minute-long timers
 // until the console answers FULL and cancels all but the first, which it
 // keeps for its end to sweep.
+// `app status` puts a status item in the bar with a panel (a description
+// out of its range refused EINVAL, a handle it never had ENOENT) and waits
+// to hear a press in it, the system's message "moybyte.status" carrying the
+// item first; it ends holding the item, for its end to sweep.
 // `app usb` drives the USB host by handle: the devices plugged in read as
 // ATTACH records (each event, address and value, a device's name), a serial
 // device's line opened and written, the write's SENT record read back, a
@@ -128,6 +132,18 @@ static int timer(void) {
     return 0;
 }
 
+static int status(void) {
+    int32_t h = moy_status_show("star", MOY_STATUS_ON, 0);
+    said("status_show", h > 0 ? 1 : h, NULL);
+    said("status_panel", moy_status_panel(h, "text Calls\nbutton go Go\ntoggle twice Twice 1"),
+         NULL);
+    said("status_bad", moy_status_panel(h, "slider v V 9 1 5"), NULL);
+    said("status_state", moy_status_state(h, MOY_STATUS_PAUSED), NULL);
+    said("status_none", moy_status_remove(99), NULL);
+    said("heard.status", heard("moybyte.status", h), NULL);
+    return 0;
+}
+
 static int lease(void) {
     char buf[16];
     int32_t pin = moy_dev_open("gpio6", "mode=out");
@@ -229,6 +245,9 @@ static int usb(void) {
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "pick") == 0) {
         return pick();
+    }
+    if (argc > 1 && strcmp(argv[1], "status") == 0) {
+        return status();
     }
     if (argc > 1 && strcmp(argv[1], "lease") == 0) {
         return lease();

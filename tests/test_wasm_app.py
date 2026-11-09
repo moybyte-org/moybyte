@@ -349,3 +349,31 @@ def test_a_compiled_app_joins_a_lorawan_network_by_handle(talk):
         assert N.owner() == 0
     finally:
         lora_sim.remove()
+
+
+def test_a_compiled_app_s_status_item_hears_its_panel_and_goes_with_its_run(talk):
+    """moybyte_status_* (runtime/system/status_items.py): an item in the bar
+    with a described panel, a description no kind reads refused BAD (-7), a
+    removed item's handle ABSENT (-8); a press in the panel, the shell's
+    (status_items.Panel), reaches the app as the system's message
+    "moybyte.status" [item, id, value]; the run's end sweeps the item."""
+    from runtime.status_items import ITEMS, ON
+    ws, pid, lines = talk()
+    shown = [ln for ln in lines if ln.startswith("status_")]
+    assert shown[0].startswith("status_show ") and int(shown[0].split()[1]) > 0, lines
+    h = int(shown[0].split()[1])
+    assert shown[1:] == ["status_panel 0", "status_bad -7", "status_state 0",
+                         "status_remove 0", "status_gone -8"], lines
+    it = ITEMS.of(pid, h)
+    assert it is not None and it.visible and it.state == ON and it.icon == "music"
+    assert [it.pid for it in ITEMS.shown] == [pid], "the removed one left the bar"
+    assert it.section.n == 4 and it.section.label[0] == "Talk" and it.section.v[3] == 3
+    since = L.next()
+    it.section._press(1, 1)                 # Say hi pressed
+    it.section._press(3, 7)                 # Volume stepped
+    _frames(ws, 2)
+    heard = [t for _s, _t, _l, q, t in os_log.records(since, 64) if q == pid]
+    assert heard == ['heard moybyte.status from system [%d, "hi", 1]' % h,
+                     'heard moybyte.status from system [%d, "vol", 7]' % h], heard
+    ws.exit()
+    assert ITEMS.of(pid, h) is None and ITEMS.count() == 0, "the run's end sweeps it"

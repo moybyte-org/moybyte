@@ -1156,3 +1156,43 @@ int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, siz
     return ((moy_os_fn_moy_ed25519_verify *)__moy_os->fn[112])(pub, pub_len, msg, msg_len, sig, sig_len);
 }
 #endif
+
+#if MOY_OS_ROW(113)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_status_show(const char *icon, int32_t state, int32_t order);
+MOY_OS_USED(113);
+int32_t moy_status_show(const char *icon, int32_t state, int32_t order)
+{
+    return ((moy_os_fn_moy_status_show *)__moy_os->fn[113])(icon, state, order);
+}
+#endif
+
+#if MOY_OS_ROW(114)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_status_state(int32_t item, int32_t state);
+MOY_OS_USED(114);
+int32_t moy_status_state(int32_t item, int32_t state)
+{
+    return ((moy_os_fn_moy_status_state *)__moy_os->fn[114])(item, state);
+}
+#endif
+
+#if MOY_OS_ROW(115)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_status_panel(int32_t item, const char *rows);
+MOY_OS_USED(115);
+int32_t moy_status_panel(int32_t item, const char *rows)
+{
+    return ((moy_os_fn_moy_status_panel *)__moy_os->fn[115])(item, rows);
+}
+#endif
+
+#if MOY_OS_ROW(116)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_status_remove(int32_t item);
+MOY_OS_USED(116);
+int32_t moy_status_remove(int32_t item)
+{
+    return ((moy_os_fn_moy_status_remove *)__moy_os->fn[116])(item);
+}
+#endif

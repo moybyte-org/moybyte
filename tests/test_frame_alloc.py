@@ -426,6 +426,7 @@ def measure(loop):
     editor(loop, info)
     panes(loop, info)
     row_of_parts(loop, info)
+    status_panel(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -1033,6 +1034,43 @@ def panes(loop, info):
     info["split_sizes"] = list(sizes)
     info["split_focus"] = o["focus"]
     info["part_at"] = at
+    ws.mark_dirty()
+    for _ in range(10):
+        loop.step()
+
+
+def status_panel(loop, info):
+    """A compiled program's status item's panel (status_items.Panel: a
+    text row, a button, a toggle and a slider), drawn on an app host of its
+    own as the handheld's control center and the desk's menu draw it, as
+    its process: what the draw allocates each frame, idle."""
+    from gc import mem_alloc
+    import ui
+    import ui_draw
+    from status_items import ITEMS, parse
+    ws = loop.ws
+    cv = ws.sys_canvas
+    th = ws.theme_colors
+    W = cv.w
+    host = ui_draw.AppHost()
+    h = ITEMS.show_compiled(77, "music", 0, 0)
+    it = ITEMS.slots[h - 1]
+    it.section.set(parse("text Now playing\tGroove Salad\nbutton skip Skip\n"
+                         "toggle shuffle Shuffle 1\nslider vol Volume 0 10 6"))
+    drawn = []
+    gc.collect()
+    gc.disable()
+    for k in range(16):
+        desk = k >= 8
+        host.begin(cv, th, (0, 0, W, 200), desk, "panel")
+        ui.at(0, 0, W, 200)
+        m = mem_alloc()
+        ITEMS.draw(it, desk)
+        drawn.append(mem_alloc() - m)
+        ui.end()
+    gc.enable()
+    it.remove()
+    info["status_panel"] = drawn
     ws.mark_dirty()
     for _ in range(10):
         loop.step()
@@ -1828,6 +1866,17 @@ def test_a_row_of_parts_allocates_nothing(result):
     row = info["row_of_parts"][1:]
     assert all(b == 0 for b, moved in row if not moved), info["row_of_parts"]
     assert all(b <= ANSWER for b, moved in row if moved), info["row_of_parts"]
+
+
+def test_a_compiled_status_panel_draws_allocating_nothing(result):
+    """A compiled program's status item's panel (runtime/system/
+    status_items.py's Panel), the shell's drawer of the rows the program
+    described: past the first frame of each mode, a frame's draw on a
+    handheld card and in a desk menu allocates nothing."""
+    info, text = result
+    drawn = info.get("status_panel")
+    assert drawn and len(drawn) == 16, text[-3000:]
+    assert drawn[1:8] == [0] * 7 and drawn[9:] == [0] * 7, drawn
 
 
 def test_a_splits_divider_drag_allocates_nothing(result):

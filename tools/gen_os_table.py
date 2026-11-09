@@ -900,6 +900,10 @@ def gen_sdk_h(table):
          "// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).",
          "#define MOY_LOG_ERR 3", "#define MOY_LOG_WARNING 4", "#define MOY_LOG_INFO 6",
          "#define MOY_LOG_DEBUG 7", "",
+         "// A status item's states (moy_status_show, moy_status_state): its icon in",
+         "// the accent, the paused ink or the danger ink.",
+         "#define MOY_STATUS_ON 0", "#define MOY_STATUS_PAUSED 1", "#define MOY_STATUS_ERROR 2",
+         "",
          "#ifdef __wasm__", "",
          "#include <errno.h>", ""]
     for r in wasi_rows(src):

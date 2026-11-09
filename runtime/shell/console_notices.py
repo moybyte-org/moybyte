@@ -515,6 +515,9 @@ class Notices:
         same item again closes it (`toggle_popover`)."""
         if item is None:
             return
+        if _ITEMS.bare(item):
+            self.open_status_app(item)
+            return
         m = self.sysmenu
         same = m.open and m.widget == "status" and self.status_open is item
         if m.open and m.widget == "status" and not same:
@@ -556,7 +559,6 @@ class Notices:
         the call alone, and an app's own service's notification opens its
         app too (scheduler.as_service)."""
         self._dirty = True
-        procs = self.procs
         brought = self._bring(n.pid)
         if brought is not None:
             if brought:
@@ -568,14 +570,31 @@ class Notices:
             from runtime import scheduler as _sched
         hooked = _sched.SCHED.hook(n.pid, "moy_action", n.id, key)
         c = n.cart
+        if hooked and not (c and c.get("entry") and c.get("path")):
+            return
+        self._open_cart_of(c)
+
+    def _open_cart_of(self, c):
+        """Process cart `c` opened again: an app's own service's its app's
+        cart, a service with no app nothing."""
         if c and c.get("entry") and c.get("path"):
             c = next((a for a in self.carts.all if a.get("path") == c["path"]), None)
-        elif hooked:
-            return
         if c and c.get("path") and c.get("type") != "service":
-            if self.wm.top_is("tasks") and procs.handheld():
+            if self.wm.top_is("tasks") and self.procs.handheld():
                 self.close_tasks()
             self.open(c)
+
+    def open_status_app(self, item):
+        """Status item `item`, which has no menu, was tapped: its process's
+        run comes to the front, as a notification's does, else its cart
+        opens (an app's own service's, its app)."""
+        if item is None or not item.pid:
+            return
+        self._dirty = True
+        self.close_popover()
+        if self._bring(item.pid) is not None:
+            return
+        self._open_cart_of(self.procs.who(item.pid)[1])
 
     def _bring(self, pid):
         """Process `pid`'s run comes to the front, as the task manager's

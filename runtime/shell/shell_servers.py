@@ -859,6 +859,69 @@ class ConsoleCalls:
     def dev_get(self, g, h, what):
         return self._dev(g, "get", h, what)
 
+    # The status items (runtime/system/status_items.py): a compiled
+    # program's item is an icon in a state and the panel it describes, which
+    # the shell draws; a press reaches it as the system's message STATUS,
+    # one name of the MOY_EVQ_LISTEN it listens on, taken at its first panel.
+    def _item(self, g, h):
+        pid = self.__ws.procs.pid_of(g)
+        if pid is None or pid <= _SHELL:
+            return None, None
+        items = _moybyte._items()
+        return items, items.of(pid, h)
+
+    def status_show(self, g, icon, state, order):
+        pid = self._own(g)
+        if pid is None:
+            return _DOOR_STALE
+        items = _moybyte._items()
+        if not icon or len(icon) > _status_items().ICON_MAX \
+                or state not in _status_items().STATES:
+            return _DOOR_BAD
+        return items.show_compiled(pid, icon, state, order) or _DOOR_FULL
+
+    def status_state(self, g, h, state):
+        items, it = self._item(g, h)
+        if it is None:
+            return _DOOR_ABSENT if items is not None else _DOOR_STALE
+        if state not in _status_items().STATES:
+            return _DOOR_BAD
+        it.show(state)
+        return 0
+
+    def status_panel(self, g, h, rows=None):
+        items, it = self._item(g, h)
+        if it is None:
+            return _DOOR_ABSENT if items is not None else _DOOR_STALE
+        got = _status_items().parse(rows or "")
+        if got is None:
+            return _DOOR_BAD
+        if got:
+            try:
+                _moybyte._ear(it.pid, _status_items().STATUS)
+            except OSError:
+                return _DOOR_FULL
+        it.section.set(got)
+        it.changed()
+        if not got and items.closed is not None:
+            items.closed(it)            # no panel: no menu stays open on it
+        return 0
+
+    def status_remove(self, g, h):
+        items, it = self._item(g, h)
+        if it is None:
+            return _DOOR_ABSENT if items is not None else _DOOR_STALE
+        it.remove()
+        return 0
+
+
+def _status_items():
+    try:
+        import status_items
+    except ImportError:  # host: the runtime package
+        from runtime import status_items
+    return status_items
+
 
 def _dev_handles():
     try:
@@ -945,6 +1008,10 @@ DOOR_ARGS = {
     "moybyte.dev_xfer": "ibi",
     "moybyte.dev_set": "is",
     "moybyte.dev_get": "is",
+    "moybyte.status_show": "sii",
+    "moybyte.status_state": "ii",
+    "moybyte.status_panel": "io",
+    "moybyte.status_remove": "i",
 }
 # END GENERATED
 

@@ -16,7 +16,12 @@
 // answer printed with its errno; a "wake" carrying ["ble"] opens the BLE
 // face by handle with a scan, prints the scan's records (each event and an
 // advertisement's name), connects to the first device heard and keeps the
-// connection until the service ends; a "wake" carrying ["timers"] asks for
+// connection until the service ends; a "wake" carrying ["status"] puts a
+// status item in the bar with a panel (a text row and a button; a toggle
+// out of its range refused EINVAL), shows it in its error state and names a
+// handle it never had, each answer printed with its errno, and keeps the
+// item until the service ends, a press in its panel heard as the system's
+// message "moybyte.status" [item, id, value]; a "wake" carrying ["timers"] asks for
 // minute-long timers until the console answers FULL, printing how many it
 // got and that answer's errno, then cancels all but the first, which it keeps
 // until the service ends; a "wake" carrying ["front"] listens
@@ -211,6 +216,19 @@ int main(void) {
                    n > src && strncmp((const char *)r + src, path, strlen(path)) == 0 ? "same"
                                                                                        : "other",
                    n < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"status\"]") == 0) {
+            int h = (int)moy_status_show("pulse", MOY_STATUS_ON, 0);
+            printf("status_show %d errno %d\n", h, h < 0 ? errno : 0);
+            int r = (int)moy_status_panel(h, "text Uplink\tup\nbutton sync Sync now");
+            printf("status_panel %d errno %d\n", r, r < 0 ? errno : 0);
+            r = (int)moy_status_panel(h, "toggle t T 5");
+            printf("status_bad %d errno %d\n", r, r < 0 ? errno : 0);
+            r = (int)moy_status_state(h, MOY_STATUS_ERROR);
+            printf("status_state %d errno %d\n", r, r < 0 ? errno : 0);
+            r = (int)moy_status_state(h + 1, MOY_STATUS_ON);
+            printf("status_none %d errno %d\n", r, r < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0) {
             printf("after %d\n", (int)moy_after(0));

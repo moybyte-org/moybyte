@@ -184,3 +184,94 @@ def test_a_vm_stop_kept_by_the_music_asks_first(tmp_path, monkeypatch):
     assert moy_log.current() == moy_log.SHELL and ws.run.player.pid is None
     leases.media = False
     assert not ws.run.player._music_keeps_the_vm(5, cart), "no music: the verdict stands"
+
+
+# -- a compiled program's item: the panel it describes ---------------------------
+
+PANEL = ("text Now playing\tGroove Salad\n"
+         "button skip Skip\n"
+         "toggle shuffle Shuffle 1\n"
+         "slider vol Volume 0 10 6")
+
+
+def test_a_description_parses_into_rows_or_is_refused():
+    from runtime.status_items import parse, ROWS_MAX, TEXT, BUTTON, TOGGLE, SLIDER
+    assert parse(PANEL) == [
+        (TEXT, "", "Now playing", "Groove Salad", 0, 0, 0),
+        (BUTTON, "skip", "Skip", "", 1, 0, 0),
+        (TOGGLE, "shuffle", "Shuffle", "", 1, 0, 0),
+        (SLIDER, "vol", "Volume", "", 6, 0, 10)]
+    assert parse("") == [] and parse(None) == [] and parse("\n\n") == []
+    assert parse("button go Go to the next one") == [
+        (BUTTON, "go", "Go to the next one", "", 1, 0, 0)], "a label runs to the line's end"
+    assert parse("slider v Level two 0 4 9")[0][2:] == ("Level two", "", 4, 0, 4), \
+        "a value outside the range is held to it"
+    for bad in ("image x y", "button skip", "toggle t T 2", "toggle t T on",
+                "slider v V 5 5 5", "slider v V 0 9", "text ", "button " + "x" * 17 + " X"):
+        assert parse(bad) is None, bad
+    assert parse("\n".join(["text a"] * ROWS_MAX)) is not None
+    assert parse("\n".join(["text a"] * (ROWS_MAX + 1))) is None
+
+
+def test_a_compiled_item_is_a_slot_its_panel_drawn_by_the_shell(tmp_path):
+    ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0)
+    from runtime.status_items import parse
+    h = ITEMS.show_compiled(42, "music", PAUSED, 3)
+    it = ITEMS.slots[h - 1]
+    assert ITEMS.of(42, h) is it and ITEMS.of(43, h) is None and ITEMS.of(42, h + 1) is None
+    assert it.visible and it.state == PAUSED and ITEMS.bare(it), "no panel: a bare item"
+    it.section.set(parse(PANEL))
+    assert not ITEMS.bare(it)
+    from runtime import ui_draw
+    m = ui_draw.metrics("row")
+    assert ITEMS.height(it, 380, True) == 4 * (m[6] + m[7])
+    heard = []
+    was = ITEMS.post
+    ITEMS.post = lambda pid, name, args: heard.append((pid, name, args))
+    try:
+        ws.open_desk()
+        ws.open_status_menu(it)
+        ws.frame(1 / 30)
+        assert ws.sysmenu.open and ws.status_open is it
+        drv = make_drv(ws)
+        for k in ("a", "down", "a", "down", "right"):    # Skip, Shuffle, Volume
+            drv.press(k)
+            drv.frame(1 / 30)
+    finally:
+        ITEMS.post = was
+    assert heard == [(42, "moybyte.status", (h, "skip", 1)),
+                     (42, "moybyte.status", (h, "shuffle", 0)),
+                     (42, "moybyte.status", (h, "vol", 7))], heard
+    assert it.section.v[2:4] == [0, 7], "a row keeps the value it moved to"
+    moybyte.WAKES.end(42)
+    assert it.pid == 0 and not ws.sysmenu.open, "the end sweeps it, its menu closed"
+
+
+def test_a_bare_item_opens_its_app(tmp_path, monkeypatch):
+    ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0)
+    opened = []
+    monkeypatch.setattr(ws, "open_status_app", lambda item: opened.append(item))
+    it = ITEMS.slots[ITEMS.show_compiled(42, "music", ON, 0) - 1]
+    ws.open_desk()
+    ws.frame(1 / 30)
+    bar, (x, y, w, h) = ws.bar_layer.cell("desk", "status")
+    ws.bar_layer.handle_bar_tap("desk", x + w // 2, y + h // 2)
+    assert opened == [it] and not ws.sysmenu.open, "the desk's tap opens the app, no menu"
+
+
+def test_a_bare_item_s_card_is_one_open_row_on_a_handheld(tmp_path, monkeypatch):
+    ws = build_ws(tmp_path)
+    opened = []
+    monkeypatch.setattr(ws, "open_status_app", lambda item: opened.append(item))
+    it = ITEMS.slots[ITEMS.show_compiled(42, "music", ON, 0) - 1]
+    ws.frame(1 / 30)
+    ws.widget_tap("battery")
+    assert ws.sysmenu.open and type(ws.sysmenu.comp).__name__ == "ControlCenter"
+    drv = make_drv(ws)
+    drv.frame(1 / 30)
+    ws.sysmenu.comp.host.focus("status%d.open" % it.k)
+    drv.frame(1 / 30)
+    drv.press("a")
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert opened == [it]

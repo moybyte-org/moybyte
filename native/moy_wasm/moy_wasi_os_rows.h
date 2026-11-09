@@ -61,6 +61,10 @@
     X(ed25519_public, "(*~*~)i") \
     X(ed25519_sign, "(*~*~*~)i") \
     X(ed25519_verify, "(*~*~*~)i") \
+    X(status_show, "(*~ii)i") \
+    X(status_state, "(ii)i") \
+    X(status_panel, "(i*~)i") \
+    X(status_remove, "(i)i") \
 
 #endif // MOY_WASI_OS_ROWS_H
 
@@ -344,6 +348,28 @@ static int32_t w_os_ed25519_verify(wasm_exec_env_t e, const uint8_t *pub, uint32
                                    uint32_t sig_n) {
     const os_arg_t a[3] = { OS_O((const char *)pub, pub_n), OS_O((const char *)msg, msg_n), OS_O((const char *)sig, sig_n) };
     return os_role(e, MOY_T_MOYBYTE_ED25519_VERIFY, true, a, 3, NULL, 0);
+}
+
+static int32_t w_os_status_show(wasm_exec_env_t e, const char *icon, uint32_t icon_n,
+                                int32_t state, int32_t order) {
+    const os_arg_t a[3] = { OS_O(icon, icon_n), OS_I(state), OS_I(order) };
+    return os_role(e, MOY_T_MOYBYTE_STATUS_SHOW, false, a, 3, NULL, 0);
+}
+
+static int32_t w_os_status_state(wasm_exec_env_t e, int32_t item, int32_t state) {
+    const os_arg_t a[2] = { OS_I(item), OS_I(state) };
+    return os_role(e, MOY_T_MOYBYTE_STATUS_STATE, false, a, 2, NULL, 0);
+}
+
+static int32_t w_os_status_panel(wasm_exec_env_t e, int32_t item, const char *rows,
+                                 uint32_t rows_n) {
+    const os_arg_t a[2] = { OS_I(item), OS_O(rows, rows_n) };
+    return os_role(e, MOY_T_MOYBYTE_STATUS_PANEL, false, a, 2, NULL, 0);
+}
+
+static int32_t w_os_status_remove(wasm_exec_env_t e, int32_t item) {
+    const os_arg_t a[1] = { OS_I(item) };
+    return os_role(e, MOY_T_MOYBYTE_STATUS_REMOVE, false, a, 1, NULL, 0);
 }
 
 #endif // MOY_WASI_OS_BODIES

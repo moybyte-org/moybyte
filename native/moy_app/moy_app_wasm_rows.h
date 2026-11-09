@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 104
+#define MOY_APP_WASM_N 108
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -363,6 +363,28 @@ static int32_t w_moybyte_ed25519_verify(void *e, const uint8_t *pub, uint32_t pu
     span_t f[3] = { { pub, pub_n }, { msg, msg_n }, { sig, sig_n } };
     return run(e, SEQ, MOY_T_MOYBYTE_ED25519_VERIFY, f, 3, NULL, 0);
 }
+static int32_t w_moybyte_status_show(void *e, const uint8_t *icon, uint32_t icon_n, int32_t state,
+                                     int32_t order) {
+    uint8_t q_state[4], q_order[4];
+    span_t f[3] = { { icon, icon_n }, NUM(q_state, state), NUM(q_order, order) };
+    return run(e, HOP, MOY_T_MOYBYTE_STATUS_SHOW, f, 3, NULL, 0);
+}
+static int32_t w_moybyte_status_state(void *e, int32_t item, int32_t state) {
+    uint8_t q_item[4], q_state[4];
+    span_t f[2] = { NUM(q_item, item), NUM(q_state, state) };
+    return run(e, HOP, MOY_T_MOYBYTE_STATUS_STATE, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_status_panel(void *e, int32_t item, const uint8_t *rows,
+                                      uint32_t rows_n) {
+    uint8_t q_item[4];
+    span_t f[2] = { NUM(q_item, item), { rows, rows_n } };
+    return run(e, HOP, MOY_T_MOYBYTE_STATUS_PANEL, f, 2, NULL, 0);
+}
+static int32_t w_moybyte_status_remove(void *e, int32_t item) {
+    uint8_t q_item[4];
+    span_t f[1] = { NUM(q_item, item) };
+    return run(e, HOP, MOY_T_MOYBYTE_STATUS_REMOVE, f, 1, NULL, 0);
+}
 
 // The natives, in the role table's order, and the table row each serves.
 static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
@@ -470,6 +492,10 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "moybyte_ed25519_public", FN(w_moybyte_ed25519_public), "(*~*~)i", NULL },
     { "moybyte_ed25519_sign", FN(w_moybyte_ed25519_sign), "(*~*~*~)i", NULL },
     { "moybyte_ed25519_verify", FN(w_moybyte_ed25519_verify), "(*~*~*~)i", NULL },
+    { "moybyte_status_show", FN(w_moybyte_status_show), "(*~ii)i", NULL },
+    { "moybyte_status_state", FN(w_moybyte_status_state), "(ii)i", NULL },
+    { "moybyte_status_panel", FN(w_moybyte_status_panel), "(i*~)i", NULL },
+    { "moybyte_status_remove", FN(w_moybyte_status_remove), "(i)i", NULL },
 };
 static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_THEME_TOKEN, MOY_T_THEME_GEN, MOY_T_THEME_LIGHT, MOY_T_THEME_NAME,
@@ -497,5 +523,6 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_MOYBYTE_DEV_OPEN, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_READ,
     MOY_T_MOYBYTE_DEV_WRITE, MOY_T_MOYBYTE_DEV_XFER, MOY_T_MOYBYTE_DEV_SET,
     MOY_T_MOYBYTE_DEV_GET, MOY_T_MOYBYTE_ED25519_PUBLIC, MOY_T_MOYBYTE_ED25519_SIGN,
-    MOY_T_MOYBYTE_ED25519_VERIFY,
+    MOY_T_MOYBYTE_ED25519_VERIFY, MOY_T_MOYBYTE_STATUS_SHOW, MOY_T_MOYBYTE_STATUS_STATE,
+    MOY_T_MOYBYTE_STATUS_PANEL, MOY_T_MOYBYTE_STATUS_REMOVE,
 };

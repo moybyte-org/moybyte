@@ -14,7 +14,11 @@
 // starting an OTAA join it keeps running (an uplink before it is accepted
 // refused, the radio busy while it runs), then asks for minute-long timers
 // until the console answers FULL and cancels all but the first, which it keeps
-// for its run's end to sweep. Every _update reads the messages queued for it, one record
+// for its run's end to sweep. It puts a status item in the bar, paused, with
+// a panel of each kind of row (a description refused BAD), shows it ON, and
+// shows and removes a second, whose handle is then ABSENT; the item stays
+// for its run's end to sweep, and a press in its panel is the system's
+// message "moybyte.status" [item, id, value]. Every _update reads the messages queued for it, one record
 // each (moy_evq_ev_t, sdk/include/moybyte/os.h, its arguments a JSON array
 // after it), and logs what it heard: a timer is the system's message
 // "moybyte.timer" carrying its id, and the repeating one's first tick
@@ -54,6 +58,12 @@ int32_t moybyte_dev_read(int32_t h, char *data, uint32_t cap) APP(moybyte_dev_re
 int32_t moybyte_dev_write(int32_t h, const char *data, uint32_t n) APP(moybyte_dev_write);
 int32_t moybyte_dev_get(int32_t h, const char *what, uint32_t what_n) APP(moybyte_dev_get);
 int32_t moybyte_dev_set(int32_t h, const char *cfg, uint32_t cfg_n) APP(moybyte_dev_set);
+int32_t moybyte_status_show(const char *icon, uint32_t icon_n, int32_t state,
+                            int32_t order) APP(moybyte_status_show);
+int32_t moybyte_status_state(int32_t item, int32_t state) APP(moybyte_status_state);
+int32_t moybyte_status_panel(int32_t item, const char *rows,
+                             uint32_t rows_n) APP(moybyte_status_panel);
+int32_t moybyte_status_remove(int32_t item) APP(moybyte_status_remove);
 void cls(int32_t c) MOY(cls);
 
 static uint32_t len(const char *s) {
@@ -177,6 +187,27 @@ EXPORT(_init) void init(void) {
     say();
     put(S("lora_uplink "));
     put_int(moybyte_dev_write(lora, S("early")));
+    say();
+    int32_t item = moybyte_status_show(S("music"), MOY_STATUS_PAUSED, 0);
+    put(S("status_show "));
+    put_int(item);
+    say();
+    put(S("status_panel "));
+    put_int(moybyte_status_panel(item, S("text Talk\tready\nbutton hi Say hi\n"
+                                         "toggle loud Loud 0\nslider vol Volume 0 10 3")));
+    say();
+    put(S("status_bad "));
+    put_int(moybyte_status_panel(item, S("image x")));
+    say();
+    put(S("status_state "));
+    put_int(moybyte_status_state(item, MOY_STATUS_ON));
+    say();
+    int32_t gone = moybyte_status_show(S("star"), MOY_STATUS_ON, 1);
+    put(S("status_remove "));
+    put_int(moybyte_status_remove(gone));
+    say();
+    put(S("status_gone "));
+    put_int(moybyte_status_state(gone, MOY_STATUS_ERROR));
     say();
     static int32_t held[64];
     int32_t t = 0, r = 0;

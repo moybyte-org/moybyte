@@ -379,6 +379,11 @@ class ControlCenter:
         for it in _ITEMS.shown:
             _ui.group(it.app or "")
             _ITEMS.draw(it, False)
+            it = _ITEMS.opening
+            if it is not None:
+                _ITEMS.opening = None
+                ws.open_status_app(it)
+                return
         _ui.group()
         _ui.scroll()
         if self.gen != _ITEMS.gen:

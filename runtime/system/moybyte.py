@@ -855,6 +855,8 @@ def _items():
         from status_items import ITEMS
     except ImportError:  # host: the runtime package
         from runtime.status_items import ITEMS
+    if ITEMS.post is None:
+        ITEMS.post = WAKES.post     # a compiled item's panel posts its presses
     return ITEMS
 
 

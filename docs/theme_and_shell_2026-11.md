@@ -294,7 +294,16 @@ renders the owner chose from):
    menu, a popover hung from it, and wears the selected fill while that is
    open. On a handheld the items' icons join the status cluster (the T-Deck
    shows Music's ♫ while it plays), and the cluster -- items, Wi-Fi,
-   battery -- is ONE focus stop that opens the control center.
+   battery -- is ONE focus stop that opens the control center. A
+   compiled program's item (owner, 2026-11-09, on #246) is an icon in a
+   state and an optional panel of rows it describes -- text, buttons, a
+   toggle, a slider (`moybyte.status_show` to `status_remove`,
+   `docs/app_api_v1.md` §10) -- which the shell draws in the same menu
+   and card (`status_items.Panel`); a press reaches the program as the
+   message `moybyte.status`, and it never draws into the bar. Icon alone,
+   text rows or a full panel are one mechanism: an item with no panel (or
+   a Python item with no section) has no menu, and a tap on it opens its
+   app, on a handheld its card's one Open row.
 7. **The handheld control center** grew from the battery's component
    (`popover.ControlCenter`): the console's card (Volume, Brightness,
    Wi-Fi), then each app's section as a card under its app's name, in one
@@ -1866,7 +1875,10 @@ the battery's line over Settings' Volume and Brightness sliders, the
 calendar is `ui.month`, and the battery's level reads None on every board
 today (no board measures one), its line then reading Battery. An app that
 asks for the Wi-Fi page (`Workstation.open_wifi_panel`) still gets Settings'
-page in console mode.
+page in console mode. An app's status item's menu (`popover.StatusMenu`)
+and its card in the handheld's control center draw the app's section as
+its process, a compiled program's being the shell's drawer of the rows it
+described (§1.5).
 
 **The keys reach the bar** (owner call 2026-10-26), in console mode on every
 board and the browser. Up past the top of the surface under a bar (on

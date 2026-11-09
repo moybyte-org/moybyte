@@ -1182,8 +1182,14 @@ def _procs_plan(ws):
 
 STATUS_HANDHELD = ("status_bar_music", "status_bar_focus", "status_cc", "status_cc_scrolled",
                    "status_vmstop", "status_paused_bar", "status_battery_low",
-                   "status_battery_charging")
-STATUS_DESK = ("status_desk_bar", "status_desk_menu")
+                   "status_battery_charging", "status_cc_panel")
+STATUS_DESK = ("status_desk_bar", "status_desk_menu", "status_desk_panel")
+
+# A compiled program's described panel (status_items.Panel): every kind of row.
+_PANEL = ("text Now playing\tGroove Salad\n"
+          "button skip Skip\n"
+          "toggle shuffle Shuffle 1\n"
+          "slider vol Volume 0 10 6")
 
 
 class _StatusSection:
@@ -1221,6 +1227,22 @@ def _status_item(ws, state=0):
     return it
 
 
+def _panel_item(ws):
+    """A compiled program's item alone in the bar, its panel `_PANEL`, as
+    `moybyte.status_show` and `status_panel` make it."""
+    from runtime import moy_log
+    from runtime.status_items import ITEMS, parse
+    for it in ITEMS.slots:
+        if it.pid:
+            ITEMS._free(it)
+    h = ITEMS.show_compiled(moy_log.spawn("Radio"), "music", 0, 0)
+    it = ITEMS.slots[h - 1]
+    it.app = "Radio"
+    it.section.set(parse(_PANEL))
+    it.changed()
+    return it
+
+
 def _status_plan(ws, cfg):
     """The apps' status items (docs/theme_and_shell_2026-11.md §8.6): on the
     desk, Music's item in the bar's right zone and its menu open; on a
@@ -1246,7 +1268,14 @@ def _status_plan(ws, cfg):
             ws._golden_popover = True
             ws.open_status_menu(ITEMS.at(0))
             assert ws.sysmenu.open and ws.sysmenu.widget == "status"
-        return [("status_desk_bar", desk_bar), ("status_desk_menu", desk_menu)]
+
+        def desk_panel():
+            ws.close_popover()
+            it = _panel_item(ws)
+            ws.open_status_menu(it)
+            assert ws.sysmenu.open and ws.status_open is it
+        return [("status_desk_bar", desk_bar), ("status_desk_menu", desk_menu),
+                ("status_desk_panel", desk_panel)]
 
     def music():
         ws.go_home()
@@ -1296,10 +1325,18 @@ def _status_plan(ws, cfg):
         ws.battery_charging = lambda: True
         ws.bar_layer.invalidate()
 
+    def cc_panel():
+        ws.battery_charging = lambda: False
+        ws.battery_level = lambda: 80
+        _panel_item(ws)
+        ws._golden_popover = True
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
+
     return [("status_bar_music", music), ("status_bar_focus", focus), ("status_cc", cc),
             ("status_cc_scrolled", scrolled), ("status_vmstop", vmstop),
             ("status_paused_bar", paused), ("status_battery_low", low),
-            ("status_battery_charging", charging)]
+            ("status_battery_charging", charging), ("status_cc_panel", cc_panel)]
 
 
 MUSIC_HANDHELD = ("music_radio", "music_radio_connecting", "music_files", "music_files_empty",

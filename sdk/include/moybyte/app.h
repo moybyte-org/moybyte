@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MOYBYTE_APP_VERSION 113
+#define MOYBYTE_APP_VERSION 117
 
 #define MOYBYTE_APP_IMPORT(name) __attribute__((import_module("moybyte.app"), import_name(#name)))
 
@@ -307,6 +307,17 @@ int32_t moybyte_ed25519_sign(const void *secret, uint32_t secret_n, const void *
 int32_t moybyte_ed25519_verify(const void *pub, uint32_t pub_n, const void *msg, uint32_t msg_n,
                                const void *sig,
                                uint32_t sig_n) MOYBYTE_APP_IMPORT(moybyte_ed25519_verify);
+// moybyte.status_show
+int32_t moybyte_status_show(const char *icon, uint32_t icon_n, int32_t state,
+                            int32_t order) MOYBYTE_APP_IMPORT(moybyte_status_show);
+// moybyte.status_state
+int32_t moybyte_status_state(int32_t item,
+                             int32_t state) MOYBYTE_APP_IMPORT(moybyte_status_state);
+// moybyte.status_panel
+int32_t moybyte_status_panel(int32_t item, const char *rows,
+                             uint32_t rows_n) MOYBYTE_APP_IMPORT(moybyte_status_panel);
+// moybyte.status_remove
+int32_t moybyte_status_remove(int32_t item) MOYBYTE_APP_IMPORT(moybyte_status_remove);
 
 #ifdef __cplusplus
 }

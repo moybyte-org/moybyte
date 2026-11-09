@@ -512,3 +512,34 @@ def test_a_wasi_service_plays_a_file_by_a_media_handle_until_it_ends(svc, perms)
         if dev_media._s["wake"] is not None:
             dev_media._pump()
     assert N.owner() == 0
+
+
+def test_a_wasi_service_s_status_item_hears_its_panel_until_it_ends(svc):
+    """moybyte.os `status_*` (runtime/system/status_items.py) for the
+    service's process: an item with a described panel, a toggle out of its
+    range EINVAL, a handle it never had NOENT; a press in the panel reaches
+    it as the system's message "moybyte.status" [item, id, value], and its
+    end sweeps the item."""
+    from runtime.status_items import ITEMS, ERROR
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, cart, s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["status"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("status_none ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    got = [t for t in _texts(since, pid) if t.startswith("status_")]
+    h = int(got[0].split()[1])
+    assert got == ["status_show %d errno 0" % h, "status_panel 0 errno 0",
+                   "status_bad -1 errno 28", "status_state 0 errno 0",
+                   "status_none -1 errno 44"], got
+    it = ITEMS.of(pid, h)
+    assert it is not None and it.state == ERROR and it.section.n == 2
+    assert (it.section.label[0], it.section.value[0], it.section.rid[1]) == \
+        ("Uplink", "up", "sync")
+    it.section._press(1, 1)
+    want = 'moybyte.status from system [%d, "sync", 1]' % h
+    assert _polled(s, lambda: want in _texts(since, pid)), _texts(since, pid)
+    assert s.stop(pid)
+    assert _polled(s, lambda: ITEMS.of(pid, h) is None), "its end sweeps the item"
+    assert ITEMS.count() == 0

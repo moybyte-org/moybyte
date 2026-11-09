@@ -432,7 +432,8 @@
   },
   "p4_1024x600_cs2_fs1_status": {
     "status_desk_bar": "951415a1fe3aca44c6e3caa4cabf1c908c775b136c021a8eb41b15b094f3cf47",
-    "status_desk_menu": "225b50ec510829d87966ca3715035790d0c2f4cb7fd026cac92ef9e8dfeb1137"
+    "status_desk_menu": "225b50ec510829d87966ca3715035790d0c2f4cb7fd026cac92ef9e8dfeb1137",
+    "status_desk_panel": "6190df505e5d115660fbd83845f35fa33f5f9fc582c4b1a2b1ea5b52aa991760"
   },
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": "8a4a206ffefa3a1789cdeb68d1aa19bb16a8848de056ba6c156c57b797e20a58",
@@ -967,6 +968,7 @@
     "status_battery_charging": "7c8180eeb92c287eb74666b5d2c6da76e85a93d82e211130f63046768b3e22b9",
     "status_battery_low": "eadbd8596249aef40ae8a34f01345d2337f9e77bca7886498fe2de24a6668f4c",
     "status_cc": "7a243019f0cbc2bd56d50faeb47b48c76c63db1077234e8c0e626d1aa0ed76b1",
+    "status_cc_panel": "9b30967a662ce98e08ed9ffb507b612aa6e8d81443c800977a16f5367ce0e404",
     "status_cc_scrolled": "8290c1c6d4309c02821142c37eb88e4fd29501918d7d4f278274ebd76761efc2",
     "status_paused_bar": "de6f86f6b5d911dba2b20b2c0f6aae5af7383a977a8e872d37d4bb88a9ff8614",
     "status_vmstop": "fa345e5cf3c0e276189896458d16251e5dbdcffef39c76c47416c76758d2ff5d"

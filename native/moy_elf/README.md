@@ -70,8 +70,8 @@ budget). No row is a second implementation of a shell or WASI call.
 `moy_progress`, the wakes `moy_every` to `moy_at`, and
 `moy_service_start` to `moy_service_running`, and `moy_pick` with the
 item rows `moy_item_read` and `moy_item_write`, a pick heard as the
-system's message `moy_open`, and the device handles `moy_dev_open` to
-`moy_dev_get`; the table is
+system's message `moy_open`, the device handles `moy_dev_open` to
+`moy_dev_get`, and the status item's rows; the table is
 `docs/app_api_v1.md`'s call table) is a row of the app ABI's role table,
 reached through the same door a compiled app's import is
 (`native/moy_app/moy_app.h`'s `moy_app_role`): its generated body packs its

@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 113
+#define MOY_OS_VERSION 117
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -56,6 +56,12 @@ typedef struct {
 #define MOY_LOG_WARNING 4
 #define MOY_LOG_INFO 6
 #define MOY_LOG_DEBUG 7
+
+// A status item's states (moy_status_show, moy_status_state): its icon in
+// the accent, the paused ink or the danger ink.
+#define MOY_STATUS_ON 0
+#define MOY_STATUS_PAUSED 1
+#define MOY_STATUS_ERROR 2
 
 #ifdef __wasm__
 
@@ -633,6 +639,50 @@ static inline int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const 
     return (int)r;
 }
 
+int32_t __moy_os_status_show(const char *icon, size_t icon_len, int32_t state, int32_t order)
+    __attribute__((import_module("moybyte.os"), import_name("status_show")));
+static inline int32_t moy_status_show(const char *icon, int32_t state, int32_t order) {
+    int32_t r = __moy_os_status_show(icon, icon ? __builtin_strlen(icon) : 0, state, order);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_status_state(int32_t item, int32_t state)
+    __attribute__((import_module("moybyte.os"), import_name("status_state")));
+static inline int32_t moy_status_state(int32_t item, int32_t state) {
+    int32_t r = __moy_os_status_state(item, state);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_status_panel(int32_t item, const char *rows, size_t rows_len)
+    __attribute__((import_module("moybyte.os"), import_name("status_panel")));
+static inline int32_t moy_status_panel(int32_t item, const char *rows) {
+    int32_t r = __moy_os_status_panel(item, rows, rows ? __builtin_strlen(rows) : 0);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_status_remove(int32_t item)
+    __attribute__((import_module("moybyte.os"), import_name("status_remove")));
+static inline int32_t moy_status_remove(int32_t item) {
+    int32_t r = __moy_os_status_remove(item);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 #else
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
@@ -703,6 +753,10 @@ int32_t moy_dev_get(int32_t h, const char *what);   // moybyte.dev_get
 int32_t moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap);   // moybyte.ed25519_public
 int32_t moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap);   // moybyte.ed25519_sign
 int32_t moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len);   // moybyte.ed25519_verify
+int32_t moy_status_show(const char *icon, int32_t state, int32_t order);   // moybyte.status_show
+int32_t moy_status_state(int32_t item, int32_t state);   // moybyte.status_state
+int32_t moy_status_panel(int32_t item, const char *rows);   // moybyte.status_panel
+int32_t moy_status_remove(int32_t item);   // moybyte.status_remove
 
 #endif // __wasm__
 

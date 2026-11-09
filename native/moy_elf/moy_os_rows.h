@@ -190,5 +190,9 @@ int32_t moy_os_moy_dev_get(int32_t h, const char *what);
 int32_t moy_os_moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap);
 int32_t moy_os_moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap);
 int32_t moy_os_moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len);
+int32_t moy_os_moy_status_show(const char *icon, int32_t state, int32_t order);
+int32_t moy_os_moy_status_state(int32_t item, int32_t state);
+int32_t moy_os_moy_status_panel(int32_t item, const char *rows);
+int32_t moy_os_moy_status_remove(int32_t item);
 
 #endif // MOY_OS_ROWS_H

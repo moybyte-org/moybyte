@@ -443,7 +443,9 @@ manager's Notifications tab) brings your app to the front and calls
 **A status item.** `moybyte.status(icon, section, order=0)` puts an item in
 the bar for your process, its section drawn in the item's menu on the desk
 and in the control centre on a handheld; your process's end takes it out
-(`runtime/system/status_items.py`).
+(`runtime/system/status_items.py`). An item with no section has no menu:
+a tap on it opens your app. A compiled program describes its rows instead
+(§10, a status item).
 
 ## 7. Services: background work and the one wait
 
@@ -767,6 +769,10 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.ed25519_public` | none | `moybyte.ed25519_public` | `moybyte.ed25519_public` | `moybyte_ed25519_public`, `moybyte.os.ed25519_public` | `moy_ed25519_public` |
 | `moybyte.ed25519_sign` | none | `moybyte.ed25519_sign` | `moybyte.ed25519_sign` | `moybyte_ed25519_sign`, `moybyte.os.ed25519_sign` | `moy_ed25519_sign` |
 | `moybyte.ed25519_verify` | none | `moybyte.ed25519_verify` | `moybyte.ed25519_verify` | `moybyte_ed25519_verify`, `moybyte.os.ed25519_verify` | `moy_ed25519_verify` |
+| `moybyte.status_show` | none |  |  | `moybyte_status_show`, `moybyte.os.status_show` | `moy_status_show` |
+| `moybyte.status_state` | none |  |  | `moybyte_status_state`, `moybyte.os.status_state` | `moy_status_state` |
+| `moybyte.status_panel` | none |  |  | `moybyte_status_panel`, `moybyte.os.status_panel` | `moy_status_panel` |
+| `moybyte.status_remove` | none |  |  | `moybyte_status_remove`, `moybyte.os.status_remove` | `moy_status_remove` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -935,6 +941,38 @@ DENIED (`EACCES`), a name, key or value the console does not take BAD
 join, ABSENT (`ENOENT`), a buffer that cannot hold one record FULL
 (`ERANGE`).
 
+**A status item** (owner, 2026-11-09, on #246). A compiled program puts an
+item in the bar as a Python program does (§6), but it never draws there: its
+item is an icon in a state, and its menu is a panel of rows it describes,
+which the shell draws (in the item's menu on the desk, in its card of the
+control centre on a handheld). `status_show(icon, state, order)` answers
+the item's handle (FULL, `ERANGE`, while the bar holds its four), `icon`
+a name of the console's icon set and `state` `MOY_STATUS_ON` (0, the
+accent), `MOY_STATUS_PAUSED` (1) or `MOY_STATUS_ERROR` (2, the danger ink);
+`status_state(h, state)` changes it, `status_remove(h)` takes it out, and
+the process's end takes out what it left. `status_panel(h, rows)`
+describes the panel, one row a line, eight at most:
+
+```
+text <label>[TAB<value>]               a row that shows, no stop
+button <id> <label>                    a row that acts
+toggle <id> <label> <0|1>              a two-state row
+slider <id> <label> <min> <max> <v>    a value from min to max
+```
+
+An id is the program's own word, at most 16 bytes; a label runs to the
+numbers that end its line. A press, a toggle's change or a slider's step
+reaches the program as the system's message `moybyte.status`,
+`[item, id, value]` (a button's value 1), which it hears without asking:
+its first panel listens on the name for it, one of the eight names a
+process listens on (`MOY_EVQ_LISTEN`). A row keeps the value it moved to
+until the program describes the panel again, as it does whenever what the
+rows say changes. An item with no panel, or an empty description, has no
+menu: a tap on it opens the app (its run comes to the front, or its cart
+opens). A description no kind reads is BAD (`EINVAL`), a handle not the
+process's ABSENT (`ENOENT`). `runtime/system/status_items.py` is the
+authority (`parse`, `Panel`).
+
 **A command** (`"type": "command"`) is a program the terminal runs by
 its id's name (`local.hello` is `hello`): in Python its `main(argv)`, with
 `print` and `input` on the session's streams, answering the exit code; in
@@ -950,8 +988,9 @@ its wakes (`every`, `after`, `at`, `cancel`, §9), the front's calls
 (`item_read`, `item_write`), its prefs and the clipboard (`prefs_get`,
 `prefs_set`, `prefs_clear`, `clipboard_put_text`, `clipboard_text`,
 `clipboard_kind`, `clipboard_seq`), the files role's documents
-(`files_list` to `files_new_name`), and its leases and devices by handle
-(`dev_open` to `dev_get`, above), and `sdk/include/moybyte/os.h` declares
+(`files_list` to `files_new_name`), its leases and devices by handle
+(`dev_open` to `dev_get`, above) and its status item (`status_show` to
+`status_remove`, above), and `sdk/include/moybyte/os.h` declares
 each under its C name, `moy_notify`, `moy_prefs_get` and the rest. A console call waits for
 the console's answer: a service's at the scheduler's next poll, a
 foreground command's at its job's next step; a background command's answers
@@ -981,7 +1020,8 @@ cancelled pick's handle 0), the handle what `moy_item_read(h, buf, cap)` and
 (`runtime/system/moybyte.py`, `hand_item`, which hands an item to any
 process that is not the app on screen). Its leases and devices are
 `moy_dev_open` to `moy_dev_get` (above), each under the `lease:<row>` or
-device permission its manifest asks beside `full_access`.
+device permission its manifest asks beside `full_access`, and its status
+item `moy_status_show` to `moy_status_remove` (above).
 
 ## 11. Lifecycle
 
