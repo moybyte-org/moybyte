@@ -60,8 +60,17 @@ release = [
   "cryptography>=41",
 ]
 
+# `moy-app`, moy-spec's `moy app` (sdk/README.md): the plugin's package is
+# sdk/moybyte_sdk, which reads the tree it sits in (`pip install -e .`).
+[project.scripts]
+moy-app = "moybyte_sdk.cli:main"
+
 [tool.setuptools.packages.find]
-include = ["runtime*"]
+where = [".", "sdk"]
+include = ["runtime*", "moybyte_sdk*"]
+
+[tool.setuptools.package-data]
+moybyte_sdk = ["stubs/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

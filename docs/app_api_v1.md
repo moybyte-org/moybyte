@@ -86,14 +86,24 @@ function _draw()
 end
 ```
 
+**Start from a template:** `moy app new hello --tier python` writes this
+folder (`--tier lua|wasm|wasi|c` the others, `--service <tier>` an app's own
+service), `moy app check hello.moy` says what the console would refuse and
+which permissions the code uses that the manifest does not ask for (or asks
+for and never uses), and `moy app stubs hello.moy` gives an editor the
+tier's names. `moy app` is moy-spec's `moy` running Moybyte's plugin,
+`moy-app`, which `make setup` installs (`sdk/README.md`).
+
 **Run it in the simulator:** `python tools/simulate_desktop.py --cart hello.moy`
 (`--windowed --size 1024x600 --font-scale 2` for a P4's desk). The simulator
-copies the folder into its store, `~/.moybyte/projects`, the first time only:
-edit that copy, or delete it, to run a change.
+copies the folder into its store, `~/.moybyte/projects`, over the copy there
+at every launch, so each run is the folder as it is; `moy app push hello.moy`
+copies it there without a launch.
 
-**Run it on a board:** `tools/board.py tdeck push hello.moy` copies the folder
-into the board's store, then `tools/board.py tdeck run Hello` opens it (any
-board id from `tools/board.py ports`; the `on-glass` skill has the rest).
+**Run it on a board:** `tools/board.py tdeck push hello.moy` (or `moy app
+push hello.moy --board tdeck`) copies the folder into the board's store, then
+`tools/board.py tdeck run Hello` opens it (any board id from
+`tools/board.py ports`; the `on-glass` skill has the rest).
 On the console itself, the home's Make tab makes and edits carts, apps
 included.
 

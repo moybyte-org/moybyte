@@ -1,7 +1,54 @@
-# The native SDK
+# The SDK
 
-What a C program needs to become a native module for a console
-(`native/moy_elf/README.md`; the design is `docs/os_2026-11/tiers.md` §1).
+What a program needs to become a Moybyte app on any tier: `moy app`, the
+command line every tier shares (below), and what a C program needs to become
+a native module for a console (`native/moy_elf/README.md`; the design is
+`docs/os_2026-11/tiers.md` §1).
+
+## `moy app`
+
+**Decision (owner, 2026-11-09, #246): one SDK, one `moy` command.**
+moy-spec's `moy` keeps to games and runs `moy-<x>` from PATH for a
+subcommand it does not have; Moybyte's is `moy-app`, the package
+`sdk/moybyte_sdk/`, which `pip install -e .` (`make setup`) puts on PATH:
+
+```
+moy app new <name> [--tier python|lua|wasm|wasi|c] [--service python|lua|wasi|c]
+moy app check <cart> [--strict]
+moy app stubs <cart>
+moy app push <cart> [--board ID | --store DIR]
+```
+
+- `new` writes `<name>.moy` from a template per tier (`sdk/moybyte_sdk/templates.py`;
+  `wasm` is an app compiled to wasm, `wasi` a WASI command or service, `c` a
+  native module), its manifest carrying Moybyte's fields, and with
+  `--service` the app's own service as its `entries`.
+- `check` reads the manifest as the console's readers do (a Moybyte field at
+  the top level, an unknown permission, a `required` one not asked for, a
+  native cart without `full_access`, an `entries` that does not read are
+  errors) and infers the permissions the cart's programs use: a wasm module's
+  `moybyte.app` and `moybyte.os` imports, a native module's rows (its
+  `.moy.rows` section), and, best effort, the names a Python or Lua script
+  spells. **Decision (owner, 2026-11-09): a permission used and not declared,
+  and one declared and unused, are each a warning.** A row the SDK's C
+  library links (`open` under stdio) is only noted: the module links it
+  whether its program reaches it or not. `front` counts only for a program
+  that runs in the background (`docs/app_api_v1.md` §6). A compiled program
+  not built yet is read from its C source.
+- `stubs` copies what the cart's tier compiles or edits against into it:
+  `include/moybyte/os.h` and `app.h` with a `compile_flags.txt` for C,
+  `moybyte_os.lua` for the Lua language server, `__builtins__.pyi` and
+  `moybyte.pyi` for a Python editor.
+- `push` copies the cart, less those stubs and only once it checks, onto a
+  board's store (`tools/board.py ID push`) or the simulator's
+  (`~/.moybyte/projects`).
+
+What `check` and `stubs` know is generated from `native/os_calls.json` by
+`tools/gen_os_table.py` (`sdk/moybyte_sdk/os_table.py`, `sdk/moybyte_sdk/stubs/`,
+`include/moybyte/app.h`), so `tests/test_os_table.py` holds them to the
+table; `tests/test_moy_app_cli.py` runs each verb.
+
+## The native module
 
 - `include/moybyte/os.h` (generated, `tools/gen_os_table.py`): the table's
   version, its type, the event descriptor (`MOY_EVQ_FD`) and the record a
@@ -19,6 +66,8 @@ What a C program needs to become a native module for a console
   `docs/app_api_v1.md`'s call table), all from
   `native/os_calls.json`. The POSIX rows are declared by the toolchain's own
   headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
+- `include/moybyte/app.h` (generated): a C app compiled to wasm's
+  `moybyte.app` imports, each under its import name.
 - `src/moyos_crt.c`: the module's entry, `_moy_entry`, and its
   `.moy.table` note.
 - `src/moyos_stubs.c` (generated): one stub a row but a retired one, each compiled on its own
