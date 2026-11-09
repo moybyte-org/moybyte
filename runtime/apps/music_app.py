@@ -772,55 +772,6 @@ def _theme():
 
 # -- the music folder -------------------------------------------------------------
 
-def _bitrate(b, at):
-    """The MP3 frame header at `b[at:]`: (bytes a second, frames' samples a
-    second) or None."""
-    h1, h2 = b[at + 1], b[at + 2]
-    ver = (h1 >> 3) & 3
-    layer = (h1 >> 1) & 3
-    bi = h2 >> 4
-    si = (h2 >> 2) & 3
-    if layer != 1 or bi in (0, 15) or si == 3 or ver == 1:
-        return None
-    if ver == 3:
-        kbps = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320)[bi]
-        rate = (44100, 48000, 32000)[si]
-    else:
-        kbps = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160)[bi]
-        rate = (22050, 24000, 16000)[si] // (2 if ver == 0 else 1)
-    return kbps * 125, rate, ver
-
-
-def mp3_seconds(path, size):
-    """An MP3's length, read from its first frame: a Xing/Info frame count
-    where it has one, else its size at that frame's bitrate. 0 unknown."""
-    try:
-        with open(path, "rb") as f:
-            b = f.read(4096)
-            skip = 0
-            if len(b) >= 10 and b[:3] == b"ID3":
-                skip = 10 + ((b[6] & 0x7f) << 21 | (b[7] & 0x7f) << 14
-                             | (b[8] & 0x7f) << 7 | (b[9] & 0x7f))
-                f.seek(skip)
-                b = f.read(4096)
-    except OSError:
-        return 0
-    for at in range(0, len(b) - 4):
-        if b[at] == 0xff and (b[at + 1] & 0xe0) == 0xe0:
-            r = _bitrate(b, at)
-            if r is None:
-                continue
-            bps, rate, ver = r
-            k = b.find(b"Xing", at)
-            if k < 0:
-                k = b.find(b"Info", at)
-            if 0 <= k < at + 64 and k + 12 <= len(b) and b[k + 7] & 1:
-                frames = b[k + 8] << 24 | b[k + 9] << 16 | b[k + 10] << 8 | b[k + 11]
-                return frames * (1152 if ver == 3 else 576) // rate
-            return (size - skip) // bps if bps else 0
-    return 0
-
-
 def _list_count(path):
     """How many songs playlist `path` names."""
     try:
@@ -844,13 +795,16 @@ def _list_count(path):
 
 def _scan(folder):
     """The music folder's songs and playlists, sorted by name: (songs,
-    lists), each a tuple of (name, path, detail); None where the folder is
-    not there. A song this console plays but does not keep (a board-served
-    page's, which the board keeps: the media face's `held`) is listed too."""
+    lists), each a tuple of (name, path, detail: a song's length, which the
+    media face's `probe` reads in C, a list's count); None where the folder
+    is not there. A song this console plays but does not keep (a
+    board-served page's, which the board keeps: the media face's `held`) is
+    listed too, with no length."""
     import os
     m = _media()
     held = getattr(m, "held", None)
     held = held(folder) if held is not None else ()
+    probe = getattr(m, "probe", None)
     try:
         names = os.listdir(folder)
     except OSError:
@@ -864,11 +818,8 @@ def _scan(folder):
         low = nm.lower()
         path = folder + "/" + nm
         if low.endswith(SONG_EXT):
-            try:
-                size = os.stat(path)[6]
-            except OSError:
-                size = 0
-            sec = mp3_seconds(path, size)
+            got = probe(path) if probe is not None else None
+            sec = got[0] if got is not None else 0
             songs.append((_stem(nm), path, _clock(sec) if sec else ""))
         elif low.endswith(LIST_EXT):
             n = _list_count(path)

@@ -2,9 +2,10 @@
 runtime/system/dev_media.py; docs/os_2026-11/hardware.md section 3) on the
 host's build of the C: an ICY stream's now-playing text from a local server,
 a playlist's next entry, a file decoded into the mix and read back (the host
-loopback), the duck under a sounding session, the MEDIA row of THE SHARES
-taken, given back and absent, and the permissions, the one owner and the end
-of its process."""
+loopback) on the frame's C job alone, its tag, its probe and its seek, the
+duck under a sounding session, the MEDIA row of THE SHARES taken, given back
+and absent, the page's bytes in the browser's shape, and the permissions, the
+one owner and the end of its process."""
 
 import errno
 import http.server
@@ -20,6 +21,7 @@ import pytest
 
 from runtime import audio_binding, dev_media, devices, moybyte
 from runtime import moy_log as L
+from runtime import moy_loop
 from runtime import moy_media as N
 from runtime import moy_play as mp
 
@@ -114,7 +116,7 @@ def media():
         for _ in range(50):
             if not dev_media._s["pid"]:
                 break
-            dev_media._pump()
+            _frame()
     devices.grants = None
     mp.share_use(None)
     assert N.owner() == 0
@@ -129,11 +131,19 @@ def _as(pid, fn):
         L.current(was)
 
 
+def _frame():
+    """One frame's media work: the C's job (the loop's tail runs it), and the
+    face's wake where the stream has one."""
+    N.pump()
+    if dev_media._s["wake"] is not None:
+        dev_media._pump()
+
+
 def _drive(until, frames=2048, rounds=3000, out=None):
-    """The pump and the host's mix, a block a round, until `until()`."""
+    """The frame's media work and the host's mix, a block a round, until `until()`."""
     buf = bytearray(frames * 2)
     for _ in range(rounds):
-        dev_media._pump()
+        _frame()
         AUDIO.render(buf, frames)
         if out is not None:
             out.extend(array("h", bytes(buf)))
@@ -220,6 +230,86 @@ def test_a_file_decodes_into_the_mix_and_reads_back_as_its_tone(media):
     assert N.status()[17] == 0                           # never starved
 
 
+def test_a_file_plays_on_the_frames_job_alone(media):
+    """No Python runs for a playing file: the face holds no wake, and the
+    loop's C jobs (what a frame's tail runs) read it, decode it and end it."""
+    pid = L.spawn("t.job")
+    _as(pid, lambda: moybyte.media.play(str(TONE)))
+    _as(pid, lambda: moybyte.media.volume(100))
+    assert dev_media._s["wake"] is None
+    buf, pcm = bytearray(4096), array("h")
+    for _ in range(400):
+        moy_loop.jobs()
+        AUDIO.render(buf, 2048)
+        pcm.extend(array("h", bytes(buf)))
+        if N.status()[0] == N.ENDED:
+            break
+    assert N.status()[0] == N.ENDED and dev_media._s["wake"] is None
+    rate = AUDIO.rate()
+    assert abs(_freq(pcm[rate // 5:rate + rate // 2], rate) - 1000) < 10
+    assert N.status()[17] == 0                           # never starved
+
+
+def test_a_files_tag_and_probe(media, tmp_path):
+    """The file's ID3v2 title and artist, read in C as it plays and by
+    probe() without playing it, in the tag's encodings."""
+    assert moybyte.media.probe(str(TONE)) == (2, "Tone", "")
+    body = MP3[10 + 0x33:]                               # the fixture's frames, its tag dropped
+
+    def frame(fid, text, ver):
+        size = len(text)
+        if ver == 4:
+            sz = bytes([(size >> 21) & 0x7f, (size >> 14) & 0x7f, (size >> 7) & 0x7f, size & 0x7f])
+        else:
+            sz = size.to_bytes(4, "big")
+        return fid + sz + b"\0\0" + text
+
+    def tag(frames, ver):
+        n = len(frames)
+        return (b"ID3" + bytes([ver, 0, 0])
+                + bytes([(n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]) + frames)
+
+    v4 = tag(frame(b"TIT2", b"\x03Caf\xc3\xa9 Song\0", 4)
+             + frame(b"TPE1", b"\x01\xff\xfe" + "Bj\xf6rk".encode("utf-16-le") + b"\0\0", 4)
+             + b"\0" * 64, 4)
+    (tmp_path / "v4.mp3").write_bytes(v4 + body)
+    assert moybyte.media.probe(str(tmp_path / "v4.mp3")) == (2, "Caf\xe9 Song", "Bj\xf6rk")
+    v3 = tag(frame(b"TPE1", b"\x00Mot\xf6rhead", 3)
+             + frame(b"TIT2", b"\x02" + "Ace".encode("utf-16-be"), 3), 3)
+    (tmp_path / "v3.mp3").write_bytes(v3 + body)
+    assert moybyte.media.probe(str(tmp_path / "v3.mp3"))[1:] == ("Ace", "Mot\xf6rhead")
+    v2 = tag(b"TT2\0\0\x05\x00Two!" + b"TP1\0\0\x04\x00Duo", 2)
+    (tmp_path / "v2.mp3").write_bytes(v2 + body)
+    assert moybyte.media.probe(str(tmp_path / "v2.mp3"))[1:] == ("Two!", "Duo")
+    assert moybyte.media.probe(str(tmp_path / "none.mp3")) is None
+    pid = L.spawn("t.tag")
+    _as(pid, lambda: moybyte.media.play(str(tmp_path / "v4.mp3")))
+    assert _drive(lambda: moybyte.media.now()["artist"] == "Bj\xf6rk")
+    assert moybyte.media.now()["title"] == "Caf\xe9 Song"
+
+
+def test_a_file_seeks_and_a_stream_does_not(media, server, tmp_path):
+    """seek(): the file from that place, its decoded tail dropped, its length
+    and tag kept; refused before its length is known and for a stream."""
+    long_ = tmp_path / "long.mp3"
+    long_.write_bytes(MP3 + MP3[10 + 0x33:] * 4)         # the tone, ten seconds
+    pid = L.spawn("t.seek")
+    _as(pid, lambda: moybyte.media.play(str(long_)))
+    assert _as(pid, lambda: moybyte.media.seek(5)) is False       # no length yet
+    assert _drive(lambda: moybyte.media.now()["len"] > 0)
+    assert moybyte.media.now()["len"] == 10 and moybyte.media.now()["at"] < 2
+    assert _as(pid, lambda: moybyte.media.seek(7)) is True
+    n = moybyte.media.now()
+    assert 6 <= n["at"] <= 7 and n["len"] == 10 and n["title"] == "Tone"
+    pcm = array("h")
+    assert _drive(lambda: moybyte.media.now()["state"] == "ended", out=pcm)
+    rate = AUDIO.rate()
+    assert len(pcm) < 5 * rate                            # three seconds left, not ten
+    _as(pid, lambda: moybyte.media.play(server + "/radio"))
+    assert _drive(lambda: moybyte.media.now()["state"] == "playing")
+    assert _as(pid, lambda: moybyte.media.seek(1)) is False
+
+
 def test_a_files_place_and_length_and_a_streams_none(media, server):
     """now()'s `at` and `len` for a file (#110: Now playing's bar): its
     length from its size at the bytes its frames take, its place what the
@@ -297,7 +387,7 @@ def test_permissions_one_owner_https_and_the_end_of_the_process(media, tmp_path)
     assert devices.MEDIA[0] == a
     moybyte.end(a)                                       # its process ends: the stream stops
     for _ in range(10):
-        dev_media._pump()
+        _frame()
     assert N.owner() == 0 and devices.MEDIA[0] == 0 and moybyte.media.now() is None
 
 
@@ -394,9 +484,11 @@ class _Net:
         return tuple((k.rsplit("/", 1)[1], len(v)) for k, v in sorted(self.songs.items())
                      if k.rsplit("/", 1)[0] == folder)
 
-    def open(self, src):
-        r = _Reader(self.songs.get(src, b""), self.err, len(self.songs.get(src, b"")))
-        self.opened.append((src, r))
+    def open(self, src, at=0):
+        data = self.songs.get(src, b"")
+        r = _Reader(data, self.err, len(data))
+        r.at = at
+        self.opened.append((src, r, at))
         return r
 
 
@@ -429,6 +521,21 @@ def test_a_song_the_page_reads_plays_where_the_console_does_not_keep_it(media, p
     assert abs(_freq(pcm[start + rate // 5:start + rate + rate // 2], rate) - 1000) < 10
     assert page.media_net.opened[0][1].closed
     assert moybyte.media.now()["len"] == 2           # its size, from the reader
+    assert dev_media._s["wake"] is not None          # the page's bytes are the face's
+
+
+def test_a_song_the_page_reads_seeks_from_the_byte_the_c_asks_for(media, page):
+    path = "/moy/files/Music/Long.mp3"
+    page.media_net = _Net({path: MP3 + MP3[10 + 0x33:] * 4})
+    pid = L.spawn("t.pageseek")
+    _as(pid, lambda: moybyte.media.play(path))
+    assert _drive(lambda: moybyte.media.now()["len"] == 10)
+    assert _as(pid, lambda: moybyte.media.seek(5)) is True
+    assert _drive(lambda: len(page.media_net.opened) == 2)
+    src, _r, at = page.media_net.opened[1]
+    total = len(page.media_net.songs[path])
+    assert src == path and abs(at - total // 2) < total // 20      # half-way in, by its bytes
+    assert _drive(lambda: moybyte.media.now()["state"] == "ended")
 
 
 def test_a_reader_that_refuses_fails_the_entry_with_its_errno(media, page):

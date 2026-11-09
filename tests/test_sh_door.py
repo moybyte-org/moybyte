@@ -393,6 +393,10 @@ class _Media:
     def next(self):
         return False
 
+    def seek(self, s):
+        self.calls.append(("seek", s))
+        return s < 60
+
 
 def _faces(monkeypatch, **faces):
     from runtime import devices
@@ -418,8 +422,10 @@ def test_device_faces_answer_through_the_door(console, monkeypatch):
     io, d = door()
     assert call(d, "role", "media", "volume", "30") == 0 and io.out == "30\n"
     assert call(d, "role", "media", "next") == 1
+    assert call(d, "role", "media", "seek", "30") == 0
+    assert call(d, "role", "media", "seek", "90") == 1
     assert call(d, "role", "media", "stop") == 0
-    assert media.calls == [("play", "/music/a.mp3"), ("stop",)]
+    assert media.calls == [("play", "/music/a.mp3"), ("seek", 30), ("seek", 90), ("stop",)]
 
 
 class _Stoppable:

@@ -250,8 +250,9 @@ void *moy_loop_alloc(size_t n);
 // Jobs in C the frame runs at its tail, each once a frame while it answers
 // true (the shell's runs that wait on the console: native/moy_sh/
 // moy_sh_board.h; the compiled services' watchdogs, modmoy_wasm.c and
-// modmoy_elf.c). False when the MOY_LOOP_JOBS slots are taken.
-#define MOY_LOOP_JOBS 6
+// modmoy_elf.c; the media service's file, native/moy_media/moy_media.h).
+// False when the MOY_LOOP_JOBS slots are taken.
+#define MOY_LOOP_JOBS 8
 typedef bool (*moy_loop_job_fn)(void *arg);
 bool moy_loop_job(moy_loop_job_fn fn, void *arg);
 void moy_loop_job_drop(moy_loop_job_fn fn, void *arg);

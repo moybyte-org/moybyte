@@ -1,20 +1,34 @@
 // moy_media: the media service (docs/os_2026-11/hardware.md section 3), an OS
 // service in C. It plays one background stream for one process: an HTTP
-// stream (ICY metadata read, the station's now-playing text) or bytes the
-// process's face feeds it from a file, each an entry of a list an M3U or PLS
-// playlist fills. MP3 is decoded (minimp3.h, vendored) and resampled to the
-// output's rate and channels (moy_aud_out_rate and _channels: 44.1 kHz stereo
-// on a P4, its stream's channels kept; 22.05 kHz mono elsewhere, a stereo
-// stream mixed down, the browser's page among them), and the
-// mix (native/moy_audio/moy_aud.h's background stream) pulls it, ducked under
-// the focused session.
+// stream (ICY metadata read, the station's now-playing text) or a file, each
+// an entry of a list an M3U or PLS playlist fills. MP3 is decoded (minimp3.h,
+// vendored) and resampled to the output's rate and channels (moy_aud_out_rate
+// and _channels: 44.1 kHz stereo on a P4, its stream's channels kept; 22.05
+// kHz mono elsewhere, a stereo stream mixed down, the browser's page among
+// them), and the mix (native/moy_audio/moy_aud.h's background stream) pulls
+// it, ducked under the focused session. play() is the whole of starting one:
+// the Music app, the shell's `media` and the browser's page all start through
+// it (runtime/system/dev_media.py, the face, checks the permissions first).
 //
-// THE BROWSER (MOY_MEDIA_CLIENT 0: its image has no HTTP client) feeds a
-// URL's bytes as it feeds a file's: the face fetches it with the page's fetch
-// and feeds the current generation, a URL entry OPENING until its first bytes
-// or its feed's end. feed_size gives a URL its length (the response's
-// Content-Length), and one with none is a live stream, opened again as a
-// board's is. It reads no ICY metadata: a page's fetch may not ask for it.
+// A FILE the console keeps is the service's to read: a job of the console's
+// frame (moy_loop.h's moy_loop_job, the VM's task on a board, the frame's
+// tail on the host and in the browser) opens it through the store's volume
+// seam (native/moy_store/moy_vol.h, the card's bus gate around every op),
+// reads it into the stream buffer a few KB at a time, sizes it, and seeks it.
+// Nothing of a playing file runs in Python. Its tag's title and artist
+// (ID3v2) are read as its first frame is, and probe() reads a file's length
+// and tag without playing it.
+//
+// THE BROWSER (MOY_MEDIA_CLIENT 0: its image has no HTTP client) keeps no
+// song in its VFS (.claude/rules/web.md, Music): a URL's bytes, and a song the
+// page holds (its OPFS store's, or a serving board's), are the FACE's to feed
+// from the page's reader, which the service asks for by arming the entry for
+// the face (status `armed`, `feed_at` the byte it starts at). page() says the
+// page holds songs the VFS does not, so a list's entry that will not open is
+// handed to the face rather than failed. feed_size gives a URL its length
+// (the response's Content-Length), and one with none is a live stream, opened
+// again as a board's is. A URL entry is OPENING until its first bytes or its
+// feed's end. It reads no ICY metadata: a page's fetch may not ask for it.
 //
 // THE MEMORY is the MEDIA row of THE SHARES (native/moy_play/moy_play.h):
 // open() takes MOY_MEDIA_SHARE from it and refuses with -ENOSPC where the row
@@ -23,24 +37,28 @@
 // the URL's client buffers are kernel memory (moy_ota.h); close() frees all of
 // it and gives the row back. Nothing is static but a pointer.
 //
-// WHO RUNS WHAT. The VM's thread opens, closes, commands and feeds. On a board
-// a task on core 0 below the flush priority (MOY_MEDIA_PRIO) reads the
-// connection and decodes; it never runs a flash operation, so its stack is
-// PSRAM. The host and the browser have no task: moy_media_run() is one pass
-// of its loop, the face's to call. The mix's pull runs on the audio feeder's task under the
-// mix's lock. The decoded ring has one writer (the task) and one reader (the
-// pull); the stream buffer one writer (the task for a URL, the VM's feed for a
-// file) and one reader (the task). Commands and texts change under the
-// service's mutex.
+// WHO RUNS WHAT. The VM's thread opens, closes, commands and feeds; the
+// frame's job reads a file on that same thread, so a store op never runs on
+// the service's PSRAM stack. On a board a task on core 0 below the flush
+// priority (MOY_MEDIA_PRIO) reads the connection and decodes; it never runs a
+// flash operation, so its stack is PSRAM. The host and the browser have no
+// task: the frame's job runs moy_media_run(), one pass of its loop. The mix's
+// pull runs on the audio feeder's task under the mix's lock. The decoded ring
+// has one writer (the task) and one reader (the pull); the stream buffer one
+// writer (the task for a URL, the frame's job for a file, the face's feed for
+// the page's bytes) and one reader (the task). Commands and texts change
+// under the service's mutex.
 //
 // A STREAM'S LIFE. go(i) makes entry i current: the task drops what it held,
 // and opens it. A URL whose response is a playlist (by its type or its path)
 // replaces the list with its entries and plays the first. An entry that ends
-// (its connection closed, or its feed ended and drained) or fails moves to
+// (its connection closed, or its file read and drained) or fails moves to
 // the next; past the last the state is ENDED (FAILED when nothing played).
 // A URL with no Content-Length (a live stream) that ends after playing is
-// opened again MOY_MEDIA_RETRIES times before the list moves on. stop() asks the task to let go; close() then frees what
-// it held once the task says it is idle (-EAGAIN until then).
+// opened again MOY_MEDIA_RETRIES times before the list moves on. seek(ms)
+// starts the current file again at that place. stop() asks the task to let
+// go; close() then frees what it held once the task says it is idle (-EAGAIN
+// until then).
 //
 // Errors are -errno with Linux's numbers on every tier.
 
@@ -66,6 +84,9 @@
 #define MOY_MEDIA_PRIO 3
 #define MOY_MEDIA_WAIT_MS 50                // one wait for the connection's bytes
 #define MOY_MEDIA_AGENT "moybyte-media"
+#define MOY_MEDIA_READ_MIN (4u * 1024u)    // a file is read once this much is free
+#define MOY_MEDIA_LIST_FILE (16u * 1024u)  // the longest playlist file play() reads
+#define MOY_MEDIA_TAG_READ 4096u            // what probe() reads of a tag, and of a first frame
 
 enum {
     MOY_MEDIA_IDLE = 0,
@@ -77,11 +98,14 @@ enum {
 
 enum {
     MOY_MEDIA_URL = 1,                      // an http:// stream the task reads
-    MOY_MEDIA_FEED = 2,                     // bytes the VM feeds (a file)
+    MOY_MEDIA_FEED = 2,                     // the page's bytes, the face feeds them
+    MOY_MEDIA_FILE = 3,                     // a file the frame's job reads
 };
 
 // -errno codes.
 #define MOY_MEDIA_EPERM 1
+#define MOY_MEDIA_ENOENT 2
+#define MOY_MEDIA_EIO 5
 #define MOY_MEDIA_EBADF 9
 #define MOY_MEDIA_EAGAIN 11
 #define MOY_MEDIA_ENOMEM 12
@@ -89,6 +113,7 @@ enum {
 #define MOY_MEDIA_ENODEV 19
 #define MOY_MEDIA_EINVAL 22
 #define MOY_MEDIA_ENOSPC 28
+#define MOY_MEDIA_ESPIPE 29
 
 typedef struct {
     int state;
@@ -97,7 +122,7 @@ typedef struct {
     uint32_t gen;                           // the current entry's generation
     int entry, entries;
     int kind;                               // the current entry's
-    int armed;                              // a FEED entry takes bytes for `gen`
+    int armed;                              // the face feeds entry `gen` its bytes
     int rate, channels, kbps;               // the stream's, from its first frame
     int volume;
     uint32_t in_bytes, in_room;             // the stream buffer
@@ -107,8 +132,17 @@ typedef struct {
     uint32_t text_gen;                      // bumps when a text changes
     int idle;                               // stopped and let go: close() frees
     uint32_t at_ms;                         // the current entry heard, ms
-    uint32_t len_ms;                        // a fed file's length, ms; 0 unknown (a stream)
+    uint32_t len_ms;                        // a file's length, ms; 0 unknown (a stream)
+    uint32_t feed_at;                       // the byte the face's feed of `gen` starts at
 } moy_media_status_t;
+
+// What probe() reads of a file: its length in seconds (0 unknown) and its
+// tag's title and artist (UTF-8, "" for none).
+typedef struct {
+    uint32_t seconds;
+    char title[MOY_MEDIA_TEXT_MAX];
+    char artist[MOY_MEDIA_TEXT_MAX];
+} moy_media_probe_t;
 
 // The bytes open() takes from the MEDIA row on this image (a stereo output's
 // decoded ring is twice a mono one's).
@@ -136,6 +170,19 @@ void moy_media_lease_end(uint32_t owner);
 #define MOY_MEDIA_ORPHAN 0xffffffffu
 int moy_media_close_vm(void);
 
+// `src` played from its start, replacing the list: a URL, a playlist file (by
+// its path: its entries, relative ones beside it) or a song. `held`: the
+// page holds the song though the VFS does not (the browser), so a missing
+// file is the face's to feed. The entries, or -ENOENT for a file that is not
+// there, -EINVAL for a playlist with none, -EIO.
+int moy_media_play(uint32_t owner, const char *src, int held);
+// The page holds songs the VFS does not: an entry that will not open is the
+// face's to feed rather than failed (the browser's face sets it at open).
+int moy_media_page(uint32_t owner, int on);
+// The current file from `ms` in: 0, -ESPIPE for a stream, -EAGAIN while its
+// length is not known (before its first frame), -EINVAL past the list.
+int moy_media_seek(uint32_t owner, uint32_t ms);
+
 // The list: cleared, an entry added (its index, -ENOSPC when full), or an M3U
 // or PLS text's entries added, relative ones resolved against `base` (a URL or
 // a directory; NULL for none): how many.
@@ -148,29 +195,42 @@ int moy_media_stop(uint32_t owner);
 int moy_media_pause(uint32_t owner, int on);
 int moy_media_volume(uint32_t owner, int v);
 
-// A file's bytes for entry generation `gen`: how many the stream buffer took
-// (0 when full, or when `gen` is not current and armed), or -errno. end()
-// says the file has no more.
+// The page's bytes for entry generation `gen` (the face's feed, status
+// `armed`): how many the stream buffer took (0 when full, or when `gen` is
+// not current and armed for the face), or -errno. end() says it has no more.
 int moy_media_feed(uint32_t owner, uint32_t gen, const void *buf, size_t n);
 int moy_media_feed_end(uint32_t owner, uint32_t gen);
 // The same, the source having failed with positive errno `err`: the entry's
 // `err` once it moves on.
 int moy_media_feed_fail(uint32_t owner, uint32_t gen, int err);
-// The file's size in bytes for entry generation `gen`, which its length is
+// The fed entry's size in bytes for generation `gen`, which its length is
 // read from: the bytes its decoded frames took against the frames they made.
 int moy_media_feed_size(uint32_t owner, uint32_t gen, uint32_t size);
 
 int moy_media_status(moy_media_status_t *st);
-enum { MOY_MEDIA_T_SRC = 0, MOY_MEDIA_T_TITLE, MOY_MEDIA_T_STATION, MOY_MEDIA_T_ENTRY };
+enum {
+    MOY_MEDIA_T_SRC = 0, MOY_MEDIA_T_TITLE, MOY_MEDIA_T_STATION, MOY_MEDIA_T_ENTRY,
+    MOY_MEDIA_T_SONG, MOY_MEDIA_T_ARTIST,
+};
 // A text into `out` (UTF-8, NUL-ended): the current entry's source, the
-// stream's now-playing title (ICY StreamTitle), its station (icy-name), or the
-// entry's own title (a playlist's). Its length.
+// stream's now-playing title (ICY StreamTitle), its station (icy-name), the
+// entry's own title (a playlist's), or its file's tag's title and artist
+// (ID3v2 TIT2 and TPE1). Its length.
 int moy_media_text(int which, char *out, size_t cap);
 // Entry `i`'s source and title: its source's length, or -EINVAL.
 int moy_media_entry(int i, char *src, size_t src_cap, char *title, size_t title_cap);
 
-// One pass of the task's loop (the host's task): 1 when it did work.
+// One pass of the task's loop (the frame's job runs it where there is no
+// task): 1 when it did work.
 int moy_media_run(void);
+// The frame's job, run once: a file's bytes read, and on the host and in the
+// browser the loop run. While the service is open the console's frame runs
+// it (moy_loop_job); a harness that steps no frames calls it.
+void moy_media_pump(void);
+
+// The file at `path`'s length and tag, read on the VM's thread with no
+// stream open: 0, or -errno.
+int moy_media_probe(const char *path, moy_media_probe_t *out);
 
 // THE PULL (moy_aud.h's background stream): `n` frames in the open's
 // channels (interleaved when two) added into `out`, at the console's level
@@ -182,6 +242,10 @@ void moy_media_mix(int16_t *out, int n, int console, int duck);
 // ICY metadata's StreamTitle='...'; into `out` (UTF-8: Latin-1 converted):
 // its length, or -1 when the block has none.
 int moy_media_icy_title(const char *meta, size_t n, char *out, size_t cap);
+// An ID3v2 tag's title and artist (TIT2 and TPE1, or v2.2's TT2 and TP1) from
+// its first `n` bytes, header included, into `title` and `artist` (UTF-8):
+// the tag's whole length (header and footer), or 0 when `p` is no tag.
+uint32_t moy_media_id3(const uint8_t *p, size_t n, char *title, char *artist, size_t cap);
 // Whether `text` is a playlist: 1 for M3U, 2 for PLS, 0 for neither, judged
 // by its content type (may be NULL), its path, then its first bytes.
 int moy_media_list_kind(const char *ctype, const char *path, const char *text, size_t n);

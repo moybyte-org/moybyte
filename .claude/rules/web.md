@@ -214,8 +214,10 @@ nor those docs will warn you about:
     every sweep, an installed Doom drew a frame a second.
 - **Music plays in the browser on the boards' decoder (#251)**: `moy_media`
   is in the wasm with no task and no HTTP client (`moy_media.h`, THE
-  BROWSER), its face fed by `ws.media_net` (`media_link.py`) in both modes.
-  What bites:
+  BROWSER): the frame's C job decodes, and what the VFS does not hold (a
+  URL, a song) the C arms for the face, which feeds it from `ws.media_net`
+  (`media_link.py`) in both modes, from the byte a seek asks for (`mget`'s
+  `at`). What bites:
   - **A song never enters the VFS.** A site-mode page's songs stay in OPFS
     (`moy_store.readAll` leaves `files/Music/*.mp3` out; a dropped MP3 is
     written there), a board-served page's on the board, read through its

@@ -9,6 +9,12 @@
 
 #include "minimp3.h"
 #include "moy_play.h"
+#include "moy_vol.h"
+
+// The frame's jobs (native/moy_kernel/moy_loop.h); weak, for an image or a
+// harness without the loop: open() then refuses (-ENODEV).
+bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
+void moy_loop_job_drop(bool (*fn)(void *), void *arg) __attribute__((weak));
 
 #if defined(__has_include)
 // ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
@@ -54,6 +60,8 @@
 #define NO_TITLE 0xffffu
 #define RD_BYTES 4096u
 #define META_MAX (255u * 16u)
+#define NO_SEEK 0xffffffffu
+#define READ_CHUNK (8u * 1024u)         // one read of a file, under the lock
 
 _Static_assert((MOY_MEDIA_IN_BYTES & IN_MASK) == 0, "the stream buffer is a power of two");
 _Static_assert((MOY_MEDIA_PCM_FRAMES & OUT_MASK) == 0, "the decoded ring is a power of two");
@@ -80,6 +88,11 @@ typedef struct {
     char title[MOY_MEDIA_TEXT_MAX], station[MOY_MEDIA_TEXT_MAX];
     uint32_t text_gen;
     int list_played;                // an entry of this list decoded a frame
+    int page;                       // the page holds songs the VFS does not
+    uint32_t face_gen;              // the armed generation the face feeds, 0 none
+    uint32_t armed_at;              // the byte the armed generation starts at
+    uint32_t seek_req, seek_dec;    // a seek's byte and frames, NO_SEEK for none
+    char song[MOY_MEDIA_TEXT_MAX], artist[MOY_MEDIA_TEXT_MAX];
 
     // the task's
     uint32_t seen;                  // the generation it works on
@@ -103,6 +116,13 @@ typedef struct {
     // they took, and a fed file's size (the face's, under the lock)
     volatile uint32_t e_dec, e_used;
     uint32_t e_size;
+    volatile uint32_t e_head;       // its tag's bytes before the first frame
+
+    // the frame's job: the file it reads (the VM's thread)
+    moy_vol_file_t *f;
+    uint32_t f_gen;                 // the armed generation it settled, 0 none
+    uint32_t f_left;                // the file's bytes not yet read
+    char path[MOY_MEDIA_SRC_MAX];
 
     // the stream buffer: one writer (the task, or the VM's feed under the lock), one reader
     volatile uint32_t in_w, in_r;
@@ -268,6 +288,151 @@ static size_t to_utf8(const char *s, size_t n, char *out, size_t cap) {
     }
     out[o] = '\0';
     return o;
+}
+
+// -- the tag (ID3v2) ---------------------------------------------------------------
+
+static uint32_t be32(const uint8_t *p) {
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+static uint32_t syncsafe(const uint8_t *p) {
+    return (uint32_t)(p[0] & 0x7f) << 21 | (uint32_t)(p[1] & 0x7f) << 14
+           | (uint32_t)(p[2] & 0x7f) << 7 | (uint32_t)(p[3] & 0x7f);
+}
+
+// Code point `c` at out[o] as UTF-8: the new length, or 0 when it does not
+// fit before the NUL.
+static size_t put_cp(char *out, size_t o, size_t cap, uint32_t c) {
+    uint8_t b[4];
+    size_t k;
+    if (c < 0x80) {
+        b[0] = (uint8_t)c;
+        k = 1;
+    } else if (c < 0x800) {
+        b[0] = (uint8_t)(0xc0 | c >> 6);
+        b[1] = (uint8_t)(0x80 | (c & 0x3f));
+        k = 2;
+    } else if (c < 0x10000) {
+        b[0] = (uint8_t)(0xe0 | c >> 12);
+        b[1] = (uint8_t)(0x80 | ((c >> 6) & 0x3f));
+        b[2] = (uint8_t)(0x80 | (c & 0x3f));
+        k = 3;
+    } else {
+        b[0] = (uint8_t)(0xf0 | c >> 18);
+        b[1] = (uint8_t)(0x80 | ((c >> 12) & 0x3f));
+        b[2] = (uint8_t)(0x80 | ((c >> 6) & 0x3f));
+        b[3] = (uint8_t)(0x80 | (c & 0x3f));
+        k = 4;
+    }
+    if (o + k >= cap) {
+        return 0;
+    }
+    memcpy(out + o, b, k);
+    return o + k;
+}
+
+// A text frame's body (its encoding byte, then its text) into `out` as
+// UTF-8, to its first NUL: ISO-8859-1, UTF-16 with its BOM, UTF-16BE, UTF-8.
+static void id3_text(const uint8_t *p, size_t n, char *out, size_t cap) {
+    out[0] = '\0';
+    if (n < 1 || cap == 0) {
+        return;
+    }
+    int enc = p[0];
+    p++;
+    n--;
+    size_t o = 0;
+    if (enc == 3) {
+        size_t k = 0;
+        while (k < n && p[k] != 0) {
+            k++;
+        }
+        to_utf8((const char *)p, k, out, cap);
+        return;
+    }
+    if (enc == 0) {
+        for (size_t i = 0; i < n && p[i] != 0; i++) {
+            size_t w = put_cp(out, o, cap, p[i]);
+            if (w == 0) {
+                break;
+            }
+            o = w;
+        }
+    } else if (enc == 1 || enc == 2) {
+        int be = enc == 2;
+        size_t i = 0;
+        if (enc == 1 && n >= 2 && ((p[0] == 0xff && p[1] == 0xfe) || (p[0] == 0xfe && p[1] == 0xff))) {
+            be = p[0] == 0xfe;
+            i = 2;
+        }
+        for (; i + 1 < n; i += 2) {
+            uint32_t c = be ? (uint32_t)p[i] << 8 | p[i + 1] : (uint32_t)p[i + 1] << 8 | p[i];
+            if (c == 0) {
+                break;
+            }
+            if (c >= 0xd800 && c < 0xdc00 && i + 3 < n) {
+                uint32_t d = be ? (uint32_t)p[i + 2] << 8 | p[i + 3] : (uint32_t)p[i + 3] << 8 | p[i + 2];
+                if (d >= 0xdc00 && d < 0xe000) {
+                    c = 0x10000u + ((c - 0xd800u) << 10) + (d - 0xdc00u);
+                    i += 2;
+                } else {
+                    c = 0xfffd;
+                }
+            } else if (c >= 0xd800 && c < 0xe000) {
+                c = 0xfffd;
+            }
+            size_t w = put_cp(out, o, cap, c);
+            if (w == 0) {
+                break;
+            }
+            o = w;
+        }
+    }
+    out[o] = '\0';
+}
+
+uint32_t moy_media_id3(const uint8_t *p, size_t n, char *title, char *artist, size_t cap) {
+    if (cap > 0) {
+        title[0] = '\0';
+        artist[0] = '\0';
+    }
+    if (n < 10 || p[0] != 'I' || p[1] != 'D' || p[2] != '3') {
+        return 0;
+    }
+    int ver = p[3], flags = p[5];
+    uint32_t size = syncsafe(p + 6);
+    uint32_t total = 10u + size + ((flags & 0x10) ? 10u : 0u);
+    if (ver < 2 || ver > 4 || (flags & 0x80) || cap == 0) {
+        return total;                       // unsynchronised, or unknown: not read
+    }
+    size_t end = 10u + (size_t)size < n ? 10u + (size_t)size : n;
+    size_t at = 10;
+    if ((flags & 0x40) && ver > 2 && at + 4 <= end) {
+        at += ver == 3 ? 4u + be32(p + at) : syncsafe(p + at);
+    }
+    size_t hn = ver == 2 ? 6 : 10;
+    while (at + hn <= end && p[at] != 0) {
+        const uint8_t *h = p + at;
+        uint32_t fs = ver == 2 ? (uint32_t)h[3] << 16 | (uint32_t)h[4] << 8 | h[5]
+                      : ver == 3 ? be32(h + 4) : syncsafe(h + 4);
+        size_t body = at + hn;
+        if (fs > end - body) {
+            break;                          // past what is here
+        }
+        int plain = ver == 2 || h[9] == 0;  // no compression, encryption or unsync
+        char *dst = NULL;
+        if (ver == 2 ? memcmp(h, "TT2", 3) == 0 : memcmp(h, "TIT2", 4) == 0) {
+            dst = title;
+        } else if (ver == 2 ? memcmp(h, "TP1", 3) == 0 : memcmp(h, "TPE1", 4) == 0) {
+            dst = artist;
+        }
+        if (dst != NULL && plain) {
+            id3_text(p + body, fs, dst, cap);
+        }
+        at = body + fs;
+    }
+    return total;
 }
 
 int moy_media_icy_title(const char *meta, size_t n, char *out, size_t cap) {
@@ -544,18 +709,23 @@ static int parse_locked(media_t *m, const char *t, size_t n, const char *base) {
 
 // -- the commands ------------------------------------------------------------------
 
+static void clear_locked(media_t *m) {
+    m->n = 0;
+    m->pool_n = 0;
+    m->entry = -1;
+    m->gen++;
+    m->soft = 0;
+    m->seek_req = NO_SEEK;
+    m->list_played = 0;
+}
+
 int moy_media_clear(uint32_t owner) {
     media_t *m = mine(owner);
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
     LOCK(m);
-    m->n = 0;
-    m->pool_n = 0;
-    m->entry = -1;
-    m->gen++;
-    m->soft = 0;
-    m->list_played = 0;
+    clear_locked(m);
     UNLOCK(m);
     WAKE(m);
     return 0;
@@ -596,6 +766,7 @@ int moy_media_go(uint32_t owner, int i) {
     m->entry = i;
     m->gen++;
     m->soft = 0;
+    m->seek_req = NO_SEEK;
     m->stop = 0;
     m->idle = 0;
     m->muted = 0;
@@ -638,6 +809,178 @@ int moy_media_volume(uint32_t owner, int v) {
     return 0;
 }
 
+// -- files: the store's volume seam, on the VM's thread ---------------------------
+
+// The file at `path` opened (held where `held`), sized, and placed at byte
+// `at`: 0, or an errno with nothing left open.
+static int vol_open(const char *path, int held, uint32_t at, moy_vol_file_t **f, uint32_t *size) {
+    moy_vol_t v;
+    const char *r;
+    *f = NULL;
+    *size = 0;
+    int g = moy_vol_gate_enter(path);
+    int rc = moy_vol_at(path, &v, &r);
+    if (rc == 0) {
+        rc = moy_vol_open(&v, r, MOY_VOL_READ | (held ? MOY_VOL_HELD : 0), f);
+        if (rc != 0) {
+            *f = NULL;
+        }
+    }
+    if (rc == 0) {
+        rc = moy_vol_size(*f, size);
+    }
+    if (rc == 0 && at > 0) {
+        rc = moy_vol_seek(*f, at < *size ? at : *size);
+    }
+    if (rc != 0 && *f != NULL) {
+        moy_vol_close(*f);
+        *f = NULL;
+    }
+    moy_vol_gate_leave(g);
+    return rc;
+}
+
+static void vol_close(const char *path, moy_vol_file_t *f) {
+    int g = moy_vol_gate_enter(path);
+    moy_vol_close(f);
+    moy_vol_gate_leave(g);
+}
+
+// Up to `cap` bytes of the file at `path` from byte `at`: 0 or an errno,
+// `*got` read and the file's size in `*size`.
+static int vol_read_at(const char *path, uint32_t at, uint8_t *buf, size_t cap, size_t *got,
+                       uint32_t *size) {
+    moy_vol_file_t *f;
+    *got = 0;
+    int rc = vol_open(path, 0, at, &f, size);
+    if (rc != 0) {
+        return rc;
+    }
+    int g = moy_vol_gate_enter(path);
+    while (rc == 0 && *got < cap) {
+        size_t k = 0;
+        rc = moy_vol_read(f, buf + *got, cap - *got, &k);
+        if (k == 0) {
+            break;
+        }
+        *got += k;
+    }
+    int rc2 = moy_vol_close(f);
+    moy_vol_gate_leave(g);
+    return rc != 0 ? rc : rc2;
+}
+
+int moy_media_play(uint32_t owner, const char *src, int held) {
+    media_t *m = mine(owner);
+    if (m == NULL) {
+        return -MOY_MEDIA_EBADF;
+    }
+    size_t sn = strlen(src);
+    if (sn == 0 || sn >= MOY_MEDIA_SRC_MAX) {
+        return -MOY_MEDIA_EINVAL;
+    }
+    int rc;
+    if (is_url(src)) {
+        LOCK(m);
+        clear_locked(m);
+        rc = add_locked(m, src, sn, NULL, 0);
+        UNLOCK(m);
+    } else if (moy_media_list_kind(NULL, src, NULL, 0) != 0) {
+        uint8_t *buf = moy_store_alloc(MOY_MEDIA_LIST_FILE);
+        if (buf == NULL) {
+            return -MOY_MEDIA_ENOMEM;
+        }
+        size_t n = 0;
+        uint32_t size;
+        rc = vol_read_at(src, 0, buf, MOY_MEDIA_LIST_FILE, &n, &size);
+        if (rc == 0) {
+            LOCK(m);
+            clear_locked(m);
+            rc = parse_locked(m, (const char *)buf, n, src);
+            UNLOCK(m);
+            rc = rc > 0 ? rc : -MOY_MEDIA_EINVAL;
+        } else {
+            rc = -rc;
+        }
+        moy_store_free(buf, MOY_MEDIA_LIST_FILE);
+    } else {
+        moy_vol_t v;
+        const char *r;
+        moy_vol_stat_t st;
+        int g = moy_vol_gate_enter(src);
+        int e = moy_vol_at(src, &v, &r);
+        if (e == 0) {
+            e = moy_vol_stat(&v, r, &st);
+        }
+        moy_vol_gate_leave(g);
+        if (e == 0 && st.is_dir) {
+            e = MOY_MEDIA_EINVAL;
+        }
+        if (e != 0 && !held) {
+            return -e;
+        }
+        LOCK(m);
+        clear_locked(m);
+        rc = add_locked(m, src, sn, NULL, 0);
+        UNLOCK(m);
+    }
+    if (rc < 0) {
+        WAKE(m);
+        return rc;
+    }
+    int n = m->n;
+    rc = moy_media_go(owner, 0);
+    return rc < 0 ? rc : n;
+}
+
+int moy_media_page(uint32_t owner, int on) {
+    media_t *m = mine(owner);
+    if (m == NULL) {
+        return -MOY_MEDIA_EBADF;
+    }
+    LOCK(m);
+    m->page = on ? 1 : 0;
+    UNLOCK(m);
+    return 0;
+}
+
+int moy_media_seek(uint32_t owner, uint32_t ms) {
+    media_t *m = mine(owner);
+    if (m == NULL) {
+        return -MOY_MEDIA_EBADF;
+    }
+    int rc = 0;
+    LOCK(m);
+    uint32_t dec = m->e_dec, used = m->e_used, head = m->e_head, size = m->e_size;
+    if (m->stop || m->cur < 0 || m->cur >= m->n) {
+        rc = -MOY_MEDIA_EINVAL;
+    } else if (is_url(m->pool + m->e_src[m->cur])) {
+        rc = -MOY_MEDIA_ESPIPE;
+    } else if (m->gen != m->seen || size == 0 || used == 0 || dec == 0) {
+        rc = -MOY_MEDIA_EAGAIN;
+    } else {
+        uint64_t frames = (uint64_t)ms * (uint32_t)m->out_rate / 1000u;
+        uint64_t byte = head + frames * used / dec;
+        if (byte > size) {
+            byte = size;
+            frames = (uint64_t)(size > head ? size - head : 0) * dec / used;
+        }
+        m->seek_req = (uint32_t)byte;
+        m->seek_dec = (uint32_t)frames;
+        m->entry = m->cur;
+        m->gen++;
+        m->soft = 0;
+        m->idle = 0;
+        m->muted = 0;
+        m->err = 0;
+    }
+    UNLOCK(m);
+    if (rc == 0) {
+        WAKE(m);
+    }
+    return rc;
+}
+
 static uint32_t in_room(const media_t *m) {
     return MOY_MEDIA_IN_BYTES - (LOAD(&m->in_w) - LOAD(&m->in_r));
 }
@@ -661,7 +1004,7 @@ int moy_media_feed(uint32_t owner, uint32_t gen, const void *buf, size_t n) {
     }
     uint32_t k = 0;
     LOCK(m);
-    if (gen != 0 && m->armed == gen && !m->fed_end) {
+    if (gen != 0 && m->armed == gen && m->face_gen == gen && !m->fed_end) {
         k = in_room(m);
         if (k > n) {
             k = (uint32_t)n;
@@ -681,7 +1024,7 @@ int moy_media_feed_fail(uint32_t owner, uint32_t gen, int err) {
         return -MOY_MEDIA_EBADF;
     }
     LOCK(m);
-    if (gen != 0 && m->armed == gen && !m->fed_end) {
+    if (gen != 0 && m->armed == gen && m->face_gen == gen && !m->fed_end) {
         m->fed_end = 1;
         m->fed_err = err > 0 ? err : 0;
     }
@@ -700,7 +1043,7 @@ int moy_media_feed_size(uint32_t owner, uint32_t gen, uint32_t size) {
         return -MOY_MEDIA_EBADF;
     }
     LOCK(m);
-    if (gen != 0 && m->armed == gen) {
+    if (gen != 0 && m->armed == gen && m->face_gen == gen) {
         m->e_size = size;
     }
     UNLOCK(m);
@@ -720,8 +1063,10 @@ int moy_media_status(moy_media_status_t *st) {
     st->gen = m->seen;
     st->entry = m->cur;
     st->entries = m->n;
-    st->kind = m->kind;
-    st->armed = m->armed != 0 && m->armed == m->seen && !m->fed_end;
+    int face = m->armed != 0 && m->armed == m->seen && m->face_gen == m->armed;
+    st->kind = face ? MOY_MEDIA_FEED : m->kind;
+    st->armed = face && !m->fed_end;
+    st->feed_at = m->armed_at;
     st->rate = m->rate;
     st->channels = m->channels;
     st->kbps = m->kbps;
@@ -732,7 +1077,9 @@ int moy_media_status(moy_media_status_t *st) {
     uint32_t size = m->e_size;
     UNLOCK(m);
     uint32_t dec = m->e_dec, used = m->e_used;
-    uint32_t held = LOAD(&m->out_w) - LOAD(&m->out_r);
+    // a flush the pull has not taken yet drops what it held already
+    uint32_t from = LOAD(&m->flush_gen) != m->flush_seen ? LOAD(&m->flush_at) : LOAD(&m->out_r);
+    uint32_t held = LOAD(&m->out_w) - from;
     uint32_t heard = dec > held ? dec - held : 0;
     if (m->out_rate > 0) {
         st->at_ms = (uint32_t)((uint64_t)heard * 1000u / (uint32_t)m->out_rate);
@@ -777,6 +1124,10 @@ int moy_media_text(int which, char *out, size_t cap) {
         n = copy_text(m->title, out, cap);
     } else if (which == MOY_MEDIA_T_STATION) {
         n = copy_text(m->station, out, cap);
+    } else if (which == MOY_MEDIA_T_SONG) {
+        n = copy_text(m->song, out, cap);
+    } else if (which == MOY_MEDIA_T_ARTIST) {
+        n = copy_text(m->artist, out, cap);
     } else if (i >= 0 && i < m->n) {
         if (which == MOY_MEDIA_T_SRC) {
             n = copy_text(m->pool + m->e_src[i], out, cap);
@@ -855,26 +1206,38 @@ static void advance(media_t *m, int err) {
 }
 
 // Entry `e` begins: what the last one held dropped (the decoded tail too,
-// unless the move was the task's own), the state OPENING for a URL.
+// unless the move was the task's own), the state OPENING for a URL. A seek
+// begins the same file again at its byte, its place, length and texts kept.
 static void begin(media_t *m) {
     conn_close(m);
     LOCK(m);
     int e = m->entry, soft = m->soft;
-    int again = e == m->cur && soft;
+    uint32_t seek = m->seek_req;
+    m->seek_req = NO_SEEK;
     m->seen = m->gen;
     m->armed = 0;
     m->fed_end = 0;
     m->fed_err = 0;
     STORE(&m->in_r, LOAD(&m->in_w));
+    int kind = e >= 0 && e < m->n ? (is_url(m->pool + m->e_src[e]) ? MOY_MEDIA_URL : MOY_MEDIA_FILE) : 0;
+    if (kind != MOY_MEDIA_FILE) {
+        seek = NO_SEEK;
+    }
+    int again = e == m->cur && (soft || seek != NO_SEEK);
     m->cur = e;
-    int kind = e >= 0 && e < m->n ? (is_url(m->pool + m->e_src[e]) ? MOY_MEDIA_URL : MOY_MEDIA_FEED) : 0;
-    if (kind != 0) {
+    if (seek != NO_SEEK) {
+        m->e_dec = m->seek_dec;
+        m->e_used = seek > m->e_head ? seek - m->e_head : 0;
+    } else if (kind != 0) {
         // a new entry's place; past the list's end the last one's stays
         m->e_size = 0;
         m->e_dec = 0;
         m->e_used = 0;
+        m->e_head = 0;
     }
-    if (kind == MOY_MEDIA_FEED || (kind == MOY_MEDIA_URL && !MOY_MEDIA_CLIENT)) {
+    m->armed_at = seek != NO_SEEK ? seek : 0;
+    m->face_gen = kind == MOY_MEDIA_URL && !MOY_MEDIA_CLIENT ? m->seen : 0;
+    if (kind == MOY_MEDIA_FILE || (kind == MOY_MEDIA_URL && !MOY_MEDIA_CLIENT)) {
         m->armed = m->seen;
     }
     if (e < 0) {
@@ -887,16 +1250,18 @@ static void begin(media_t *m) {
     if (!again) {
         m->title[0] = '\0';
         m->station[0] = '\0';
+        m->song[0] = '\0';
+        m->artist[0] = '\0';
         m->text_gen++;
     }
     UNLOCK(m);
     m->kind = kind;
-    m->retries = again ? m->retries + 1 : 0;
+    m->retries = again && seek == NO_SEEK ? m->retries + 1 : 0;
     m->dial_ms = 0;
     m->played = 0;
     m->eof = 0;
     m->skip = 0;
-    m->head_seen = 0;
+    m->head_seen = seek != NO_SEEK;
     m->icy_int = 0;
     m->in_meta = 0;
     m->win_off = 0;
@@ -1214,12 +1579,24 @@ static int decode_one(media_t *m) {
         if (m->win_n < 10 && !last) {
             return 0;
         }
-        m->head_seen = 1;
         if (m->win_n >= 10 && w[0] == 'I' && w[1] == 'D' && w[2] == '3') {
-            m->skip = 10u + ((uint32_t)(w[6] & 0x7f) << 21 | (uint32_t)(w[7] & 0x7f) << 14
-                             | (uint32_t)(w[8] & 0x7f) << 7 | (uint32_t)(w[9] & 0x7f))
-                      + ((w[5] & 0x10) ? 10u : 0u);
+            // the tag's frames are read once as much of it as the window holds is here
+            uint32_t total = 10u + syncsafe(w + 6) + ((w[5] & 0x10) ? 10u : 0u);
+            uint32_t want = total < MOY_MEDIA_WIN_BYTES ? total : MOY_MEDIA_WIN_BYTES;
+            if (m->win_n < want && !last) {
+                return 0;
+            }
+            char title[MOY_MEDIA_TEXT_MAX], artist[MOY_MEDIA_TEXT_MAX];
+            moy_media_id3(w, m->win_n, title, artist, sizeof(title));
+            LOCK(m);
+            memcpy(m->song, title, sizeof(title));
+            memcpy(m->artist, artist, sizeof(artist));
+            m->text_gen++;
+            UNLOCK(m);
+            m->skip = total;
+            m->e_head = total;
         }
+        m->head_seen = 1;
         return 1;
     }
     if (m->win_n == 0) {
@@ -1255,7 +1632,7 @@ static int decode_one(media_t *m) {
 static int step(media_t *m) {
     LOCK(m);
     int stop = m->stop, moved = m->gen != m->seen;
-    if (!stop && (m->kind == MOY_MEDIA_FEED || !MOY_MEDIA_CLIENT)) {
+    if (!stop && (m->kind == MOY_MEDIA_FILE || !MOY_MEDIA_CLIENT)) {
         m->eof = m->fed_end;
         if (m->fed_end) {
             m->err = m->fed_err;
@@ -1309,6 +1686,207 @@ int moy_media_run(void) {
         any = 1;
     }
     return any;
+}
+
+// -- the file: the frame's job, on the VM's thread --------------------------------
+
+// The job's file closed. Outside the job (a close from the lease table, the
+// VM's end) it closes with no gate: the mount table it resolves through may
+// be gone, and a file only read writes nothing as it closes.
+static void file_close(media_t *m, int gated) {
+    if (m->f != NULL) {
+        if (gated) {
+            vol_close(m->path, m->f);
+        } else {
+            moy_vol_close(m->f);
+        }
+        m->f = NULL;
+    }
+}
+
+// The armed entry's file opened when the generation moved (or handed to the
+// face where the page holds what the VM does not), and read into the stream
+// buffer while it has room: a chunk at a time under the lock, so a command
+// that moves the entry between two never sees a byte of the last one.
+static void file_pump(media_t *m) {
+    LOCK(m);
+    uint32_t gen = m->armed;
+    int ours = gen != 0 && m->face_gen != gen;
+    uint32_t at = m->armed_at;
+    int page = m->page;
+    if (gen != m->f_gen && ours) {
+        if (m->cur >= 0 && m->cur < m->n) {
+            copy_text(m->pool + m->e_src[m->cur], m->path, sizeof(m->path));
+        } else {
+            ours = 0;
+        }
+    }
+    UNLOCK(m);
+    if (gen != m->f_gen) {
+        file_close(m, 1);
+        m->f_gen = gen;
+        if (!ours) {
+            return;
+        }
+        uint32_t size = 0;
+        int rc = vol_open(m->path, 1, at, &m->f, &size);
+        LOCK(m);
+        if (m->armed != gen) {
+            rc = -1;                        // moved on while it opened
+        } else if (rc == 0) {
+            m->e_size = size;
+            m->f_left = size > at ? size - at : 0;
+        } else if (page) {
+            m->face_gen = gen;
+        } else {
+            m->fed_end = 1;
+            m->fed_err = rc;
+        }
+        UNLOCK(m);
+        if (rc != 0) {
+            file_close(m, 1);
+            WAKE(m);
+            return;
+        }
+    }
+    if (m->f == NULL) {
+        return;
+    }
+    int moved = 0, end = 0;
+    for (;;) {
+        uint32_t room = in_room(m);
+        if (room < MOY_MEDIA_READ_MIN && room < m->f_left) {
+            break;
+        }
+        uint32_t want = room < m->f_left ? room : m->f_left;
+        if (want > READ_CHUNK) {
+            want = READ_CHUNK;
+        }
+        LOCK(m);
+        if (m->armed != gen || m->fed_end) {
+            UNLOCK(m);
+            break;
+        }
+        uint32_t w = m->in_w, got = 0;
+        int rc = 0;
+        int g = moy_vol_gate_enter(m->path);
+        while (rc == 0 && got < want) {
+            uint32_t pos = (w + got) & IN_MASK, span = MOY_MEDIA_IN_BYTES - pos;
+            if (span > want - got) {
+                span = want - got;
+            }
+            size_t k = 0;
+            rc = moy_vol_read(m->f, m->in + pos, span, &k);
+            if (k == 0) {
+                break;
+            }
+            got += (uint32_t)k;
+        }
+        moy_vol_gate_leave(g);
+        m->f_left = got < m->f_left ? m->f_left - got : 0;
+        end = rc != 0 || got == 0 || m->f_left == 0;
+        STORE(&m->in_w, w + got);
+        if (end) {
+            m->fed_end = 1;
+            m->fed_err = rc;
+        }
+        UNLOCK(m);
+        moved = 1;
+        if (end) {
+            break;
+        }
+    }
+    if (end) {
+        file_close(m, 1);
+    }
+    if (moved) {
+        WAKE(m);
+    }
+}
+
+void moy_media_pump(void) {
+    media_t *m = s_m;
+    if (m == NULL) {
+        return;
+    }
+    file_pump(m);
+#ifndef MEDIA_BOARD
+    for (int i = 0; i < 4 && moy_media_run(); i++) {
+        file_pump(m);
+    }
+#endif
+}
+
+static bool media_job(void *arg) {
+    (void)arg;
+    moy_media_pump();
+    return true;
+}
+
+// -- probe ---------------------------------------------------------------------------
+
+// An MPEG audio frame header at `b`: its bytes a second, its rate and its
+// samples a frame, or 0 for no header.
+static int frame_head(const uint8_t *b, uint32_t *bps, uint32_t *hz, uint32_t *spf) {
+    static const uint16_t K1[15] = { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 };
+    static const uint16_t K2[15] = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 };
+    static const uint16_t R1[3] = { 44100, 48000, 32000 };
+    static const uint16_t R2[3] = { 22050, 24000, 16000 };
+    if (b[0] != 0xff || (b[1] & 0xe0) != 0xe0) {
+        return 0;
+    }
+    int ver = (b[1] >> 3) & 3, layer = (b[1] >> 1) & 3, bi = b[2] >> 4, si = (b[2] >> 2) & 3;
+    if (layer != 1 || bi == 0 || bi == 15 || si == 3 || ver == 1) {
+        return 0;
+    }
+    *bps = (ver == 3 ? K1[bi] : K2[bi]) * 125u;
+    *hz = ver == 3 ? R1[si] : R2[si] / (ver == 0 ? 2u : 1u);
+    *spf = ver == 3 ? 1152u : 576u;
+    return 1;
+}
+
+static int find4(const uint8_t *b, size_t n, size_t from, const char *pat) {
+    for (size_t i = from; i + 4 <= n; i++) {
+        if (memcmp(b + i, pat, 4) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+int moy_media_probe(const char *path, moy_media_probe_t *out) {
+    memset(out, 0, sizeof(*out));
+    uint8_t *b = moy_store_alloc(MOY_MEDIA_TAG_READ);
+    if (b == NULL) {
+        return -MOY_MEDIA_ENOMEM;
+    }
+    size_t n = 0;
+    uint32_t size = 0, skip = 0;
+    int rc = vol_read_at(path, 0, b, MOY_MEDIA_TAG_READ, &n, &size);
+    if (rc == 0) {
+        skip = moy_media_id3(b, n, out->title, out->artist, sizeof(out->title));
+        if (skip > 0) {
+            rc = vol_read_at(path, skip, b, MOY_MEDIA_TAG_READ, &n, &size);
+        }
+    }
+    for (size_t at = 0; rc == 0 && at + 4 < n; at++) {
+        uint32_t bps, hz, spf;
+        if (!frame_head(b + at, &bps, &hz, &spf)) {
+            continue;
+        }
+        int k = find4(b, n, at, "Xing");
+        if (k < 0) {
+            k = find4(b, n, at, "Info");
+        }
+        if (k >= 0 && (size_t)k < at + 64 && (size_t)k + 12 <= n && (b[k + 7] & 1)) {
+            out->seconds = (uint32_t)((uint64_t)be32(b + k + 8) * spf / hz);
+        } else if (bps > 0) {
+            out->seconds = (size > skip ? size - skip : 0) / bps;
+        }
+        break;
+    }
+    moy_store_free(b, MOY_MEDIA_TAG_READ);
+    return -rc;
 }
 
 #ifdef MEDIA_BOARD
@@ -1381,7 +1959,13 @@ static int media_open(uint32_t owner, int rate, int channels) {
     m->cur = -1;
     m->volume = MOY_MEDIA_VOLUME;
     m->state = MOY_MEDIA_IDLE;
+    m->seek_req = NO_SEEK;
     mp3dec_init(&m->dec);
+    if (moy_loop_job == NULL || !moy_loop_job(media_job, NULL)) {
+        block_free(m);
+        moy_share_give(MOY_SHARE_MEDIA, share);
+        return moy_loop_job == NULL ? -MOY_MEDIA_ENODEV : -MOY_MEDIA_EBUSY;
+    }
 #ifdef MEDIA_BOARD
     m->mtx = xSemaphoreCreateMutexStatic(&m->mtx_buf);
     m->tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -1391,6 +1975,9 @@ static int media_open(uint32_t owner, int rate, int channels) {
                                                 m, MOY_MEDIA_PRIO, m->stack, m->tcb, 0);
     }
     if (m->mtx == NULL || m->task == NULL) {
+        if (moy_loop_job_drop != NULL) {
+            moy_loop_job_drop(media_job, NULL);
+        }
         heap_caps_free(m->tcb);
         heap_caps_free(m->stack);
         block_free(m);
@@ -1442,6 +2029,10 @@ static void reap(media_t *m) {
 #endif
     uint32_t share = m->share;
     conn_close(m);
+    file_close(m, 0);
+    if (moy_loop_job_drop != NULL) {
+        moy_loop_job_drop(media_job, NULL);
+    }
     block_free(m);
     moy_share_give(MOY_SHARE_MEDIA, share);
 }
@@ -1486,6 +2077,8 @@ int moy_media_close_vm(void) {
         return 0;
     }
     orphan(m);
+    file_close(m, 0);
+    m->f_gen = 0;
 #ifdef MEDIA_BOARD
     for (int i = 0; i < 200 && !m->idle; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));

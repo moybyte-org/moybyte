@@ -2,9 +2,11 @@
 module `moy_media` as the boards import it, name for name
 (native/moy_media/modmoy_media.c has the list). The C is the host's one
 library (runtime/host/host_native.py) with the kernel's client under it, which
-speaks plain TCP on the host. The host has no task: `run()` is one pass of its
-loop, and `attach(audio)` hands the host's mix (runtime/host/audio_binding.py,
-a library of its own) the service's pull, which a board's open does in C."""
+speaks plain TCP on the host. The host has no task: the frame's job
+(`pump()`, which the loop's tail runs while the service is open) reads a
+file and runs one pass of its loop, and `attach(audio)` hands the host's mix
+(runtime/host/audio_binding.py, a library of its own) the service's pull,
+which a board's open does in C."""
 
 from __future__ import annotations
 
@@ -21,17 +23,18 @@ _MEDIA = os.path.join(native_build.ROOT, "native", "moy_media")
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
+_STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 
 PART = native_build.Part("media", ("moy_media.h", "moy_media.c", "moy_mp3.c", "minimp3.h"),
-                         (_MEDIA, _NET, _PLAY, _KERNEL))
+                         (_MEDIA, _NET, _PLAY, _KERNEL, _STORE))
 
 IDLE, OPENING, PLAYING, ENDED, FAILED = range(5)
-TASK = 0                                # no task: the face calls run()
-URL, FEED = 1, 2
-T_SRC, T_TITLE, T_STATION, T_ENTRY = range(4)
+TASK = 0                                # no task: the frame's job runs the loop
+URL, FEED, FILE = 1, 2, 3
+T_SRC, T_TITLE, T_STATION, T_ENTRY, T_SONG, T_ARTIST = range(6)
 FIELDS = ("state", "paused", "owner", "gen", "entry", "entries", "kind", "armed", "rate",
           "channels", "kbps", "volume", "in_bytes", "in_room", "pcm_frames", "decoded",
-          "played", "starved", "err", "text_gen", "idle", "at_ms", "len_ms")
+          "played", "starved", "err", "text_gen", "idle", "at_ms", "len_ms", "feed_at")
 
 _U32, _I, _P, _SZ = ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t
 
@@ -43,7 +46,12 @@ class _St(ctypes.Structure):
                 ("in_bytes", _U32), ("in_room", _U32), ("pcm_frames", _U32),
                 ("decoded", _U32), ("played", _U32), ("starved", _U32),
                 ("err", _I), ("text_gen", _U32), ("idle", _I), ("at_ms", _U32),
-                ("len_ms", _U32)]
+                ("len_ms", _U32), ("feed_at", _U32)]
+
+
+class _Probe(ctypes.Structure):
+    _fields_ = [("seconds", _U32), ("title", ctypes.c_char * 128),
+                ("artist", ctypes.c_char * 128)]
 
 
 _SIGS = (
@@ -52,6 +60,11 @@ _SIGS = (
     ("moy_media_open", [_U32, _I, _I], _I),
     ("moy_media_close", [_U32], _I),
     ("moy_media_owner", [], _U32),
+    ("moy_media_play", [_U32, ctypes.c_char_p, _I], _I),
+    ("moy_media_page", [_U32, _I], _I),
+    ("moy_media_seek", [_U32, _U32], _I),
+    ("moy_media_pump", [], None),
+    ("moy_media_probe", [ctypes.c_char_p, ctypes.POINTER(_Probe)], _I),
     ("moy_media_clear", [_U32], _I),
     ("moy_media_add", [_U32, ctypes.c_char_p, ctypes.c_char_p], _I),
     ("moy_media_playlist", [_U32, ctypes.c_char_p, _SZ, ctypes.c_char_p], _I),
@@ -111,6 +124,31 @@ def close(owner):
 
 def owner():
     return _lib().moy_media_owner()
+
+
+def play(owner, src, held=False):
+    return _lib().moy_media_play(owner, _b(src), 1 if held else 0)
+
+
+def page(owner, on):
+    return _lib().moy_media_page(owner, 1 if on else 0)
+
+
+def seek(owner, ms):
+    return _lib().moy_media_seek(owner, max(0, int(ms)))
+
+
+def pump():
+    """The frame's job run once (a harness that steps no frames)."""
+    _lib().moy_media_pump()
+
+
+def probe(path):
+    """(seconds, title, artist) of the file at `path`, or None."""
+    p = _Probe()
+    if _lib().moy_media_probe(_b(path), ctypes.byref(p)) != 0:
+        return None
+    return p.seconds, p.title.decode(errors="replace"), p.artist.decode(errors="replace")
 
 
 def clear(owner):

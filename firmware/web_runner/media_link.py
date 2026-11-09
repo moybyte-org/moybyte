@@ -1,15 +1,18 @@
 """Music in the browser: the page's bytes behind `ws.media_net`, which the
 media face (runtime/system/dev_media.py) feeds the C decoder from where the
-console has no HTTP client and keeps no song.
+console has no HTTP client and keeps no song: a URL's, and a song the page
+holds, when the C arms the entry for the face (a file in the VFS the C reads
+itself, native/moy_media/moy_media.h).
 
 A page keeps no song in its VFS, in either mode: a site-mode page's songs
 are the browser's OPFS store's (`files/Music`), a board-served page's are the
 serving board's music folder. The worker lists them at boot into LISTING
 ({name: size}), and rewrites it when a song is dropped on the page, so
 `held()` names them for the Music app and `holds()` lets the face play one.
-`open(src)` reads a song or a URL: the worker reads the song out of OPFS, or
-from the board's sealed GET /media a range at a time (native/moy_net/
-moy_webhost.c, THE MEDIA ROUTE), or fetches the URL with the page's fetch.
+`open(src, at)` reads a song from byte `at` (a seek's) or a URL: the worker
+reads the song out of OPFS, or from the board's sealed GET /media a range at
+a time (native/moy_net/moy_webhost.c, THE MEDIA ROUTE), or fetches the URL
+with the page's fetch.
 
 THE BYTES GO THROUGH SPOOL SEGMENTS, never the VM's heap: the worker appends
 what arrives to SPOOL/m<id>.<k>, each segment SEG bytes, and says when one is
@@ -82,7 +85,7 @@ class WebMediaNet:
         folder, _, name = src.rpartition("/")
         return folder == self.music and name in self._listing()
 
-    def open(self, src):
+    def open(self, src, at=0):
         link = self.link
         r = _Stream(link, link._id())
         link._live[r.rid] = r
@@ -91,7 +94,7 @@ class WebMediaNet:
         else:
             name = src.rpartition("/")[2]
             r.size = self._listing().get(name)
-            link.queue({"op": "mget", "id": r.rid, "song": name, "size": r.size})
+            link.queue({"op": "mget", "id": r.rid, "song": name, "size": r.size, "at": at})
         return r
 
 

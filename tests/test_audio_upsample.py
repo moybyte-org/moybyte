@@ -169,24 +169,13 @@ def test_a_stereo_stream_keeps_its_channels_on_a_stereo_output(aud, p4_line):
         held = mp.share_held(mp.SHARE_MEDIA)
         assert held == mono + 16384 * 2 <= mp.shares("p4")[mp.SHARE_MEDIA] // 4
         N.volume(owner, 100)
-        N.add(owner, str(STEREO), None)
-        N.go(owner, 0)
-        data = STEREO.read_bytes()
-        at, ended = 0, False
+        assert N.play(owner, str(STEREO)) == 1
         mix = N._lib().moy_media_mix
         mix.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
         buf = (ctypes.c_int16 * (2 * 1024))()
         left, right = [], []
         for _ in range(2000):
-            N.run()
-            st = N.status()
-            if st[6] == N.FEED and st[7] and not ended:
-                if at < len(data):
-                    at += max(0, N.feed(owner, st[3], data[at:at + 4096]))
-                else:
-                    N.feed_end(owner, st[3])
-                    ended = True
-                N.run()
+            N.pump()                                     # the frame's job: the file read, decoded
             ctypes.memset(buf, 0, ctypes.sizeof(buf))
             mix(buf, 1024, 7, 0)
             left.extend(buf[0::2])
@@ -220,16 +209,9 @@ def _media_playing(N, owner):
     that the pull has frames to give."""
     assert N.open(owner, OUT_RATE, 2) == 0
     N.volume(owner, 100)
-    N.add(owner, str(STEREO), None)
-    N.go(owner, 0)
-    data = STEREO.read_bytes()
+    assert N.play(owner, str(STEREO)) == 1
     for _ in range(200):
-        N.run()
-        st = N.status()
-        if st[6] == N.FEED and st[7]:
-            N.feed(owner, st[3], data)
-            N.feed_end(owner, st[3])
-            N.run()
+        N.pump()
         if N.status()[14] > 4096:
             return
     raise AssertionError("the fixture never decoded")

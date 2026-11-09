@@ -123,6 +123,7 @@ _SIGS = (
     ("moy_loop_host_clear", [], None),
     ("moy_loop_host_note", [ctypes.c_char_p], None),
     ("moy_loop_driver_step", [_U32], _I),
+    ("moy_loop_jobs", [], _I),
 )
 
 _LIB = [None]
@@ -294,6 +295,11 @@ def drive(handle_input, handle_pointer, frame, dt):
 
 def step():
     return _lib().moy_loop_step()
+
+
+def jobs():
+    """The frame's C jobs run once, as its tail runs them: how many remain."""
+    return _lib().moy_loop_jobs()
 
 
 def vm(up):

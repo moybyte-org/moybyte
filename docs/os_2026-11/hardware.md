@@ -380,8 +380,14 @@ to mono), and the mix pulls it as its
 quarter of its level while the focused session sounds (**ducked**). On a
 board a task on core 0 below the flush priority (`MOY_MEDIA_PRIO`) reads the
 connection and decodes, on a 24 KiB PSRAM stack (a frame's decode takes 16.7
-KB) that never runs a flash operation: a file is read by the face's pump in
-the VM and its bytes fed to the C. The host has no task; the pump runs one
+KB) that never runs a flash operation. **A file is the C's from end to end**
+(owner, #246 review 2026-11-07: one path for the Music app, the shell's
+`media` and the browser): `moy_media_play` builds the list (a playlist file
+read through the store's volume seam), and a job of the console's frame
+(`moy_loop_job`, on the VM's task) opens the current file, reads it into the
+stream buffer a few KiB at a time with the card's bus gate around each read,
+sizes it and seeks it, so a store op never runs on the PSRAM stack and no
+Python runs while a file plays. The host has no task; the same job runs one
 pass of its loop. Decode cost is the stream's (internet radio is 44.1 kHz
 stereo), not the output's. On the T-Deck that cost reaches a heavy cart on
 core 1 through the cache and the memory bus the cores share, and the decode
@@ -399,10 +405,11 @@ stream whose list holds a URL holds the WiFi lease under `media`, whose
 internal cost never comes back (#158).
 
 **Its memory** is THE SHARES' MEDIA row (`native/moy_play/moy_play.h`): the
-open takes `moy_media.share()` from it (155,876 bytes on the T-Deck,
-188,644 on a P4: the service's state, its 32 KiB stream buffer, its 16 KiB
+open takes `moy_media.share()` from it (156,680 bytes on the T-Deck,
+189,448 on a P4: the service's state, its 32 KiB stream buffer, its 16 KiB
 decoder window, the decoder, a decoded ring of 16,384 frames, 32 KiB mono or
-64 KiB stereo, and the list, one PSRAM block; the task's stack; the
+64 KiB stereo, the list, and the open file's path and tag, one PSRAM
+block; the task's stack; the
 URL client's buffers) and the close gives it back. Where the row is absent
 the open is refused (ENOSPC) and `moybyte.media` is `None`: the T-Deck has a
 MEDIA row of 192 KiB, the Guition S3 none (owner, 2026-11-04: the one
@@ -423,14 +430,18 @@ slot, so the feeder hands it the two channels' mean (`MOY_AUDIO_DAC_MONO`):
 the stereo stops at the codec, and an output that plays two slots takes it
 whole. The microphone, on the speaker's clocks, records at 44.1 kHz there.
 
-**Verbs:** `play(src)`, `pause`, `resume`, `stop`, `next`, `prev`, `volume`,
-`now`. `play` takes a file (an MP3), an `http://` stream (asked for its **ICY
+**Verbs:** `play(src)`, `pause`, `resume`, `stop`, `next`, `prev`, `seek`,
+`volume`, `now`, `probe`. `play` takes a file (an MP3), an `http://` stream (asked for its **ICY
 metadata**: `icy-name` is the station, `StreamTitle` the now-playing text) or
 an **M3U/PLS playlist** (a file, or a URL known by its content type or path),
 whose entries play in turn: an entry that ends or fails moves to the next,
 and a live stream (no Content-Length) that drops after playing is opened
-again twice first. An `https` stream verifies as `http` does, and
-`moybyte.media.tls()` says whether one plays here.
+again twice first. `seek(seconds)` starts the current file again at that
+place (its byte from the bytes its frames have taken against the frames they
+made), its decoded tail dropped; a stream has no place. A file's ID3v2 tag
+gives `now()` its title and artist, and `probe(path)` reads a song's length
+and tag without playing it (Music's folder list). An `https` stream verifies
+as `http` does, and `moybyte.media.tls()` says whether one plays here.
 **Media keys** (play, pause, next, previous) on a keyboard are to arrive as
 events of kind `MEDIA` (§2) the service answers when no focused app takes
 them (owner, 2026-11-03); no keyboard driver posts a MEDIA record yet.
@@ -445,14 +456,16 @@ a depth greater than a GC pause.
 
 **In the browser (#251)** the same C decodes, compiled into the wasm
 (`native/moy_media/micropython.mk`) and pulled by the page's mix: no task
-(the face's pump runs the loop, as on the host) and no HTTP client
-(`MOY_MEDIA_CLIENT` 0), so a URL's bytes are fed as a file's are, from the
-page's fetch (`ws.media_net`, `firmware/web_runner/media_link.py`), with no
-ICY metadata (a page may not ask for it). A page keeps no song in its VFS: a
-static host's are the browser's OPFS (`files/Music`, where a dropped MP3
-lands), a board-served page's are the board's music folder, read through
-its sealed `GET /media` a range a request (`native/moy_net/moy_webhost.c`,
-THE MEDIA ROUTE), since the sync wire carries no binaries. A station plays
+(the frame's job runs the loop, as on the host) and no HTTP client
+(`MOY_MEDIA_CLIENT` 0). A page keeps no song in its VFS: a static host's are
+the browser's OPFS (`files/Music`, where a dropped MP3 lands), a board-served
+page's are the board's music folder, read through its sealed `GET /media` a
+range a request (`native/moy_net/moy_webhost.c`, THE MEDIA ROUTE), since the
+sync wire carries no binaries. So a URL's bytes, and a song's, are the
+page's: the C arms the entry for the face, which feeds it from the page's
+reader (`ws.media_net`, `firmware/web_runner/media_link.py`) from the byte
+the C asks for (a seek's), with no ICY metadata (a page may not ask for it);
+a file that is in the VFS the frame's job reads, as on a board. A station plays
 only if it sends CORS headers; one that does not fails with EACCES, which
 Music shows as "Blocks browsers".
 
@@ -471,7 +484,7 @@ moybyte.http.stream(url, window) -> Stream: state() / available() / ended() / re
 moybyte.lora.config(...) / listen() / send(bytes) / recv(into) -> (n, rssi, snr) | None   raw packets (§1)
 moybyte.lora.join(dev_eui, join_eui, app_key) / uplink(port, bytes) / downlink(into) -> (n, port) | None
 moybyte.ble.scan() / connect(addr) / find(uuid) / read(h) / write(h, bytes) / subscribe(h) / advertise(name, data)
-moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / volume(v) / now() -> dict   §3
+moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s) / volume(v) / now() -> dict / probe(path)   §3
 ```
 
 Leases (Python gets them as `machine` objects, §1:

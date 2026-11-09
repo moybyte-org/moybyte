@@ -1895,7 +1895,7 @@ async function mediaSite(j, mine, put, room, fail) {
     const f = opfsStores.files ? await store.songFile(opfsStores.files, j.song) : null;
     if (!f) { fail(ENOENT, "no such song"); return; }
     cartsSay({ id: j.id, status: 200, size: f.size });
-    for (let at = 0; at < f.size; at += SEG) {
+    for (let at = j.at || 0; at < f.size; at += SEG) {
         await room();
         if (!mine()) return;
         put(new Uint8Array(await f.slice(at, at + SEG).arrayBuffer()));
@@ -1909,7 +1909,7 @@ function hexUtf8(s) {
 async function mediaBoard(j, mine, put, room, fail) {
     const f = hexUtf8(j.song);
     cartsSay({ id: j.id, status: 200, size: typeof j.size === "number" ? j.size : null });
-    for (let at = 0; ; ) {
+    for (let at = j.at || 0; ; ) {
         await room();
         if (!mine()) return;
         const r = await sealed("GET", "/media?f=" + f + "&at=" + at + "&len=" + SEG, undefined, true);

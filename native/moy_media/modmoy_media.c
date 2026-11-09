@@ -5,14 +5,16 @@
 // and channels (moy_aud_out_rate and _channels).
 //
 //   present() share() open(owner, rate) close(owner) owner()
+//   play(owner, src, held) -> entries  page(owner, on)  seek(owner, ms)
 //   clear(owner) add(owner, src, title) playlist(owner, text, base)
 //   go(owner, i) stop(owner) pause(owner, on) volume(owner, v)
 //   feed(owner, gen, buf) -> n  feed_end(owner, gen)  feed_fail(owner, gen, err)
 //   feed_size(owner, gen, size)
 //   status() -> tuple (FIELDS' order) | None   text(which) -> str
-//   entry(i) -> (src, title) | None   run() -> bool
+//   entry(i) -> (src, title) | None   run() -> bool   pump()
+//   probe(path) -> (seconds, title, artist) | None
 //   TASK: 1 where a task runs the service's loop (a board), else 0 (the
-//   browser: the face calls run())
+//   browser: the frame's job runs it)
 //   icy_title(meta) -> str | None   list_kind(ctype, path, text) -> int
 
 #include <string.h>
@@ -70,6 +72,39 @@ static mp_obj_t media_owner(void) {
     return mp_obj_new_int_from_uint(moy_media_owner());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_owner_obj, media_owner);
+
+static mp_obj_t media_play(mp_obj_t owner, mp_obj_t src, mp_obj_t held) {
+    return rc(moy_media_play(u32(owner), mp_obj_str_get_str(src), mp_obj_is_true(held)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(media_play_obj, media_play);
+
+static mp_obj_t media_page(mp_obj_t owner, mp_obj_t on) {
+    return rc(moy_media_page(u32(owner), mp_obj_is_true(on)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(media_page_obj, media_page);
+
+static mp_obj_t media_seek(mp_obj_t owner, mp_obj_t ms) {
+    mp_int_t v = mp_obj_get_int(ms);
+    return rc(moy_media_seek(u32(owner), v < 0 ? 0u : (uint32_t)v));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(media_seek_obj, media_seek);
+
+static mp_obj_t media_pump(void) {
+    moy_media_pump();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(media_pump_obj, media_pump);
+
+static mp_obj_t media_probe(mp_obj_t path) {
+    moy_media_probe_t p;
+    if (moy_media_probe(mp_obj_str_get_str(path), &p) != 0) {
+        return mp_const_none;
+    }
+    mp_obj_t t[3] = { mp_obj_new_int_from_uint(p.seconds), mp_obj_new_str(p.title, strlen(p.title)),
+                      mp_obj_new_str(p.artist, strlen(p.artist)) };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(media_probe_obj, media_probe);
 
 static mp_obj_t media_clear(mp_obj_t owner) {
     return rc(moy_media_clear(u32(owner)));
@@ -139,7 +174,7 @@ static mp_obj_t media_status(void) {
     if (!moy_media_status(&s)) {
         return mp_const_none;
     }
-    mp_obj_t t[23] = {
+    mp_obj_t t[24] = {
         MP_OBJ_NEW_SMALL_INT(s.state), MP_OBJ_NEW_SMALL_INT(s.paused),
         mp_obj_new_int_from_uint(s.owner), mp_obj_new_int_from_uint(s.gen),
         MP_OBJ_NEW_SMALL_INT(s.entry), MP_OBJ_NEW_SMALL_INT(s.entries),
@@ -151,9 +186,9 @@ static mp_obj_t media_status(void) {
         mp_obj_new_int_from_uint(s.played), mp_obj_new_int_from_uint(s.starved),
         MP_OBJ_NEW_SMALL_INT(s.err), mp_obj_new_int_from_uint(s.text_gen),
         MP_OBJ_NEW_SMALL_INT(s.idle), mp_obj_new_int_from_uint(s.at_ms),
-        mp_obj_new_int_from_uint(s.len_ms),
+        mp_obj_new_int_from_uint(s.len_ms), mp_obj_new_int_from_uint(s.feed_at),
     };
-    return mp_obj_new_tuple(23, t);
+    return mp_obj_new_tuple(24, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_status_obj, media_status);
 
@@ -229,6 +264,11 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&media_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&media_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_owner), MP_ROM_PTR(&media_owner_obj) },
+    { MP_ROM_QSTR(MP_QSTR_play), MP_ROM_PTR(&media_play_obj) },
+    { MP_ROM_QSTR(MP_QSTR_page), MP_ROM_PTR(&media_page_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seek), MP_ROM_PTR(&media_seek_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pump), MP_ROM_PTR(&media_pump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_probe), MP_ROM_PTR(&media_probe_obj) },
     { MP_ROM_QSTR(MP_QSTR_clear), MP_ROM_PTR(&media_clear_obj) },
     { MP_ROM_QSTR(MP_QSTR_add), MP_ROM_PTR(&media_add_obj) },
     { MP_ROM_QSTR(MP_QSTR_playlist), MP_ROM_PTR(&media_playlist_obj) },
@@ -254,10 +294,13 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_FAILED), MP_ROM_INT(MOY_MEDIA_FAILED) },
     { MP_ROM_QSTR(MP_QSTR_URL), MP_ROM_INT(MOY_MEDIA_URL) },
     { MP_ROM_QSTR(MP_QSTR_FEED), MP_ROM_INT(MOY_MEDIA_FEED) },
+    { MP_ROM_QSTR(MP_QSTR_FILE), MP_ROM_INT(MOY_MEDIA_FILE) },
     { MP_ROM_QSTR(MP_QSTR_T_SRC), MP_ROM_INT(MOY_MEDIA_T_SRC) },
     { MP_ROM_QSTR(MP_QSTR_T_TITLE), MP_ROM_INT(MOY_MEDIA_T_TITLE) },
     { MP_ROM_QSTR(MP_QSTR_T_STATION), MP_ROM_INT(MOY_MEDIA_T_STATION) },
     { MP_ROM_QSTR(MP_QSTR_T_ENTRY), MP_ROM_INT(MOY_MEDIA_T_ENTRY) },
+    { MP_ROM_QSTR(MP_QSTR_T_SONG), MP_ROM_INT(MOY_MEDIA_T_SONG) },
+    { MP_ROM_QSTR(MP_QSTR_T_ARTIST), MP_ROM_INT(MOY_MEDIA_T_ARTIST) },
     { MP_ROM_QSTR(MP_QSTR_TASK), MP_ROM_INT(MEDIA_TASK) },
 };
 static MP_DEFINE_CONST_DICT(media_globals, media_globals_table);

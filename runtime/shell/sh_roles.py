@@ -50,7 +50,7 @@ the http worker's own wait), never `online()`.
   midi                       the transports this console has
   midi send PORT BYTE...     MIDI bytes (hex) to uart<n>, usb:ADDR or ble:ADDR
   media                      the stream's state, one `key value` a line
-  media play SRC | stop | pause | resume | next | prev | volume [V]
+  media play SRC | stop | pause | resume | next | prev | seek SECONDS | volume [V]
   snd                        the audio ring's counters
   snd play [FRAMES]          stdin (PCM16 mono, 22,050 Hz) through the ring
   pkg update | list | sources the package verbs (runtime/carts/pkg.py), over the
@@ -679,6 +679,10 @@ def r_media(d, a):
         if not getattr(f, verb)():
             d.err("media", "no %s entry" % verb)
             return 1
+    elif verb == "seek" and len(a) == 2 and _int(a[1]) is not None:
+        if not f.seek(_int(a[1])):
+            d.err("media", "no place to seek in")
+            return 1
     elif verb == "volume" and len(a) <= 2:
         v = f.volume(_int(a[1]) if len(a) == 2 else None)
         if v is None:
@@ -686,7 +690,8 @@ def r_media(d, a):
             return 1
         d.out("%d\n" % v)
     else:
-        return _usage(d, "media", "[play SRC | stop | pause | resume | next | prev | volume [V]]")
+        return _usage(d, "media",
+                      "[play SRC | stop | pause | resume | next | prev | seek SECONDS | volume [V]]")
     return 0
 
 
