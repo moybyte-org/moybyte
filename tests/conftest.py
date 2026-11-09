@@ -344,6 +344,13 @@ def _processes_reset():
     A = sys.modules.get("runtime.achievements")
     if A is not None:
         A.end()
+    S = sys.modules.get("runtime.scheduler")
+    if S is not None:
+        sched = S.SCHED
+        w = sched.wakes
+        w.ended, w.opener, w.goal = sched._ended, sched._open, sched._goal
+        for pid in [p.pid for p in sched.procs.values() if p.state == S.EXITED]:
+            del sched.procs[pid]
 
 
 @pytest.fixture(autouse=True)
@@ -369,7 +376,12 @@ def _processes_fresh():
     in the next test's console, whose banner took a tap meant for the page. Each test starts, and leaves, the shell current,
     the gates unbound (the front's among them, `front.FRONT`), no
     notification, no status item and no achievements process, as a fresh VM has them before its
-    console boots."""
+    console boots. The scheduler is one per VM too: a `Scheduler` built over
+    the shared wakes takes their hooks (a badge's goal read from ITS rows, so
+    a game of the next test's coalesced with no goal), and a crashed
+    service's row stays until the task manager's Close (a later test's task
+    list held another's crashed service); each test starts with `SCHED`'s
+    hooks and no exited row."""
     _processes_reset()
     yield
     _processes_reset()

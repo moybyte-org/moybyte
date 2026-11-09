@@ -288,10 +288,16 @@ def test_a_vm_stop_leaves_no_services_storage_grant(tmp_path, monkeypatch):
     try:
         for _ in range(5):
             monkeypatch.setattr(S, "SCHED", S.Scheduler())    # the new VM's
-            pid = ws.ach.start()
-            assert pid is not None and S.SCHED.procs[pid].ctx is not None
-            assert ws.app_abi.count() == base + 1
-            ws.app_abi = console._app_abi(None)               # the VM stopped
-            assert ws.app_abi.count() == base
+            try:
+                pid = ws.ach.start()
+                assert pid is not None and S.SCHED.procs[pid].ctx is not None
+                assert ws.app_abi.count() == base + 1
+                ws.app_abi = console._app_abi(None)           # the VM stopped
+                assert ws.app_abi.count() == base
+            finally:
+                # The stop took the VM's processes' queues (moy_evq_vm_stop)
+                # and wakes with it; on the host they are this process's.
+                for q in list(S.SCHED.procs):
+                    moybyte.WAKES.end(q)
     finally:
         moy_app.kernel(True)
