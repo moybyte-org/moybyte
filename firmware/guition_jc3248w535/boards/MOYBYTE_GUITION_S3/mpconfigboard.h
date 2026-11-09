@@ -41,6 +41,12 @@
 // when a card is in it (device/card_store.py), and a big card is the common one.
 // FAT12/16/32 cards mount as before. LFN is already on, which exFAT needs.
 #define MICROPY_FATFS_EXFAT                 (1)
+// FatFS takes the store's lock around every call on the card's volume, which
+// a program's own task works too (native/moy_store/moy_vol.h, THE STORE'S LOCK);
+// its long-name buffer is on the calling task's stack (tools/patch_fatfs_lfn.py).
+#define MICROPY_FATFS_REENTRANT             (1)
+#define MICROPY_FATFS_ENABLE_LFN            (2)
+#define MICROPY_FATFS_SYNC_T                uintptr_t
 
 // The Python heap may grow on demand (split heap), but never into this much
 // of PSRAM: it is the Lua VM's, the panel DMA's and the layer pool's share.

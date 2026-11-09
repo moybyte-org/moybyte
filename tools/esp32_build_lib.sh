@@ -355,6 +355,15 @@ moybyte_patch_gc_meters() {
 # pass over the rest of the buffer per store -- ~2.2 ms a row into a 153 KB
 # PSRAM bytearray on the P4. tools/patch_slice_store.py is the patch and the
 # measurement: all-or-nothing, idempotent, and every other store unchanged.
+# FatFS's long-name buffer a board's choice: the port's MICROPY_FATFS_ENABLE_LFN
+# a default, so a re-entrant oofatfs (the store's lock, native/moy_store/
+# moy_vol.h) can put it on the calling task's stack. tools/patch_fatfs_lfn.py
+# is the patch; all-or-nothing, idempotent.
+moybyte_patch_fatfs_lfn() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_fatfs_lfn.py" "${MPY_DIR}" || exit 1
+}
+
 moybyte_patch_slice_store() {
   [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}" || exit 1

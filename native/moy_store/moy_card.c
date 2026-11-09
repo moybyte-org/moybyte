@@ -15,6 +15,7 @@
 // The cache is the T-Deck's (dev 638661e), in C under every board's card:
 // moy_cache.h, with its zero runs over the mounted volume's clusters.
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -58,13 +59,33 @@ static card_t *card_p;
 #define card (*card_p)
 
 void *moy_store_raw_alloc(size_t n);
+static int card_mount(uint32_t sectors);
+static int card_hold(int on);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_store_card_driver);
+
+#if defined(__unix__) && !defined(__EMSCRIPTEN__)
+// The unix port's native card: sectors in RAM, for the tests of a task that
+// works the card with no VM (card_ram).
+#define MOY_CARD_RAM 1
+static uint8_t *s_ram;
+static uint32_t s_ram_sectors;
+#endif
 
 static int io(void *ctx, uint32_t start, uint8_t *buf, uint32_t n, int write) {
     (void)ctx;
     mp_obj_t drv = MP_STATE_VM(moy_store_card_driver);
     if (drv == MP_OBJ_NULL || drv == mp_const_none) {
+        #if MOY_CARD_RAM
+        if (s_ram != NULL) {
+            if (start + n > s_ram_sectors) {
+                return MP_EIO;
+            }
+            uint8_t *at = s_ram + (size_t)start * SECTOR;
+            memcpy(write ? at : buf, write ? buf : at, (size_t)n * SECTOR);
+            return 0;
+        }
+        #endif
         if (moy_sd_card_io == NULL) {
             return MP_ENODEV;
         }
@@ -127,7 +148,26 @@ void *moy_store_card_fatfs(void) {
 // The store's FATFS mounted over the card's `sectors`, with no VM: 0, or an
 // errno value. A second call drops the cache and mounts the same instance
 // again (a card may have changed).
+// The card's FATFS while it is mounted and its sectors come from the board's
+// driver (no Python object between FatFS and the card): the one FAT instance
+// a task other than the VM's may work (moy_vol.h, THE VOLUME TABLE).
+static int card_native(void) {
+    mp_obj_t drv = MP_STATE_VM(moy_store_card_driver);
+    return drv == MP_OBJ_NULL || drv == mp_const_none;
+}
+
+void *moy_store_card_native(void) {
+    return card_native() ? moy_store_card_fatfs() : NULL;
+}
+
 int moy_store_card_mount(uint32_t sectors) {
+    moy_store_lock();
+    int rc = card_mount(sectors);
+    moy_store_unlock();
+    return rc;
+}
+
+static int card_mount(uint32_t sectors) {
     if (!need_card()) {
         return MP_ENOMEM;
     }
@@ -159,12 +199,17 @@ int moy_store_card_mount(uint32_t sectors) {
     card.sectors = sectors;
     moy_cache_drop_all(&card.cache);
     card.cache.every = 0;
+    moy_vol_table_drop(&v->fatfs);
+    moy_vol_fat_lockable(card_native() ? &v->fatfs : NULL);
     FRESULT res = f_mount(&v->fatfs);
     if (res != FR_OK) {
         return fresult_to_errno_table[res];
     }
     card.cache.base = (uint32_t)v->fatfs.database;
     card.cache.every = v->fatfs.csize;
+    if (card_native()) {
+        moy_vol_table_set("/sd", MOY_VOL_KIND_FAT, &v->fatfs);
+    }
     return 0;
 }
 
@@ -181,6 +226,13 @@ int moy_store_card_hold(int on) {
     if (!need_card()) {
         return MP_ENOMEM;
     }
+    moy_store_lock();
+    int rc = card_hold(on);
+    moy_store_unlock();
+    return rc;
+}
+
+static int card_hold(int on) {
     if (on && card.vfs != NULL) {
         for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
             if (m->obj == MP_OBJ_FROM_PTR(card.vfs)) {
@@ -193,6 +245,7 @@ int moy_store_card_hold(int on) {
             }
             card.vfs->fatfs.fs_type = 0;
         }
+        moy_vol_table_drop(&card.vfs->fatfs);
     }
     card.held = on != 0;
     moy_cache_drop_all(&card.cache);
@@ -252,6 +305,39 @@ static mp_obj_t mod_card(size_t n_args, const mp_obj_t *args) {
     return MP_OBJ_FROM_PTR(card.vfs);
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_obj, 1, 2, mod_card);
+
+#if MOY_CARD_RAM
+// card_ram(sectors) -> the volume: the card over a native RAM medium of
+// `sectors`, formatted FAT and mounted (the unix port's, for the tests).
+static mp_obj_t mod_card_ram(mp_obj_t sectors_in) {
+    uint32_t sectors = (uint32_t)mp_obj_get_int(sectors_in);
+    if (!need_card()) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    if (s_ram == NULL || s_ram_sectors != sectors) {
+        free(s_ram);
+        s_ram = calloc(sectors, SECTOR);
+        s_ram_sectors = s_ram != NULL ? sectors : 0;
+        if (s_ram == NULL) {
+            mp_raise_type(&mp_type_MemoryError);
+        }
+    }
+    MP_STATE_VM(moy_store_card_driver) = mp_const_none;
+    int rc = moy_store_card_mount(sectors);
+    if (rc != 0) {
+        static uint8_t work[FF_MAX_SS];
+        moy_store_lock();
+        FRESULT r = f_mkfs(&card.vfs->fatfs, FM_FAT | FM_SFD, 0, work, sizeof work);
+        moy_store_unlock();
+        rc = r == FR_OK ? moy_store_card_mount(sectors) : fresult_to_errno_table[r];
+    }
+    if (rc != 0) {
+        mp_raise_OSError(rc);
+    }
+    return MP_OBJ_FROM_PTR(card.vfs);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(moy_store_card_ram_obj, mod_card_ram);
+#endif
 
 // card_hold(on) -> None: the hold (moy_store_card_hold), raising
 // OSError(EBUSY) while the volume is mounted; card_hold() -> whether held.

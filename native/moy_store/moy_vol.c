@@ -1,5 +1,11 @@
 // The volume seam's three backends (moy_vol.h has the contract).
 
+// The lock's clock and recursive mutex are POSIX's, which a strict C99
+// build on Linux leaves out unless asked.
+#if defined(__linux__) && !defined(_GNU_SOURCE) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE 700
+#endif
+
 #include <string.h>
 
 #include "moy_vol.h"
@@ -42,8 +48,347 @@ extern __typeof__(f_chdir) f_chdir __attribute__((weak));
 #include <unistd.h>
 #endif
 
+// -- the store's lock (moy_vol.h, THE STORE'S LOCK) ------------------------------
+
+#if defined(__has_include) && __has_include("esp_heap_caps.h")
+#define LOCK_RTOS 1
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+#elif !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
+#define LOCK_THREADS 1
+#include <pthread.h>
+#include <time.h>
+#endif
+
+// The holder and its depth: written by the holder alone, so a task reading
+// the owner sees itself only while it holds the lock.
+static uintptr_t s_owner;
+static int s_depth;
+static uint32_t s_held_at;
+static moy_store_lock_stats_t s_stats;
+
+#if LOCK_RTOS
+static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
+static StaticSemaphore_t s_mu_buf;
+static SemaphoreHandle_t s_mu;
+
+static SemaphoreHandle_t mu(void) {
+    if (s_mu == NULL) {
+        portENTER_CRITICAL(&s_mux);
+        if (s_mu == NULL) {
+            s_mu = xSemaphoreCreateMutexStatic(&s_mu_buf);
+        }
+        portEXIT_CRITICAL(&s_mux);
+    }
+    return s_mu;
+}
+
+uintptr_t moy_store_me(void) {
+    return (uintptr_t)xTaskGetCurrentTaskHandle();
+}
+
+static uint32_t now_us(void) {
+    return (uint32_t)esp_timer_get_time();
+}
+
+static int try_take(void) {
+    return xSemaphoreTake(mu(), 0) == pdTRUE;
+}
+
+static void nap(void) {
+    vTaskDelay(1);
+}
+
+static void take(void) {
+    xSemaphoreTake(mu(), portMAX_DELAY);
+}
+
+static void give(void) {
+    xSemaphoreGive(mu());
+}
+#elif LOCK_THREADS
+static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
+
+uintptr_t moy_store_me(void) {
+    return (uintptr_t)pthread_self() | 1u;
+}
+
+static uint32_t now_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u);
+}
+
+static int try_take(void) {
+    return pthread_mutex_trylock(&s_mu) == 0;
+}
+
+static void nap(void) {
+    struct timespec ts = { 0, 100000 };
+    nanosleep(&ts, NULL);
+}
+
+static void take(void) {
+    pthread_mutex_lock(&s_mu);
+}
+
+static void give(void) {
+    pthread_mutex_unlock(&s_mu);
+}
+#else
+uintptr_t moy_store_me(void) {
+    return 1u;
+}
+
+static uint32_t now_us(void) {
+    return 0u;
+}
+
+static int try_take(void) {
+    return 1;
+}
+
+static void nap(void) {
+}
+
+static void take(void) {
+}
+
+static void give(void) {
+}
+#endif
+
+int moy_store_on_vm(void) __attribute__((weak));
+
+// The VM's task goes first: while it waits, another task does not take the
+// lock it let go, so the VM waits for one op at most, never for a task that
+// takes the lock again and again (a mutex hands it to whoever asks next).
+static uint32_t s_vm_wants;
+
+void moy_store_lock(void) {
+    uintptr_t me = moy_store_me();
+    if (__atomic_load_n(&s_owner, __ATOMIC_RELAXED) == me) {
+        s_depth++;
+        return;
+    }
+    int vm = moy_store_on_vm != NULL && moy_store_on_vm();
+    while (!vm && __atomic_load_n(&s_vm_wants, __ATOMIC_ACQUIRE) != 0u) {
+        nap();
+    }
+    if (!try_take()) {
+        uint32_t t0 = now_us();
+        if (vm) {
+            __atomic_add_fetch(&s_vm_wants, 1u, __ATOMIC_RELEASE);
+        }
+        take();
+        if (vm) {
+            __atomic_sub_fetch(&s_vm_wants, 1u, __ATOMIC_RELEASE);
+        }
+        uint32_t w = now_us() - t0;
+        s_stats.waits++;
+        if (w > s_stats.wait_us) {
+            s_stats.wait_us = w;
+        }
+        if (vm && w > s_stats.vm_wait_us) {
+            s_stats.vm_wait_us = w;
+        }
+    }
+    __atomic_store_n(&s_owner, me, __ATOMIC_RELAXED);
+    s_depth = 1;
+    s_held_at = now_us();
+}
+
+void moy_store_unlock(void) {
+    if (__atomic_load_n(&s_owner, __ATOMIC_RELAXED) != moy_store_me() || s_depth <= 0) {
+        return;
+    }
+    if (--s_depth > 0) {
+        return;
+    }
+    uint32_t h = now_us() - s_held_at;
+    s_stats.holds++;
+    if (h > s_stats.hold_us) {
+        s_stats.hold_us = h;
+    }
+    __atomic_store_n(&s_owner, (uintptr_t)0, __ATOMIC_RELAXED);
+    give();
+}
+
+int moy_store_lock_depth(void) {
+    return __atomic_load_n(&s_owner, __ATOMIC_RELAXED) == moy_store_me() ? s_depth : 0;
+}
+
+void moy_store_unlock_to(int depth) {
+    while (moy_store_lock_depth() > depth) {
+        moy_store_unlock();
+    }
+}
+
+void moy_store_lock_stats(moy_store_lock_stats_t *out, int reset) {
+    moy_store_lock();
+    *out = s_stats;
+    if (reset) {
+        memset(&s_stats, 0, sizeof s_stats);
+    }
+    moy_store_unlock();
+}
+
+// -- the volume table (moy_vol.h, THE VOLUME TABLE) --------------------------------
+
+typedef struct {
+    char at[MOY_VOL_TABLE_AT];
+    uint8_t len;
+    uint8_t kind;
+    void *fs;
+} mount_t;
+
+static mount_t s_table[MOY_VOL_TABLE_N];
+
+int moy_vol_table_set(const char *at, uint8_t kind, void *fs) {
+    size_t n = strlen(at);
+    while (n > 1u && at[n - 1u] == '/') {
+        n--;
+    }
+    if (n == 0u || n >= MOY_VOL_TABLE_AT || at[0] != '/') {
+        return MOY_EINVAL;
+    }
+    moy_store_lock();
+    mount_t *free_slot = NULL;
+    int rc = MOY_ENOSPC;
+    for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
+        mount_t *m = &s_table[i];
+        if (m->len == n && memcmp(m->at, at, n) == 0) {
+            free_slot = m;
+            break;
+        }
+        if (m->len == 0u && free_slot == NULL) {
+            free_slot = m;
+        }
+    }
+    if (free_slot != NULL) {
+        memcpy(free_slot->at, at, n);
+        free_slot->at[n] = 0;
+        free_slot->len = (uint8_t)n;
+        free_slot->kind = kind;
+        free_slot->fs = fs;
+        rc = 0;
+    }
+    moy_store_unlock();
+    return rc;
+}
+
+void moy_vol_table_drop(void *fs) {
+    moy_store_lock();
+    for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
+        if (s_table[i].len != 0u && s_table[i].fs == fs) {
+            memset(&s_table[i], 0, sizeof s_table[i]);
+        }
+    }
+    moy_store_unlock();
+}
+
+void moy_vol_table_clear(void) {
+    moy_store_lock();
+    memset(s_table, 0, sizeof s_table);
+    moy_store_unlock();
+}
+
+int moy_vol_table_at(const char *path, moy_vol_t *v, const char **rest) {
+    if (path[0] != '/') {
+        return MOY_ENODEV;
+    }
+    moy_store_lock();
+    const mount_t *best = NULL;
+    for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
+        const mount_t *m = &s_table[i];
+        if (m->len == 0u || (best != NULL && m->len <= best->len)) {
+            continue;
+        }
+        if (m->len == 1u || (strncmp(path, m->at, m->len) == 0
+                             && (path[m->len] == '/' || path[m->len] == 0))) {
+            best = m;
+        }
+    }
+    int rc = MOY_ENODEV;
+    if (best != NULL && best->kind != MOY_VOL_KIND_VM) {
+        v->kind = best->kind;
+        v->fs = best->fs;
+        if (best->kind == MOY_VOL_KIND_POSIX || best->len == 1u) {
+            *rest = path;
+        } else {
+            *rest = path[best->len] ? path + best->len : "/";
+        }
+        rc = 0;
+    }
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_table_mounts(int (*fn)(void *arg, const char *name), void *arg) {
+    mount_t t[MOY_VOL_TABLE_N];
+    moy_store_lock();
+    memcpy(t, s_table, sizeof t);
+    moy_store_unlock();
+    for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
+        if (t[i].len <= 1u) {
+            continue;
+        }
+        char name[MOY_VOL_TABLE_AT];
+        size_t n = 0;
+        while (n + 1u < t[i].len && t[i].at[n + 1u] != '/') {
+            name[n] = t[i].at[n + 1u];
+            n++;
+        }
+        name[n] = 0;
+        int r = n > 0 ? fn(arg, name) : 0;
+        if (r != 0) {
+            return r;
+        }
+    }
+    return 0;
+}
+
+// -- FatFS's grant (oofatfs built FF_FS_REENTRANT) --------------------------------
+
+static void *s_fat_locked;
+
+void moy_vol_fat_lockable(void *fs) {
+    s_fat_locked = fs;
+}
+
+#if MOY_VOL_FAT && FF_FS_REENTRANT
+// One sync object, the store's lock, for the instance a task can reach; none
+// for any other (a VfsFat over a Python block device, which only the VM's
+// task works and whose sectors can raise from inside FatFS).
+int ff_cre_syncobj(FATFS *fs, FF_SYNC_t *sobj) {
+    *sobj = (fs == s_fat_locked) ? (FF_SYNC_t)(uintptr_t)fs : (FF_SYNC_t)0;
+    return 1;
+}
+
+int ff_req_grant(FF_SYNC_t sobj) {
+    if (sobj) {
+        moy_store_lock();
+    }
+    return 1;
+}
+
+void ff_rel_grant(FF_SYNC_t sobj) {
+    if (sobj) {
+        moy_store_unlock();
+    }
+}
+
+int ff_del_syncobj(FF_SYNC_t sobj) {
+    (void)sobj;
+    return 1;
+}
+#endif
+
 struct moy_vol_file {
     struct moy_vol_file *next;      // the open list moy_vol_unwind walks
+    uintptr_t who;                  // the task that opened it
     size_t bytes;                   // as allocated
     uint8_t kind;
     void *fs;
@@ -108,8 +453,8 @@ static int px_err(void) {
 }
 #endif
 
-int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
-                 moy_vol_file_t **out) {
+static int vol_open(const moy_vol_t *v, const char *path, int mode,
+                    moy_vol_file_t **out) {
     size_t bytes = sizeof(moy_vol_file_t);
     #if MOY_VOL_LFS2
     if (v->kind == MOY_VOL_KIND_LFS2) {
@@ -172,6 +517,7 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
         return rc;
     }
     if (!held) {
+        f->who = moy_store_me();
         f->next = open_files;
         open_files = f;
     }
@@ -179,7 +525,7 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
     return 0;
 }
 
-int moy_vol_read(moy_vol_file_t *f, void *buf, size_t n, size_t *got) {
+static int vol_read(moy_vol_file_t *f, void *buf, size_t n, size_t *got) {
     *got = 0;
     switch (f->kind) {
         #if MOY_VOL_FAT
@@ -220,7 +566,7 @@ int moy_vol_read(moy_vol_file_t *f, void *buf, size_t n, size_t *got) {
     }
 }
 
-int moy_vol_write(moy_vol_file_t *f, const void *buf, size_t n) {
+static int vol_write(moy_vol_file_t *f, const void *buf, size_t n) {
     switch (f->kind) {
         #if MOY_VOL_FAT
         case MOY_VOL_KIND_FAT: {
@@ -265,7 +611,7 @@ int moy_vol_write(moy_vol_file_t *f, const void *buf, size_t n) {
     }
 }
 
-int moy_vol_size(moy_vol_file_t *f, uint32_t *n) {
+static int vol_size(moy_vol_file_t *f, uint32_t *n) {
     switch (f->kind) {
         #if MOY_VOL_FAT
         case MOY_VOL_KIND_FAT:
@@ -297,7 +643,7 @@ int moy_vol_size(moy_vol_file_t *f, uint32_t *n) {
     }
 }
 
-int moy_vol_seek(moy_vol_file_t *f, uint32_t at) {
+static int vol_seek(moy_vol_file_t *f, uint32_t at) {
     switch (f->kind) {
         #if MOY_VOL_FAT
         case MOY_VOL_KIND_FAT:
@@ -320,7 +666,7 @@ int moy_vol_seek(moy_vol_file_t *f, uint32_t at) {
     }
 }
 
-int moy_vol_close(moy_vol_file_t *f) {
+static int vol_close(moy_vol_file_t *f) {
     int rc = MOY_EBADF;
     unlink_open(f);
     switch (f->kind) {
@@ -353,29 +699,61 @@ void moy_vol_set_gate(moy_vol_gate_fn fn) {
     gate = fn;
 }
 
+// What moy_vol_gate_enter took: the lock, and the bus gate.
+enum { GATE_BUS = 1, GATE_LOCK = 2 };
+
 int moy_vol_gate_enter(const char *path) {
     moy_vol_t v;
     const char *r;
-    if (gate == NULL || moy_vol_at(path, &v, &r) != 0 || v.kind != MOY_VOL_KIND_FAT) {
-        return 0;
+    int rc = moy_vol_at(path, &v, &r);      // first: on the VM's task it can raise
+    if (rc == MOY_ENODEV && moy_store_on_vm != NULL && !moy_store_on_vm()) {
+        return -1;
+    }
+    moy_store_lock();
+    if (gate == NULL || rc != 0 || v.kind != MOY_VOL_KIND_FAT) {
+        return GATE_LOCK;
     }
     gate(1);
-    return 1;
+    return GATE_LOCK | GATE_BUS;
 }
 
 void moy_vol_gate_leave(int entered) {
-    if (entered && gate != NULL) {
+    if (entered < 0) {
+        return;
+    }
+    if ((entered & GATE_BUS) && gate != NULL) {
         gate(0);
+    }
+    if (entered & GATE_LOCK) {
+        moy_store_unlock();
     }
 }
 
+// The calling task's files and working folders: another task's are its own.
 void moy_vol_unwind(void) {
-    while (open_files != NULL) {
-        moy_vol_close(open_files);
+    uintptr_t me = moy_store_me();
+    moy_store_lock();
+    for (int again = 1; again;) {
+        again = 0;
+        for (moy_vol_file_t *f = open_files; f != NULL; f = f->next) {
+            if (f->who == me) {
+                moy_vol_close(f);
+                again = 1;
+                break;
+            }
+        }
     }
-    while (heres != NULL) {
-        moy_vol_leave(heres);
+    for (int again = 1; again;) {
+        again = 0;
+        for (moy_vol_here_t *h = heres; h != NULL; h = h->next) {
+            if (h->who == me) {
+                moy_vol_leave(h);
+                again = 1;
+                break;
+            }
+        }
     }
+    moy_store_unlock();
 }
 
 int moy_vol_enter(const moy_vol_t *v, const char *dir, moy_vol_here_t *h) {
@@ -389,6 +767,8 @@ int moy_vol_enter(const moy_vol_t *v, const char *dir, moy_vol_here_t *h) {
     if (h->dir == NULL) {
         return MOY_ENOMEM;
     }
+    moy_store_lock();
+    h->who = moy_store_me();
     memcpy(h->dir, dir, h->dir_n);
     #if MOY_VOL_FAT
     if (v->kind == MOY_VOL_KIND_FAT) {
@@ -401,6 +781,7 @@ int moy_vol_enter(const moy_vol_t *v, const char *dir, moy_vol_here_t *h) {
         #endif
         int rc = fat_err(FF(f_chdir)(fs, h->dir));
         if (rc != 0) {
+            moy_store_unlock();
             moy_store_free(h->dir, h->dir_n + 1u);
             h->dir = NULL;
             return rc;
@@ -462,6 +843,7 @@ void moy_vol_leave(moy_vol_here_t *h) {
     }
     if (h->dir != NULL) {
         moy_store_free(h->dir, h->dir_n + 1u);
+        moy_store_unlock();
     }
     h->name = h->dir = NULL;
     h->name_cap = 0;
@@ -479,7 +861,7 @@ static int64_t days_from_civil(int y, unsigned m, unsigned d) {
 }
 #endif
 
-int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
+static int vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
     st->is_dir = 0;
     st->size = 0;
     st->mtime = 0;
@@ -544,8 +926,8 @@ int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
     }
 }
 
-int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
-                 void *ctx) {
+static int vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
+                    void *ctx) {
     int rc = 0;
     moy_store_tick();
     switch (v->kind) {
@@ -668,7 +1050,7 @@ int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
     }
 }
 
-int moy_vol_mkdir(const moy_vol_t *v, const char *path) {
+static int vol_mkdir(const moy_vol_t *v, const char *path) {
     switch (v->kind) {
         #if MOY_VOL_FAT
         case MOY_VOL_KIND_FAT:
@@ -688,7 +1070,7 @@ int moy_vol_mkdir(const moy_vol_t *v, const char *path) {
     }
 }
 
-int moy_vol_remove(const moy_vol_t *v, const char *path) {
+static int vol_remove(const moy_vol_t *v, const char *path) {
     switch (v->kind) {
         #if MOY_VOL_FAT
         case MOY_VOL_KIND_FAT:
@@ -733,7 +1115,7 @@ static int native_rename(const moy_vol_t *v, const char *src, const char *dst) {
     }
 }
 
-int moy_vol_rename(const moy_vol_t *v, const char *src, const char *dst) {
+static int vol_rename(const moy_vol_t *v, const char *src, const char *dst) {
     if (v->kind != MOY_VOL_KIND_FAT) {
         moy_vol_stat_t st;
         if (moy_vol_stat(v, dst, &st) == 0) {
@@ -743,11 +1125,97 @@ int moy_vol_rename(const moy_vol_t *v, const char *src, const char *dst) {
     return native_rename(v, src, dst);
 }
 
-int moy_vol_replace(const moy_vol_t *v, const char *src, const char *dst) {
+static int vol_replace(const moy_vol_t *v, const char *src, const char *dst) {
     int rc = native_rename(v, src, dst);
     if (rc != 0 && v->kind == MOY_VOL_KIND_FAT) {
         moy_vol_remove(v, dst);
         rc = native_rename(v, src, dst);
     }
+    return rc;
+}
+
+// -- every call under the store's lock ------------------------------------------
+
+int moy_vol_open(const moy_vol_t *v, const char *path, int mode, moy_vol_file_t **out) {
+    moy_store_lock();
+    int rc = vol_open(v, path, mode, out);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_read(moy_vol_file_t *f, void *buf, size_t n, size_t *got) {
+    moy_store_lock();
+    int rc = vol_read(f, buf, n, got);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_write(moy_vol_file_t *f, const void *buf, size_t n) {
+    moy_store_lock();
+    int rc = vol_write(f, buf, n);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_size(moy_vol_file_t *f, uint32_t *n) {
+    moy_store_lock();
+    int rc = vol_size(f, n);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_seek(moy_vol_file_t *f, uint32_t at) {
+    moy_store_lock();
+    int rc = vol_seek(f, at);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_close(moy_vol_file_t *f) {
+    moy_store_lock();
+    int rc = vol_close(f);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
+    moy_store_lock();
+    int rc = vol_stat(v, path, st);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn, void *ctx) {
+    moy_store_lock();
+    int rc = vol_list(v, dir, fn, ctx);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_mkdir(const moy_vol_t *v, const char *path) {
+    moy_store_lock();
+    int rc = vol_mkdir(v, path);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_remove(const moy_vol_t *v, const char *path) {
+    moy_store_lock();
+    int rc = vol_remove(v, path);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_rename(const moy_vol_t *v, const char *src, const char *dst) {
+    moy_store_lock();
+    int rc = vol_rename(v, src, dst);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_replace(const moy_vol_t *v, const char *src, const char *dst) {
+    moy_store_lock();
+    int rc = vol_replace(v, src, dst);
+    moy_store_unlock();
     return rc;
 }

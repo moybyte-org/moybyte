@@ -23,8 +23,10 @@
 
 void moy_store_unwind(void);
 
-#define GUARD_BEGIN { nlr_buf_t nlr_; if (nlr_push(&nlr_) == 0) {
-#define GUARD_END nlr_pop(); } else { moy_store_unwind(); nlr_jump(nlr_.ret_val); } }
+// A verb holds the store's lock whole (moy_vol.h, THE STORE'S LOCK).
+#define GUARD_BEGIN { nlr_buf_t nlr_; moy_store_lock(); if (nlr_push(&nlr_) == 0) {
+#define GUARD_END nlr_pop(); moy_store_unlock(); } else { moy_store_unwind(); \
+    nlr_jump(nlr_.ret_val); } }
 
 static const char CARTS_DIR[] = "/sd/moybyte/carts";
 

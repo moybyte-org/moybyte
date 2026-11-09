@@ -5,13 +5,14 @@
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,
 // _read_bytes, _remove, _mkdir and _exists.
 //
-// THE BORROW (native/moy_store/moy_vol.h). moy_vol_at resolves a
-// path through MicroPython's mount table to the VM's own instance: a VfsFat's
-// FATFS, a VfsLfs2's lfs2_t (refused loudly when the private layout this file
-// mirrors stops matching), or POSIX under a VfsPosix at "/". A sector read
-// through a Python block device can raise, so every call runs under nlr_push
-// and an exception closes the files the call opened and frees its scratch
-// before it goes on. Scratch and the marker cache are PSRAM on a board,
+// THE BORROW (native/moy_store/moy_vol.h). On the VM's task moy_vol_at
+// resolves a path through MicroPython's mount table to the VM's own instance:
+// a VfsFat's FATFS, a VfsLfs2's lfs2_t (refused loudly when the private layout
+// this file mirrors stops matching), or POSIX under a VfsPosix at "/"; on any
+// other task through the volume table, which it fills from that mount table.
+// A sector read through a Python block device can raise, so every call runs
+// under nlr_push and the store's lock, and an exception closes the files the
+// call opened, frees its scratch and lets go of the lock before it goes on. Scratch and the marker cache are PSRAM on a board,
 // malloc elsewhere, never the gc heap.
 
 #include <string.h>
@@ -58,13 +59,15 @@
 
 // -- the allocator -------------------------------------------------------------
 //
-// Every block carries a header; a scratch block is also on a list, which an
-// exception frees whole.
+// Every block carries a header; a scratch block is also on a list, with the
+// task that made it, and an exception frees that task's whole. The list is
+// worked under the store's lock: any task allocates.
 
 typedef struct blk {
     struct blk *prev, *next;
     size_t n;
     size_t keep;
+    uintptr_t who;
 } blk_t;
 
 static blk_t *scratch;
@@ -117,7 +120,9 @@ static void *alloc_blk(size_t n, int keep) {
     }
     b->n = n;
     b->keep = (size_t)keep;
+    moy_store_lock();
     if (!keep) {
+        b->who = moy_store_me();
         b->next = scratch;
         if (scratch != NULL) {
             scratch->prev = b;
@@ -128,6 +133,7 @@ static void *alloc_blk(size_t n, int keep) {
     if (mem_now > mem_high) {
         mem_high = mem_now;
     }
+    moy_store_unlock();
     return b + 1;
 }
 
@@ -146,6 +152,9 @@ extern void moy_kernel_feed(void) __attribute__((weak));
 
 void moy_store_tick(void) {
     #if MOY_STORE_PSRAM
+    if (!moy_store_on_vm()) {
+        return;
+    }
     static mp_uint_t last;
     uint32_t t, g, f;
     mp_uint_t now = mp_hal_ticks_ms();
@@ -167,6 +176,7 @@ void moy_store_free(void *p, size_t n) {
         return;
     }
     blk_t *b = (blk_t *)p - 1;
+    moy_store_lock();
     if (!b->keep) {
         if (b->prev != NULL) {
             b->prev->next = b->next;
@@ -178,29 +188,43 @@ void moy_store_free(void *p, size_t n) {
         }
     }
     mem_now -= b->n;
+    moy_store_unlock();
     raw_free(b);
 }
 
-// What a raised call leaves: its open files closed, its scratch freed.
+// What a raised call leaves: its open files closed, its working folders left
+// and its scratch freed, the calling task's alone.
 static void unwind(void) {
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         moy_vol_unwind();
         nlr_pop();
     }
-    while (scratch != NULL) {
-        moy_store_free(scratch + 1, scratch->n);
+    uintptr_t me = moy_store_me();
+    moy_store_lock();
+    for (blk_t *b = scratch; b != NULL;) {
+        blk_t *next = b->next;
+        if (b->who == me) {
+            moy_store_free(b + 1, b->n);
+        }
+        b = next;
     }
+    moy_store_unlock();
 }
 
 // The same, for a store call made from another module's binding (moy_net's
-// webhost) whose own nlr frame caught the raise.
+// webhost, a compiled cart's files) whose own nlr frame caught the raise, at
+// the outside of its store calls: every hold the task has is let go.
 void moy_store_unwind(void) {
     unwind();
+    moy_store_unlock_to(0);
 }
 
-#define GUARD_BEGIN { nlr_buf_t nlr_; if (nlr_push(&nlr_) == 0) {
-#define GUARD_END nlr_pop(); } else { unwind(); nlr_jump(nlr_.ret_val); } }
+// A call from Python holds the store's lock whole; a raise drops what it took.
+#define GUARD_BEGIN { nlr_buf_t nlr_; int depth_ = moy_store_lock_depth(); \
+    moy_store_lock(); if (nlr_push(&nlr_) == 0) {
+#define GUARD_END nlr_pop(); moy_store_unlock(); } else { unwind(); \
+    moy_store_unlock_to(depth_); nlr_jump(nlr_.ret_val); } }
 
 // -- the borrow ------------------------------------------------------------------
 
@@ -222,46 +246,83 @@ extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
 extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
                            uint32_t *bsize) __attribute__((weak));
 
-// While no VM runs (its mount table is gone: docs/history/kernel_cartpath_2026-10.md
-// section 5.3) the kernel's own volumes answer: the card's FATFS at /sd, held
-// open across the stop (moy_card.c), and the internal flash's littlefs at /.
-void *moy_store_card_fatfs(void);
-#if MICROPY_VFS_LFS2
-extern lfs2_t *moy_kvol_lfs(void) __attribute__((weak));
-#endif
+// The card's FATFS while it is mounted over its native driver, or NULL
+// (moy_card.c); a task other than the VM's never reaches any other FAT.
+void *moy_store_card_native(void);
 
-static int vol_at_kernel(const char *path, moy_vol_t *v, const char **rest) {
-    if (path[0] != '/') {
-        return MP_ENODEV;
+// The VM's task: a thread of the VM's while its mount table stands. Every
+// other task (a program's, a service's, the kernel's frame while no VM runs)
+// resolves through the volume table and never enters the VM.
+int moy_store_on_vm(void) {
+    #if MICROPY_PY_THREAD
+    if (mp_thread_get_state() == NULL) {
+        return 0;
     }
-    #if MICROPY_VFS_FAT
-    if (strncmp(path, "/sd", 3) == 0 && (path[3] == '/' || path[3] == 0)) {
-        void *fs = moy_store_card_fatfs();
-        if (fs == NULL) {
-            return MP_ENODEV;
+    #endif
+    return MP_STATE_VM(vfs_mount_table) != NULL;
+}
+
+// The volume table as the VM's mount table holds it (moy_vol.h, THE VOLUME
+// TABLE): a KVfs, the card's VfsFat over its native driver, VfsPosix at "/".
+// Rebuilt when the mount table changed since the last look, which every
+// resolve on the VM's task takes, and at the console's ask after a mount
+// (vol_sync).
+static uintptr_t s_mounts_seen;
+
+static void table_sync(int force) {
+    uintptr_t sig = 0;
+    for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
+        sig = sig * 31u + (uintptr_t)m + (uintptr_t)m->obj * 7u + m->len;
+    }
+    if (!force && sig == s_mounts_seen) {
+        return;
+    }
+    moy_store_lock();
+    s_mounts_seen = sig;
+    moy_vol_table_clear();
+    for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
+        if (m->len == 0 || m->len >= MOY_VOL_TABLE_AT) {
+            continue;
         }
-        v->kind = MOY_VOL_KIND_FAT;
-        v->fs = fs;
-        *rest = path[3] ? path + 3 : "/";
-        return 0;
+        char at[MOY_VOL_TABLE_AT];
+        memcpy(at, m->str, m->len);
+        at[m->len] = 0;
+        #if MICROPY_VFS_LFS2
+        if (moy_kvfs_lfs != NULL) {
+            void *k = moy_kvfs_lfs(m->obj);
+            if (k != NULL) {
+                moy_vol_table_set(at, MOY_VOL_KIND_LFS2, k);
+                continue;
+            }
+        }
+        #endif
+        const mp_obj_type_t *t = mp_obj_get_type(m->obj);
+        #if MICROPY_VFS_FAT
+        if (t == &mp_fat_vfs_type) {
+            void *fs = &((fs_user_mount_t *)MP_OBJ_TO_PTR(m->obj))->fatfs;
+            if (fs == moy_store_card_native()) {
+                moy_vol_table_set(at, MOY_VOL_KIND_FAT, fs);
+                continue;
+            }
+        }
+        #endif
+        #if MICROPY_VFS_POSIX
+        if (t == &mp_type_vfs_posix && m->len == 1) {
+            moy_vol_table_set(at, MOY_VOL_KIND_POSIX, NULL);
+            continue;
+        }
+        #endif
+        (void)t;
+        moy_vol_table_set(at, MOY_VOL_KIND_VM, NULL);   // the VM's alone
     }
-    #endif
-    #if MICROPY_VFS_LFS2
-    lfs2_t *k = moy_kvol_lfs != NULL ? moy_kvol_lfs() : NULL;
-    if (k != NULL) {
-        v->kind = MOY_VOL_KIND_LFS2;
-        v->fs = k;
-        *rest = path;
-        return 0;
-    }
-    #endif
-    return MP_ENODEV;
+    moy_store_unlock();
 }
 
 int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
-    if (MP_STATE_VM(vfs_mount_table) == NULL) {
-        return vol_at_kernel(path, v, rest);
+    if (!moy_store_on_vm()) {
+        return moy_vol_table_at(path, v, rest);
     }
+    table_sync(0);
     const char *r = path;
     mp_vfs_mount_t *m = mp_vfs_lookup_path(path, &r);
     if (m == MP_VFS_ROOT) {
@@ -323,12 +384,8 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
 }
 
 int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg) {
-    if (MP_STATE_VM(vfs_mount_table) == NULL) {
-        #if MICROPY_VFS_FAT
-        return moy_store_card_fatfs() != NULL ? fn(arg, "sd") : 0;
-        #else
-        return 0;
-        #endif
+    if (!moy_store_on_vm()) {
+        return moy_vol_table_mounts(fn, arg);
     }
     for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
         char name[32];
@@ -1467,10 +1524,145 @@ static mp_obj_t mod_mem(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
 
+// lock_stats(reset=False) -> (holds, longest hold, longest wait, the VM's task's
+// longest wait, waits), the times in microseconds: the store's lock's meter
+// (moy_vol.h, THE STORE'S LOCK).
+static mp_obj_t mod_lock_stats(size_t n_args, const mp_obj_t *args) {
+    moy_store_lock_stats_t st;
+    moy_store_lock_stats(&st, n_args > 0 && mp_obj_is_true(args[0]));
+    mp_obj_t t[5] = { mp_obj_new_int_from_uint(st.holds), mp_obj_new_int_from_uint(st.hold_us),
+                      mp_obj_new_int_from_uint(st.wait_us), mp_obj_new_int_from_uint(st.vm_wait_us),
+                      mp_obj_new_int_from_uint(st.waits) };
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lock_stats_obj, 0, 1, mod_lock_stats);
+
+#if defined(__unix__) && !defined(__EMSCRIPTEN__) && MICROPY_PY_THREAD
+// THE TESTS' TASK: a thread of no VM working the store as a program's own task
+// does, each op inside the store's gate (tests/test_store_tasks.py).
+// task(dir, rounds) starts it: each round publishes <dir>/t<i>.txt, reads it
+// back, renames it <dir>/r<i>.txt and reads that, and lists the folder.
+// task_join() -> (rounds whole, the first failure's round, its errno, the
+// gate's -1s): waits for it.
+#include <pthread.h>
+#include <stdio.h>
+
+typedef struct {
+    pthread_t t;
+    char dir[96];
+    int rounds, ok, bad_at, bad_rc, refused, running;
+} task_t;
+
+static task_t s_task;
+
+static int task_count(void *ctx, const char *name, size_t len, int is_dir, uint32_t size) {
+    (void)name;
+    (void)len;
+    (void)is_dir;
+    (void)size;
+    (*(int *)ctx)++;
+    return 0;
+}
+
+static int task_round(task_t *k, int i) {
+    char a[128], b[128], text[48];
+    snprintf(a, sizeof a, "%s/t%d.txt", k->dir, i);
+    snprintf(b, sizeof b, "%s/r%d.txt", k->dir, i);
+    int n = snprintf(text, sizeof text, "task round %d", i);
+    int g = moy_vol_gate_enter(a);
+    if (g < 0) {
+        k->refused++;
+        return MP_ENODEV;
+    }
+    moy_buf_t got = { NULL, 0 };
+    int rc = moy_fs_publish(a, text, (size_t)n);
+    if (rc == 0) {
+        rc = moy_fs_read(a, NULL, &got);
+    }
+    if (rc == 0 && (got.n != (size_t)n || memcmp(got.p, text, (size_t)n) != 0)) {
+        rc = MP_EIO;
+    }
+    moy_buf_free(&got);
+    if (rc == 0) {
+        moy_fs_remove(b);
+        rc = moy_fs_rename(a, b);
+    }
+    if (rc == 0) {
+        rc = moy_fs_read_file(b, 4096, &got);
+        if (rc == 0 && (got.n != (size_t)n || memcmp(got.p, text, (size_t)n) != 0)) {
+            rc = MP_EIO;
+        }
+        moy_buf_free(&got);
+    }
+    if (rc == 0) {
+        moy_vol_t v;
+        const char *rest;
+        int seen = 0;
+        rc = moy_vol_at(k->dir, &v, &rest);
+        if (rc == 0) {
+            rc = moy_vol_list(&v, rest, task_count, &seen);
+        }
+        if (rc == 0 && seen < 1) {
+            rc = MP_ENOENT;
+        }
+    }
+    moy_vol_gate_leave(g);
+    return rc;
+}
+
+static void *task_run(void *arg) {
+    task_t *k = arg;
+    for (int i = 0; i < k->rounds; i++) {
+        int rc = task_round(k, i);
+        if (rc == 0) {
+            k->ok++;
+        } else if (k->bad_rc == 0) {
+            k->bad_at = i;
+            k->bad_rc = rc;
+        }
+    }
+    return NULL;
+}
+
+static mp_obj_t mod_task(mp_obj_t dir, mp_obj_t rounds) {
+    if (s_task.running) {
+        mp_raise_OSError(MP_EBUSY);
+    }
+    memset(&s_task, 0, sizeof s_task);
+    snprintf(s_task.dir, sizeof s_task.dir, "%s", mp_obj_str_get_str(dir));
+    s_task.rounds = mp_obj_get_int(rounds);
+    s_task.bad_at = -1;
+    if (pthread_create(&s_task.t, NULL, task_run, &s_task) != 0) {
+        mp_raise_OSError(MP_EAGAIN);
+    }
+    s_task.running = 1;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_task_obj, mod_task);
+
+static mp_obj_t mod_task_join(void) {
+    if (s_task.running) {
+        MP_THREAD_GIL_EXIT();
+        pthread_join(s_task.t, NULL);
+        MP_THREAD_GIL_ENTER();
+        s_task.running = 0;
+    }
+    mp_obj_t t[4] = { MP_OBJ_NEW_SMALL_INT(s_task.ok), MP_OBJ_NEW_SMALL_INT(s_task.bad_at),
+                      MP_OBJ_NEW_SMALL_INT(s_task.bad_rc), MP_OBJ_NEW_SMALL_INT(s_task.refused) };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_task_join_obj, mod_task_join);
+#define MOY_STORE_TASK 1
+#endif
+
 #if MICROPY_VFS_FAT
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_stats_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_hold_obj);
+#if defined(__unix__) && !defined(__EMSCRIPTEN__)
+MP_DECLARE_CONST_FUN_OBJ_1(moy_store_card_ram_obj);
+#define MOY_STORE_CARD_RAM 1
+#endif
 #endif
 
 // The kernel's internal volume's VFS type (moy_kvfs.c), where it compiles.
@@ -1538,8 +1730,16 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_card), MP_ROM_PTR(&moy_store_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_card_stats), MP_ROM_PTR(&moy_store_card_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_card_hold), MP_ROM_PTR(&moy_store_card_hold_obj) },
+    #if defined(MOY_STORE_CARD_RAM)
+    { MP_ROM_QSTR(MP_QSTR_card_ram), MP_ROM_PTR(&moy_store_card_ram_obj) },
+    #endif
     #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_store) },
+    { MP_ROM_QSTR(MP_QSTR_lock_stats), MP_ROM_PTR(&mod_lock_stats_obj) },
+    #if defined(MOY_STORE_TASK)
+    { MP_ROM_QSTR(MP_QSTR_task), MP_ROM_PTR(&mod_task_obj) },
+    { MP_ROM_QSTR(MP_QSTR_task_join), MP_ROM_PTR(&mod_task_join_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_set_publish_root), MP_ROM_PTR(&mod_set_publish_root_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish), MP_ROM_PTR(&mod_publish_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish_bak), MP_ROM_PTR(&mod_publish_bak_obj) },

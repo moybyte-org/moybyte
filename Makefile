@@ -236,8 +236,11 @@ UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
 # MICROPY_ENABLE_VM_ABORT is the boards' too (each console's mpconfigboard.h):
 # the scheduler's callback guard, native/moy_kernel/modmoy_guard.c. It changes
 # the VM's state struct, so a build tree whose objects were compiled with
-# other flags is rebuilt whole (the `moy_cflags` stamp below).
-UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off -DMICROPY_ENABLE_VM_ABORT=1
+# other flags is rebuilt whole (the `moy_cflags` stamp below). The FatFS
+# grant is the boards' too: every call on the card's volume takes the store's
+# lock (native/moy_store/moy_vol.h, THE STORE'S LOCK), and it changes FATFS.
+UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off -DMICROPY_ENABLE_VM_ABORT=1 \
+	-DMICROPY_FATFS_REENTRANT=1 -DMICROPY_FATFS_SYNC_T=uintptr_t -DMICROPY_FATFS_ENABLE_LFN=2
 UNIX_MP_R32_CFLAGS := $(UNIX_MP_CFLAGS) \
 	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
 	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
@@ -278,6 +281,7 @@ unix-micropython:
 # news about a test binary that is not an image.
 	@MOYBYTE_REQUIRE_WEB_BUNDLE=0 $(PYTHON) tools/gen_web_blob.py --quiet >/dev/null
 	@bash tools/mpy_tree.sh $(UNIX_MP_SRC) $(UNIX_MP_TAG)
+	@$(PYTHON) tools/patch_fatfs_lfn.py $(UNIX_MP_SRC)
 # Separate from the clone on purpose (the web runner's build.sh learned the
 # same lesson): a checkout can exist WITHOUT its submodules if a previous run
 # died between the two, and a guarded init could never repair that. It is also

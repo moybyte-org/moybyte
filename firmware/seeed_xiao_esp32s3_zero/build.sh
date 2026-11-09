@@ -66,6 +66,9 @@ moybyte_patch_native_code_free
 # An equal-length slice store moves no tail: every board takes it, and
 # tools/patch_slice_store.py carries the measurement.
 moybyte_patch_slice_store
+# DECLINED moybyte_patch_fatfs_lfn -- the long-name buffer on the stack, for a
+# re-entrant oofatfs: the Zero runs no program on a task of its own, so its
+# FatFS stays the port's, unlocked.
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache

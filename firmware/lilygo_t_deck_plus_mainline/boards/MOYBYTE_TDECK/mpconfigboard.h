@@ -63,6 +63,12 @@
 // ENODEV and leaves the console on its flash store. FAT12/16/32 cards mount as
 // before. LFN is already on, which exFAT needs.
 #define MICROPY_FATFS_EXFAT                 (1)
+// FatFS takes the store's lock around every call on the card's volume, which
+// a program's own task works too (native/moy_store/moy_vol.h, THE STORE'S LOCK);
+// its long-name buffer is on the calling task's stack (tools/patch_fatfs_lfn.py).
+#define MICROPY_FATFS_REENTRANT             (1)
+#define MICROPY_FATFS_ENABLE_LFN            (2)
+#define MICROPY_FATFS_SYNC_T                uintptr_t
 
 // Audio is a MAX98357 mono I2S amp (BCK 7 / WS 5 / DOUT 6), driven by the
 // `moy_audio` usermod's core-1 feeder task. `machine.I2S` is on because
