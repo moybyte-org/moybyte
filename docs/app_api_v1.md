@@ -348,7 +348,7 @@ imports its rows, §10).
 | `network` | `wifi` |
 | `multiplayer` | `net`, `on_net` (`docs/moy_cart_api.md`, Multiplayer) |
 | `pins` | `pin_write`, `pin_read` (`docs/moy_cart_api.md`, Pins) |
-| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); `http`, `lora` and `mic` by handle on the compiled tiers too (§10, Devices by handle) |
+| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); `http`, `lora` (with LoRaWAN), `mic` and `ble` by handle on the compiled tiers too (§10, Devices by handle) |
 | `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1); by handle on the compiled tiers (§10) |
 | `full_access` | what a native (ELF) cart must ask for, and what admits an unsigned compiled module (§10) |
 | `console` | `print` writes to the text console's scrollback instead of drawing (a script's, the terminal's) |
@@ -715,13 +715,13 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
 | `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
 | `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
-| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
-| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
-| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
-| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
-| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
-| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
-| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
+| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
+| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
+| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
+| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
+| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
+| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
+| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -797,7 +797,7 @@ a native module) holds a lease or a device API by a handle where a Python
 program holds an object (`runtime/system/dev_handles.py` is the authority
 on every name, key and answer). `dev_open(name, cfg)` answers the handle:
 `name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
-`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`), `cfg` words
+`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`), `cfg` words
 `key=value` (`"mode=out value=1"`, `"baudrate=9600"`, `"scl=20 sda=21
 addr=0x48"`, `"url=http://example.com/ cap=4096"`). On the handle,
 `dev_read(h, buf, cap)` takes what waits (0 when nothing does),
@@ -808,18 +808,37 @@ number (`"value"`, `"any"`, `"status"`, `"rssi"`, ...); `dev_close(h)` gives
 it back, and the process's end closes what it left open. A ring's records
 are read through the handle on every tier, never posted as messages: a
 pin's edges (`dev_set(h, "edges=both")`, then 8 bytes an edge from
-`dev_read`), a packet the radio heard, the microphone's samples. A program
-polls its handles where it polls its messages, in `_update` or on a timer.
+`dev_read`), a packet the radio heard, the microphone's samples, the BLE
+face's events. A program polls its handles where it polls its messages, in
+`_update` or on a timer.
+
+The radios act by `dev_set` words, one action a set, and `dev_write`
+carries the bytes to where a word pointed it. A `ble` handle scans
+(`"scan=3000"`), connects (`"connect=aa:bb:cc:dd:ee:ff"`, `"connect=off"`),
+finds a characteristic (`"find=2a19"`, or the 128-bit UUID), reads it
+(`"read=0x20"`), subscribes (`"subscribe=0x10"`, `"unsubscribe=0x10"`) and
+advertises (`"advertise=name data=ffff0102"`, `"advertise=off"`);
+`"write=0x30"` makes each `dev_write` a write to that characteristic. What
+each did comes back from `dev_read` as records, Python's `ble.on` events
+with their bytes: a 12-byte head (the event, the bytes after it, `a`,
+`b`) then those bytes, an advertisement's address and name, a read's
+value, a notification's. A `lora` handle joins a LoRaWAN network with
+`"join=otaa dev_eui=... join_eui=... app_key=..."` (the keys in hex as a
+network console prints them) and `"send=2"` makes each `dev_write` an
+uplink on port 2 (`"send=raw"` a raw packet again); a downlink is read as
+a packet is, `dev_get(h, "port")` its port, and `"joined"` and `"busy"`
+say where the join stands.
+
 Each name needs what Python's needs: `lease:<row>` (`lease:gpio` for
 anything on the pins: a pin, a PWM, an ADC, an I²C bus), `http`, `lora`,
-`mic`. One holder a lease or a device, whatever the tiers: a resource a
-Python program's object holds is BUSY to a handle and the reverse (`-11`
-to a compiled app, `EBUSY` to a native or WASI program). A refused
-permission is DENIED (`EACCES`), a name, key or value the console does not
-take BAD (`EINVAL`), a handle not open ABSENT (`ENOENT`), a buffer that
-cannot hold one record FULL (`ERANGE`). `ble`, `usb`, `midi`, `camera` and
-`media` are Python's alone; `docs/os_2026-11/hardware.md` §4 says how BLE
-would come.
+`mic`, `ble`. One holder a lease or a device, whatever the tiers: a
+resource a Python program's object holds is BUSY to a handle and the
+reverse (`-11` to a compiled app, `EBUSY` to a native or WASI program), and
+a process opens a radio or the microphone once. A refused permission is
+DENIED (`EACCES`), a name, key or value the console does not take BAD
+(`EINVAL`), a handle not open, or a radio verb that needs a connection or a
+join, ABSENT (`ENOENT`), a buffer that cannot hold one record FULL
+(`ERANGE`). `usb`, `midi`, `camera` and `media` are Python's alone.
 
 **A command** (`"type": "command"`) is a program the terminal runs by
 its id's name (`local.hello` is `hello`): in Python its `main(argv)`, with

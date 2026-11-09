@@ -101,7 +101,7 @@ TABLE = (
     ("mic", "api:mic", ("python", "wasm", "elf"), "Record with the microphone", "mic", ()),
     ("lora", "api:lora", ("python", "wasm", "elf"),
      "Send and receive on the LoRa radio", "lora", ()),
-    ("ble", "api:ble", ("python",), "Use Bluetooth devices", "ble", ()),
+    ("ble", "api:ble", ("python", "wasm", "elf"), "Use Bluetooth devices", "ble", ()),
     ("usb", "api:usb", ("python",), "Use USB devices plugged into the console", "usb", ()),
     ("midi", "api:midi", ("python",), "Play and hear MIDI instruments", "midi", ()),
     ("camera", "api:camera", ("python",), "Take pictures with the camera", "camera", ()),

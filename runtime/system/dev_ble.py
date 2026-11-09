@@ -9,6 +9,8 @@ Addresses are "aa:bb:cc:dd:ee:ff"; a UUID is an int (16-bit) or the 128-bit
 string. Every verb answers at once; what it did arrives as an event, to
 `on(fn)`: fn(event, value, status), status 0 or a negative errno.
 
+  open()                    the API held before its first verb
+  source()                  the ring source its events ride (a reader's)
   scan(ms=3000)             EV_ADV (value: the device's index) as each
                             device is first heard, then EV_SCAN_DONE; it
                             shares the radio's one discovery with the
@@ -83,6 +85,10 @@ def uuid_bytes(u):
         return bytes([u & 0xFF, (u >> 8) & 0xFF])
     s = u.replace("-", "")
     return _flip(bytes(int(s[i:i + 2], 16) for i in range(0, 32, 2)))
+
+
+def open():  # noqa: A001 -- the verb's name
+    _take()
 
 
 def scan(ms=3000):
@@ -176,6 +182,10 @@ def on(fn):
 
 def close():
     sweep(_D.pid())
+
+
+def source():
+    return _N.source()
 
 
 def present():

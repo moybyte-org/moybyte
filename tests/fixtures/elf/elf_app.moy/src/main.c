@@ -7,7 +7,11 @@
 // a pin driven and read, a UART written and read back through its peer, an
 // SPI transfer and one too long for its buffer, a UART it already holds, a
 // row the board does not offer and a handle it never had; it ends holding
-// the pin, for its end to sweep.
+// the pin, for its end to sweep. `app ble` drives the BLE face by handle:
+// a scan (each record's event and the bytes it carried, an advertisement's
+// name after its address), a connection to the first device heard, a
+// characteristic found and read, a write to it, a second handle refused and
+// two actions in one set refused; it ends connected, for its end to drop.
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -88,12 +92,59 @@ static int lease(void) {
     return 0;
 }
 
+// Each record a ble handle's read holds: the event, a, b and the bytes.
+static void records(const char *what, const uint8_t *r, int32_t n) {
+    printf("%s", what);
+    for (int32_t k = 0; k + 12 <= n;) {
+        uint16_t ev = (uint16_t)(r[k] | r[k + 1] << 8), len = (uint16_t)(r[k + 2] | r[k + 3] << 8);
+        int32_t a, b;
+        memcpy(&a, r + k + 4, 4);
+        memcpy(&b, r + k + 8, 4);
+        printf(" %u:%d:%d", ev, (int)a, (int)b);
+        if (ev == 1 && len > 6) {
+            printf(":%.*s", (int)len - 6, (const char *)r + k + 18);
+        } else if (len > 0) {
+            printf(":%02x", r[k + 12]);
+        }
+        k += 12 + len;
+    }
+    printf("\n");
+}
+
+static int ble(void) {
+    uint8_t buf[128];
+    int32_t h = moy_dev_open("ble", "scan=500");
+    said("dev_open.ble", h > 0 ? 1 : h, NULL);
+    int32_t n = moy_dev_read(h, buf, sizeof buf);
+    records("scan", buf, n);
+    char cfg[32];
+    snprintf(cfg, sizeof cfg, "connect=%02x:%02x:%02x:%02x:%02x:%02x", buf[12], buf[13],
+             buf[14], buf[15], buf[16], buf[17]);
+    said("dev_set.connect", moy_dev_set(h, cfg), NULL);
+    said("dev_set.find", moy_dev_set(h, "find=2a19"), NULL);
+    n = moy_dev_read(h, buf, sizeof buf);
+    records("found", buf, n);
+    said("dev_set.read", moy_dev_set(h, "read=0x20"), NULL);
+    said("dev_read.short", moy_dev_read(h, buf, 8), NULL);
+    n = moy_dev_read(h, buf, sizeof buf);
+    records("read", buf, n);
+    said("dev_set.write", moy_dev_set(h, "write=0x20"), NULL);
+    said("dev_write", moy_dev_write(h, "\x07", 1), NULL);
+    said("dev_open.again", moy_dev_open("ble", NULL), NULL);
+    said("dev_set.two", moy_dev_set(h, "scan=1 read=0x20"), NULL);
+    said("dev_get.connected", moy_dev_get(h, "connected"), NULL);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "pick") == 0) {
         return pick();
     }
     if (argc > 1 && strcmp(argv[1], "lease") == 0) {
         return lease();
+    }
+    if (argc > 1 && strcmp(argv[1], "ble") == 0) {
+        return ble();
     }
     char buf[256];
     int32_t r = moy_prefs_set("level", "42");

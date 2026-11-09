@@ -294,3 +294,207 @@ def test_an_http_handle_reads_its_body_in_chunks(web):
     assert not [r for r in dev_http._open.values() if r.owner == pid]
     devices.grants = lambda p: ()
     assert _open(pid, "http", "url=%s/hello" % web) == H.DENIED
+
+
+# -- BLE --------------------------------------------------------------------------------
+
+HRM = "c0:ff:ee:00:00:01"
+LAMP = "c0:ff:ee:00:00:02"
+
+
+@pytest.fixture
+def air():
+    from runtime import moy_gatt
+    from runtime.host import gatt_sim
+    devices.grants = devices.console = None
+    gatt_sim.install()
+    gatt_sim.device(HRM, "Pulse", rssi=-48)
+    gatt_sim.chr(HRM, 0x2A37, 0x0010, b"\x00\x48")
+    gatt_sim.chr(HRM, 0x2A19, 0x0020, b"\x5a")
+    gatt_sim.device(LAMP, "Lamp", rssi=-71)
+    gatt_sim.chr(LAMP, "6e400002-b5a3-f393-e0a9-e50e24dcca9e", 0x0030, b"")
+    was = moybyte.WAKES.table
+    moybyte.bind(mi.kernel())
+    yield gatt_sim
+    for pid in list(H.HANDLES):
+        moybyte.end(pid)
+    while moy_gatt.owner():
+        moybyte.end(moy_gatt.owner())
+    devices.grants = None
+    gatt_sim.remove()
+    moybyte.WAKES.table = None
+    if was is not None:
+        moybyte.bind(was)
+
+
+def _get(pid, h, what):
+    return _as(pid, lambda: H.get(pid, h, what))
+
+
+def _records(b):
+    """A ble handle's read as [(event, a, b, bytes)]."""
+    out, k = [], 0
+    while k < len(b):
+        ev, n, a, st = struct.unpack_from("<HHii", b, k)
+        out.append((ev, a, st, bytes(b[k + H.BLE_HEAD:k + H.BLE_HEAD + n])))
+        k += H.BLE_HEAD + n
+    return out
+
+
+def _ble(pid, h, cap=512):
+    got = _as(pid, lambda: H.read(pid, h, cap))
+    assert not isinstance(got, int), got
+    return _records(got)
+
+
+def test_a_ble_handle_scans_connects_finds_reads_writes_and_hears_notifications(air):
+    from runtime import dev_ble as B
+    pid = L.spawn("t.ble")
+    h = _open(pid, "ble")
+    assert h > 0 and _ble(pid, h) == []
+    set_ = lambda cfg: _as(pid, lambda: H.set(pid, h, cfg))  # noqa: E731
+    assert set_("scan=500") == 0
+    assert _as(pid, lambda: H.read(pid, h, 8)) == H.FULL      # the first record waits
+    assert _ble(pid, h) == [(B.EV_ADV, 0, -48, bytes.fromhex("c0ffee000001") + b"Pulse"),
+                            (B.EV_ADV, 1, -71, bytes.fromhex("c0ffee000002") + b"Lamp"),
+                            (B.EV_SCAN_DONE, 2, 0, b"")]
+    assert set_("connect=" + HRM) == 0 and set_("find=2a19") == 0
+    assert _ble(pid, h) == [(B.EV_CONNECTED, 1, 0, b""), (B.EV_FOUND, 0x20, 0, b"")]
+    assert _get(pid, h, "connected") == 1
+    assert set_("read=0x20") == 0
+    assert _ble(pid, h) == [(B.EV_READ, 1, 0, b"\x5a")]
+    assert set_("subscribe=0x10") == 0
+    assert air.notify(HRM, 0x10, b"\x00\x4c") and air.notify(HRM, 0x10, b"\x00\x4d")
+    assert _ble(pid, h, H.BLE_HEAD) == [(B.EV_WRITTEN, 0, 0, b"")]     # its CCCD
+    one = H.BLE_HEAD + 2
+    assert _ble(pid, h, one) == [(B.EV_NOTIFY, 0x10, 2, b"\x00\x4c")]
+    assert _ble(pid, h, one) == [(B.EV_NOTIFY, 0x10, 2, b"\x00\x4d")]
+    assert _as(pid, lambda: H.write(pid, h, b"x")) == H.BAD   # no write= yet
+    assert set_("write=0x20 response=1") == 0
+    assert _as(pid, lambda: H.write(pid, h, b"\x07")) == 1
+    assert air.written(HRM, 0x20) == b"\x07"
+    assert _ble(pid, h) == [(B.EV_WRITTEN, 0, 0, b"")]
+    assert set_("find=0x9999") == 0
+    assert _ble(pid, h) == [(B.EV_FOUND, 0, -errno.ENOENT, b"")]
+    assert set_("connect=off") == 0 and _get(pid, h, "connected") == 0
+    assert _ble(pid, h)[-1][0] == B.EV_DISCONNECTED
+    assert set_("read=0x20") == H.ABSENT                    # no connection
+    for bad in ("scan=1 find=2a19", "connect=c0:ff", "find=2a1g", "find=6e40-00", "read=0", "data=00",
+                "warp=1", "subscribe=x"):
+        assert set_(bad) == H.BAD, bad
+
+
+def test_a_ble_handle_finds_by_128_bit_uuid_and_advertises(air):
+    from runtime import dev_ble as B
+    pid = L.spawn("t.ble")
+    h = _open(pid, "ble", "connect=" + LAMP)
+    assert _as(pid, lambda: H.set(pid, h, "find=6e400002-b5a3-f393-e0a9-e50e24dcca9e")) == 0
+    assert _ble(pid, h)[-1] == (B.EV_FOUND, 0x30, 0, b"")
+    assert _as(pid, lambda: H.set(pid, h, "write=0x30 response=0")) == 0
+    assert _as(pid, lambda: H.write(pid, h, b"on")) == 2 and air.written(LAMP, 0x30) == b"on"
+    assert _as(pid, lambda: H.set(pid, h, "advertise=moy data=ffff0102 interval=100")) == 0
+    assert air.advertised() == bytes([2, 1, 6, 4, 9]) + b"moy" + bytes([5, 0xff]) + \
+        b"\xff\xff\x01\x02"
+    assert _as(pid, lambda: H.set(pid, h, "advertise=off")) == 0 and air.advertised() == b""
+
+
+def test_one_ble_holder_its_permission_and_its_end(air):
+    from runtime import dev_ble as B
+    from runtime import moy_gatt
+    a, b = L.spawn("t.a"), L.spawn("t.b")
+    h = _open(a, "ble", "connect=" + HRM)
+    assert moy_gatt.owner() == a and moy_gatt.state() == moy_gatt.CONNECTED
+    assert _open(a, "ble") == H.BUSY                         # one handle on the one radio
+    assert _open(b, "ble") == H.BUSY
+    with pytest.raises(OSError) as e:
+        _as(b, B.scan)                                       # Python's face too
+    assert e.value.errno == errno.EBUSY
+    moybyte.end(a)
+    assert moy_gatt.owner() == 0 and moy_gatt.state() == 0 and a not in H.HANDLES
+    assert _get(a, h, "connected") == H.ABSENT
+    assert _open(b, "ble", "scan=0") == H.BAD and moy_gatt.owner() == 0   # nothing kept
+    devices.grants = lambda p: ()
+    assert _open(b, "ble") == H.DENIED
+    devices.grants = None
+    air.remove()
+    assert _open(b, "ble") == H.ABSENT
+
+
+# -- LoRaWAN ----------------------------------------------------------------------------
+
+DEV_EUI = "70B3D57ED0050001"
+JOIN_EUI = "0000000000000000"
+APP_KEY = "8E3F2A1B0C9D8E7F6A5B4C3D2E1F0A9B"
+JOIN = "join=otaa dev_eui=%s join_eui=%s app_key=%s" % (DEV_EUI, JOIN_EUI, APP_KEY)
+EARLY = 20                      # MOY_LORA_WIN_EARLY_MS
+
+
+@pytest.fixture
+def radio():
+    from runtime import moy_lora
+    from runtime.host import lora_sim
+    devices.grants = devices.console = None
+    lora_sim.install()
+    yield moy_lora, lora_sim
+    for pid in list(H.HANDLES):
+        moybyte.end(pid)
+    while moy_lora.owner():
+        moybyte.end(moy_lora.owner())
+    devices.grants = None
+    lora_sim.remove()
+
+
+def _rx1(N, sim, reply, freq, sf, t0):
+    """The MAC stepped from a transmission's end at `t0` into RX1, `reply`
+    on the air there."""
+    N.step(t0)
+    due = N.step(t0)
+    N.step(due)
+    assert sim.air(reply, freq, sf)
+    N.step(due + EARLY)
+
+
+def test_a_lora_handle_joins_sends_uplinks_and_reads_a_downlink(radio):
+    N, sim = radio
+    pid = L.spawn("t.node")
+    net = sim.Network(bytes.fromhex(DEV_EUI), bytes.fromhex(JOIN_EUI), bytes.fromhex(APP_KEY))
+    h = _open(pid, "lora", "send=2")
+    assert _as(pid, lambda: H.write(pid, h, b"early")) == H.ABSENT        # before a join
+    assert _get(pid, h, "joined") == 0
+    assert _as(pid, lambda: H.set(pid, h, JOIN)) == 0
+    req, freq, sf, *_ = sim.sent()
+    assert _get(pid, h, "busy") == 1
+    _rx1(N, sim, net.answer(req), freq, sf, 1000)
+    assert _get(pid, h, "joined") == 1 and _get(pid, h, "busy") == 0
+    assert _as(pid, lambda: H.write(pid, h, b"temp=21.5")) == 9
+    up, freq, sf, *_ = sim.sent()
+    assert net.answer(up) is None and net.uplinks == [(0, 2, b"temp=21.5", False)]
+    t = 20000
+    N.step(t)
+    while _get(pid, h, "busy") and t < 40000:                # its windows close empty
+        t = N.step(t) or t + 1
+    assert _get(pid, h, "busy") == 0 and _get(pid, h, "fcnt") == 1
+    net.down(7, b"\x01\x02led")
+    assert _as(pid, lambda: H.set(pid, h, "send=5 confirmed=1 dr=4")) == 0
+    assert _as(pid, lambda: H.write(pid, h, b"\xff")) == 1
+    assert _as(pid, lambda: H.write(pid, h, b"\xfe")) == H.BUSY          # its windows run
+    up, freq, sf, *_ = sim.sent()
+    assert sf == 8
+    reply = net.answer(up)
+    assert net.uplinks[-1] == (1, 5, b"\xff", True)
+    _rx1(N, sim, reply, freq, sf, 50000)
+    assert _as(pid, lambda: H.read(pid, h, 32)) == b"\x01\x02led"
+    assert _get(pid, h, "port") == 7
+    assert _as(pid, lambda: H.set(pid, h, "send=raw")) == 0
+    assert _as(pid, lambda: H.write(pid, h, b"mesh")) == 4 and sim.sent()[0] == b"mesh"
+
+
+def test_a_lora_handle_refuses_a_join_it_cannot_make(radio):
+    pid = L.spawn("t.node")
+    h = _open(pid, "lora")
+    for bad in ("join=abp " + JOIN[10:], "join=otaa dev_eui=%s" % DEV_EUI,
+                JOIN.replace(APP_KEY, APP_KEY[:-2]), JOIN.replace(DEV_EUI, "zz" * 8),
+                "dev_eui=" + DEV_EUI, "send=0", "send=224", "confirmed=2", "dr=9"):
+        assert _as(pid, lambda: H.set(pid, h, bad)) == H.BAD, bad
+    devices.grants = lambda p: ()
+    assert _open(L.spawn("t.other"), "lora", JOIN) == H.DENIED

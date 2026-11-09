@@ -306,3 +306,32 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
             leases.LEASES.sweep(p)
         N.reset()
         leases.stand_in(None, None)
+
+
+def test_a_compiled_app_joins_a_lorawan_network_by_handle(talk):
+    """A `lora` handle's LoRaWAN words from a wasm app (runtime/system/
+    dev_handles.py): its join=otaa keys reach the air as a join request the
+    network server (runtime/host/lora_sim.py) accepts, the radio busy while
+    the join runs and an uplink before it ABSENT; the join completes on the
+    handle the app keeps, and its run's end lets the radio go."""
+    from runtime import moy_lora as N
+    from runtime.host import lora_sim
+    keys = [bytes.fromhex(k) for k in ("70B3D57ED0050001", "0000000000000000",
+                                       "8E3F2A1B0C9D8E7F6A5B4C3D2E1F0A9B")]
+    lora_sim.install()
+    try:
+        ws, pid, lines = talk()
+        got = [ln for ln in lines if ln.startswith("lora_")]
+        assert got == ["lora_open 1", "lora_join 0", "lora_busy 1", "lora_uplink -8"], lines
+        req, freq, sf, *_ = lora_sim.sent()
+        accept = lora_sim.Network(*keys).answer(req)
+        assert accept is not None
+        due = N.step(1000)
+        N.step(due)
+        assert lora_sim.air(accept, freq, sf)
+        N.step(due + 20)
+        assert N.owner() == pid and N.joined()[0]
+        ws.exit()
+        assert N.owner() == 0
+    finally:
+        lora_sim.remove()

@@ -172,11 +172,13 @@ keeps; the station's address coming and going is a NET record on the
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
-on. A compiled program holds `http`, `lora` and `mic` by handle through the
-same rows as its leases (above): an `http` handle a GET whose body it reads
-in chunks (`cfg` `url=... cap=N`, or `window=N` for a body of any length),
-a `lora` handle the radio's raw packets, a `mic` handle PCM16 samples.
-BLE, USB, MIDI, the camera and the media service are Python's alone (§4).
+on. A compiled program holds `http`, `lora`, `mic` and `ble` by handle
+through the same rows as its leases (above): an `http` handle a GET whose
+body it reads in chunks (`cfg` `url=... cap=N`, or `window=N` for a body of
+any length), a `lora` handle the radio's raw packets and LoRaWAN's join,
+uplinks and downlinks, a `mic` handle PCM16 samples, a `ble` handle the
+face's verbs and its events as records (§4). USB, MIDI, the camera and the
+media service are Python's alone.
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
@@ -517,7 +519,7 @@ moybyte.gps() -> (lat, lon, alt, t_us) | None
 moybyte.http.get(url, cap, on_done) -> Request: state() / body() / readinto(buf) / close()
 moybyte.http.stream(url, window) -> Stream: state() / available() / ended() / readinto(buf) / close()   a body of any length through a window
 moybyte.lora.config(...) / listen() / send(bytes) / recv(into) -> (n, rssi, snr) | None   raw packets (§1)
-moybyte.lora.join(dev_eui, join_eui, app_key) / uplink(port, bytes) / downlink(into) -> (n, port) | None
+moybyte.lora.join(dev_eui, join_eui, app_key) / uplink(port, bytes) / downlink(into) -> (n, port) | None / busy()
 moybyte.ble.scan() / connect(addr) / find(uuid) / read(h) / write(h, bytes) / subscribe(h) / advertise(name, data)
 moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s) / volume(v) / now() -> dict / probe(path)   §3
 ```
@@ -525,7 +527,7 @@ moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s
 Leases (Python gets them as `machine` objects, §1:
 `moybyte.lease(name, **cfg)` and `moybyte.pins()`; `pins` is the digital
 subset every tier may hold), and on the compiled tiers leases and the
-`http`, `lora` and `mic` devices by handle (`runtime/system/dev_handles.py`;
+`http`, `lora`, `mic` and `ble` devices by handle (`runtime/system/dev_handles.py`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
 ```
@@ -537,14 +539,28 @@ dev_xfer(h, bytes, into) -> n         SPI full duplex; an I2C write then read
 dev_set(h, cfg); dev_get(h, what) -> n
 ```
 
-BLE by handle is not built. It would be one more name on the same rows: a
-`ble` handle whose `dev_set` asks (`scan=ms`, `connect=aa:bb:...`,
-`find=<uuid>`, `subscribe=<handle>`) and whose `dev_read` takes the face's
-events as records (the event, its value, its status, and the bytes a read
-or a notification carried), the records `dev_ble.on` wakes Python on;
-it waits on a reader of the BLE ring per handle, which the edges' reader
-shows the shape of. LoRaWAN's join and uplink would be `dev_set` words on
-the `lora` handle the same way.
+The radios ride the same rows. A word of a radio's `dev_set` starts one
+action, and `dev_write` carries bytes to where a word pointed it:
+
+```
+ble   scan=<ms>  connect=<addr>|off  find=<uuid>  read=<h>  subscribe=<h>  unsubscribe=<h>
+      advertise=<name>|off [data=<hex> interval=<ms>]   write=<h> [response=0|1]: where dev_write goes
+      dev_read: the face's events since the last read, whole records:
+                event u16, n u16, a i32, b i32 (moy_gatt.h's), then n bytes --
+                ADV the address and the name, READ the value, NOTIFY the notification
+      dev_get: connected
+lora  join=otaa dev_eui=<hex> join_eui=<hex> app_key=<hex> [dr]
+      send=<port>|raw [confirmed=0|1 dr]: what dev_write sends, an uplink or a packet
+      dev_read: the next packet or downlink; dev_get: port, joined, fcnt, busy
+```
+
+A `ble` handle reads the BLE ring through a reader of its own (only the
+`gatt` source), as an edge handle reads its pin's; the records are the ones
+`dev_ble.on` wakes Python on, each with the bytes a read or a notification
+carried. Each is under the permission Python's face needs (`ble`, `lora`);
+one holder rules across the tiers, a process opens a radio once, and its
+end closes the handle, which drops the connection, the beacon and the
+radio as Python's face sweep does.
 
 In C (`native/moy_kernel/moy_lease.h`): `moy_lease_take(owner, cls, unit,
 pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,

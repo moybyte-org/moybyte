@@ -26,6 +26,8 @@ LoRaWAN, over the OS-side MAC (OTAA, class A, EU868):
   downlink(into) -> (n, port) | None
                             the next downlink a receive window caught
   joined() -> (dev_addr, fcnt_up) | None
+  busy()                    whether a transmission, a join or an uplink's
+                            receive windows run (listening is not busy)
 
   on(fn)                    wake `fn(event, n, rssi, snr_db)` for each of the
                             radio's events: EV_RX, EV_TX_DONE, EV_JOINED,
@@ -109,6 +111,10 @@ def downlink(into):
 def joined():
     j, addr, fcnt = _N.joined()
     return (addr, fcnt) if j and _N.owner() == _D.pid() else None
+
+
+def busy():
+    return _N.owner() == _D.pid() and _N.mode() not in (_N.IDLE, _N.LISTEN)
 
 
 def on(fn):

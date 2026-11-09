@@ -13,7 +13,10 @@
 // console's leases by handle (a process listens on eight names): gpio6
 // driven high and kept until the service ends, uart1 written and read back
 // (its peer joined to it) and closed, and a handle it never had, each
-// answer printed with its errno; a "bye" ends it, a "quit" returns
+// answer printed with its errno; a "wake" carrying ["ble"] opens the BLE
+// face by handle with a scan, prints the scan's records (each event and an
+// advertisement's name), connects to the first device heard and keeps the
+// connection until the service ends; a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -100,6 +103,28 @@ int main(void) {
             printf("dev_close %d errno %d\n", r, r < 0 ? errno : 0);
             r = (int)moy_dev_get(9999, "value");
             printf("dev_get.none %d errno %d\n", r, r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0 && strcmp(m.b + sizeof m.ev, "[\"ble\"]") == 0) {
+            int h = (int)moy_dev_open("ble", "scan=500");
+            printf("ble_open %d errno %d\n", h > 0 ? 1 : h, h < 0 ? errno : 0);
+            unsigned char r[128];
+            int n = (int)moy_dev_read(h, r, sizeof r);
+            printf("ble_scan");
+            for (int k = 0; k + 12 <= n; k += 12 + (r[k + 2] | r[k + 3] << 8)) {
+                int len = r[k + 2] | r[k + 3] << 8;
+                printf(" %d", r[k]);
+                if (r[k] == 1 && len > 6) {
+                    printf(":%.*s", len - 6, (const char *)r + k + 18);
+                }
+            }
+            printf(" errno %d\n", n < 0 ? errno : 0);
+            char cfg[32];
+            snprintf(cfg, sizeof cfg, "connect=%02x:%02x:%02x:%02x:%02x:%02x", r[12], r[13],
+                     r[14], r[15], r[16], r[17]);
+            int c = (int)moy_dev_set(h, cfg);
+            printf("ble_connect %d errno %d\n", c, c < 0 ? errno : 0);
+            c = (int)moy_dev_get(h, "connected");
+            printf("ble_connected %d errno %d\n", c, c < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0) {
             printf("after %d\n", (int)moy_after(0));

@@ -207,6 +207,42 @@ def test_a_native_command_holds_leases_by_handle_and_its_end_sweeps_them(term):
         leases.stand_in(None, None)
 
 
+def test_a_native_command_drives_ble_by_handle_and_its_end_drops_the_link(term):
+    """`moy_dev_*` on a `ble` handle (elf_app.moy's `app ble`, the host's
+    stand-in peripherals): a scan read back as records, each advertisement's
+    name after its address; a connection to the first device heard, a
+    characteristic found by its 16-bit UUID, read (a read too short for the
+    record ERANGE, the record kept) and written; a second handle EBUSY, two
+    actions in one set EINVAL. Its end drops the connection it kept. The
+    drivers' rings are the kernel table's, the one a board's console binds."""
+    from runtime import devices, moybyte
+    from runtime import moy_gatt as N
+    from runtime import moy_input as mi
+    from runtime.host import gatt_sim
+    _ws, app = term
+    devices.grants = None
+    gatt_sim.install()
+    was = moybyte.WAKES.table
+    moybyte.bind(mi.kernel())
+    try:
+        gatt_sim.device("c0:ff:ee:00:00:01", "Pulse", rssi=-48)
+        gatt_sim.chr("c0:ff:ee:00:00:01", 0x2A19, 0x0020, b"\x5a")
+        gatt_sim.device("c0:ff:ee:00:00:02", "Lamp", rssi=-71)
+        assert out(app, "elf.app/app ble; echo status $?") == [
+            "dev_open.ble 1", "scan 1:0:-48:Pulse 1:1:-71:Lamp 2:2:0",
+            "dev_set.connect 0", "dev_set.find 0", "found 3:1:0 5:32:0",
+            "dev_set.read 0", "dev_read.short -1 ERANGE", "read 6:1:0:5a",
+            "dev_set.write 0", "dev_write 1", "dev_open.again -1 EBUSY",
+            "dev_set.two -1 EINVAL", "dev_get.connected 1", "status 0"]
+        assert gatt_sim.written("c0:ff:ee:00:00:01", 0x20) == b"\x07"
+        assert N.owner() == 0 and N.state() == 0
+    finally:
+        moybyte.WAKES.table = None
+        if was is not None:
+            moybyte.bind(was)
+        gatt_sim.remove()
+
+
 def test_the_crypto_rows_answer_a_native_command(term):
     """The crypto rows from C (tests/fixtures/elf/elf_crypto.moy): the known
     answers, and each length refused an errno, never a crash."""

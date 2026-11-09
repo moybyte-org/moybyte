@@ -374,3 +374,44 @@ def test_a_wasi_service_holds_leases_by_handle_until_it_ends(svc, perms):
             leases.LEASES.sweep(p)
         N.reset()
         leases.stand_in(None, None)
+
+
+@pytest.mark.parametrize("perms", [("ble",), ()])
+def test_a_wasi_service_scans_and_connects_by_a_ble_handle(svc, perms):
+    """moybyte.os `dev_*` on a `ble` handle: a scan read back as records (the
+    host's stand-in peripherals, each advertisement's name), a connection to
+    the first device heard, kept until the service ends, whose sweep drops
+    it; each refused ACCES without the `ble` permission. The drivers' rings
+    are the kernel table's, the one a board's console binds."""
+    from runtime import moy_gatt as N
+    from runtime import moy_input as mi
+    from runtime.host import gatt_sim
+    ws, s, cart, peer = svc
+    gatt_sim.install()
+    gatt_sim.device("c0:ff:ee:00:00:01", "Pulse", rssi=-48)
+    gatt_sim.device("c0:ff:ee:00:00:02", "Lamp", rssi=-71)
+    was = moybyte.WAKES.table
+    moybyte.bind(mi.kernel())
+    try:
+        since = L.next()
+        pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+        assert pid is not None
+        assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["ble"]')[0] == 1)
+        assert _polled(s, lambda: any(t.startswith("ble_connected ") for t in _texts(since, pid))), \
+            _texts(since, pid)
+        got = [t for t in _texts(since, pid) if t.startswith("ble_")]
+        if perms:
+            assert got == ["ble_open 1 errno 0", "ble_scan 1:Pulse 1:Lamp 2 errno 0",
+                           "ble_connect 0 errno 0", "ble_connected 1 errno 0"], got
+            assert N.owner() == pid and N.state() == N.CONNECTED
+        else:
+            assert got == ["ble_open -1 errno 2", "ble_scan errno 44",
+                           "ble_connect -1 errno 44", "ble_connected -1 errno 44"], got
+        assert s.stop(pid)
+        assert _polled(s, lambda: N.owner() == 0)
+        assert N.state() == 0
+    finally:
+        moybyte.WAKES.table = None
+        if was is not None:
+            moybyte.bind(was)
+        gatt_sim.remove()

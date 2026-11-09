@@ -8,7 +8,9 @@
 // already due, a timer that goes off once and one that repeats, asks its
 // documents for a free name, writes the OS log, and opens leases by handle
 // (a pin it drives high and keeps until its run ends, a UART it writes and
-// reads back through its peer and closes). Every _update reads the messages queued for it, one record
+// reads back through its peer and closes) and the LoRa radio by handle,
+// starting an OTAA join it keeps running (an uplink before it is accepted
+// refused, the radio busy while it runs). Every _update reads the messages queued for it, one record
 // each (moy_evq_ev_t, sdk/include/moybyte/os.h, its arguments a JSON array
 // after it), and logs what it heard: a timer is the system's message
 // "moybyte.timer" carrying its id, and the repeating one's first tick
@@ -47,6 +49,7 @@ int32_t moybyte_dev_close(int32_t h) APP(moybyte_dev_close);
 int32_t moybyte_dev_read(int32_t h, char *data, uint32_t cap) APP(moybyte_dev_read);
 int32_t moybyte_dev_write(int32_t h, const char *data, uint32_t n) APP(moybyte_dev_write);
 int32_t moybyte_dev_get(int32_t h, const char *what, uint32_t what_n) APP(moybyte_dev_get);
+int32_t moybyte_dev_set(int32_t h, const char *cfg, uint32_t cfg_n) APP(moybyte_dev_set);
 void cls(int32_t c) MOY(cls);
 
 static uint32_t len(const char *s) {
@@ -145,6 +148,21 @@ EXPORT(_init) void init(void) {
     say();
     put(S("dev_close "));
     put_int(moybyte_dev_close(u));
+    say();
+    int32_t lora = moybyte_dev_open(S("lora"), S("send=2"));
+    put(S("lora_open "));
+    put_int(lora > 0 ? 1 : lora);
+    say();
+    put(S("lora_join "));
+    put_int(moybyte_dev_set(lora, S("join=otaa dev_eui=70B3D57ED0050001 "
+                                    "join_eui=0000000000000000 "
+                                    "app_key=8E3F2A1B0C9D8E7F6A5B4C3D2E1F0A9B")));
+    say();
+    put(S("lora_busy "));
+    put_int(moybyte_dev_get(lora, S("busy")));
+    say();
+    put(S("lora_uplink "));
+    put_int(moybyte_dev_write(lora, S("early")));
     say();
 }
 
