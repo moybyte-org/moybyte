@@ -1669,6 +1669,9 @@ DESK_POPOVERS = ("popover_clock", "popover_clock_six", "popover_wifi", "popover_
 # A compiled program's panel at its most rows (status_items.ROWS_MAX).
 _PANEL_FULL = _PANEL + "".join("\nbutton b%d Preset %d" % (k, k) for k in range(1, 5))
 
+# A day of November 2026, whose six weeks the calendar's card opens at.
+_NOVEMBER = (_DATE[0], _DATE[1] + 1, _DATE[2])
+
 # More networks than a card at font scale 2 holds on the P4's glass.
 _NETS_MANY = [("Network %d" % k, -40 - k, k % 2 == 0) for k in range(1, 11)]
 
@@ -1676,12 +1679,13 @@ _NETS_MANY = [("Network %d" % k, -40 - k, k % 2 == 0) for k in range(1, 11)]
 def _desk_popover_plan(ws):
     """Every desk popover over the desk with a Calc window, at the config's
     font scale: each must fit the glass (`DESK_POPOVERS`)."""
-    def popover(widget, then=None):
+    def popover(widget, then=None, day=_DATE):
         def enter():
             ws.close_popover()
             if widget == "clock":
                 ws.open_desk()
                 ws.open_app(ws._apps_by_id["calc"])
+            ws.bar_layer._today = lambda: day       # the card sizes as it opens
             ws._golden_popover = True
             ws.widget_tap(widget)
             assert ws.sysmenu.open and ws.sysmenu.widget == widget, widget
@@ -1690,7 +1694,10 @@ def _desk_popover_plan(ws):
         return enter
 
     def six():
-        ws.sysmenu.comp.page(1)         # November 2026: six weeks
+        # November 2026's six weeks, the card opened at their height (a
+        # month paged to keeps the card it opened in): `_quiesce` pins the
+        # day back to October's, a month before
+        ws.sysmenu.comp.off = 1
 
     def many():
         ws.settings_layer.wifi_nets = list(_NETS_MANY)
@@ -1719,7 +1726,8 @@ def _desk_popover_plan(ws):
         ws.open_status_menu(ITEMS.at(0))
         assert ws.sysmenu.open and ws.sysmenu.widget == "status"
 
-    return [("popover_clock", popover("clock")), ("popover_clock_six", popover("clock", six)),
+    return [("popover_clock", popover("clock")), ("popover_clock_six",
+                                                 popover("clock", six, _NOVEMBER)),
             ("popover_wifi", popover("wifi")), ("popover_wifi_many", popover("wifi", many)),
             ("popover_battery", popover("battery")), ("status_desk_panel", panel(_PANEL)),
             ("status_desk_panel_full", panel(_PANEL_FULL)), ("music_desk_menu", music)]

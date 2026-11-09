@@ -60,7 +60,7 @@ def _inner(ws, rect):
 
 def _fit(ws, comp):
     """Size the popover to `comp` again where what it lists moved (the
-    networks a scan found, a month's weeks), within the glass's room: the
+    networks a scan found), within the glass's room: the
     next frame repaints at the new size (a mark made inside a draw is spent
     with it, so it asks for that frame)."""
     m = ws.sysmenu
@@ -116,11 +116,12 @@ class MonthView:
         p = _pad(ws)
         top = p if desk else 6 * ws.layout.fs
         x0, y0, w0, h0 = rect
-        _fit(ws, self)                # a month paged to has its own weeks
         self.host.begin(cv, ws.theme_colors, (x0 + p, y0 + top, w0 - 2 * p, h0 - top), desk,
                         "panel")
         if y:
-            # a card shorter than its size (the glass's room) tightens the weeks
+            # the card keeps the height it opened at, within the glass's room:
+            # a month with more weeks than it holds (paged to, or past the
+            # room) tightens its weeks into it
             foot = _foot(ws.layout.fs) + p // 2 if desk else 3 * ws.layout.fs
             _ui.at(x0 + p, y0 + top, w0 - 2 * p,
                    min(_ui.month_h(y, m, ws.layout.fs, desk), h0 - top - foot))

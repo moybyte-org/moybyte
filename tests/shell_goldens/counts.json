@@ -572,7 +572,7 @@
   "p4_1024x600_fs2_desk_popovers": {
     "music_desk_menu": [38, 17],
     "popover_battery": [35, 31],
-    "popover_clock": [29, 69],
+    "popover_clock": [8, 49],
     "popover_clock_six": [28, 63],
     "popover_wifi": [26, 36],
     "popover_wifi_many": [29, 38],
