@@ -711,3 +711,79 @@ def test_a_camera_handle_reads_whole_frames_and_its_end_lets_it_go():
     finally:
         devices.grants = None
         camera_sim.remove()
+
+
+# -- the media service -------------------------------------------------------------------
+
+TONE = ROOT / "tests" / "fixtures" / "media" / "tone_1k.mp3"
+
+
+@pytest.fixture
+def media():
+    from runtime import audio_binding, dev_media
+    from runtime import moy_media
+    if audio_binding.get() is None or not dev_media.present():
+        pytest.skip("no media service on this host")
+    devices.grants = devices.console = None
+    yield dev_media
+    for pid in list(H.HANDLES):
+        moybyte.end(pid)
+    for _ in range(50):
+        if not dev_media._s["pid"]:
+            break
+        moy_media.pump()
+        if dev_media._s["wake"] is not None:
+            dev_media._pump()
+    devices.grants = None
+    assert moy_media.owner() == 0
+
+
+def test_a_media_handle_plays_a_file_and_reads_what_plays(media):
+    from runtime import moy_media
+    pid = L.spawn("t.music")
+    h = _open(pid, "media")
+    assert _get(pid, h, "state") == 0 and _get(pid, h, "mine") == 0
+    assert _as(pid, lambda: H.read(pid, h, 64)) == b""                 # no stream
+    assert _as(pid, lambda: H.set(pid, h, "pause=1")) == H.ABSENT
+    assert _as(pid, lambda: H.set(pid, h, "stop=1")) == 0
+    probe = _as(pid, lambda: H.xfer(pid, h, str(TONE).encode(), 64))
+    assert probe == struct.pack("<I", 2) + b"Tone\n"
+    assert _as(pid, lambda: H.xfer(pid, h, str(TONE).encode(), 6)) == H.FULL
+    assert _as(pid, lambda: H.xfer(pid, h, b"/no/such.mp3", 64)) == H.ABSENT
+    assert _as(pid, lambda: H.write(pid, h, b"/no/such.mp3")) == H.ABSENT
+    assert moy_media.owner() == 0
+    assert _as(pid, lambda: H.write(pid, h, str(TONE).encode())) == len(str(TONE))
+    assert moy_media.owner() == pid and _get(pid, h, "mine") == 1
+    assert _get(pid, h, "state") in (1, 2) and _get(pid, h, "entries") == 1
+    assert _as(pid, lambda: H.set(pid, h, "volume=40 pause=1")) == 0
+    assert _get(pid, h, "paused") == 1 and _get(pid, h, "volume") <= 40
+    assert _as(pid, lambda: H.set(pid, h, "pause=0")) == 0 and _get(pid, h, "paused") == 0
+    assert _as(pid, lambda: H.set(pid, h, "skip=next")) == H.ABSENT    # the list's end
+    text = _as(pid, lambda: H.read(pid, h, 512)).decode().split("\n")
+    assert len(text) == 5 and text[3] == str(TONE)
+    assert _as(pid, lambda: H.read(pid, h, 4)) == H.FULL
+    for bad in ("volume=101", "pause=2", "skip=up", "stop=0", "warp=1"):
+        assert _as(pid, lambda: H.set(pid, h, bad)) == H.BAD, bad
+    other = L.spawn("t.other")
+    o = _open(other, "media")
+    assert _as(other, lambda: H.write(other, o, str(TONE).encode())) == H.BUSY
+    assert _get(other, o, "mine") == 0
+    assert _as(other, lambda: H.set(other, o, "pause=1")) == H.DENIED  # not its stream
+    assert _open(pid, "media") == H.BUSY                               # one handle a process
+    assert _as(pid, lambda: H.close(pid, h)) == 0                      # its close stops it
+    assert media._s["stopping"] or not media._s["pid"]
+
+
+def test_a_media_handle_needs_either_permission_and_its_end_stops_the_stream(media):
+    from runtime import moy_media
+    a, b = L.spawn("t.a"), L.spawn("t.b")
+    devices.grants = lambda p: {a: {"media"}, b: {"media:url"}}.get(p, set())
+    assert _open(L.spawn("t.none"), "media") == H.DENIED
+    hb = _open(b, "media")
+    assert _as(b, lambda: H.write(b, hb, str(TONE).encode())) == H.DENIED      # a file is media's
+    assert _as(b, lambda: H.write(b, hb, b"http://127.0.0.1:1/x")) == H.DENIED  # and http's
+    ha = _open(a, "media")
+    assert _as(a, lambda: H.write(a, ha, str(TONE).encode())) > 0
+    assert moy_media.owner() == a
+    moybyte.end(a)
+    assert a not in H.HANDLES and (media._s["stopping"] or not media._s["pid"])

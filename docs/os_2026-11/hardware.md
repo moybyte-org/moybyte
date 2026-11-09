@@ -174,15 +174,15 @@ and a VM stop keeps the rows; the station's address coming and going is a NET re
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
-on. A compiled program holds `http`, `lora`, `mic`, `ble`, `usb`, `midi` and `camera` by handle
+on. A compiled program holds `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` by handle
 through the same rows as its leases (above): an `http` handle a GET whose
 body it reads in chunks (`cfg` `url=... cap=N`, or `window=N` for a body of
 any length), a `lora` handle the radio's raw packets and LoRaWAN's join,
 uplinks and downlinks, a `mic` handle PCM16 samples, a `ble` handle the
 face's verbs and its events as records, a `usb` handle the USB host's
 devices, their reports and serial lines, as records, a `midi` handle one
-port's messages, a `camera` handle its latest frame (§4). The media service
-is Python's alone.
+port's messages, a `camera` handle its latest frame, a `media`
+handle the media service's stream (§3, §4).
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
@@ -405,8 +405,9 @@ A KEY's `b` is the console key event; TEXT is its own record.
 ## 3. The media service
 
 An **OS service** in C (`native/moy_media/moy_media.h`, the module
-`moy_media`; its face `runtime/system/dev_media.py`, `moybyte.media`): one
-background stream for one process, from an HTTP stream or a file. MP3 is
+`moy_media`; its face `runtime/system/dev_media.py`, `moybyte.media`, and a
+compiled program's `media` handle, §4): one background stream for one
+process, from an HTTP stream or a file. MP3 is
 decoded by minimp3 (vendored, `native/moy_media/UPSTREAM.md`) and resampled
 once to the output's rate and channels (below: on a P4 a 44.1 kHz stereo
 stream is copied as it is, its channels kept; on the T-Deck it is mixed down
@@ -532,7 +533,7 @@ moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s
 Leases (Python gets them as `machine` objects, §1:
 `moybyte.lease(name, **cfg)` and `moybyte.pins()`; `pins` is the digital
 subset every tier may hold), and on the compiled tiers leases and the
-`http`, `lora`, `mic`, `ble`, `usb`, `midi` and `camera` devices by handle (`runtime/system/dev_handles.py`;
+`http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices by handle (`runtime/system/dev_handles.py`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
 ```
@@ -566,6 +567,10 @@ midi  open: uart=<row> [baud=<n>] | usb=<addr> | ble=<addr>, one port a handle
       dev_write: whole MIDI messages; dev_read: its messages, 3 bytes each
       (status, data1, data2); dev_get: port, state (0 connecting, 1 ready, 2 failed)
 camera dev_read: the latest frame, whole, w*h RGB565 big-endian; dev_get: w, h
+media dev_write: play the source the bytes name; volume=<0..100> pause=1|0 seek=<s>
+      skip=next|prev stop=1; dev_get: state, paused, entry, entries, at, len, volume,
+      stamp, mine, ...; dev_read: title, artist, station, src (four lines);
+      dev_xfer: a file's probe (seconds u32, then title and artist)
 ```
 
 A `ble`, `usb` or `midi` handle reads its driver's ring through a reader
@@ -573,11 +578,12 @@ of its own (only that source; a `midi` handle only its port's messages),
 as an edge handle reads its pin's; the records are the ones the face's
 `on` wakes Python on, each with the bytes a read, a notification, a report
 or a serial line carried. Each is under the permission Python's face needs
-(`ble`, `lora`, `usb`, `midi`, `camera`); one holder rules across the
-tiers, a process opens a radio, the USB host or the camera once, and its end closes the handle,
+(`ble`, `lora`, `usb`, `midi`, `camera`, `media` or `media:url`); one
+holder rules across the tiers, a process opens a radio, the USB host, the
+camera or the media service once, and its end closes the handle,
 which drops the connection, the beacon and the radio, lets the USB host
-go, or closes the MIDI port (and its UART's lease), as Python's face sweep
-does.
+go, closes the MIDI port (and its UART's lease) or stops the stream, as
+Python's face sweep does.
 
 In C (`native/moy_kernel/moy_lease.h`): `moy_lease_take(owner, cls, unit,
 pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,

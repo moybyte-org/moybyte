@@ -7,8 +7,8 @@ WASI program, an ELF module) holds where a Python program holds an object
   open(name, cfg) -> h      a lease of row `name` (leases.py's names:
                             "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",
                             "adc<n>", "i2c") or a device API ("http", "lora",
-                            "mic", "ble", "usb", "midi", "camera"),
-                            configured by `cfg`
+                            "mic", "ble", "usb", "midi", "camera",
+                            "media"), configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
   write(h, bytes) -> n      what was sent
@@ -98,13 +98,34 @@ answers:
   camera    read: the latest frame, w * h RGB565 pixels big-endian (the
             glass's byte order), whole (FULL where `into` cannot hold it),
             0 bytes before the first; get w, h
+  media     the media service's one stream (docs/os_2026-11/hardware.md
+            section 3), this process's: write: play the source the bytes
+            name (UTF-8): a file, an .m3u or .pls playlist (`media`) or an
+            http(s):// URL (`media:url` and `http`), replacing what this
+            process played, BUSY while another process's plays, ABSENT for
+            a file not there, BAD for https where nothing verifies it,
+            FULL where THE SHARES' MEDIA row is;
+            set volume=0..100, pause=1|0, seek=<seconds>, skip=next|prev,
+            stop=1, applied in that order (ABSENT with no stream, a seek a
+            stream or an unknown length cannot take, a skip past the list's
+            end; DENIED for another process's stream); get state (0 idle,
+            1 opening, 2 playing, 3 ended, 4 failed), paused, entry,
+            entries, rate, channels, kbps, volume, err, at and len (seconds
+            heard and long, a file's), stamp (moves when what these show
+            does), mine (1 where the stream is this process's), tls (1
+            where an https URL plays); read: the now-playing text, four
+            UTF-8 lines -- title, artist, station, src -- whole (FULL where
+            it does not fit), 0 bytes with no stream; xfer: a file's probe,
+            its path in, its length in seconds (u32) then its title and
+            artist on two lines out, ABSENT where it reads none. Its close
+            and its process's end stop the stream
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
 name needs (leases.perm_of's `lease:<row>`, a device's own), BUSY where
 another process holds the lease or the device (a Python program's object, or
-another compiled program's handle; a process opens lora, mic, ble, usb and
-the camera once),
+another compiled program's handle; a process opens lora, mic, ble, usb, the
+camera and media once),
 BAD for a name, a key or a value this console does not take, ABSENT for a
 handle not open, a device this console lacks and a radio verb that needs a
 connection or a join, FULL where `into` cannot hold one record, IO where the
@@ -133,8 +154,10 @@ STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = -1, -2, -3, -4, -7, -8, -6, 
 EPERM, ENOENT, EIO, EBADF, ENOMEM, EACCES, EBUSY, ENODEV, EINVAL, ENOSPC = (
     1, 2, 5, 9, 12, 13, 16, 19, 22, 28)
 ENOTCONN = 107              # the radios' drivers' (moy_gatt.h, moy_lora.h)
+EPROTONOSUPPORT = 93        # the media service's https where nothing verifies
 _CODE = {EPERM: DENIED, EACCES: DENIED, EBUSY: BUSY, EINVAL: BAD, ENODEV: ABSENT,
-         ENOENT: ABSENT, EBADF: ABSENT, ENOMEM: NOMEM, ENOSPC: FULL, ENOTCONN: ABSENT}
+         ENOENT: ABSENT, EBADF: ABSENT, ENOMEM: NOMEM, ENOSPC: FULL, ENOTCONN: ABSENT,
+         EPROTONOSUPPORT: BAD}
 
 EDGE_DEPTH = 64
 EDGE_BYTES = 8
@@ -1004,19 +1027,108 @@ class _Camera(_Handle):
         self.f.sweep(pid)
 
 
+_MEDIA_STATES = ("idle", "opening", "playing", "ended", "failed")
+_MEDIA_NOW = ("paused", "entry", "entries", "rate", "channels", "kbps", "volume", "err", "at",
+              "len")
+
+
+def _text(data):
+    return bytes(data).decode("utf-8")
+
+
+class _Media(_Handle):
+    def __init__(self, cfg):
+        _only(cfg, ())
+        self.f = _face("media")
+
+    def write(self, data):
+        self.f.play(_text(data))
+        return len(data)
+
+    def _none(self):
+        raise OSError(ENOENT, "no stream there")
+
+    def set(self, cfg):
+        _only(cfg, ("volume", "pause", "seek", "skip", "stop"))
+        f = self.f
+        if "stop" in cfg:
+            _int(cfg["stop"], 1, 1, "stop")
+        if "skip" in cfg and cfg["skip"] not in ("next", "prev"):
+            raise OSError(EINVAL, "skip=%r" % (cfg["skip"],))
+        if f.now() is None and any(k != "stop" for k in cfg):
+            self._none()
+        if "volume" in cfg:
+            f.volume(_int(cfg["volume"], 0, 100, "volume"))
+        if "pause" in cfg:
+            if _int(cfg["pause"], 0, 1, "pause"):
+                f.pause()
+            else:
+                f.resume()
+        if "seek" in cfg and not f.seek(_int(cfg["seek"], 0, 0x7FFFFFFF, "seek")):
+            self._none()
+        if "skip" in cfg and not (f.next() if cfg["skip"] == "next" else f.prev()):
+            self._none()
+        if "stop" in cfg:
+            f.stop()
+        return 0
+
+    def get(self, what):
+        f = self.f
+        if what == "tls":
+            return int(f.tls())
+        if what == "stamp":
+            return f.stamp() or 0
+        n = f.now()
+        if what == "state":
+            return 0 if n is None else _MEDIA_STATES.index(n["state"])
+        if what == "mine":
+            try:
+                import devices
+            except ImportError:  # host: the runtime package
+                from runtime import devices
+            return int(n is not None and n["pid"] == devices.pid())
+        if what in _MEDIA_NOW:
+            return 0 if n is None else int(n[what])
+        raise OSError(EINVAL, "no %s" % what)
+
+    def read(self, cap):
+        n = self.f.now()
+        if n is None:
+            return b""
+        out = "".join((n[k] or "") + "\n" for k in ("title", "artist", "station", "src"))
+        out = out.encode("utf-8")
+        return FULL if len(out) > cap else out
+
+    def xfer(self, data, cap):
+        got = self.f.probe(_text(data))
+        if got is None:
+            self._none()
+        out = _u32(got[0]) + ((got[1] or "") + "\n" + (got[2] or "")).encode("utf-8")
+        return FULL if len(out) > cap else out
+
+    def close(self, pid):
+        self.f.sweep(pid)
+
+
 _DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb,
-            "midi": _Midi, "camera": _Camera}
+            "midi": _Midi, "camera": _Camera,
+            "media": _Media}
 # A device with one holder: a process opens it once.
-_ONE = ("lora", "mic", "ble", "usb", "camera")
+_ONE = ("lora", "mic", "ble", "usb", "camera", "media")
+# The permissions a device needs, one of them, where they are not its name.
+_PERMS = {"media": ("media", "media:url")}
 
 
-def _need(pid, perm):
+def _need(pid, name):
     try:
         import devices
     except ImportError:  # host: the runtime package
         from runtime import devices
-    if not devices.may(pid, perm):
-        raise OSError(EPERM, 'needs "%s"' % perm)
+    perms = _PERMS.get(name, (name,))
+    for perm in perms:
+        if devices.may(pid, perm):
+            return
+    raise OSError(EPERM, 'needs "%s"' % perms[0])
 
 
 def _mine(pid, h):

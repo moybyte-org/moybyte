@@ -26,7 +26,10 @@
 // opened (nav_open_app, under `launch` and the front's gate), a document
 // shared and one picked; the pick reaches it as "moy_open" (handle, mime,
 // mode, name), whose item it reads, writes and reads again through its
-// handle, and a handle it was never given; a "bye" ends it, a "quit" returns
+// handle, and a handle it was never given; a "wake" carrying ["media", path]
+// opens the media service by handle, probes the file (its length and
+// title), plays it, prints whether the stream is its own and the source it
+// reads back, and keeps it playing until the service ends; a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -174,6 +177,40 @@ int main(void) {
             printf("item_read.again %.*s errno %d\n", r > 0 ? r - 1 : 0, b, r < 0 ? errno : 0);
             r = moy_item_read(h + 1000, b, sizeof b);
             printf("item_read.none %d errno %d\n", r, r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strncmp(m.b + sizeof m.ev, "[\"media\",\"", 10) == 0) {
+            char path[200];
+            snprintf(path, sizeof path, "%s", m.b + sizeof m.ev + 10);
+            char *end = strstr(path, "\"]");
+            if (end != NULL) {
+                *end = 0;
+            }
+            int h = (int)moy_dev_open("media", NULL);
+            printf("media_open %d errno %d\n", h > 0 ? 1 : h, h < 0 ? errno : 0);
+            unsigned char r[256];
+            int n = (int)moy_dev_xfer(h, path, strlen(path), r, sizeof r);
+            int title = 0;
+            while (4 + title < n && r[4 + title] != '\n') {
+                title++;
+            }
+            printf("media_probe %d:%.*s errno %d\n", n >= 4 ? r[0] : -1, title,
+                   (const char *)r + 4, n < 0 ? errno : 0);
+            n = (int)moy_dev_write(h, path, strlen(path));
+            printf("media_play %d errno %d\n", n == (int)strlen(path) ? 1 : n, n < 0 ? errno : 0);
+            n = (int)moy_dev_get(h, "mine");
+            printf("media_mine %d errno %d\n", n, n < 0 ? errno : 0);
+            n = (int)moy_dev_read(h, r, sizeof r);
+            int src = 0;
+            for (int k = 0, lines = 0; k < n && lines < 3; k++) {
+                if (r[k] == '\n' && ++lines == 3) {
+                    src = k + 1;
+                }
+            }
+            printf("media_src %s errno %d\n",
+                   n > src && strncmp((const char *)r + src, path, strlen(path)) == 0 ? "same"
+                                                                                       : "other",
+                   n < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0) {
             printf("after %d\n", (int)moy_after(0));
