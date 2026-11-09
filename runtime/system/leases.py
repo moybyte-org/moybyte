@@ -511,33 +511,25 @@ class LocalPins:
     `read(n)`, the browser's GpioLink's shape (`ws.gpio`). A pin is taken for
     the calling process at its first use, an output by `write`, an input by
     `read`; a pin another process holds, or none of the gpio row, answers
-    False and None. `take(n, out)` is the pin itself, raising where those
-    answer False and None (a compiled program's `pins` handle,
-    runtime/system/dev_handles.py)."""
+    False and None."""
 
     def __init__(self, leases):
         self.leases = leases
 
-    def take(self, n, out):
-        """Pin `n` for the calling process, an output (`out`) or an input:
-        taken at its first use; OSError where another process holds it or
-        the gpio row has no such pin."""
+    def _pin(self, n, out):
         pid = _pid()
         name = "gpio%d" % int(n)
         p = self.leases.of(pid, name)
         if p is None:
-            p = self.leases.take(pid, name, {"mode": Pin.OUT if out else Pin.IN}, _N.PINS)
+            try:
+                p = self.leases.take(pid, name, {"mode": Pin.OUT if out else Pin.IN}, _N.PINS)
+            except OSError:
+                return None
             p._out = out
         elif out and not getattr(p, "_out", False):
             p.init(Pin.OUT)
             p._out = True
         return p
-
-    def _pin(self, n, out):
-        try:
-            return self.take(n, out)
-        except OSError:
-            return None
 
     def write(self, n, v):
         p = self._pin(n, True)

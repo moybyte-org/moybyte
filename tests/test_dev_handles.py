@@ -1,11 +1,13 @@
-"""Leases and device APIs by handle (runtime/system/dev_handles.py,
-docs/os_2026-11/hardware.md section 4): what the `moybyte.dev_*` rows answer
-a compiled program, here called as its process would be served, over the
-host's stand-ins (runtime/host/lease_sim.py, lora_sim.py, mic_sim.py) and the
-http client against a local server. The rows reached from each compiled tier
-are tests/test_wasm_app.py's, tests/test_wasi_services.py's and
-tests/test_elf_commands.py's."""
+"""Leases and device APIs by handle (docs/os_2026-11/hardware.md section 4):
+what the `moybyte.dev_*` rows answer a compiled program, here called as its
+process would be served -- gpio<n> and pins by the kernel's handle table
+(native/moy_kernel/moy_dev.h), every other kind by runtime/system/
+dev_handles.py -- over the host's stand-ins (runtime/host/lease_sim.py,
+lora_sim.py, mic_sim.py) and the http client against a local server. The
+rows reached from each compiled tier are tests/test_wasm_app.py's,
+tests/test_wasi_services.py's and tests/test_elf_commands.py's."""
 
+import ctypes
 import errno
 import http.server
 import struct
@@ -39,6 +41,7 @@ def board():
         leases.LEASES.sweep(pid)
     leases.LEASES.grants = None
     devices.grants = None
+    _K().moy_dev_reset()
     N.reset()
     leases.stand_in(None, None)
 
@@ -56,18 +59,75 @@ def _open(pid, name, cfg=""):
     return _as(pid, lambda: H.open(pid, name, cfg))
 
 
+# The kernel's handle table, as the door's C half calls it (moy_app.c,
+# dev_row): a process's pid and its grant's device permissions.
+P_GPIO, P_PINS = 1 << 0, 1 << 1        # moy_dev.h's MOY_DEV_P_GPIO, MOY_DEV_P_PINS
+EDGE_BYTES = 8
+PASS = -1000                            # MOY_DEV_PASS: not the table's, the door's Python half's
+_C, _S, _Z, _U = ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int32, ctypes.c_uint32
+_DEV_SIGS = (
+    ("moy_dev_open", [_U, _U, _C, _S, _C, _S], _Z),
+    ("moy_dev_close", [_U, _Z], _Z),
+    ("moy_dev_read", [_U, _Z, ctypes.c_void_p, _S], _Z),
+    ("moy_dev_set", [_U, _Z, _C, _S], _Z),
+    ("moy_dev_get", [_U, _Z, _C, _S], _Z),
+    ("moy_dev_sweep", [_U], _U),
+    ("moy_dev_count", [], _U),
+    ("moy_dev_reset", [], None),
+)
+
+
+def _K():
+    lib = N._lib()
+    for name, args, res in _DEV_SIGS:
+        fn = getattr(lib, name)
+        fn.argtypes, fn.restype = args, res
+    return lib
+
+
+def _kopen(pid, name, cfg="", perms=P_GPIO | P_PINS):
+    b, c = name.encode(), cfg.encode()
+    return _K().moy_dev_open(pid, perms, b, len(b), c, len(c))
+
+
+def _kset(pid, h, cfg):
+    b = cfg.encode()
+    return _K().moy_dev_set(pid, h, b, len(b))
+
+
+def _kget(pid, h, what):
+    b = what.encode()
+    return _K().moy_dev_get(pid, h, b, len(b))
+
+
+def _kread(pid, h, cap):
+    buf = ctypes.create_string_buffer(max(cap, 1))
+    n = _K().moy_dev_read(pid, h, buf, cap)
+    return buf.raw[:n] if n >= 0 else n
+
+
+def _kclose(pid, h):
+    return _K().moy_dev_close(pid, h)
+
+
+def _end(pid):
+    """Process `pid` ended: its Python handles and its kernel ones closed."""
+    moybyte.end(pid)
+    _K().moy_dev_sweep(pid)
+
+
 # -- the leases -------------------------------------------------------------------------
 
 
 def test_a_gpio_handle_drives_and_reads_its_pin():
     pid = L.spawn("t.gpio")
-    h = _open(pid, "gpio6", "mode=out value=1")
+    h = _kopen(pid, "gpio6", "mode=out value=1")
     assert h > 0 and N.pin_state(6) & N.PIN_OUT and N.sim_get(6) == 1
-    assert H.set(pid, h, "value=0") == 0 and H.get(pid, h, "value") == 0
-    assert H.set(pid, h, "mode=in pull=up") == 0 and N.pin_state(6) & N.PIN_PU
-    assert H.read(pid, h, 64) == b""                    # no edges asked for
-    assert H.close(pid, h) == 0 and N.pin_state(6) == N.PIN_SAFE
-    assert H.get(pid, h, "value") == H.ABSENT
+    assert _kset(pid, h, "value=0") == 0 and _kget(pid, h, "value") == 0
+    assert _kset(pid, h, "mode=in pull=up") == 0 and N.pin_state(6) & N.PIN_PU
+    assert _kread(pid, h, 64) == b""                    # no edges asked for
+    assert _kclose(pid, h) == 0 and N.pin_state(6) == N.PIN_SAFE
+    assert _kget(pid, h, "value") == H.ABSENT
 
 
 def test_a_gpio_handle_reads_the_edges_its_trigger_names():
@@ -75,17 +135,17 @@ def test_a_gpio_handle_reads_the_edges_its_trigger_names():
     moybyte.bind(mi.kernel())
     try:
         pid = L.spawn("t.edges")
-        h = _open(pid, "gpio5", "mode=in")
-        assert H.set(pid, h, "edges=rising") == 0
+        h = _kopen(pid, "gpio5", "mode=in")
+        assert _kset(pid, h, "edges=rising") == 0
         for v in (1, 0, 1, 0):
             N.sim_level(5, v)
-        assert H.read(pid, h, 4) == H.FULL
-        got = H.read(pid, h, 64)
-        assert len(got) == 2 * H.EDGE_BYTES
+        assert _kread(pid, h, 4) == H.FULL
+        got = _kread(pid, h, 64)
+        assert len(got) == 2 * EDGE_BYTES
         assert [struct.unpack_from("<II", got, k)[1] for k in (0, 8)] == [1, 1]
-        assert H.read(pid, h, 64) == b""
-        assert H.set(pid, h, "edges=off") == 0 and H.read(pid, h, 64) == b""
-        assert H.set(pid, h, "edges=sideways") == H.BAD
+        assert _kread(pid, h, 64) == b""
+        assert _kset(pid, h, "edges=off") == 0 and _kread(pid, h, 64) == b""
+        assert _kset(pid, h, "edges=sideways") == H.BAD
     finally:
         moybyte.WAKES.table = None
         if was is not None:
@@ -140,9 +200,10 @@ def test_a_pwm_and_an_adc_handle():
 def test_a_name_or_cfg_the_console_does_not_take_is_bad():
     pid = L.spawn("t.bad")
     assert _open(pid, "uart9") == H.BAD
-    assert _open(pid, "gpio") == H.BAD
-    assert _open(pid, "gpio6", "mode=sideways") == H.BAD
-    assert _open(pid, "gpio6", "nonsense") == H.BAD
+    assert _open(pid, "gpio6") == H.BAD                   # the kernel's, never Python's
+    assert _kopen(pid, "gpio") == PASS and _open(pid, "gpio") == H.BAD   # not the kernel's
+    assert _kopen(pid, "gpio6", "mode=sideways") == H.BAD
+    assert _kopen(pid, "gpio6", "nonsense") == H.BAD
     assert _open(pid, "toaster") == H.BAD
     assert N.held() == 0
 
@@ -151,14 +212,16 @@ def test_a_lease_needs_its_row_granted():
     pid = L.spawn("t.perm")
     leases.LEASES.grants = lambda p: ("lease:gpio",) if p == pid else None
     assert _open(pid, "uart1") == H.DENIED
-    assert _open(pid, "gpio6") > 0 and _open(pid, "pwm22") > 0
+    assert _open(pid, "pwm22") > 0
+    assert _kopen(pid, "gpio6", perms=P_PINS) == H.DENIED
+    assert _kopen(pid, "gpio6", perms=P_GPIO) > 0
 
 
 def test_one_holder_across_the_tiers_a_python_object_or_a_handle():
     py, native = L.spawn("t.py"), L.spawn("t.native")
     u = _as(py, lambda: moybyte.lease("uart1"))
     assert _open(native, "uart1") == H.BUSY
-    h = _open(native, "gpio6", "mode=out")
+    h = _kopen(native, "gpio6", "mode=out")
     with pytest.raises(OSError) as e:
         _as(py, lambda: moybyte.lease("gpio6"))
     assert e.value.errno == errno.EBUSY
@@ -167,15 +230,18 @@ def test_one_holder_across_the_tiers_a_python_object_or_a_handle():
     assert e.value.errno == errno.EBUSY
     leases.LEASES.drop(u)
     assert _open(native, "uart1") > 0
-    assert H.close(native, h) == 0
+    assert _kclose(native, h) == 0
     _as(py, lambda: moybyte.lease("gpio6"))
 
 
 def test_a_handle_is_its_process_s_own():
     a, b = L.spawn("t.a"), L.spawn("t.b")
-    h = _open(a, "gpio6", "mode=out")
-    assert H.get(b, h, "value") == H.ABSENT and H.close(b, h) == H.ABSENT
-    assert H.close(a, h) == 0 and H.close(a, h) == H.ABSENT
+    h = _kopen(a, "gpio6", "mode=out")
+    assert _kget(b, h, "value") == H.ABSENT and _kclose(b, h) == H.ABSENT
+    assert _kclose(a, h) == 0 and _kclose(a, h) == H.ABSENT
+    u = _open(a, "uart1")
+    assert H.get(b, u, "baudrate") == H.ABSENT and H.close(b, u) == H.ABSENT
+    assert H.close(a, u) == 0 and H.close(a, u) == H.ABSENT
 
 
 def test_the_process_s_end_closes_every_handle_and_leaves_the_pins_safe():
@@ -183,14 +249,14 @@ def test_the_process_s_end_closes_every_handle_and_leaves_the_pins_safe():
     moybyte.bind(mi.kernel())
     try:
         pid = L.spawn("t.end")
-        _open(pid, "gpio5", "mode=in")
-        h = _open(pid, "gpio6", "mode=out value=1")
-        assert H.set(pid, h, "edges=both") == 0
+        _kopen(pid, "gpio5", "mode=in")
+        h = _kopen(pid, "gpio6", "mode=out value=1")
+        assert _kset(pid, h, "edges=both") == 0
         _open(pid, "uart1")
         _open(pid, "i2c", "scl=20 sda=21")
-        assert N.held(N.VM) == 4
-        moybyte.end(pid)
-        assert pid not in H.HANDLES and N.held() == 0
+        assert N.held() == 4 and N.held(N.VM) == 2, "the kernel's two hold no VM stop off"
+        _end(pid)
+        assert pid not in H.HANDLES and N.held() == 0 and _K().moy_dev_count() == 0
         assert [N.pin_state(p) for p in (5, 6, 20, 21, 47, 48)] == [N.PIN_SAFE] * 6
     finally:
         moybyte.WAKES.table = None
@@ -813,40 +879,37 @@ def test_a_media_handle_needs_either_permission_and_its_end_leaves_the_stream(me
 
 def test_a_pins_handle_drives_and_reads_the_pins_it_takes():
     pid, py = L.spawn("t.pins"), L.spawn("t.py")
-    h = _open(pid, "pins", "gpio6=1")
+    h = _kopen(pid, "pins", "gpio6=1")
     assert h > 0 and N.pin_state(6) & N.PIN_OUT and N.sim_get(6) == 1
-    assert _as(pid, lambda: H.set(pid, h, "gpio6=0 gpio20=1")) == 0
+    assert _kset(pid, h, "gpio6=0 gpio20=1") == 0
     assert N.sim_get(6) == 0 and N.sim_get(20) == 1
     N.sim_level(5, 1)
-    assert _get(pid, h, "gpio5") == 1 and not N.pin_state(5) & N.PIN_OUT   # an input
-    assert _get(pid, h, "gpio6") == 0
+    assert _kget(pid, h, "gpio5") == 1 and not N.pin_state(5) & N.PIN_OUT   # an input
+    assert _kget(pid, h, "gpio6") == 0
     assert _as(py, lambda: leases.LocalPins(leases.LEASES).write(6, 1)) is False  # Python's
     for bad in ("gpio6=2", "pin6=1", "gpio=1", "warp", "gpio7=1"):          # 7: not the row's
-        assert _as(pid, lambda: H.set(pid, h, bad)) == H.BAD, bad
-    assert _get(pid, h, "value") == H.BAD
-    assert _open(pid, "pins") == H.BUSY                       # one handle a process
+        assert _kset(pid, h, bad) == H.BAD, bad
+    assert _kget(pid, h, "value") == H.BAD
+    assert _kopen(pid, "pins") == H.BUSY                      # one handle a process
     other = L.spawn("t.other")
-    o = _open(other, "pins")
-    assert _as(other, lambda: H.set(other, o, "gpio6=1")) == H.BUSY      # pid holds it
-    assert _as(pid, lambda: H.close(pid, h)) == 0
+    o = _kopen(other, "pins")
+    assert _kset(other, o, "gpio6=1") == H.BUSY               # pid holds it
+    assert _kclose(pid, h) == 0
     assert [N.pin_state(p) for p in (5, 6, 20)] == [N.PIN_SAFE] * 3
-    assert _as(other, lambda: H.set(other, o, "gpio6=1")) == 0 and N.sim_get(6) == 1
-    moybyte.end(other)
+    assert _kset(other, o, "gpio6=1") == 0 and N.sim_get(6) == 1
+    _end(other)
     assert N.pin_state(6) == N.PIN_SAFE and N.held() == 0
 
 
 def test_a_pins_handle_needs_the_permission_and_pins_and_keeps_nothing_refused():
     pid = L.spawn("t.pins")
-    leases.LEASES.grants = lambda p: ()                       # no lease:gpio: pins is enough
-    devices.grants = lambda p: ("pins",)
-    assert _open(pid, "pins", "gpio6=1") > 0
-    moybyte.end(pid)
-    devices.grants = lambda p: ("lease",)
-    assert _open(pid, "pins") == H.DENIED
-    devices.grants = None
-    assert _open(pid, "pins", "gpio6=1 gpio7=9") == H.BAD and N.held() == 0
+    assert _kopen(pid, "pins", "gpio6=1", perms=P_PINS) > 0  # no lease:gpio: pins is enough
+    _end(pid)
+    assert _kopen(pid, "pins", perms=P_GPIO) == H.DENIED
+    assert _kopen(pid, "pins", "gpio6=1 gpio7=9") == H.BAD and N.held() == 0
+    assert _open(pid, "pins") == H.BAD                       # the kernel's, never Python's
     leases.stand_in(None, None)
-    assert _open(pid, "pins") == H.ABSENT
+    assert _kopen(pid, "pins") == H.ABSENT
 
 
 def test_a_media_handle_plays_only_from_its_own_folders(media, tmp_path, monkeypatch):

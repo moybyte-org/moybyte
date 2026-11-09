@@ -277,7 +277,8 @@ def test_a_compiled_app_is_refused_what_its_permissions_do_not_grant(talk):
 
 @pytest.mark.parametrize("off", [(), ("lease:gpio", "lease:uart1")])
 def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
-    """moybyte_dev_* (runtime/system/dev_handles.py): a pin the app drives and
+    """moybyte_dev_* (native/moy_kernel/moy_dev.h for the pin and the pins,
+    runtime/system/dev_handles.py for the UART): a pin the app drives and
     reads back, a UART it writes and reads through its peer, each DENIED with
     its `lease:<row>` turned off; the pin it keeps is BUSY to a Python
     program while it runs and safe once its run ends. A `pins` handle

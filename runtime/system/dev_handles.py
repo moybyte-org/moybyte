@@ -10,7 +10,6 @@
 #   words                    a cfg string of `key=value` words as a dict
 #   _Handle                  the base every handle's verbs default from
 #   _Lease                   the base of a lease row's handle (leases.py)
-#   _Gpio                    gpio<n>: modes, levels and edge events
 #   _Uart                    uart<n>
 #   _Spi                     spi<n>: full-duplex transfers
 #   _Pwm                     pwm<n>
@@ -27,22 +26,21 @@
 #   _Camera                  camera: a picture per read
 #   _media_roots             the folders a process's media handle plays from
 #   _Media                   media: the media service's stream by handle
-#   _Pins                    pins: the console's pins switched by handle
 #   _Net                     net: the radio link's messages on a port
 """Leases and device APIs by handle: what a compiled program (a wasm app, a
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
-`moybyte.dev_*`. The kernel's handle table serves the kinds it owns on the
-calling program's own task (native/moy_kernel/moy_dev.h: gpio<n> and pins,
-whose classes here answer only in an image without it); every other kind is
-served here, by the door's Python half as the calling process
-(runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
+`moybyte.dev_*`. The kernel's handle table serves gpio<n> and pins on the
+calling program's own task (native/moy_kernel/moy_dev.h, which says what
+they answer); every other kind is served here, by the door's Python half as
+the calling process (runtime/shell/shell_servers.py, ConsoleCalls), on the
+VM's task:
 
   open(name, cfg) -> h      a lease of row `name` (leases.py's names:
-                            "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",
-                            "adc<n>", "i2c") or a device API ("http", "lora",
-                            "mic", "ble", "usb", "midi", "camera",
-                            "media", "pins", "net"), configured by `cfg`
+                            "uart<n>", "spi<n>", "pwm<n>", "adc<n>", "i2c")
+                            or a device API ("http", "lora", "mic", "ble",
+                            "usb", "midi", "camera", "media", "net"),
+                            configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
   write(h, bytes) -> n      what was sent
@@ -54,10 +52,6 @@ served here, by the door's Python half as the calling process
 address, a UUID, a name and bytes (in hex) stay text. What each handle
 answers:
 
-  gpio<n>   cfg mode=in|out|od pull=up|down|none value=0|1; set the same and
-            edges=rising|falling|both|off; get value; read: the edges since
-            the last read, 8 bytes each (the stamp, microseconds wrapping at
-            2^30, and the level after it, each a little-endian uint32)
   uart<n>   cfg baudrate bits parity=none|even|odd stop tx rx timeout rxbuf
             txbuf; read: the bytes waiting; write; get any
   spi<n>    cfg baudrate polarity phase bits firstbit=msb|lsb sck mosi miso;
@@ -156,12 +150,6 @@ answers:
             artist on two lines out, DENIED where it may not play the file,
             ABSENT where it reads none. Its close and its process's end
             leave the stream playing
-  pins      the `pins` permission's digital pins (Python's pin_write and
-            pin_read), each a pin of the board's gpio row taken for the
-            process at its first use: set gpio<n>=0|1 (several words, several
-            pins) drives each as an output; get gpio<n> reads one, an input
-            where it was not driven; a pin another process holds is BUSY;
-            its close gives back the pins it took
   net       the console-to-console radio link (docs/netplay_v1.md, Ports),
             one port a handle: cfg port=1..65535 (required; port 0 is the
             game's net.send and on_net) and from=any|match (any by
@@ -218,9 +206,7 @@ _CODE = {EPERM: DENIED, EACCES: DENIED, EBUSY: BUSY, EINVAL: BAD, ENODEV: ABSENT
          ENOENT: ABSENT, EBADF: ABSENT, ENOMEM: NOMEM, ENOSPC: FULL, ENOTCONN: ABSENT,
          EPROTONOSUPPORT: BAD}
 
-EDGE_DEPTH = 64
-EDGE_BYTES = 8
-_BATCH = 8                  # edge records a read takes from the ring at a time
+_BATCH = 8                  # events a read takes from the input table at a time
 
 HANDLES = {}                # pid -> {h: its handle}
 _NEXT = [1]
@@ -343,100 +329,6 @@ class _Lease(_Handle):
 
     def close(self, pid):
         _leases().LEASES.drop(self.obj)
-
-
-class _Gpio(_Lease):
-    def __init__(self, obj):
-        _Lease.__init__(self, obj)
-        self.reader = -1
-        self.trigger = 0
-        self.buf = None
-
-    @staticmethod
-    def cfg(cfg):
-        P = _leases().Pin
-        _only(cfg, ("mode", "pull", "value"))
-        _named(cfg, "mode", {"in": P.IN, "out": P.OUT, "od": P.OPEN_DRAIN})
-        _named(cfg, "pull", {"up": P.PULL_UP, "down": P.PULL_DOWN, "none": None})
-        return cfg
-
-    def set(self, cfg):
-        edges = cfg.pop("edges", None)
-        if edges is not None and edges not in ("rising", "falling", "both", "off"):
-            raise OSError(EINVAL, "edges=%r" % edges)
-        cfg = self.cfg(cfg)
-        v = cfg.pop("value", None)
-        if cfg:
-            self.obj.init(cfg.get("mode", -1), cfg.get("pull", -1))
-        if v is not None:
-            self.obj.value(1 if v else 0)
-        if edges is not None:
-            self._edges_off()
-            if edges != "off":
-                self._edges_on({"rising": 1, "falling": 2, "both": 3}[edges])
-        return 0
-
-    def get(self, what):
-        if what != "value":
-            raise OSError(EINVAL, "no %s" % what)
-        return self.obj.value()
-
-    def _edges_on(self, trigger):
-        L = _leases()
-        t = _moybyte.WAKES.table
-        if t is None:
-            raise OSError(ENODEV, "no input table")
-        src = L._N.edge(self.obj._h, self.obj.pin, EDGE_DEPTH, False)
-        try:
-            self.reader = t.reader(1 << _moybyte.EDGE, src)
-        except BaseException:
-            L._N.edge_close(self.obj._h, self.obj.pin)
-            raise
-        self.trigger = trigger
-        self.buf = _array("i", [0] * (_moybyte.EV_FIELDS * _BATCH))
-
-    def _edges_off(self):
-        if self.reader < 0:
-            return
-        t = _moybyte.WAKES.table
-        if t is not None:
-            t.reader_free(self.reader)
-        self.reader = -1
-        N = _leases()._N
-        if N.live(self.obj._h):
-            try:
-                N.edge_close(self.obj._h, self.obj.pin)
-            except OSError:
-                pass
-
-    def read(self, cap):
-        if self.reader < 0:
-            return b""
-        if cap < EDGE_BYTES:
-            return FULL
-        t = _moybyte.WAKES.table
-        F, T, K, B = _moybyte.EV_FIELDS, _moybyte.EV_T, _moybyte.EV_KIND, _moybyte.EV_B
-        out = bytearray()
-        want = cap // EDGE_BYTES
-        while len(out) // EDGE_BYTES < want:
-            n = t.events(self.buf, self.reader) if t is not None else 0
-            for i in range(n):
-                k = i * F
-                if self.buf[k + K] != _moybyte.EDGE:
-                    continue
-                level = 1 if self.buf[k + B] else 0
-                if self.trigger & (1 if level else 2):
-                    out += (self.buf[k + T] & 0xFFFFFFFF).to_bytes(4, "little")
-                    out += level.to_bytes(4, "little")
-            if n < _BATCH:
-                break
-        # a batch read may hold more than fits: what is past `cap` is lost,
-        # as a ring's overrun is (`drops`), so ask with room for a batch
-        return bytes(out[:want * EDGE_BYTES])
-
-    def close(self, pid):
-        self._edges_off()
-        _Lease.close(self, pid)
 
 
 class _Uart(_Lease):
@@ -570,7 +462,7 @@ class _I2c(_Lease):
         return self.obj.readfrom(a, cap) if cap > 0 else b""
 
 
-_LEASES = {"gpio": _Gpio, "uart": _Uart, "spi": _Spi, "pwm": _Pwm, "adc": _Adc}
+_LEASES = {"uart": _Uart, "spi": _Spi, "pwm": _Pwm, "adc": _Adc}
 
 
 def _lease(pid, name, cfg):
@@ -1232,53 +1124,6 @@ class _Media(_Handle):
         """The handle's end: the stream is the service's and plays on."""
 
 
-def _pin_of(key):
-    if not isinstance(key, str) or not key.startswith("gpio") or not key[4:].isdigit():
-        raise OSError(EINVAL, "a pin is gpio<n>: %r" % (key,))
-    return int(key[4:])
-
-
-class _Pins(_Handle):
-    def __init__(self, cfg):
-        g = _leases().local_pins()
-        if g is None:
-            raise OSError(ENODEV, "this console has no pins")
-        self.g = g
-        self.took = []          # the pins this handle took, given back at its close
-        if cfg:
-            try:
-                self.set(cfg)
-            except BaseException:
-                self.close(0)
-                raise
-
-    def _pin(self, key, out):
-        n = _pin_of(key)
-        L = _leases()
-        had = L.LEASES.of(L._pid(), "gpio%d" % n)
-        p = self.g.take(n, out)
-        if had is None:
-            self.took.append(p)
-        return p
-
-    def set(self, cfg):
-        for k in cfg:
-            _pin_of(k)
-            _int(cfg[k], 0, 1, k)
-        for k in sorted(cfg):
-            self._pin(k, True).value(cfg[k])
-        return 0
-
-    def get(self, what):
-        return self._pin(what, False).value()
-
-    def close(self, pid):
-        L = _leases()
-        for p in self.took:
-            L.LEASES.drop(p)
-        self.took = []
-
-
 NET_HEAD = 10               # a net record's head: the sender (6 bytes), port, n (u16)
 NET_PORTS = 4               # the ports a process holds at once
 _NET_CODE = {-1: EINVAL, -2: ENOSPC, -3: EBUSY, -4: EBADF, -5: EIO, -6: EBUSY}
@@ -1374,9 +1219,9 @@ class _Net(_Handle):
 
 _DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb,
             "midi": _Midi, "camera": _Camera,
-            "media": _Media, "pins": _Pins, "net": _Net}
+            "media": _Media, "net": _Net}
 # A device with one holder: a process opens it once.
-_ONE = ("lora", "mic", "ble", "usb", "camera", "media", "pins")
+_ONE = ("lora", "mic", "ble", "usb", "camera", "media")
 # The permissions a device needs, one of them, where they are not its name.
 _PERMS = {"media": ("media", "media:url"), "net": ("multiplayer",)}
 

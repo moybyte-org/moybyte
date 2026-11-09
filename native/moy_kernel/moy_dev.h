@@ -3,7 +3,8 @@
 // "here"). A WASI program, an ELF module and a compiled app hold a lease or a
 // device by HANDLE where a Python program holds an object; this table serves
 // the handles whose device has a C face that is safe on the caller's own task,
-// so they answer with no VM, through an S3's VM stop too. The rest are the
+// so they answer with no VM, through an S3's VM stop too, on every image
+// that links moy_app (each links this kernel too). The rest are the
 // console's Python (runtime/system/dev_handles.py): a call this table does
 // not own answers MOY_DEV_PASS, and the door hands it to Python on the VM's
 // task (native/moy_app/moy_app.c, dev_row).

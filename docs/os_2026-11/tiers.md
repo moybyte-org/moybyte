@@ -333,7 +333,7 @@ the system's messages (`_minimise`, `_restore`, `moy_action`, `moy_open`;
 item to any process with a queue, a native command's and a service's too, and
 `_compiled_events`). **Its leases and devices are handles it polls too
 (2026-11-09)**: the `dev_*` rows on all three compiled tiers
-(`hardware.md` §1, `runtime/system/dev_handles.py`), whose `dev_read`
+(`hardware.md` §1 and §4), whose `dev_read`
 takes a ring's records (a pin's edges, a packet, samples, MIDI messages,
 the BLE and USB faces' events with their bytes) from the handle, a reader of the ring per handle.
 The other way, a message from "system" a record, was refused: the queue

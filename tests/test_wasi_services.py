@@ -433,8 +433,9 @@ def test_the_fixture_is_a_service():
 
 @pytest.mark.parametrize("perms", [("lease:gpio", "lease:uart1"), ()])
 def test_a_wasi_service_holds_leases_by_handle_until_it_ends(svc, perms):
-    """moybyte.os `dev_*` are the device handles' rows (runtime/system/
-    dev_handles.py) for the service's process: a pin driven and read back, a
+    """moybyte.os `dev_*` are the device handles' rows (native/moy_kernel/
+    moy_dev.h's pin, runtime/system/dev_handles.py's UART) for the service's
+    process: a pin driven and read back, a
     UART written and read through its peer, a handle it never had NOENT, each
     refused ACCES without its `lease:<row>`. A pin it holds is BUSY to a
     Python program until the service ends, whose sweep leaves it safe."""

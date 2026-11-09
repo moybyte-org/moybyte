@@ -240,7 +240,8 @@ def test_a_native_command_hears_its_timers_and_alarm_and_its_end_sweeps_them(ter
 
 def test_a_native_command_holds_leases_by_handle_and_its_end_sweeps_them(term):
     """`moy_dev_*` from C (elf_app.moy's `app lease`): the device handles'
-    rows (runtime/system/dev_handles.py) for the command's process under its
+    rows (native/moy_kernel/moy_dev.h's pin, runtime/system/dev_handles.py's
+    UART and SPI) for the command's process under its
     `lease:<row>` permissions -- a pin driven and read, a UART written and
     read through its peer, a UART it already holds EBUSY, an SPI host a
     Python program holds EBUSY too, a row not offered EINVAL, a handle it
