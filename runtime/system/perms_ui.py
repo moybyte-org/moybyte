@@ -55,7 +55,7 @@ class PermsPage:
             for cart in self._carts.all() or ():
                 if self._nav.is_system_app(cart):
                     continue              # the shell's own: no grant to narrow
-                perms = _perms.asked(cart.get("permissions"), _perms.tier_of(cart))
+                perms = _perms.asked(cart.get("permissions"), _perms.tiers_of(cart))
                 if perms:
                     out.append((cart.get("title") or "?", _perms.app_id(cart),
                                 tuple((p, _perms.line(p)) for p in perms)))

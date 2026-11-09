@@ -345,6 +345,23 @@ def test_its_restart_policy_is_the_cart_names(tmp_path, monkeypatch):
         S.SCHED.forgive(APP)
 
 
+@pytest.mark.parametrize("runtime,entry,want", [
+    ("lua", "svc.elf", ["prefs", "autostart", "full_access"]),   # the ELF service's
+    ("lua", None, ["prefs", "autostart"]),
+    ("wasm", "svc.wasm", ["prefs", "autostart", "full_access"]),  # a WASI service autostarts
+])
+def test_the_prompt_asks_for_what_the_app_and_its_service_are_served(runtime, entry, want):
+    cart = {"id": APP, "type": "app", "runtime": runtime,
+            "permissions": ["prefs", "autostart", "full_access"],
+            "entries": {"service": entry} if entry else None}
+    assert app_perms.asked(cart["permissions"], app_perms.tiers_of(cart)) == want
+    assert [p for p in want if app_perms.line(p) in app_perms.prompt(cart)] == want
+    man = {"id": APP, "runtime": runtime, "moybyte": {
+        "type": "app", "permissions": cart["permissions"], "entries": cart["entries"]}}
+    assert app_perms.tiers_of(app_perms.manifest_cart(man, "both.moy")) \
+        == app_perms.tiers_of(cart)
+
+
 def test_the_install_prompt_says_the_app_works_in_the_background():
     cart = {"id": APP, "type": "app", "runtime": "lua", "permissions": ["files", "prefs"],
             "entries": {"service": "service.lua"}}

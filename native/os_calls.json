@@ -295,7 +295,7 @@
     {"perm": "console", "grants": "api:console", "prompt": null, "needs": null, "py": []},
     {"perm": "notifications", "grants": "api:notify", "prompt": "Show notifications", "needs": null, "py": []},
     {"perm": "front", "grants": "api:front", "prompt": "Take over the screen from the background", "needs": null, "py": []},
-    {"perm": "autostart", "grants": "boot", "prompt": "Start when the console starts", "needs": null, "py": [], "tiers": ["python", "lua"]},
+    {"perm": "autostart", "grants": "boot", "prompt": "Start when the console starts", "needs": null, "py": [], "tiers": ["python", "lua", "wasm", "elf"]},
     {"perm": "lease", "grants": "lease", "prompt": "full", "needs": "lease", "py": []},
     {"perm": "full_access", "grants": "full_access", "prompt": "Full access to the console", "needs": null, "py": [], "tiers": ["elf", "wasm"]},
     {"perm": "http", "grants": "api:http", "prompt": "Fetch pages from the internet", "needs": "wifi", "py": []},

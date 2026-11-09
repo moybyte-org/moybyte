@@ -357,7 +357,9 @@ imports its rows, §10).
 The full list is `native/os_calls.json`'s `"permissions"`, generated
 into `runtime/shell/app_perms.py`'s `TABLE`, which the install prompt, the
 launch check and Settings read; a permission's tiers are the tiers that
-serve what it hands an app.
+serve what it hands an app. A cart with its own service (§7) is asked for
+what its own tier or its service's serves (`app_perms.tiers_of`): one
+consent covers both.
 
 **Not asked for, not there.** An ungranted capability has no name: touching
 it is a `NameError` (Lua: `nil`), like a typo. A permission the user turned

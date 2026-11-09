@@ -180,7 +180,7 @@ def _perm_carts(ws):
     for cart in ws.carts.all:
         if ws.is_system_app(cart):
             continue
-        perms = app_perms.asked(cart.get("permissions"), app_perms.tier_of(cart))
+        perms = app_perms.asked(cart.get("permissions"), app_perms.tiers_of(cart))
         if perms:
             out.append((app_perms.app_id(cart), cart.get("id"), perms))
     return out

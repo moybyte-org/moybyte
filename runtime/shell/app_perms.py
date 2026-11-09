@@ -93,7 +93,8 @@ TABLE = (
      "Show notifications", None, ()),
     ("front", "api:front", ("python", "lua", "wasm", "elf"),
      "Take over the screen from the background", None, ()),
-    ("autostart", "boot", ("python", "lua"), "Start when the console starts", None, ()),
+    ("autostart", "boot", ("python", "lua", "wasm", "elf"),
+     "Start when the console starts", None, ()),
     ("lease", "lease", ("python",), "full", "lease", ()),
     ("full_access", "full_access", ("wasm", "elf"), "Full access to the console", None, ()),
     ("http", "api:http", ("python",), "Fetch pages from the internet", "wifi", ()),
@@ -169,12 +170,14 @@ def line(perm):
 
 def asked(perms, tier=None):
     """The permissions of `perms` the prompt names, in the manifest's order,
-    each once; for a cart of `tier`, only those its tier serves (TIERS): the
-    rest are absent whatever is consented, so nothing asks for them."""
+    each once; for a cart of `tier` (a tier, or the tiers `tiers_of` names),
+    only those one of them serves (TIERS): the rest are absent whatever is
+    consented, so nothing asks for them."""
+    tiers = (tier,) if isinstance(tier, str) else tier
     out = []
     for p in perms or ():
         if line(p) is not None and p not in out:
-            if tier is None or tier in row(p)[TIERS]:
+            if tiers is None or any(t in row(p)[TIERS] for t in tiers):
                 out.append(p)
     return out
 
@@ -185,6 +188,21 @@ def tier_of(cart):
     if cart and cart.get("native"):
         return "elf"
     return (cart.get("runtime") if cart else None) or "python"
+
+
+def tiers_of(cart):
+    """The tiers `cart`'s programs run on: its own (`tier_of`), and its own
+    service's where it declares one (scheduler.entry_of), whose permissions
+    its one consent grants too."""
+    own = tier_of(cart)
+    if not cart or cart.get("type") == "service":
+        return (own,)
+    try:
+        import scheduler
+    except ImportError:  # host: the runtime package
+        from runtime import scheduler
+    got = scheduler.entry_of(cart)
+    return (own,) if got is None or got[1] == own else (own, got[1])
 
 
 def services(ws):
@@ -327,8 +345,8 @@ def absent_names(absent, rec):
 
 def manifest_cart(man, folder):
     """What the checks read of a cart, from its manifest `man` (a dict) and
-    its `folder` name: id, title, runtime, type, permissions, required and native,
-    as the store's cart dict carries them."""
+    its `folder` name: id, title, runtime, type, permissions, required,
+    native and entries, as the store's cart dict carries them."""
     ven = vendor(man)
     cid = man.get("id") if isinstance(man, dict) else None
     if not is_cart_id(cid):
@@ -341,7 +359,8 @@ def manifest_cart(man, folder):
             "type": ven.get("type"),
             "permissions": perms if isinstance(perms, list) else [],
             "required": req if isinstance(req, list) else [],
-            "native": chips if isinstance(chips, list) else None}
+            "native": chips if isinstance(chips, list) else None,
+            "entries": ven.get("entries")}
 
 
 def app_id(cart):
@@ -358,11 +377,12 @@ def prompt(cart, rec=None):
     BACKGROUND: what it is granted, it uses with no
     window open."""
     perms = (cart.get("permissions") if cart else None) or ()
-    want = asked(perms, tier_of(cart))
+    tiers = tiers_of(cart)
+    want = asked(perms, tiers)
     held = rec["perms"] if rec is not None and rec["perms"] is not None else None
     new = want if held is None else [p for p in want if p not in held]
     first = held is None
-    python = tier_of(cart) == "python"
+    python = "python" in tiers
     if not new and not (python and first):
         return None
     lines = [line(p) for p in want]
