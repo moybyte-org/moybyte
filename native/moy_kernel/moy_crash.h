@@ -11,8 +11,10 @@
 // It reads the task name, the uptime and the text only while the flash cache
 // is on, so a panic inside a flash operation still leaves PC, cause, address
 // and backtrace. The next boot's intake adds the reset reason, copies it to
-// NVS (every board's table has an nvs partition, so no core-dump partition)
-// and clears the RTC copy. `crc` covers every byte after itself, so a record
+// NVS (every board's table has an nvs partition) and clears the RTC copy.
+// After the wrapper, the IDF's panic handler writes the whole core dump to
+// the coredump partition on a board whose table has one (moy_kernel_dump,
+// tools/coredump.py). `crc` covers every byte after itself, so a record
 // is either whole or absent: power-on garbage, or a wrapper that died
 // half-way, reads as none. A VM that dies with the board up is recorded by the
 // VM service; a hang is the task watchdog's panic (moy_kernel.c).

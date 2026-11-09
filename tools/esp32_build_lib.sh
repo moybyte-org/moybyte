@@ -833,12 +833,15 @@ moybyte_app_size_guard() {
 # service is mp_task copied, so the pinned tag's mp_task must be the one the
 # copy was reviewed against (tools/mp_task_calls.py, before anything compiles),
 # and its recovery floor names this build's OTA label, board and channel (its
-# `update` word fetches that release). Reads SCRIPT_DIR MPY_DIR MODULES_DIR.
+# `update` word fetches that release). The kernel reads the core dump a panic
+# wrote (esp_core_dump.h), so the port's component list takes espcoredump.
+# Reads SCRIPT_DIR MPY_DIR MODULES_DIR.
 moybyte_kernel_entry() {
   local dest staged label
   dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
   staged="${SCRIPT_DIR}/${dest}/moy_kernel"
   [ -d "${staged}" ] || return 0
+  moybyte_idf_component espcoredump
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/mp_task_calls.py" check \
     "${MPY_DIR}" "${REPO_ROOT}/native/moy_kernel/mp_task_calls.txt" || exit 1
   local board channel
@@ -958,6 +961,9 @@ moybyte_build_and_collect() {
   floor="${floor%% *}"
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin" \
     "${floor}" "${board_id}"
+  # A core dump must carry the loaded modules' table (tools/coredump.py).
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/coredump.py" check-elf "${bout}/micropython.elf" \
+    || exit 1
   echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }

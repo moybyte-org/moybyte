@@ -29,6 +29,10 @@ have, so with this package installed (`pip install -e .` in moybyte puts
         the cart, its stubs left behind, onto a board's store
         (tools/board.py ID push) or the simulator's (~/.moybyte/projects,
         where tools/simulate_desktop.py runs it from)
+    moy app coredump <board> [--gdb] [--port PORT] [--elf ELF] [--symbols DIR]
+        the core dump a panic left in the board's flash, read over the cable
+        and decoded (tools/coredump.py show): every task's backtrace, a
+        native module's frames under its own symbols; --gdb opens gdb on it
 
 The tiers are the start-here table's: `wasm` is an app compiled to wasm
 (moybyte.app imports), `wasi` a WASI command or service, `c` a native (ELF)
@@ -923,13 +927,27 @@ def cmd_push(a):
     return 0
 
 
+# -- coredump ------------------------------------------------------------------
+
+def cmd_coredump(a):
+    cmd = [sys.executable, os.path.join(ROOT, "tools", "coredump.py"), "show", a.board]
+    if a.gdb:
+        cmd.append("--gdb")
+    for flag in ("port", "elf"):
+        if getattr(a, flag):
+            cmd += ["--" + flag, getattr(a, flag)]
+    for d in a.symbols:
+        cmd += ["--symbols", d]
+    return subprocess.call(cmd)
+
+
 # -- the command line -----------------------------------------------------------
 
 def parser():
     ap = argparse.ArgumentParser(prog=PROG, description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog="\n\n".join(__doc__.split("\n\n")[2:]))
-    sub = ap.add_subparsers(dest="verb", metavar="{new,check,build,stubs,push}")
+    sub = ap.add_subparsers(dest="verb", metavar="{new,check,build,stubs,push,coredump}")
     p = sub.add_parser("new", help="a cart folder from a template")
     p.add_argument("name")
     p.add_argument("--tier", choices=TIERS, default="python")
@@ -954,6 +972,13 @@ def parser():
     to = p.add_mutually_exclusive_group()
     to.add_argument("--board", help="a board id (tools/board.py ports)")
     to.add_argument("--store", help="a simulator store folder (default %s)" % SIM_STORE)
+    p = sub.add_parser("coredump", help="a board's core dump, read and decoded")
+    p.add_argument("board", help="a board id (tools/board.py ports)")
+    p.add_argument("--gdb", action="store_true", help="open gdb on it")
+    p.add_argument("--port")
+    p.add_argument("--elf", help="the firmware ELF the board runs (default: its build tree)")
+    p.add_argument("--symbols", action="append", default=[],
+                   help="a folder of unstripped modules named <sha256>.elf; repeatable")
     return ap
 
 
@@ -964,7 +989,7 @@ def main(argv=None):
         ap.print_help()
         return 0
     return {"new": cmd_new, "check": cmd_check, "build": cmd_build, "stubs": cmd_stubs,
-            "push": cmd_push}[a.verb](a)
+            "push": cmd_push, "coredump": cmd_coredump}[a.verb](a)
 
 
 if __name__ == "__main__":

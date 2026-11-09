@@ -18,6 +18,7 @@ moy app check <cart> [--strict]
 moy app build <cart> [--chip esp32s3|esp32p4|host ...] [--unsigned]
 moy app stubs <cart>
 moy app push <cart> [--board ID | --store DIR]
+moy app coredump <board> [--gdb] [--port PORT] [--elf ELF] [--symbols DIR]
 ```
 
 - `new` writes `<name>.moy` from a template per tier (`sdk/moybyte_sdk/templates.py`;
@@ -51,6 +52,14 @@ moy app push <cart> [--board ID | --store DIR]
 - `push` copies the cart, less those stubs and only once it checks, onto a
   board's store (`tools/board.py ID push`) or the simulator's
   (`~/.moybyte/projects`).
+- `coredump` reads the core dump a panic left in the board's `coredump`
+  partition over the cable and decodes it with the IDF's esp-coredump
+  against the firmware ELF of the board's build (`tools/coredump.py show`):
+  every task's backtrace, with a native module's frames under its own
+  symbols, found by the sha256 the dump records from the unstripped twin
+  each build keeps under `.build/sdk/symbols/` (`--symbols` adds a folder);
+  `--gdb` opens gdb on it (`native/moy_elf/README.md`, "A crash's core
+  dump").
 
 What `check` and `stubs` know is generated from `native/os_calls.json` by
 `tools/gen_os_table.py` (`sdk/moybyte_sdk/os_table.py`, `sdk/moybyte_sdk/stubs/`,

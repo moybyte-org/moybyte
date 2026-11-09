@@ -56,8 +56,11 @@
 
 #include "esp_elf.h"
 #include "moy_elf.h"
+#include "moy_elf_maps.h"
+#include "moy_net.h"
 #include "moy_ota.h"
 #include "moy_os.h"
+#include "moy_log.h"
 #include "moy_loop.h"
 #include "moy_sh.h"
 #ifdef MOY_OS_UMODE
@@ -83,8 +86,8 @@
 #error "moy_elf: a chip the SDK does not build for"
 #endif
 
-// The last load's cost: the file's read, its signature and verdict, its
-// relocation (the loader's cache flush included), all on the calling task;
+// The last load's cost: the file's read, its signature, verdict and sha256
+// (moy_elf_maps.h), its relocation (the loader's cache flush included), all on the calling task;
 // and the internal SRAM free before it and once the module is loaded.
 static struct {
     int64_t read_us, check_us, reloc_us;
@@ -208,16 +211,44 @@ static int u_module(esp_elf_t *elf, uint32_t text_end, uint32_t data_at, moy_os_
 }
 #endif
 
+_Static_assert(MOY_ELF_MAPS_SLOTS >= MOY_OS_PROCS, "a slot for every process's module");
+
+// The module's code where moy_elf_maps.h says: the segment on a P4, every
+// section at one offset; on an S3 its text, at the instruction bus's alias.
+static void map_module(esp_elf_t *elf, uint32_t pid, const uint8_t sha[32]) {
+#if CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
+    const esp_elf_sec_t *t = &elf->sec[ELF_SEC_TEXT];
+    moy_elf_maps_add(elf, pid, t->v_addr, (uint32_t)esp_elf_runtime_base(elf), t->size, sha);
+#else
+    moy_elf_maps_add(elf, pid, elf->svaddr, (uint32_t)elf->psegment, elf->segment_size, sha);
+#endif
+    const moy_elf_map_t *m = NULL;
+    const moy_elf_maps_t *all = moy_elf_maps();
+    for (unsigned i = 0; i < MOY_ELF_MAPS_SLOTS; i++) {
+        if (all->map[i].seq == all->seq) {
+            m = &all->map[i];
+        }
+    }
+    if (m != NULL) {
+        moy_log_say(MOY_LOG_INFO, pid, "module %02x%02x%02x%02x%02x%02x%02x%02x: %08lx+%lx at %08lx",
+                    sha[0], sha[1], sha[2], sha[3], sha[4], sha[5], sha[6], sha[7],
+                    (unsigned long)m->vaddr, (unsigned long)m->size, (unsigned long)m->addr);
+    }
+}
+
 static void unload(void *loaded) {
     esp_elf_t *elf = loaded;
+    moy_elf_maps_drop(elf);
     esp_elf_deinit(elf);
     heap_caps_free(elf);
 }
 
 // The file at `path` read, admitted (`flags`' MOY_OS_UNSIGNED: the cart's
-// consent), checked and relocated into *m: 0, or -1 with the reason in err.
+// consent), checked and relocated into *m for process `pid`, and its place
+// recorded for a core dump (moy_elf_maps.h): 0, or -1 with the reason in err.
 // Raises only when the file cannot be read.
-static int load(mp_obj_t path, uint32_t flags, moy_os_module_t *m, char *err, size_t errlen) {
+static int load(mp_obj_t path, uint32_t flags, uint32_t pid, moy_os_module_t *m, char *err,
+                size_t errlen) {
     memset(m, 0, sizeof *m);
 #ifdef MOY_OS_UMODE
     if (moy_u_ready() != 0) {
@@ -269,6 +300,8 @@ static int load(mp_obj_t path, uint32_t flags, moy_os_module_t *m, char *err, si
         snprintf(err, errlen, "refused: %s", why);
         return -1;
     }
+    uint8_t sha[32];
+    moy_net_sha256(buf, len, sha);
     int64_t t2 = esp_timer_get_time();
     esp_elf_t *elf = heap_caps_calloc(1, sizeof *elf, PSRAM_CAPS);
     if (elf == NULL) {
@@ -305,6 +338,7 @@ static int load(mp_obj_t path, uint32_t flags, moy_os_module_t *m, char *err, si
 #else
     esp_elf_request(elf, 0, 0, NULL);
 #endif
+    map_module(elf, pid, sha);
     g_load.read_us = t1 - t0;
     g_load.check_us = t2 - t1;
     g_load.reloc_us = esp_timer_get_time() - t2;
@@ -357,7 +391,7 @@ static mp_obj_t mod_command(size_t n_args, const mp_obj_t *args) {
     }
     uint32_t flags = n_args > 7 ? (uint32_t)mp_obj_get_int(args[7]) : 0u;
     moy_os_module_t m;
-    if (load(args[0], flags, &m, err, sizeof err) != 0) {
+    if (load(args[0], flags, pid, &m, err, sizeof err) != 0) {
         return result(MOY_OS_REFUSED, err);
     }
     const char **argv = m_new(const char *, argc ? argc : 1);
@@ -391,7 +425,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *args) {
     }
     uint32_t flags = n_args > 6 ? (uint32_t)mp_obj_get_int(args[6]) : 0u;
     moy_os_module_t m;
-    if (load(args[0], flags, &m, err, sizeof err) != 0) {
+    if (load(args[0], flags, pid, &m, err, sizeof err) != 0) {
         return result(MOY_OS_REFUSED, err);
     }
     const char **argv = m_new(const char *, argc ? argc : 1);
@@ -459,11 +493,12 @@ static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
     uint32_t flags = n_args > 3 ? (uint32_t)mp_obj_get_int(args[3]) : 0u;
     moy_app_run_t run;
     const moy_app_run_t *rp = run_of(n_args > 4 ? args[4] : mp_const_none, &run);
+    uint32_t pid = (uint32_t)mp_obj_get_int(args[1]);
     moy_os_module_t m;
-    if (load(args[0], flags, &m, err, sizeof err) != 0) {
+    if (load(args[0], flags, pid, &m, err, sizeof err) != 0) {
         return mp_obj_new_str(err, strlen(err));
     }
-    if (moy_os_service(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
+    if (moy_os_service(&m, NULL, pid, mp_obj_str_get_str(args[2]),
                        rp, err, sizeof err) == NULL) {
         return mp_obj_new_str(err, strlen(err));
     }

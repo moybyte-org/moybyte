@@ -475,3 +475,25 @@ def test_an_image_without_a_table_is_flashed_as_before(monkeypatch, tmp_path):
     """An app-only image has no table to compare; nothing is read."""
     _rc, fake = _flash(monkeypatch, tmp_path, P4)
     assert _verbs(fake.calls) == ["erase_region", "write_flash"]
+
+
+CORE_6M = SLOTS_6M + [("coredump", 1, 3, 0xC10000, 0x20000)]
+
+
+def test_a_flash_that_adds_the_coredump_partition_erases_it_and_moves_the_store(
+        monkeypatch, tmp_path, capsys):
+    rc, fake = _flash_over(monkeypatch, tmp_path, _table(SLOTS_6M), CORE_6M)
+    assert rc == 0
+    assert _verbs(fake.calls) == ["read_flash", "erase_region", "erase_region",
+                                  "erase_region", "write_flash"]
+    _read, _otadata, store, core, _write = fake.calls
+    assert store[-3:] == ["erase_region", "0xc30000", "0x2000"]
+    assert core[-3:] == ["erase_region", "0xc10000", "0x20000"]
+    assert core[core.index("--after") + 1] == "no_reset"
+    assert "coredump partition at 0xc10000+0x20000" in capsys.readouterr().out
+
+
+def test_a_flash_over_the_same_coredump_partition_keeps_its_dump(monkeypatch, tmp_path):
+    rc, fake = _flash_over(monkeypatch, tmp_path, _table(CORE_6M), CORE_6M)
+    assert rc == 0
+    assert _verbs(fake.calls) == ["read_flash", "erase_region", "write_flash"]

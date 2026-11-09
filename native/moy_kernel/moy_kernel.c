@@ -56,6 +56,9 @@
 #include "esp_attr.h"
 #include "esp_app_desc.h"
 #include "esp_cpu.h"
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include "esp_core_dump.h"
+#endif
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "multi_heap.h"
@@ -432,6 +435,28 @@ const moy_crash_rec_t *moy_kernel_take_crash(void) {
     }
     s_fresh = false;
     return moy_kernel_last_crash();
+}
+
+// The core dump a panic wrote to the coredump partition (sdkconfig.board's
+// CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH; tools/coredump.py reads it): its size
+// once its checksum holds, else 0. A board on a table without the partition,
+// or an image built without the dump, reads 0.
+uint32_t moy_kernel_dump(void) {
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    size_t addr = 0, size = 0;
+    if (esp_core_dump_image_check() == ESP_OK && esp_core_dump_image_get(&addr, &size) == ESP_OK) {
+        return (uint32_t)size;
+    }
+#endif
+    return 0;
+}
+
+bool moy_kernel_dump_clear(void) {
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    return esp_core_dump_image_erase() == ESP_OK;
+#else
+    return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------

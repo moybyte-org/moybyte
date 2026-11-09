@@ -78,6 +78,7 @@ target_sources(usermod_moy_elf INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_os.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_os_table.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_elf_check.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_elf_maps.c
 )
 target_include_directories(usermod_moy_elf INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}

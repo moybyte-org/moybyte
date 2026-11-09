@@ -110,10 +110,10 @@ except ImportError:        # host, and a board without the kernel
 # being written here.
 try:
     from settings_layer import SETTINGS_TOGGLES
-    from crash_guard import last_crash
+    from crash_guard import core_dump, last_crash
 except ImportError:        # host / test -- the runtime package
     from runtime.settings_layer import SETTINGS_TOGGLES
-    from runtime.crash_guard import last_crash
+    from runtime.crash_guard import core_dump, last_crash
 
 # A partial line longer than this is noise; drop it. NOT sized for a human:
 # the on-glass harness's `pyexec` uploads code in 768-char chunks wrapped in a
@@ -809,8 +809,10 @@ def _remote_state(ws):
     try:
         # The last crash the kernel recorded (native/moy_kernel): what was
         # OPEN in the strike ledger, why it stopped, where. None on a board
-        # with no record and on every tier without the kernel.
+        # with no record and on every tier without the kernel. `dump`: the
+        # size of the core dump the panic wrote to flash, or None.
         st["crash"] = last_crash()
+        st["dump"] = core_dump()
     except Exception as exc:  # noqa: BLE001
         st["crash_err"] = str(exc)
     try:

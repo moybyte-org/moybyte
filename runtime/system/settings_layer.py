@@ -51,11 +51,12 @@ except ImportError:  # pragma: no cover - host fallback
 try:
     import ui as _ui
     import layout_base as _lb
-    from crash_guard import crash_available, crash_lines, last_crash
+    from crash_guard import clear_core_dump, core_dump, crash_available, crash_lines, last_crash
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import layout_base as _lb
-    from runtime.crash_guard import crash_available, crash_lines, last_crash
+    from runtime.crash_guard import (clear_core_dump, core_dump, crash_available,
+                                      crash_lines, last_crash)
 
 try:
     from achievements_ui import AchievementsPage
@@ -1078,14 +1079,19 @@ class SettingsLayer:
         self.ws._dirty = True
 
     def _crash_page(self):
-        """The record's lines, and one button back."""
+        """The record's lines, the core dump's size with a button that
+        clears it when one is in flash, and one button back."""
         _x, _y, w, _h = _ui.page("")
         _ui.hints(("confirm", "Back"))
         _ui.group("Last crash")
         n = max(8, (w - 32) // max(1, self.ws.layout.font_w))
-        for line in crash_lines(last_crash()):
+        dump = core_dump()
+        for line in crash_lines(last_crash(), dump):
             for part in _wrap(line, n):
                 _ui.label(part)
+        if dump and _ui.button("Clear core dump"):
+            clear_core_dump()
+            self.ws._dirty = True
         if _ui.button("Back"):
             self.close_crash()
         _ui.group()
@@ -1627,7 +1633,7 @@ class SettingsLayer:
             return _wc.place(_wc.zone())
         if kind == "crash":
             rec = last_crash()
-            v = str(rec.get("kind") or "?")[:8] if rec else "None"
+            v = str(rec.get("kind") or "?")[:8] if rec else ("Dump" if core_dump() else "None")
             return v[:1].upper() + v[1:]
         if kind == "webhost":
             return ws.webhost_label() if ws.webhost_serving() else "Off"

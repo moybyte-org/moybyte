@@ -118,15 +118,42 @@ def last_crash():
     return _native.last() if _native is not None else None
 
 
+# The core dump's size, read once a boot (the check reads the whole dump);
+# empty until the first read.
+_dump = []
+
+
+def core_dump():
+    """The size in bytes of the ESP-IDF core dump the last panic wrote to the
+    board's coredump partition (tools/coredump.py reads and decodes it), or
+    None: no dump, no partition on this board's table, or no kernel."""
+    if _native is None:
+        return None
+    if not _dump:
+        _dump.append(_native.dump() or None)
+    return _dump[0]
+
+
+def clear_core_dump():
+    """Erase the core dump: True once it is gone."""
+    if _native is None or not _native.clear_dump():
+        return False
+    _dump[:] = [None]
+    return True
+
+
 def crash_available():
     """True on a board whose kernel keeps a crash record: the Settings
     diagnostics row exists exactly there."""
     return _native is not None
 
 
-def crash_lines(rec):
+def crash_lines(rec, dump=None):
     """A crash record as the Settings panel's lines (short, upper case): what
-    stopped, what was running, where, and the reason. `rec` None is no crash."""
+    stopped, what was running, where, and the reason, then the core dump's
+    size when one is in flash. `rec` None is no crash."""
+    if dump:
+        return crash_lines(rec) + ["CORE DUMP %d KB IN FLASH" % ((dump + 1023) // 1024)]
     if not rec:
         return ["NO CRASH RECORDED"]
     kind = str(rec.get("kind") or "?").upper()

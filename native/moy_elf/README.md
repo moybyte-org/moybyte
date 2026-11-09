@@ -246,6 +246,23 @@ UNSIGNED flag, which `runtime/run/elf_run.py` sets from the cart's consent to
 `full_access` (`app_perms.run_admits_unsigned`).
 `tools/elf_cart.py` signs as `tools/wasm_module.py` does.
 
+## A crash's core dump
+
+A module is relocated into PSRAM, so a pc inside it means nothing to gdb
+without the module's file and its load address. `moy_elf_maps.h`'s table
+holds both for every module loaded now: the sha256 of the bytes the board
+loaded (the signature trailer off) and the mapping of its code, the one
+segment on a P4, the text at the instruction bus's alias on an S3. The table
+sits in internal RAM the ESP-IDF core dump always carries
+(`COREDUMP_DRAM_ATTR`), and each load also says it in the OS log.
+`tools/elf_cart.py` keeps each module's unstripped twin (built with `-g`)
+under `.build/sdk/symbols/<sha256>.elf`, and `tools/coredump.py` (`moy app
+coredump BOARD`) finds the table in a board's dump, loads each twin's symbols
+at its recorded address and hands the dump to the IDF's esp-coredump and gdb.
+On a P4 a module's own fault is caught in U-mode and kills its process
+(`moy_elf.faults()`) rather than panicking the board, so a dump there is a
+kernel panic's, with any loaded module's frames named.
+
 ## The cart
 
 A native cart's manifest names its chips, `"moybyte": {"native": ["esp32s3",

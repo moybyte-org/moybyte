@@ -29,6 +29,8 @@
 //   moy_crash.take()               this boot's fresh record, once, or None
 //   moy_crash.crash_limit([n])     (limit, crashes): the console's crashes in a
 //                                  row that open the recovery console, set first
+//   moy_crash.dump()               the core dump's size in flash, or None
+//   moy_crash.clear_dump()         erase it: True once it is gone
 //   moy_crash.panic(how)           DEV: 'fault' (a store to 0) or 'abort', now
 
 #include <string.h>
@@ -342,6 +344,19 @@ static mp_obj_t mod_take(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_take_obj, mod_take);
 
+// dump() -> the size of the core dump a panic wrote to flash, or None;
+// clear_dump() -> True once it is erased.
+static mp_obj_t mod_dump(void) {
+    uint32_t n = moy_kernel_dump();
+    return n ? mp_obj_new_int_from_uint(n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_dump_obj, mod_dump);
+
+static mp_obj_t mod_clear_dump(void) {
+    return mp_obj_new_bool(moy_kernel_dump_clear());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_clear_dump_obj, mod_clear_dump);
+
 // crash_limit([n]) -> (limit, crashes): the console's crashes in a row that open
 // the recovery console (0 never), set first with `n` (0..32), and the count.
 static mp_obj_t mod_limit(size_t n_args, const mp_obj_t *args) {
@@ -369,6 +384,8 @@ static const mp_rom_map_elem_t moy_crash_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&mod_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_panic), MP_ROM_PTR(&mod_panic_obj) },
     { MP_ROM_QSTR(MP_QSTR_crash_limit), MP_ROM_PTR(&mod_limit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_dump), MP_ROM_PTR(&mod_dump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_clear_dump), MP_ROM_PTR(&mod_clear_dump_obj) },
     { MP_ROM_QSTR(MP_QSTR_APP), MP_ROM_INT(MOY_ROLE_APP) },
     { MP_ROM_QSTR(MP_QSTR_WALLPAPER), MP_ROM_INT(MOY_ROLE_WALLPAPER) },
     { MP_ROM_QSTR(MP_QSTR_GAME), MP_ROM_INT(MOY_ROLE_GAME) },

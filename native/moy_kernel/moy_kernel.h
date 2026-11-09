@@ -88,6 +88,12 @@ int moy_kernel_crash_limit(int n, int *count);
 const moy_crash_rec_t *moy_kernel_last_crash(void);
 const moy_crash_rec_t *moy_kernel_take_crash(void);
 
+// The core dump the last panic wrote to flash: its size, 0 for none (no
+// partition on this board's table, or a dump whose checksum fails). Clearing
+// erases it: true once it is gone.
+uint32_t moy_kernel_dump(void);
+bool moy_kernel_dump_clear(void);
+
 const char *moy_kernel_reset_name(int reason);
 
 // The task watchdog the console's frame feeds (#160): feed once per frame (the

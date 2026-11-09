@@ -71,10 +71,10 @@ except ImportError:  # pragma: no cover - host package lane
 
 try:
     from boot_carts import BootCarts
-    from crash_guard import take_crash
+    from crash_guard import core_dump, take_crash
 except ImportError:  # pragma: no cover - host package lane
     from runtime.boot_carts import BootCarts
-    from runtime.crash_guard import take_crash
+    from runtime.crash_guard import core_dump, take_crash
 
 try:
     import ui_draw as _ui_draw
@@ -260,13 +260,17 @@ def boot_ok(ws, kernel=None):
     (native/moy_kernel), which would otherwise send a boot that ends here to
     the recovery screen, and counts it out of the boot-loop guard. Then the
     crash the kernel recorded before this boot, if any, said once on the
-    notice banner."""
+    notice banner (Settings -> LAST CRASH shows it, and the core dump the panic
+    wrote, which it can clear)."""
     kernel = kernel or _kernel
     if kernel is None:
         return None
     kernel.boot_ok()
     rec = take_crash()
     if rec:
+        dump = core_dump()
+        if dump:
+            print("core dump: %d bytes in flash (tools/coredump.py)" % dump)
         who = rec.get("id") or rec.get("task") or "?"
         ws.notice(_ui_draw.s("notice.crashed_last"), "%s: %s" % (who, rec.get("what") or rec.get("kind")),
                   "warn", 10000)

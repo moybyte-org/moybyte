@@ -28,6 +28,10 @@ into `<stem>.<chip>.elf`, signed alike. A cart with no `src/*.c` of its own
 (a Python or Lua app) gets the service's modules alone, and no `native`
 field: that names the chips of the cart's own main.
 
+A board module is compiled with -g and stripped; its unstripped twin is kept
+under .build/sdk/symbols/ by the sha256 of the stripped module, the name a
+board's core dump gives it (tools/coredump.py).
+
 EVERY MODULE IS SIGNED, as a compiled cart's AOT module is (tools/wasm_module.py,
 the OTA signing key), over the text native/moy_elf/moy_elf.h's
 MOY_ELF_SIG_SCHEME names; `--unsigned` leaves it off. The host's chip is never
@@ -59,6 +63,11 @@ SDK_LIBM = os.path.join(SDK_LIBC, "m")
 LIBMOY = os.path.join(ROOT, "native", "moy_gfx", "libmoy")
 LIBMOY_SOURCES = ("moy_canvas.c", "moy_sprite.c", "moy_data.c")
 CACHE = os.path.join(ROOT, ".build", "sdk")
+# Each board module's unstripped twin, named by the sha256 of the module a
+# board loads (stripped, its signature trailer off): a board's core dump
+# names its modules by that sha (native/moy_elf/moy_elf_maps.h) and
+# tools/coredump.py loads their symbols from here.
+SYMBOLS = os.path.join(CACHE, "symbols")
 TABLE = os.path.join(ROOT, "native", "os_calls.json")
 ELF_H = os.path.join(ROOT, "native", "moy_elf", "moy_elf.h")
 
@@ -91,7 +100,7 @@ CHIPS = {
              "bare_libgcc": False},
 }
 
-CFLAGS = ["-Os", "-fPIC", "-ffunction-sections", "-fdata-sections", "-fvisibility=hidden",
+CFLAGS = ["-Os", "-g", "-fPIC", "-ffunction-sections", "-fdata-sections", "-fvisibility=hidden",
           "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0", "-fno-stack-protector"]
 # The SDK's libm keeps each operation as its source writes it: its range
 # reductions and extra-precision steps count on every product rounding.
@@ -338,9 +347,12 @@ def finish(out, chip, signed=True, sign_with=None):
     `signed` is False, signed (the host's is neither). Returns `out`."""
     strip = toolchain(chip)[2]
     if chip != "host":
+        with open(out, "rb") as f:
+            linked = f.read()
         args = [strip, "--strip-unneeded", "--remove-section=.comment"]
         args += ["--remove-section=%s" % s for s in CHIPS[chip]["strip"]]
         _run(args + [out])
+        keep_symbols(linked, out)
     if signed and chip != "host":
         from tools import wasm_module
         key = sign_with if sign_with is not None else wasm_module.signing_key()
@@ -352,6 +364,18 @@ def finish(out, chip, signed=True, sign_with=None):
         with open(out, "wb") as f:
             f.write(wasm_module.sign(data, chip, key, scheme=sig_scheme()))
     return out
+
+
+def keep_symbols(linked, module):
+    """Keep `linked`, the bytes of a module before its strip, under SYMBOLS
+    by the sha256 of `module`, the stripped file. Returns that path."""
+    with open(module, "rb") as f:
+        sha = hashlib.sha256(f.read()).hexdigest()
+    os.makedirs(SYMBOLS, exist_ok=True)
+    path = os.path.join(SYMBOLS, sha + ".elf")
+    with open(path, "wb") as f:
+        f.write(linked)
+    return path
 
 
 def service_entry(man):
