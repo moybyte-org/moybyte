@@ -80,6 +80,7 @@ _SPY = """(() => {
 })()"""
 _PCM = "'PCM ' + JSON.stringify(window.__pcm)"
 _MEDIA = "__moyState().then(s => 'MEDIA ' + JSON.stringify(s.media))"
+_LAST = "__moyState().then(s => 'LAST ' + JSON.stringify(s.media_last))"
 
 
 def _playing(timeout=20000):
@@ -167,22 +168,24 @@ def test_site_a_station_plays_when_it_lets_a_page_read_it_and_says_so_when_not(
         out, js = web_e2e.run(tmp_path, "radio", "?dev=1&handheld=1&cart=Music",
                               [{"js": _SPY}, {"wait": 1500}] + _add_station(url) + [
             {"js": _MEDIA},
-            {"waitFor": "__moyState().then(s => s.media && (s.media.state === 'failed'"
-                        " || s.media.at >= 1))", "timeout": 20000},
-            {"wait": 1000}, {"js": _MEDIA}, {"js": _PCM}, {"shot": "radio"},
+            {"waitFor": "__moyState().then(s => (s.media && s.media.at >= 1)"
+                        " || (s.media_last && s.media_last.state === 'failed'))",
+             "timeout": 20000},
+            {"wait": 1000}, {"js": _MEDIA}, {"js": _LAST}, {"js": _PCM}, {"shot": "radio"},
         ], base, tmp_path / "chrome", boot_ms=30000)
         media = [j for j in js if isinstance(j, str) and j.startswith("MEDIA ")]
         last = json.loads(media[-1][6:]) if media else None
-        assert last, (js, out[-3000:])
         assert not station.refused, station.refused
         if cors:
+            assert last, (js, out[-3000:])
             assert last["src"] == url and last["state"] == "playing", last
             _assert_tone(_tagged(js, "PCM"), out)
         else:
-            # past its one entry, the list failed with the page's refusal:
-            # the card says "Blocks browsers"
-            assert last["state"] == "failed" and last["err"] == 13, last
-            assert last["entries"] == 1, last
+            # past its one entry, the list failed with the page's refusal and
+            # the run ended: the card says "Blocks browsers"
+            assert media and last is None, js
+            ended = _tagged(js, "LAST")
+            assert ended and ended["state"] == "failed" and ended["err"] == 13, (js, out[-3000:])
     finally:
         station.stop()
         server.terminate()

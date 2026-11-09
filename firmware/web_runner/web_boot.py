@@ -943,7 +943,8 @@ def state_json():
     Settings rows as the console holds them, whether the FPS chip shows and
     the store's sync (`sync`: the batches its far end has taken, and whether
     one is on its way), the Terminal's grid as lines (`term`, None before
-    it first opens) and the media stream's `now()` (`media`), for a harness
+    it first opens), the media stream's `now()` (`media`, None with no run)
+    and how its last run ended (`media_last`, dev_media.last), for a harness
     driving the page
     (`window.__moyState()`)."""
     import dev_channel
@@ -965,8 +966,9 @@ def state_json():
     try:
         import dev_media
         st["media"] = dev_media.now()
+        st["media_last"] = dev_media.last()
     except ImportError:
-        st["media"] = None
+        st["media"] = st["media_last"] = None
     # The running cart's first pmem slots, where a fixture reports its checks:
     # the run's flush, which hands a moved image to the console's pmem to be
     # kept at the next boundary as the periodic flush does, then its image.
