@@ -467,7 +467,7 @@ def pulse(cv, rect, on, off, fs, lit=1):
 def chevron(cv, x, y, h, c, fs, desk=False):
     """The toolkit's one chevron (a value row's), right pointing, its
     column at x, centred on a line at y `h` tall; its width."""
-    w = _ui_draw.metrics("value_row")[3 if desk else 2] * (1 if desk else fs)
+    w = _ui_draw.metrics("value_row")[3 if desk else 2] * fs
     half = w // fs - 1
     rows = 2 * half + 1
     y0 = y + (h - rows * fs) // 2
@@ -534,7 +534,7 @@ class Card:
         c, fs, th, cv = self.c, self.fs, self.th, self.cv
         if meta is None:
             meta = lines(c)[1]
-        lh = ui.text_size("Ag")[1] + 2 * fs
+        lh = ui.text_size("Ag", fs)[1] + 2 * fs
         tx = x
         gw = size * 2 * fs
         if c["state"] == PLAYING:
@@ -556,7 +556,7 @@ class Card:
         cw = 6 * fs if chev else 0
         tw = x + w - tx - cw - (6 * fs if chev else 0)
         title = lines(self.c)[0]
-        lh = ui.text_size("Ag")[1] + 2 * fs
+        lh = ui.text_size("Ag", fs)[1] + 2 * fs
         ty = y + (a - 2 * lh) // 2
         ui.at(tx, ty, tw, lh)
         ui.label(title, _FACE_TITLE if title_face == "title" else _FACE_UI)
@@ -598,7 +598,7 @@ class Card:
         tx = hx + a + 8 * fs
         cw = 6 * fs
         title = lines(c)[0]
-        lh = ui.text_size("Ag")[1] + fs
+        lh = ui.text_size("Ag", fs)[1] + fs
         ty = y + (h - 2 * lh) // 2
         ui.at(tx, ty, hx + hw - tx - cw - 6 * fs, lh)
         ui.label(title, _FACE_UI)
@@ -1355,7 +1355,7 @@ class MusicAppLayer:
         g = 12 * fs
         fx, fw = x + g, w - 2 * g
         rh = self._row_h() + 4 * fs
-        lh = ui.text_size("Ag")[1] + 2 * fs
+        lh = ui.text_size("Ag", fs)[1] + 2 * fs
         cy = y + 8 * fs
         err = self.err
         if self._first:

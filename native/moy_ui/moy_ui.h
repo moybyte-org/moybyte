@@ -976,7 +976,7 @@ int moy_ui_perf(const moy_ui_sink_t *s, int right, int bottom, int fps, const in
 // weekend's in the dim ink and day `today` (0 none) bold on a disc of
 // `value`. With `chevrons` the head's right holds the previous and the next
 // month's chevrons, their boxes in chev[2]. moy_ui_month_h is its height
-// for `weeks` rows.
+// for `weeks` rows; in a shorter box the weeks' rows tighten to fit it.
 int moy_ui_month_h(int weeks, int fs, int desk);
 int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
                  moy_ui_span_t days, int first, int n, int today, int chevrons, int fs, int desk,

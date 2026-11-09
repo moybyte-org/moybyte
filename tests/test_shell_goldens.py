@@ -132,6 +132,15 @@ keeps the matrix a clean product instead of a pile of special cases.
                            system menu; on the T-Deck, console mode's
                            fullscreen container for each -- the calendar page,
                            Settings at the WIFI panel, Settings at VOLUME.
+  p4_1024x600_fs2_desk_popovers
+                           every desk popover at font scale 2, the scale
+                           the P4's desk can run at, over the desk with a
+                           window: the calendar (a five-week month, then a
+                           six-week one, its weeks tightened into the
+                           glass's room), Wi-Fi (the host's networks, then
+                           more than the card holds, scrolling), the
+                           battery's rows, a compiled program's status menu
+                           (four rows, then eight, scrolling) and Music's.
   tdeck_320x240_fs1_homegrid, p4_1024x600_cs2_fs1_homegrid
                            the home in its GRID arrangement (the layout's
                            `home`, docs/theme_and_shell_2026-11.md §8.10), one
@@ -423,6 +432,9 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_popovers": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="popovers"),
+    "p4_1024x600_fs2_desk_popovers": dict(
+        sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="desk_popovers"),
     "tdeck_320x240_fs1_widget_pages": dict(
         sys_size=None, font_scale=1, windowed=False, variant="dark",
         diagonal_in=None, plan="widget_pages"),
@@ -671,6 +683,8 @@ def _surface_plan(ws, cfg):
     plan = []
     if cfg.get("plan") == "popovers":
         return _popover_plan(ws)
+    if cfg.get("plan") == "desk_popovers":
+        return _desk_popover_plan(ws)
     if cfg.get("plan") == "widget_pages":
         return _widget_page_plan(ws)
     if cfg.get("plan") == "home":
@@ -1648,6 +1662,69 @@ def _popover_plan(ws):
     return plan
 
 
+DESK_POPOVERS = ("popover_clock", "popover_clock_six", "popover_wifi", "popover_wifi_many",
+                 "popover_battery", "status_desk_panel", "status_desk_panel_full",
+                 "music_desk_menu")
+
+# A compiled program's panel at its most rows (status_items.ROWS_MAX).
+_PANEL_FULL = _PANEL + "".join("\nbutton b%d Preset %d" % (k, k) for k in range(1, 5))
+
+# More networks than a card at font scale 2 holds on the P4's glass.
+_NETS_MANY = [("Network %d" % k, -40 - k, k % 2 == 0) for k in range(1, 11)]
+
+
+def _desk_popover_plan(ws):
+    """Every desk popover over the desk with a Calc window, at the config's
+    font scale: each must fit the glass (`DESK_POPOVERS`)."""
+    def popover(widget, then=None):
+        def enter():
+            ws.close_popover()
+            if widget == "clock":
+                ws.open_desk()
+                ws.open_app(ws._apps_by_id["calc"])
+            ws._golden_popover = True
+            ws.widget_tap(widget)
+            assert ws.sysmenu.open and ws.sysmenu.widget == widget, widget
+            if then is not None:
+                then()
+        return enter
+
+    def six():
+        ws.sysmenu.comp.page(1)         # November 2026: six weeks
+
+    def many():
+        ws.settings_layer.wifi_nets = list(_NETS_MANY)
+
+    def panel(text):
+        def enter():
+            from runtime.status_items import parse
+            ws.close_popover()
+            it = _panel_item(ws)
+            it.section.set(parse(text))
+            it.changed()
+            ws.open_status_menu(it)
+            assert ws.sysmenu.open and ws.status_open is it
+        return enter
+
+    def music():
+        from runtime.status_items import ITEMS
+        ws.close_popover()
+        for it in ITEMS.slots:          # the panels' program is gone: Music's item alone
+            if it.pid:
+                ITEMS._free(it)
+        _music(ws, _MUSIC_LIST, ("list", "Road trip mix", "/m/r.m3u"), tab=1,
+               files=_MUSIC_FILES)
+        ws.open_app(ws._apps_by_id["calc"])
+        _music_wake_off()
+        ws.open_status_menu(ITEMS.at(0))
+        assert ws.sysmenu.open and ws.sysmenu.widget == "status"
+
+    return [("popover_clock", popover("clock")), ("popover_clock_six", popover("clock", six)),
+            ("popover_wifi", popover("wifi")), ("popover_wifi_many", popover("wifi", many)),
+            ("popover_battery", popover("battery")), ("status_desk_panel", panel(_PANEL)),
+            ("status_desk_panel_full", panel(_PANEL_FULL)), ("music_desk_menu", music)]
+
+
 def _home_plan(ws, cfg):
     """The home alone, one surface a tab -- a config that changes only its
     arrangement (the layout's `home`)."""
@@ -1742,6 +1819,8 @@ def surface_names(config_name):
     cfg = CONFIGS[config_name]
     if cfg.get("plan") == "popovers":
         return ["desk_window_calc"] + ["popover_" + w for w in WIDGETS]
+    if cfg.get("plan") == "desk_popovers":
+        return list(DESK_POPOVERS)
     if cfg.get("plan") == "widget_pages":
         return ["page_" + w for w in WIDGETS]
     if cfg.get("plan") == "home":

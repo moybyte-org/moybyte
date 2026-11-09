@@ -948,11 +948,12 @@ class SettingsLayer:
         host.keys(i)
         return True
 
-    def wifi_page(self, popover=False):
+    def wifi_page(self, popover=False, scroll=False):
         """The wifi panel as a page of the frame begun (the rows' place, or
         the wifi popover's rect): the connection, the networks the last scan
         found (a lock where one needs a password), Scan again and Forget; or,
-        while a password is typed, its field and Connect."""
+        while a password is typed, its field and Connect. `scroll`: the
+        popover's card is shorter than its rows, and the networks scroll."""
         ws = self.ws
         connected, ssid, ip = (False, None, None)
         if ws.wifi is not None:
@@ -961,7 +962,7 @@ class SettingsLayer:
             except Exception:  # noqa: BLE001
                 pass
         if popover:
-            self._wifi_popover(connected, ssid)
+            self._wifi_popover(connected, ssid, scroll)
             return
         _ui.page("")
         if self.wifi_pick is not None and not ws.can_type():
@@ -1004,22 +1005,31 @@ class SettingsLayer:
         if f and f.startswith("net") and f[3:].isdigit():
             self.wifi_sel = int(f[3:])
 
-    def _wifi_popover(self, connected, ssid):
+    def wifi_listed(self):
+        """How many of the networks the last scan found the panel lists."""
+        return min(len(self.wifi_nets), _NETS)
+
+    def _wifi_popover(self, connected, ssid, scroll=False):
         """The page in the bar's Wi-Fi popover: the connection on its head,
         then the networks the last scan found as a menu (the joined one
-        checked, a lock where one needs a password) and Scan again."""
+        checked, a lock where one needs a password) and Scan again, in a
+        scroll region over the hints where the card is shorter than them."""
+        if _lb.metric_class() == _lb.DESK:
+            _ui.hints(("confirm", "Join", "back", "Close"))
         _ui.info("Wi-Fi", str(ssid) if connected and ssid else "Not connected")
         names, icons = [], []
-        for k in range(min(len(self.wifi_nets), _NETS)):
+        for k in range(self.wifi_listed()):
             ssid_k, _sig, locked = self.wifi_nets[k]
             names.append(str(ssid_k)[:24])
             icons.append("check" if connected and str(ssid_k) == str(ssid)
                          else "lock" if locked else "wifi")
         names.append(WIFI_SCAN)
         icons.append("search")
+        if scroll:
+            _ui.scroll("wifi.nets")
         got = _ui.menu("Networks" if len(names) > 1 else "", names, icons)
-        if _lb.metric_class() == _lb.DESK:
-            _ui.hints(("confirm", "Join", "back", "Close"))
+        if scroll:
+            _ui.scroll()
         if self.wifi_pick is not None:
             self._wifi_prompt()
             return

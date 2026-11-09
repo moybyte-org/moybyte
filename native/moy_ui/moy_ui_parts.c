@@ -1736,6 +1736,12 @@ int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
     pf_t fu = font_of(&d, MOY_UI_FONT_UI);
     int head = (d.desk ? 30 : 22) * k, cap = (d.desk ? 22 : 26) * k;
     int pitch = (d.desk ? 30 : 21) * k;
+    int weeks = (first + n + 6) / 7;
+    if (weeks > 0 && head + cap + weeks * pitch > b.h) {
+        // a box shorter than the month's height: its weeks' rows tighten into it
+        int fit = (b.h - head - cap) / weeks;
+        pitch = fit < k ? k : fit;
+    }
     uint16_t ink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
     uint16_t dim = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM));
     int cw = b.w / 7, gx = b.x + (b.w - 7 * cw) / 2;
@@ -1775,6 +1781,7 @@ int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
     int gy = b.y + head + cap;
     int disc = (d.desk ? 28 : 20) * k;
     disc = disc > cw ? cw : disc;
+    disc = disc > pitch ? pitch : disc;
     int solid = solid_marks();
     for (int day = 1; day <= n; day++) {
         int i = first + day - 1;

@@ -1088,7 +1088,8 @@ def month(year, mon, today=0):
     seven columns from Monday, the weekend's dim and day `today` (0 none)
     bold on a disc of `value`. On the desk and under touch its head holds
     the previous and next month's chevrons: -1 or 1 the frame one is
-    pressed, else 0."""
+    pressed, else 0. A rect shorter than `month_h` tightens its weeks' rows
+    to fit it."""
     t = _T
     return _C.api_month(t[0], t[1], t[2], "%s %d" % (MONTHS[mon - 1], year), "MTWTFSS",
                         weekday(year, mon, 1), month_days(year, mon), today)

@@ -569,6 +569,16 @@
     "unlock_banner": "efccbe025ce50548c982dbb3d9f672bb8f55ceb61c6be3d72774bb64a0bc6547",
     "web_console": "281cd2fb121e20a759b5dc4233c78a3a61e26aa8c6cfc6546b5c6a7bd3c6a0b3"
   },
+  "p4_1024x600_fs2_desk_popovers": {
+    "music_desk_menu": "f9227b476d5e6f51fdfee287827e8bd195c244b7701d399dc82afd2d42fa1704",
+    "popover_battery": "38639e6b2d2b483e10153dfbb2c9da732050ffbbc244ed2b3c10a26293a6b41e",
+    "popover_clock": "6461d42c9ab530737a43692ec3c125431f1bd51ae4a70a12446a933dabe4a73b",
+    "popover_clock_six": "e776ae3fa3346a1210c75c660efe9a3aa0313866b72a5f7d949a47a0b1d3aa27",
+    "popover_wifi": "280483a5491d2c3693b37ed66c4e19a6728388bbdc772844c8dc20108f049685",
+    "popover_wifi_many": "005770547cb2a223736924d497862132839476c710493991fc3b5f08e7544bf3",
+    "status_desk_panel": "452f70ed5ec18d74d64ed33a1f4d0a07fd7f2a9911793e6fad01f7a2f2da1335",
+    "status_desk_panel_full": "954b491a162bc1fdab5d204b050c4c48b72343f5fc8f8e99593b1946204e8c49"
+  },
   "p4_1024x600_fs2_windowed": {
     "about": "6a4f951e3b2f0bfa4a7b586351118acc170fa4d6391e0443bffc040f8cf4e760",
     "app_appearance": "20d2e8043c533ec46018af7b7ac02130aa3483bb32f934dc10f1f6f7f2b3de80",

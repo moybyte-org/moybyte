@@ -1788,7 +1788,9 @@ strip — is declined (§12.2).
 anchored to a widget's cell, opening into the content side of its bar (down
 from a top bar, up from a bottom one, inward from a side bar), its width the
 larger of its content's minimum and today's popup width, clamped to the
-glass; one open at a time; it closes on a tap outside, on the anchor tapped
+glass, its height at most the room from its anchor to the glass's far edge
+(`popover_room`), where a component's rows tighten (the month's weeks) or
+scroll (Wi-Fi's networks, a status menu's section); one open at a time; it closes on a tap outside, on the anchor tapped
 again, on B or stop, and on Esc from a BLE keyboard, where arrows move and
 Enter activates — exactly the `sysmenu` layer's rules. That layer is the
 one popover layer, with the system menu as its first content; the system

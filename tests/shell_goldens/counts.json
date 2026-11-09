@@ -569,6 +569,16 @@
     "unlock_banner": [79, 30],
     "web_console": [295, 7]
   },
+  "p4_1024x600_fs2_desk_popovers": {
+    "music_desk_menu": [38, 17],
+    "popover_battery": [35, 31],
+    "popover_clock": [29, 69],
+    "popover_clock_six": [28, 63],
+    "popover_wifi": [26, 36],
+    "popover_wifi_many": [29, 38],
+    "status_desk_panel": [13, 15],
+    "status_desk_panel_full": [20, 19]
+  },
   "p4_1024x600_fs2_windowed": {
     "about": [9, 6],
     "app_appearance": [20, 22],

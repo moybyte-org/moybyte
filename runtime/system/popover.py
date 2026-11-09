@@ -15,7 +15,9 @@ The system menu is the popover's ROWS, not a component (`widgets.Popup`).
 
 Every component's interface: `size()` -> (w, h) in pixels at the current
 scales, the font scale on the desk too (its frame draws its rows at it),
-`draw(cv, rect)` (the card is the popover's, `rect` inside it), `keys()`
+`draw(cv, rect)` (the card is the popover's, `rect` inside it: shorter
+than `size()` where the glass has less room under the bar, `popover_room`,
+and the component's rows then tighten or scroll in it), `keys()`
 -> the hint strip's keys on a handheld, `handle_input(i)` -> "local" when
 only the panel's pixels moved, "global" when something outside it did,
 None for nothing; `click(px, py, rect)` the same; `typing()` ->
@@ -58,11 +60,12 @@ def _inner(ws, rect):
 
 def _fit(ws, comp):
     """Size the popover to `comp` again where what it lists moved (the
-    networks a scan found): the next frame repaints at the new size (a mark
-    made inside a draw is spent with it, so it asks for that frame)."""
+    networks a scan found, a month's weeks), within the glass's room: the
+    next frame repaints at the new size (a mark made inside a draw is spent
+    with it, so it asks for that frame)."""
     m = ws.sysmenu
     w, h = comp.size()
-    h += 2 if _desk() else 2 * ws.layout.fs
+    h = min(h + (2 if _desk() else 2 * ws.layout.fs), ws.popover_room())
     if m.comp is comp and m.size[1] != h:
         m.size = (m.size[0], h)
         ws.request_frame()
@@ -113,11 +116,14 @@ class MonthView:
         p = _pad(ws)
         top = p if desk else 6 * ws.layout.fs
         x0, y0, w0, h0 = rect
+        _fit(ws, self)                # a month paged to has its own weeks
         self.host.begin(cv, ws.theme_colors, (x0 + p, y0 + top, w0 - 2 * p, h0 - top), desk,
                         "panel")
         if y:
+            # a card shorter than its size (the glass's room) tightens the weeks
+            foot = _foot(ws.layout.fs) + p // 2 if desk else 3 * ws.layout.fs
             _ui.at(x0 + p, y0 + top, w0 - 2 * p,
-                   _ui.month_h(y, m, ws.layout.fs, desk))
+                   min(_ui.month_h(y, m, ws.layout.fs, desk), h0 - top - foot))
             step = _ui.month(y, m, today)
             if step:
                 self.off += step
@@ -166,6 +172,7 @@ class WifiPanel:
     def __init__(self, ws):
         self.ws = ws
         self.rect = None
+        self.need = 0                 # the card's height its rows take
         self.host = _ui_draw.AppHost()
 
     def size(self):
@@ -174,9 +181,10 @@ class WifiPanel:
         row = _ui_draw.metrics("row")
         rh, gap = row[6 if desk else 5] * fs, row[7] * fs
         cap = _ui_draw.metrics("group")[4 if desk else 3] * fs
-        n = min(len(self.ws.settings_layer.wifi_nets), 6) + 2
+        n = self.ws.settings_layer.wifi_listed() + 2   # the head, the networks, Scan again
         foot = _foot(fs) if desk else 0
-        return ((300 if desk else 232) * fs, 2 * _pad(self.ws) + cap + n * (rh + gap) + foot)
+        self.need = 2 * _pad(self.ws) + cap + n * (rh + gap) + foot
+        return ((300 if desk else 232) * fs, self.need)
 
     def keys(self):
         return _WIFI_KEYS
@@ -191,7 +199,7 @@ class WifiPanel:
         before = self._radio()
         _fit(ws, self)
         self.host.begin(cv, ws.theme_colors, _inner(ws, rect), _desk(), "panel")
-        ws.settings_layer.wifi_page(popover=True)
+        ws.settings_layer.wifi_page(popover=True, scroll=rect[3] < self.need)
         if self._radio() != before:
             ws._dirty = True          # the radio's state shows outside the panel
         elif self.host.owed or self.host.tap == 2 or self.host.moved:
@@ -433,6 +441,7 @@ class StatusMenu:
         self.rect = None
         self.host = _ui_draw.AppHost()
         self.gen = _ITEMS.gen
+        self.need = 0                 # the card's height its section takes
 
     def size(self):
         fs = self.ws.layout.fs
@@ -441,7 +450,8 @@ class StatusMenu:
         foot = 0 if _ui.input_kind() == "touch" else _foot(fs)
         it = self.item
         h = _ITEMS.height(it, w - 2 * _pad(self.ws), True, fs) if it is not None else 0
-        return (w, 2 * _pad(self.ws) + h + foot)
+        self.need = 2 * _pad(self.ws) + h + foot
+        return (w, self.need)
 
     def keys(self):
         return _MENU_KEYS
@@ -451,9 +461,15 @@ class StatusMenu:
         self.rect = rect
         it = self.item
         self.host.begin(cv, ws.theme_colors, _inner(ws, rect), True, "panel")
-        if it is not None and it.pid:
-            _ITEMS.draw(it, True)
         _ui.hints(_MENU_POINTER if _ui.input_kind() == "touch" else _MENU_KEYS)
+        if it is not None and it.pid:
+            # a card shorter than its section (the glass's room): it scrolls
+            scroll = rect[3] < self.need
+            if scroll:
+                _ui.scroll("status.menu")
+            _ITEMS.draw(it, True)
+            if scroll:
+                _ui.scroll()
         if self.gen != _ITEMS.gen:
             self.gen = _ITEMS.gen
             _fit(ws, self)

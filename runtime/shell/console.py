@@ -2192,10 +2192,20 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         desk = self.metric_class == _layout_base.DESK
         h += 2 if desk else 2 * self.layout.fs   # the card's drop
         w = min(max(w, _POPUP_W * m.fs), self.sys_canvas.w)
-        h = min(h, self.sys_canvas.h)
         self._place_popover(widget, w, h)
-        m.show_component(comp, widget, (w, h))
+        m.show_component(comp, widget, (w, min(h, self.popover_room())))
         self.popover_touch()
+
+    def popover_room(self):
+        """The most height the placed popover's card takes: from its anchor to
+        the glass's far edge, the popover's gap kept off that edge. A
+        component given less than its size lays its rows out in what it
+        gets: tighter, or in a scroll region."""
+        m = self.sysmenu
+        e = 8 if self.metric_class == _layout_base.DESK else 4 * self.layout.fs
+        if m.up:
+            return m.anchor_y - e
+        return self.sys_canvas.h - m.anchor_y - e
 
     def close_popover(self):
         """Close the popover if one is open: its component's `closed` runs,
