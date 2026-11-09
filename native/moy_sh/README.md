@@ -54,7 +54,12 @@ A session takes its record and its arena from the host's `alloc` (PSRAM on a
 board, `heap_caps` with the default heap only where there is no PSRAM); a pipe's buffer, a file read whole and a fork's snapshot are taken
 while a run needs them and returned after. The screen face takes its record,
 its session and its grid the same way at its first open (`moy_sh_screen_new`)
-and gives them back at `close`. The objects hold one writable word, thread-local,
+and gives them back at `close`. The serial face's session lives from its first
+`sh` line to the boot's end, except across a run that stops the VM
+(`native/moy_play/moy_play_stop.c`): an idle one is freed with the VM, so it
+cannot split the block the compiled module loads into, and made again in its
+folder after the run (`moy_sh_board_release`, `moy_sh_board_restore`), its
+variables a new session's. The objects hold one writable word, thread-local,
 `moy_sh_g` (the running session's state, and between runs the serial face's,
 parked there so the board keeps no root of its own): `tests/test_moy_sh.py`
 compiles them as a board does and fails on any other `.data` or `.bss`. The Terminal's face takes its record (the line, the history, the candidates and the log's row buffers) the same way at `moy_sh_face_new` and gives it back at `moy_sh_face_free`; a frame allocates nothing but the log's row buffers when the grid grows. The recovery floor's screen takes its record, its UI context, its shape and its pixels the same way at `moy_sh_floor_new`. A text app takes its front, its record and its screen (`moy_sh_app_open`), and the editor its text, from the same `alloc` while it is open. A face's runner takes its record from `alloc`, and at its session's first run a task whose 24 KB stack is PSRAM (`RUN_STACK`, the SSH face's task's) and two semaphores; all go at `moy_sh_board_runner_end`, before the session is freed. The kernel's loop keeps the parked runs' jobs in four slots of its own (`moy_loop_job`).

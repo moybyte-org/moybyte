@@ -1638,31 +1638,44 @@ bool moy_sh_board_break(void) {
     return true;
 }
 
+// The serial session, made and parked: NULL with the `SH error` line that
+// says why in *err.
+static serial_t *serial_new(const char **err) {
+    serial_t *f = b_alloc(NULL, sizeof *f);
+    if (f == NULL) {
+        *err = "SH error no memory";
+        return NULL;
+    }
+    memset(f, 0, sizeof *f);
+    memcpy(f->line, "SH ", 3);
+    moy_sh_host_t h;
+    moy_sh_board_host(&h, f, serial_out, serial_poll);
+    h.app = serial_app;
+    f->runner = moy_sh_board_runner(&h, serial_end);
+    moy_sh_t *s = moy_sh_new(&h, MOY_SH_ARENA, "/", "/");
+    if (s == NULL) {
+        moy_sh_board_runner_end(f->runner);
+        b_free(NULL, f);
+        *err = "SH error no session";
+        return NULL;
+    }
+    f->homed = moy_sh_board_go_home(s, 0) >= 0;
+    moy_sh_setvar(s, "TERM", "dumb");  // the channel carries lines, not a screen
+    f->s = s;
+    moy_sh_park(s);
+    return f;
+}
+
 bool moy_sh_board_line(const char *text) {
     moy_sh_t *s = moy_sh_running();
     if (s == NULL) {
-        serial_t *f = b_alloc(NULL, sizeof *f);
-        if (f == NULL) {
-            moy_loop_say_line("SH error no memory");
+        const char *err;
+        serial_t *made = serial_new(&err);
+        if (made == NULL) {
+            moy_loop_say_line(err);
             return false;
         }
-        memset(f, 0, sizeof *f);
-        memcpy(f->line, "SH ", 3);
-        moy_sh_host_t h;
-        moy_sh_board_host(&h, f, serial_out, serial_poll);
-        h.app = serial_app;
-        f->runner = moy_sh_board_runner(&h, serial_end);
-        s = moy_sh_new(&h, MOY_SH_ARENA, "/", "/");
-        if (s == NULL) {
-            moy_sh_board_runner_end(f->runner);
-            b_free(NULL, f);
-            moy_loop_say_line("SH error no session");
-            return false;
-        }
-        f->homed = moy_sh_board_go_home(s, 0) >= 0;
-        moy_sh_setvar(s, "TERM", "dumb");  // the channel carries lines, not a screen
-        f->s = s;
-        moy_sh_park(s);
+        s = made->s;
     }
     serial_t *f = moy_sh_ctx(s);
     moy_sh_board_home_late(s, &f->homed);
@@ -1703,4 +1716,50 @@ void moy_sh_board_end(void) {
         moy_sh_free(s);
         b_free(NULL, f);
     }
+}
+
+// The parked serial session while it waits on nothing: no run parked, no
+// text app in front.
+static serial_t *serial_idle(void) {
+    moy_sh_t *s = moy_sh_running();
+    if (s == NULL || moy_sh_host(s)->app != serial_app) {
+        return NULL;
+    }
+    serial_t *f = moy_sh_ctx(s);
+    return f->app == NULL && !moy_sh_board_busy(s) ? f : NULL;
+}
+
+size_t moy_sh_board_idle_bytes(void) {
+    serial_t *f = serial_idle();
+    if (f == NULL) {
+        return 0;
+    }
+    const moy_sh_runner_t *r = f->runner;
+    return sizeof *f + moy_sh_held(f->s)
+           + (r != NULL ? sizeof *r + (r->live ? RUN_STACK : 0u) : 0u);
+}
+
+bool moy_sh_board_release(char *cwd, size_t cap) {
+    serial_t *f = serial_idle();
+    if (f == NULL) {
+        return false;
+    }
+    snprintf(cwd, cap, "%s", moy_sh_cwd(f->s));
+    moy_sh_board_end();
+    return true;
+}
+
+bool moy_sh_board_restore(const char *cwd) {
+    if (moy_sh_running() != NULL) {
+        return false;
+    }
+    const char *err;
+    serial_t *f = serial_new(&err);
+    if (f == NULL) {
+        return false;
+    }
+    if (cwd != NULL && cwd[0] != 0) {
+        moy_sh_cd(f->s, cwd);
+    }
+    return true;
 }

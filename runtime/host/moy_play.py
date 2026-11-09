@@ -539,7 +539,7 @@ def info(run=None):
     stack_frame, end_why, stop, vm_down, fit, stuck), or None for a handle that names
     no run. `stop` is the launch's stop verdict ("stops", or the clause that
     kept the VM: STOP_WHYS); `fit` the verdict's fit check with the VM up
-    (need, need_block, free, largest, vm_heap), None where it reached none;
+    (need, need_block, free, largest, what a stop frees), None where it reached none;
     `stuck` the runaway watch ended a tick."""
     d, lb = _play()
     i = lb.PlayInfo()

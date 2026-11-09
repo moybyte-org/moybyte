@@ -1,0 +1,61 @@
+> sh mkdir -p docs
+SH end 0
+> sh cd docs
+SH end 0
+> sh X=set
+SH end 0
+> %stop
+STOP released 1: its arena and more, 0 after
+STOP restored 1 at /sd/moybyte/files/docs
+> sh pwd
+SH /sd/moybyte/files/docs
+SH end 0
+> sh echo "x=[$X] home=$HOME"
+SH x=[] home=/sd/moybyte/files
+SH end 0
+> sh cd
+SH end 0
+> sh pwd
+SH /sd/moybyte/files
+SH end 0
+> sh edit /n.txt
+SH edit n.txt
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH a new file                                                                   1/1
+SH app edit
+> %stop
+STOP released 0: nothing, 0 after
+> sh ^X
+SH end 0
+> sh pwd
+SH /sd/moybyte/files
+SH end 0
+> sh exit
+SH exit 0
+> %stop
+STOP released 0: nothing, 0 after
+> sh pwd
+SH /sd/moybyte/files
+SH end 0
+[exit 0]

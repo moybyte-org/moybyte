@@ -290,8 +290,9 @@ typedef struct {
     char title[48];             // the manifest's title, "" when it names none
     char id[24];                // the folder's stem: what the crash record names
     // The verdict's fit check, the VM up: the compiled cart's footprint (total,
-    // block), PSRAM free and its largest block then, and the VM's heap bytes a
-    // stop would give back. All 0: the verdict did not reach the fit.
+    // block), PSRAM free and its largest block then, and the bytes a stop
+    // would give back (the VM's heap and the serial shell's idle session).
+    // All 0: the verdict did not reach the fit.
     uint32_t fit[5];
     bool stuck;                 // the runaway watch ended its tick
 } moy_play_info_t;

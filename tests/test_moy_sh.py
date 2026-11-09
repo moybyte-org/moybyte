@@ -208,8 +208,14 @@ def _face(harness, path, root, screen):
 # neofetch's rows are sh_main's stand-in console's, and the screen face draws
 # them in colour where the serial face (TERM=dumb) writes them plain;
 # an `app_` script's text app shows on the screen face's own screen, which
-# tests/test_terminal.py holds.
-REPLAYS = ([os.path.join(SERIAL, n + ".sh") for n in SERIAL_NAMES if not n.startswith("app_")]
+# tests/test_terminal.py holds; a `%stop` line (a stopped run's) releases the
+# serial face's session, which a screen face's is not.
+def _replays(name):
+    with open(os.path.join(SERIAL, name + ".sh"), encoding="utf-8") as f:
+        return not name.startswith("app_") and "%stop" not in f.read().split("\n")
+
+
+REPLAYS = ([os.path.join(SERIAL, n + ".sh") for n in SERIAL_NAMES if _replays(n)]
            + [os.path.join(SCRIPTS, n + ".sh") for n in SCRIPT_NAMES
               if n not in ("interrupt", "builtin_neofetch")])
 

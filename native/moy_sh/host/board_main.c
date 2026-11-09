@@ -16,6 +16,10 @@
 // running session's stdout, `lookup`/`spawn` know `hello`, `kill` refuses
 // pid 1, `read /proc/7/status` and `list /proc` answer, the rest is ABSENT.
 //
+// A `%stop` line is the stopped run's (native/moy_play/moy_play_stop.c), on
+// the serial face: what its idle session holds, released, and made again in
+// its folder.
+//
 // The store's mount table is a stand-in too: one volume mounted at /sd, as a
 // board's card (moy_vol_mounts), over whatever the tree holds there.
 
@@ -238,6 +242,18 @@ static void screen_line(moy_sh_screen_t **fp, const char *text, uint32_t *next) 
     }
 }
 
+static void stop_line(void) {
+    size_t held = moy_sh_board_idle_bytes();
+    char cwd[512];
+    int kept = moy_sh_board_release(cwd, sizeof cwd);
+    printf("STOP released %d: %s, %zu after\n", kept,
+           held > MOY_SH_ARENA ? "its arena and more" : held ? "less than its arena" : "nothing",
+           moy_sh_board_idle_bytes());
+    if (kept) {
+        printf("STOP restored %d at %s\n", moy_sh_board_restore(cwd), cwd);
+    }
+}
+
 int main(int argc, char **argv) {
     int screen = 0;
     for (;;) {
@@ -274,6 +290,11 @@ int main(int argc, char **argv) {
     uint32_t next = 0;
     while (fgets(line, sizeof line, f) != NULL) {
         line[strcspn(line, "\n")] = 0;
+        if (!strcmp(line, "%stop")) {
+            printf("> %s\n", line);
+            stop_line();
+            continue;
+        }
         printf("> sh %s\n", line);
         if (screen) {
             screen_line(&face, line, &next);

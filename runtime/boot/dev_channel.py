@@ -931,7 +931,7 @@ def _remote_state(ws):
             st["run"]["stop"] = info[11]
             st["run"]["vm_down"] = bool(info[12])
             # the verdict's fit check with the VM up: (need, need_block,
-            # free, largest, vm_heap) bytes, None where it reached none
+            # free, largest, what a stop frees) bytes, None where it reached none
             st["run"]["fit"] = list(info[13]) if len(info) > 13 and info[13] else None
         st["play"] = (None if info is None else
                       {"runtime": info[0], "frames": info[3], "ticks": info[4],

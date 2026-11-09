@@ -151,8 +151,16 @@ moy_sh_t *moy_sh_new(const moy_sh_host_t *host, size_t arena, const char *home,
 #define MOY_SH_HOME_MAX 96
 int moy_sh_go_home(moy_sh_t *s, const char *const *dirs);
 
+// The session's working folder made `dir` (a folder of its tree, its home
+// untouched): 0, or -1 when it is not one (the session stays where it was).
+int moy_sh_cd(moy_sh_t *s, const char *dir);
+
 // Whether `path` (a shell path) is a folder of the session's tree.
 int moy_sh_is_dir(moy_sh_t *s, const char *path);
+
+// The bytes the session took from its host's `alloc` (its record, its arena,
+// its service commands, a held line): what moy_sh_free gives back.
+size_t moy_sh_held(const moy_sh_t *s);
 
 // The folder /etc names from now on (`etc` outlives the session).
 void moy_sh_set_etc(moy_sh_t *s, const char *etc);

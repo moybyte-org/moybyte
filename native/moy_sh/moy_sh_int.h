@@ -31,6 +31,7 @@ struct moy_sh_fork_frame {
 struct moy_sh {
     moy_sh_host_t host;
     void *mem;                          // the arena's bytes, from host.alloc
+    size_t mem_n;                       // and their count
     moy_sh_arena_t *arena;
     struct moy_sh_globals *g;
 

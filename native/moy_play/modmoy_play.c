@@ -397,7 +397,7 @@ static mp_obj_t stack_obj(uint32_t v) {
 // or the last one's (`stop`: the launch's stop verdict, "stops" or the clause
 // that kept the VM; `vm_down`: it ran with the VM stopped; `fit`: the
 // verdict's fit check with the VM up -- (need, need_block, free, largest,
-// vm_heap) bytes -- or None when it did not reach one; `stuck`: the runaway
+// freed) bytes, `freed` what the stop would give back -- or None when it did not reach one; `stuck`: the runaway
 // watch ended a tick); None when
 // there is none. `upcalls` is a tuple by class: CONSOLE, APP, DRIVER,
 // SERVICE, REFUSED; the two stack readings are moy_play.stack()'s, taken

@@ -141,4 +141,22 @@ bool moy_sh_board_line(const char *text);
 // The serial session given back, with the text app in front of it.
 void moy_sh_board_end(void);
 
+// THE STOPPED RUN'S ROOM (native/moy_play/moy_play_stop.c). The serial
+// session lives from the first `sh` line to the boot's end, so on a board
+// that stops the VM for a compiled run its PSRAM would sit between what the
+// stop gives back and split the block the module loads into. An idle one --
+// no run parked, no text app in front -- goes with the VM instead and comes
+// back in its folder once the run has ended; its variables, functions and
+// aliases are a new session's.
+// The bytes the idle serial session holds (its record, its session, its
+// runner and the runner's task stack), 0 when none is parked or it is busy:
+// what a release gives back, which the stop's verdict counts.
+size_t moy_sh_board_idle_bytes(void);
+// The idle serial session freed, its working folder into `cwd` (`cap`
+// bytes): false, and nothing freed, when there is none or it is busy.
+bool moy_sh_board_release(char *cwd, size_t cap);
+// The serial session made again with `cwd` its working folder, unless a
+// line made one meanwhile: whether it was.
+bool moy_sh_board_restore(const char *cwd);
+
 #endif // MOY_SH_BOARD_H

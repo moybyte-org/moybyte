@@ -15,11 +15,14 @@
 // present shows its canvas -- and, the policy being `need`, its fit check
 // FAILS with the VM up: a compiled cart's footprint (moy_wasm_footprint.h,
 // the module this console would load) against free PSRAM and its largest
-// block. `vmstop force` (the dev channel's, never a kid's) makes the fit read
-// as failing, so a board where the cart fits can still be made to stop.
+// block, and with what the stop gives back (the VM's heap and the serial
+// shell's idle session) it must then fit. `vmstop force` (the dev channel's,
+// never a kid's) makes the fit read as failing, so a board where the cart
+// fits can still be made to stop.
 //
 // THE RUN (moy_play_stopped_run), on the VM service task after the stop's
-// mp_deinit (native/moy_kernel's moy_kernel_vm_down): the PSRAM line the gate
+// mp_deinit (native/moy_kernel's moy_kernel_vm_down): the serial shell's idle
+// session released (native/moy_sh/moy_sh_board.h), the PSRAM line the gate
 // reads, then the load -- the fit checked again against the largest block,
 // the module found by name (this console's AOT module, else main.wasm on the
 // interpreter, as device/moycore_glue.py's WasmRun finds it), main.wasm's head
@@ -30,7 +33,7 @@
 // dev channel's `end`. A refusal or a raise paints the chrome's panel and
 // waits for a press, a Ctrl-C or `end` (moy_play_panel). pmem is written
 // back (the store's crash-safe write) and everything is closed before the
-// next VM starts.
+// next VM starts, the shell's session made again in its folder last.
 
 #include "py/mpconfig.h"
 
@@ -85,6 +88,7 @@
 #define CFG_MAX (16u * 1024u)
 #define PMEM_MAX (8u * 1024u)
 #define END_SERIAL 5                // MOY_PLAY_END_SERIAL
+#define MOY_SH_CWD_MAX 512          // native/moy_sh's MOY_SH_PATH_MAX
 
 // The kernel's (native/moy_kernel): the heaps line, the serial line out, the
 // task watchdog.
@@ -92,6 +96,11 @@ void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
 // The app's run the stop carries (native/moy_app/moy_app.h), weak: an image
 // without native/moy_app has none.
 const struct moy_app_run *moy_app_stopped(void) __attribute__((weak));
+// The serial shell's idle session (native/moy_sh/moy_sh_board.h's stopped
+// run's room), weak: an image without native/moy_sh has none.
+size_t moy_sh_board_idle_bytes(void) __attribute__((weak));
+bool moy_sh_board_release(char *cwd, size_t cap) __attribute__((weak));
+bool moy_sh_board_restore(const char *cwd) __attribute__((weak));
 void moy_kernel_say(const char *line);
 void moy_kernel_feed(void);
 void moy_kernel_stamp(int part);
@@ -190,10 +199,10 @@ static void footprint(const module_t *m, uint64_t *total, uint64_t *block) {
 
 // -- the verdict ------------------------------------------------------------------
 
-// The bytes the VM's heap areas hold (what a stop gives back), read with the
-// VM up.
-static uint64_t vm_heap_bytes(void) {
-    uint64_t held = 0;
+// The bytes a stop gives back, read with the VM up: the VM's heap areas and
+// the serial shell's idle session, which the stopped run releases.
+static uint64_t stop_bytes(void) {
+    uint64_t held = moy_sh_board_idle_bytes != NULL ? moy_sh_board_idle_bytes() : 0u;
     for (mp_state_mem_area_t *a = &MP_STATE_MEM(area); a != NULL;) {
         held += (uint64_t)(a->gc_pool_end
                            - (a == &MP_STATE_MEM(area) ? a->gc_alloc_table_start : (byte *)a));
@@ -238,7 +247,7 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     footprint(&m, &total, &block);
     size_t free_ = heap_caps_get_free_size(PSRAM_CAPS);
     size_t largest = heap_caps_get_largest_free_block(PSRAM_CAPS);
-    uint64_t held = vm_heap_bytes();
+    uint64_t held = stop_bytes();
     fit[0] = (uint32_t)total;
     fit[1] = (uint32_t)block;
     fit[2] = (uint32_t)free_;
@@ -247,8 +256,8 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     if (!s_force && total <= free_ && block <= largest) {
         return MOY_PLAY_KEEP_FITS;
     }
-    // What the stop gives back is at most the VM's heap: a cart that would
-    // not fit even with all of it is the fit notice, with the VM up.
+    // What the stop gives back is at most that: a cart that would not fit
+    // even with all of it is the fit notice, with the VM up.
     if (total > free_ + held || block > largest + held) {
         return MOY_PLAY_KEEP_BIG;
     }
@@ -750,6 +759,35 @@ static int load(uint32_t run, const char *path, bool *notice) {
     return rc;
 }
 
+// The idle serial session goes with the VM (moy_sh_board.h's stopped run's
+// room): left in place it would split what the stop gave back. Released
+// before anything of the run's is allocated: true when it was, its folder
+// then in *cwd (PSRAM; NULL where none could be kept, and the session comes
+// back at its home).
+static __attribute__((noinline)) bool sh_release(char **cwd) {
+    char at[MOY_SH_CWD_MAX];
+    *cwd = NULL;
+    if (moy_sh_board_release == NULL || !moy_sh_board_release(at, sizeof(at))) {
+        return false;
+    }
+    size_t n = strlen(at) + 1;
+    *cwd = heap_caps_malloc(n, PSRAM_CAPS);
+    if (*cwd != NULL) {
+        memcpy(*cwd, at, n);
+    }
+    return true;
+}
+
+// The released session back in its folder, once the run is closed.
+static __attribute__((noinline)) void sh_restore(bool kept, char *cwd) {
+    char at[MOY_SH_CWD_MAX];
+    snprintf(at, sizeof(at), "%s", cwd != NULL ? cwd : "");
+    heap_caps_free(cwd);
+    if (kept) {
+        moy_sh_board_restore(at);
+    }
+}
+
 static void run_line(const char *what) {
     char line[160];
     snprintf(line, sizeof(line), "STOP %s: %s", what, S->title[0] ? S->title : "cart");
@@ -764,11 +802,14 @@ void moy_play_stopped_run(void) {
     }
     char cart[192];
     snprintf(cart, sizeof(cart), "%s", path);
+    char *sh_cwd;
+    bool sh_kept = sh_release(&sh_cwd);
     // The gate's reading: PSRAM after the stop, before the load.
     moy_kernel_heaps("STOP", "down", "");
     S = heap_caps_calloc(1, sizeof(stop_t), PSRAM_CAPS);
     if (S == NULL) {
         moy_play_end(run, MOY_PLAY_END_CRASH);
+        sh_restore(sh_kept, sh_cwd);
         return;
     }
     wire_init();
@@ -852,6 +893,7 @@ void moy_play_stopped_run(void) {
     heap_caps_free(S);
     S = NULL;
     moy_kernel_heaps("STOP", "ended", "");
+    sh_restore(sh_kept, sh_cwd);
 }
 
 #endif

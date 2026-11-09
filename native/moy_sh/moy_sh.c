@@ -146,6 +146,7 @@ moy_sh_t *moy_sh_new(const moy_sh_host_t *host, size_t arena, const char *home,
     s->host = *host;
     s->next_pid = MOY_SH_FIRST_CHILD;
     s->mem = host->alloc(host->ctx, arena + 16);
+    s->mem_n = s->mem != NULL ? arena + 16 : 0;
     void *base = s->mem != NULL ? (void *)(((uintptr_t)s->mem + 15) & ~(uintptr_t)15) : NULL;
     s->arena = moy_sh_arena_init(base, arena);
     s->g = s->arena != NULL ? moy_sh_arena_alloc(s->arena, sizeof *s->g) : NULL;
@@ -206,14 +207,21 @@ moy_sh_t *moy_sh_new(const moy_sh_host_t *host, size_t arena, const char *home,
     return s;
 }
 
+// The session's folder made `dir`, a folder of its tree (the session current).
+static int cd_to(const char *dir, size_t max) {
+    struct stat st;
+    if (strlen(dir) < max && stat(dir, &st) == 0 && S_ISDIR(st.st_mode) && chdir(dir) == 0) {
+        setpwd(dir, 0);
+        return 1;
+    }
+    return 0;
+}
+
 int moy_sh_go_home(moy_sh_t *s, const char *const *dirs) {
     struct moy_sh_globals *was = enter(s);
     int at = -1;
-    struct stat st;
     for (int i = 0; dirs[i] != NULL && at < 0; i++) {
-        if (strlen(dirs[i]) < sizeof s->home && stat(dirs[i], &st) == 0 && S_ISDIR(st.st_mode)
-                && chdir(dirs[i]) == 0) {
-            setpwd(dirs[i], 0);
+        if (cd_to(dirs[i], sizeof s->home)) {
             setvar("HOME", dirs[i], 0);
             strcpy(s->home, dirs[i]);
             at = i;
@@ -222,6 +230,18 @@ int moy_sh_go_home(moy_sh_t *s, const char *const *dirs) {
     flushall();
     leave(was);
     return at;
+}
+
+int moy_sh_cd(moy_sh_t *s, const char *dir) {
+    struct moy_sh_globals *was = enter(s);
+    int r = cd_to(dir, MOY_SH_PATH_MAX) ? 0 : -1;
+    flushall();
+    leave(was);
+    return r;
+}
+
+size_t moy_sh_held(const moy_sh_t *s) {
+    return sizeof *s + s->mem_n + (size_t)s->nroles * sizeof *s->roles + s->pending_cap;
 }
 
 int moy_sh_is_dir(moy_sh_t *s, const char *path) {
