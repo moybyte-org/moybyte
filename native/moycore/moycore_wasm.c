@@ -62,7 +62,9 @@ typedef struct moycore_wrun {
     // points at it until the runtime is destroyed, so it lives as long as
     // this struct does -- freed by moycore_wasm_end, after the session's teardown.
     NativeSymbol *natives;
-    NativeSymbol *app_natives;   // the same, for the app extension's rows
+    // The app extension's rows, registered where they are: const, generated
+    // in WAMR's lookup order (moy_wasm_register_rows).
+    const NativeSymbol *app_natives;
 #endif
 } wrun_t;
 
@@ -142,7 +144,6 @@ static void wrun_free(wrun_t *r)
     if (r == WR) files_close();
 #if MOY_WASM
     wmem_free(r->natives);
-    wmem_free(r->app_natives);
 #endif
     wmem_free(r->writable);
     wmem_free(r);
@@ -383,16 +384,11 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
     if (moy_app_wasm_natives != NULL) {
         uint32_t an = 0;
         const NativeSymbol *rows = moy_app_wasm_natives(&an);
-        WR->app_natives = (NativeSymbol *)wmem_calloc(an, sizeof(NativeSymbol));
-        if (!WR->app_natives) {
-            snprintf(err, errlen, "out of memory: no PSRAM for the import table");
-            return 1;
-        }
-        memcpy(WR->app_natives, rows, an * sizeof(NativeSymbol));
-        if (!wasm_runtime_register_natives(APP_EXT, WR->app_natives, an)) {
+        if (!moy_wasm_register_rows(APP_EXT, rows, an)) {
             snprintf(err, errlen, "the app extension's table did not register");
             return 1;
         }
+        WR->app_natives = rows;
     }
 #else
     // The page's adapters read the table where it is (moy_web_natives).

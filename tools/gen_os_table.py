@@ -936,10 +936,11 @@ def gen_wasi_h(src):
          "// A WASI program's moybyte.os imports (native/moy_wasm/moy_wasi.h): each\n"
          "// X(verb, its WAMR signature), a text a pointer and a length, the rows of\n"
          "// native/os_calls.json marked \"wasi\", whose C function the kernel serves an\n"
-         "// ELF module too.\n",
+         "// ELF module too, in their import names' order: WAMR's lookup order, so the\n"
+         "// table registers const, unsorted at run time.\n",
          "#ifndef MOY_WASI_OS_ROWS_H", "#define MOY_WASI_OS_ROWS_H", "",
          "#define MOY_WASI_OS_ROWS(X) \\"]
-    for r in wasi_rows(src):
+    for r in sorted(wasi_rows(src), key=lambda r: wasi_name(r).encode()):
         o.append('    X(%s, "%s") \\' % (wasi_name(r), wasi_sig(r)))
     o += ["", "#endif // MOY_WASI_OS_ROWS_H", "",
           "// The natives of the rows the kernel does not serve, where moy_wasi.c",
@@ -1181,6 +1182,13 @@ def wasm_rows(src):
     return [r for r in door_rows(src) if r.get("wasm") is True]
 
 
+def wasm_natives(src):
+    """The rows with a moybyte.app import in their import names' order: the
+    order WAMR looks a name up in, so the natives' table registers const,
+    never sorted at run time."""
+    return sorted(wasm_rows(src), key=lambda r: ident(r["name"]).encode())
+
+
 def gen_wasm_h(src):
     rows = wasm_rows(src)
     o = [HEAD,
@@ -1226,13 +1234,13 @@ def gen_wasm_h(src):
             r["how"].upper(), upper(r["name"]), "f" if fields else "NULL", len(fields),
             outs[0] if outs else "NULL", (outs[0] + "_cap") if outs else "0"))
         o.append("}")
-    o += ["", "// The natives, in the role table's order, and the table row each serves.",
+    o += ["", "// The natives, in their import names' order, and the table row each serves.",
           "static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {"]
-    for r in rows:
+    for r in wasm_natives(src):
         fn = ("moy_ui_wasm_" + verb_of(r)) if r["how"] == "direct" else "w_" + ident(r["name"])
         o.append('    { "%s", FN(%s), "%s", NULL },' % (ident(r["name"]), fn, wasm_sig(r)))
     o += ["};", "static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {"]
-    o += _wrap(["MOY_T_%s" % upper(r["name"]) for r in rows])
+    o += _wrap(["MOY_T_%s" % upper(r["name"]) for r in wasm_natives(src)])
     o += ["};", ""]
     return "\n".join(o)
 

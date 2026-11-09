@@ -691,7 +691,8 @@ def test_the_engine_and_the_host_twin_share_one_statement_of_the_rule():
     native = os.path.join(ROOT, "native")
     defs = []
     for dirpath, _dirs, names in os.walk(native):
-        if "/wamr" in dirpath or ".staged" in dirpath:
+        parts = os.path.relpath(dirpath, native).split(os.sep)
+        if "wamr" in parts or ".staged" in parts:
             continue
         for name in names:
             if name.endswith((".c", ".h")):

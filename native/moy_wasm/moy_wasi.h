@@ -136,13 +136,11 @@ void moy_wasi_free(moy_wasi_t *w);
 // runs; a run with none answers those rows ACCES.
 void moy_wasi_set_run(moy_wasi_t *w, const moy_app_run_t *run);
 
-// The natives (WAMR's NativeSymbol rows) for WASI's module, and for
-// moybyte.term and moybyte.os together (`term`), copied into `store`
-// (moy_wasi_count's counts), which WAMR sorts in place and keeps while they
-// are registered: 0, or -1.
-uint32_t moy_wasi_count(uint32_t *term);
-int moy_wasi_register(NativeSymbol *store);
-void moy_wasi_unregister(NativeSymbol *store);
+// The natives (WAMR's NativeSymbol rows) for WASI's module, moybyte.term and
+// moybyte.os registered from their const tables, which are already in
+// WAMR's lookup order: 0, or -1.
+int moy_wasi_register(void);
+void moy_wasi_unregister(void);
 
 // Whether a loaded module is a command this console runs: every import a
 // function of WASI's module or moybyte.term that the natives serve, and a

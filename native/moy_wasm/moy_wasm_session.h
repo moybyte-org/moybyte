@@ -129,6 +129,17 @@ void moy_wasm_session_terminate(void);
 // waiting to serve it (the call is then not made).
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg);
 
+#ifndef MOY_WASM_JS
+// From ops->runtime_up: register `rows` for imports from `module` as they
+// are, const and already in strcmp order of their names
+// (wasm_runtime_register_natives_sorted: nothing copied, nothing sorted). The
+// registration's node comes from PSRAM's heap, not the session's pool:
+// sessions register the same rows, and wasm_runtime_unregister_natives
+// removes the first node naming them, which can be another session's.
+// 1, or 0 (rows out of order, or no memory).
+int moy_wasm_register_rows(const char *module, const NativeSymbol *rows, uint32_t n);
+#endif
+
 #ifdef MOY_WASM_JS
 // From ops->call, the browser's engine: run the cart's hook export `hook`
 // (MOY_WASM_INIT, _UPDATE with `dt`, _DRAW) on the page's instance. 0 when it

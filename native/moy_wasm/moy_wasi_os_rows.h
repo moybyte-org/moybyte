@@ -3,68 +3,69 @@
 // A WASI program's moybyte.os imports (native/moy_wasm/moy_wasi.h): each
 // X(verb, its WAMR signature), a text a pointer and a length, the rows of
 // native/os_calls.json marked "wasi", whose C function the kernel serves an
-// ELF module too.
+// ELF module too, in their import names' order: WAMR's lookup order, so the
+// table registers const, unsorted at run time.
 
 #ifndef MOY_WASI_OS_ROWS_H
 #define MOY_WASI_OS_ROWS_H
 
 #define MOY_WASI_OS_ROWS(X) \
-    X(files_readable, "()i") \
-    X(files_ready, "()i") \
-    X(files_list, "(*~*~)i") \
-    X(files_count, "(*~)i") \
-    X(files_load, "(*~*~*~)i") \
-    X(files_save, "(*~*~*~*~)i") \
-    X(files_delete, "(*~*~*~)i") \
-    X(files_duplicate, "(*~*~*~)i") \
-    X(files_rename, "(*~*~*~*~)i") \
-    X(files_new_name, "(*~*~*~)i") \
-    X(nav_open_app, "(*~)i") \
-    X(prefs_get, "(*~*~)i") \
-    X(prefs_set, "(*~*~)i") \
-    X(prefs_clear, "(*~)i") \
-    X(clipboard_put_text, "(*~)i") \
-    X(clipboard_text, "(*~)i") \
-    X(clipboard_kind, "()i") \
-    X(clipboard_seq, "()i") \
-    X(notify, "(*~*~)i") \
-    X(open_with, "(*~i)i") \
-    X(share, "(*~*~)i") \
-    X(send, "(*~*~*~)i") \
-    X(award, "(*~)i") \
-    X(progress, "(*~i)i") \
-    X(on, "(*~i)i") \
-    X(every, "(i)i") \
-    X(after, "(i)i") \
-    X(cancel, "(i)i") \
-    X(pick, "(*~*~)i") \
-    X(log, "(i*~)i") \
-    X(item_read, "(i*~)i") \
-    X(item_write, "(i*~)i") \
-    X(at, "(i)i") \
-    X(service_start, "()i") \
-    X(service_stop, "()i") \
-    X(service_running, "()i") \
-    X(random, "(i*~)i") \
-    X(sha256, "(*~*~)i") \
-    X(hmac_sha256, "(*~*~*~)i") \
-    X(aes_gcm_seal, "(*~*~*~)i") \
     X(aes_gcm_open, "(*~*~*~)i") \
-    X(x25519, "(*~*~*~)i") \
-    X(dev_open, "(*~*~)i") \
+    X(aes_gcm_seal, "(*~*~*~)i") \
+    X(after, "(i)i") \
+    X(at, "(i)i") \
+    X(award, "(*~)i") \
+    X(cancel, "(i)i") \
+    X(clipboard_kind, "()i") \
+    X(clipboard_put_text, "(*~)i") \
+    X(clipboard_seq, "()i") \
+    X(clipboard_text, "(*~)i") \
     X(dev_close, "(i)i") \
+    X(dev_get, "(i*~)i") \
+    X(dev_open, "(*~*~)i") \
     X(dev_read, "(i*~)i") \
+    X(dev_set, "(i*~)i") \
     X(dev_write, "(i*~)i") \
     X(dev_xfer, "(i*~*~)i") \
-    X(dev_set, "(i*~)i") \
-    X(dev_get, "(i*~)i") \
     X(ed25519_public, "(*~*~)i") \
     X(ed25519_sign, "(*~*~*~)i") \
     X(ed25519_verify, "(*~*~*~)i") \
-    X(status_show, "(*~ii)i") \
-    X(status_state, "(ii)i") \
+    X(every, "(i)i") \
+    X(files_count, "(*~)i") \
+    X(files_delete, "(*~*~*~)i") \
+    X(files_duplicate, "(*~*~*~)i") \
+    X(files_list, "(*~*~)i") \
+    X(files_load, "(*~*~*~)i") \
+    X(files_new_name, "(*~*~*~)i") \
+    X(files_readable, "()i") \
+    X(files_ready, "()i") \
+    X(files_rename, "(*~*~*~*~)i") \
+    X(files_save, "(*~*~*~*~)i") \
+    X(hmac_sha256, "(*~*~*~)i") \
+    X(item_read, "(i*~)i") \
+    X(item_write, "(i*~)i") \
+    X(log, "(i*~)i") \
+    X(nav_open_app, "(*~)i") \
+    X(notify, "(*~*~)i") \
+    X(on, "(*~i)i") \
+    X(open_with, "(*~i)i") \
+    X(pick, "(*~*~)i") \
+    X(prefs_clear, "(*~)i") \
+    X(prefs_get, "(*~*~)i") \
+    X(prefs_set, "(*~*~)i") \
+    X(progress, "(*~i)i") \
+    X(random, "(i*~)i") \
+    X(send, "(*~*~*~)i") \
+    X(service_running, "()i") \
+    X(service_start, "()i") \
+    X(service_stop, "()i") \
+    X(sha256, "(*~*~)i") \
+    X(share, "(*~*~)i") \
     X(status_panel, "(i*~)i") \
     X(status_remove, "(i)i") \
+    X(status_show, "(*~ii)i") \
+    X(status_state, "(ii)i") \
+    X(x25519, "(*~*~*~)i") \
 
 #endif // MOY_WASI_OS_ROWS_H
 

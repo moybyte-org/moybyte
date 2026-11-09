@@ -251,15 +251,14 @@ void hw_interp_footprint(uint64_t memory, uint64_t module_len, uint64_t *total,
 const NativeSymbol *moy_app_wasm_natives(uint32_t *count);
 int moy_app_wasm_admit(const moy_app_run_t *r, const uint8_t *head, size_t n, char *err,
                        size_t errlen);
-static NativeSymbol *g_app_store;
+static const NativeSymbol *g_app_rows;
 static uint32_t g_app_n;
 
+/* Registered where they are: const, generated in WAMR's lookup order. */
 static int app_register(void)
 {
-    const NativeSymbol *rows = moy_app_wasm_natives(&g_app_n);
-    if (!(g_app_store = (NativeSymbol *)malloc(g_app_n * sizeof *g_app_store))) return 0;
-    memcpy(g_app_store, rows, g_app_n * sizeof *g_app_store);
-    return wasm_runtime_register_natives("moybyte.app", g_app_store, g_app_n) ? 1 : 0;
+    g_app_rows = moy_app_wasm_natives(&g_app_n);
+    return wasm_runtime_register_natives_sorted("moybyte.app", g_app_rows, g_app_n) ? 1 : 0;
 }
 
 /* G_RUNS: every run made and not freed, what an import's exec env is matched
@@ -535,7 +534,7 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
         put_err(err, errlen, "refused", "the manifest declares no \"memory\"");
         return 1;
     }
-    moy_wasm_ext x = { "moybyte.app", g_app_store, g_app_n };
+    moy_wasm_ext x = { "moybyte.app", g_app_rows, g_app_n };
     uint32_t nx = r->app.g ? 1u : 0u;
     if (moy_wasm_check_ext(r->module, copy, (size_t)n, (uint32_t)pages, &x, nx,
                            msg, sizeof msg)
@@ -678,7 +677,7 @@ void hw_free(host_wasm *r)
  * `_start` on a thread of its own, its calls served on the thread that steps
  * it (the runner below, moy_wasi.h's "IN STEPS"). One at a time. The natives
  * are registered once, beside the cart table, and stay. */
-static NativeSymbol *g_wasi;
+static int g_wasi;   /* moy_wasi_register has run */
 
 typedef struct {
     moy_wasi_t *w;
@@ -788,14 +787,11 @@ static int wasi_natives(char *err, int errlen)
         return 0;
     }
     if (!g_wasi) {
-        uint32_t term = 0, k = moy_wasi_count(&term);
-        g_wasi = (NativeSymbol *)malloc((k + term) * sizeof *g_wasi);
-        if (!g_wasi || moy_wasi_register(g_wasi) != 0) {
-            free(g_wasi);
-            g_wasi = NULL;
+        if (moy_wasi_register() != 0) {
             put_err(err, errlen, "the WASI table would not register", NULL);
             return 0;
         }
+        g_wasi = 1;
     }
     return 1;
 }

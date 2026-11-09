@@ -2001,15 +2001,20 @@ static uint32_t w_term_size(wasm_exec_env_t e, uint32_t cols, uint32_t rows) {
 
 // -- the tables --------------------------------------------------------------------
 
+// Each table is in its import names' strcmp order, which WAMR's lookup
+// needs: registered as it is, never copied or sorted at run time
+// (wasm_runtime_register_natives_sorted refuses a table out of order).
+// moybyte.os's rows are generated in that order (tools/gen_os_table.py).
+
 #define ROW(name, sig) { #name, (void *)w_##name, sig, NULL }
 
 static const NativeSymbol WASI[] = {
     ROW(args_get, "(**)i"),
     ROW(args_sizes_get, "(**)i"),
-    ROW(environ_get, "(**)i"),
-    ROW(environ_sizes_get, "(**)i"),
     ROW(clock_res_get, "(i*)i"),
     ROW(clock_time_get, "(iI*)i"),
+    ROW(environ_get, "(**)i"),
+    ROW(environ_sizes_get, "(**)i"),
     ROW(fd_advise, "(iIIi)i"),
     ROW(fd_allocate, "(iII)i"),
     ROW(fd_close, "(i)i"),
@@ -2065,36 +2070,36 @@ static const NativeSymbol OS[] = {
 #define N_TERM (uint32_t)(sizeof TERM / sizeof TERM[0])
 #define N_OS (uint32_t)(sizeof OS / sizeof OS[0])
 
-uint32_t moy_wasi_count(uint32_t *term) {
-    if (term != NULL) {
-        *term = N_TERM + N_OS;
-    }
-    return N_WASI;
+// A board's session registers through moy_wasm_register_rows
+// (modmoy_wasm.c); the host has no sessions and registers directly.
+int moy_wasm_register_rows(const char *module, const NativeSymbol *rows, uint32_t n)
+    __attribute__((weak));
+
+static bool register_rows(const char *module, const NativeSymbol *rows, uint32_t n) {
+    return moy_wasm_register_rows != NULL ? moy_wasm_register_rows(module, rows, n) != 0
+                                          : wasm_runtime_register_natives_sorted(module, rows, n);
 }
 
-int moy_wasi_register(NativeSymbol *store) {
-    memcpy(store, WASI, sizeof WASI);
-    memcpy(store + N_WASI, TERM, sizeof TERM);
-    memcpy(store + N_WASI + N_TERM, OS, sizeof OS);
-    if (!wasm_runtime_register_natives(MOY_WASI_MODULE, store, N_WASI)) {
+int moy_wasi_register(void) {
+    if (!register_rows(MOY_WASI_MODULE, WASI, N_WASI)) {
         return -1;
     }
-    if (!wasm_runtime_register_natives(MOY_WASI_TERM, store + N_WASI, N_TERM)) {
-        wasm_runtime_unregister_natives(MOY_WASI_MODULE, store);
+    if (!register_rows(MOY_WASI_TERM, TERM, N_TERM)) {
+        wasm_runtime_unregister_natives(MOY_WASI_MODULE, WASI);
         return -1;
     }
-    if (!wasm_runtime_register_natives(MOY_WASI_OS, store + N_WASI + N_TERM, N_OS)) {
-        wasm_runtime_unregister_natives(MOY_WASI_TERM, store + N_WASI);
-        wasm_runtime_unregister_natives(MOY_WASI_MODULE, store);
+    if (!register_rows(MOY_WASI_OS, OS, N_OS)) {
+        wasm_runtime_unregister_natives(MOY_WASI_TERM, TERM);
+        wasm_runtime_unregister_natives(MOY_WASI_MODULE, WASI);
         return -1;
     }
     return 0;
 }
 
-void moy_wasi_unregister(NativeSymbol *store) {
-    wasm_runtime_unregister_natives(MOY_WASI_MODULE, store);
-    wasm_runtime_unregister_natives(MOY_WASI_TERM, store + N_WASI);
-    wasm_runtime_unregister_natives(MOY_WASI_OS, store + N_WASI + N_TERM);
+void moy_wasi_unregister(void) {
+    wasm_runtime_unregister_natives(MOY_WASI_MODULE, WASI);
+    wasm_runtime_unregister_natives(MOY_WASI_TERM, TERM);
+    wasm_runtime_unregister_natives(MOY_WASI_OS, OS);
 }
 
 int moy_wasi_check(wasm_module_t module, char *err, size_t errlen) {

@@ -110,9 +110,11 @@ def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
 def test_the_import_adapter_is_the_tables_wasm_column():
     """A row with a wasm type is one native of native/moy_app/moy_app_wasm.c,
     imported from module moybyte.app as <role>_<verb> at that type, in the
-    table's order; a row without one has no native."""
-    want = [(r["role"] + "_" + r["verb"], r["wasm"], i)
-            for i, r in enumerate(_rows()) if r["wasm"] is not None]
+    import names' strcmp order (WAMR registers the table where it is, never
+    sorted at run time); a row without one has no native."""
+    want = sorted(((r["role"] + "_" + r["verb"], r["wasm"], i)
+                   for i, r in enumerate(_rows()) if r["wasm"] is not None),
+                  key=lambda t: t[0].encode())
     assert list(moy_app.wasm_rows()) == want
 
 

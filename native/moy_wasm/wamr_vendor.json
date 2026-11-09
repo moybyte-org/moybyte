@@ -22,10 +22,10 @@
     "native/moy_wasm/wamr/core/iwasm/common/wasm_loader_common.h": "8e3c82af318f153686cdf27c6b60184edbdc901eb8ce2abb0f742eb7f6c62a96",
     "native/moy_wasm/wamr/core/iwasm/common/wasm_memory.c": "389c356c8bbc2a3420b98f465414528c270829e1a1c3eb28e6189e04a6b1b67b",
     "native/moy_wasm/wamr/core/iwasm/common/wasm_memory.h": "918d55b701ce04d617ab647cad4b85c741c55d5e7d2a583bbbb226dac635260a",
-    "native/moy_wasm/wamr/core/iwasm/common/wasm_native.c": "343cbeed430801bb45fa5f079ba56d595959604eddbe2c28ee7fa6f11d92b2e2",
-    "native/moy_wasm/wamr/core/iwasm/common/wasm_native.h": "ae38abf99304810cb615e7ba25dc5072cde43b6de31826a1cd68ce5bc577c9d3",
-    "native/moy_wasm/wamr/core/iwasm/common/wasm_runtime_common.c": "0c06913ff4dd9d73f123754f10a3e05e031b5f16d646e78eac8d9cfe9e580b50",
-    "native/moy_wasm/wamr/core/iwasm/common/wasm_runtime_common.h": "39f49119722e0e64ea974b0e0b6baa55e5549119c73915f2e075d091568115cc",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_native.c": "c6f5c41b801345d53d580b2971207e3ad741485914091aace8970998456b876b",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_native.h": "afa9facc26e606e4f33da34ceb1bce2bcb936d75ef3acd1df79f7fe51862e3d0",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_runtime_common.c": "72b3b75204d607ed2fa7e0eb38c5b23d2c4da5a42da28f18c3cbe40de1967a6e",
+    "native/moy_wasm/wamr/core/iwasm/common/wasm_runtime_common.h": "ce9522f996c85e968e6233e5a4297aa0aeaae019d35e36cca4460cdc9dc187ac",
     "native/moy_wasm/wamr/core/iwasm/common/wasm_shared_memory.c": "a24638ae10426b549ea9a5273fc1322eab8790cac74a5b69b8e3e64ee733b134",
     "native/moy_wasm/wamr/core/iwasm/common/wasm_shared_memory.h": "dc0cfb3bbf506b0a5ddf0fa330796aa74ae2dc201fb8dfc2a2531b6e61427b99",
     "native/moy_wasm/wamr/core/iwasm/common/wasm_suspend_flags.h": "5cbce685f3d471c077fdbf4b2405e5f07f2a5533c7cc0c4dfec55fedeb4ff168",
@@ -33,7 +33,7 @@
     "native/moy_wasm/wamr/core/iwasm/compilation/aot_stack_frame.h": "b7051e42d54b6199668c2664db3a1a3efe19dc8e324efa5534af5ba124730ba8",
     "native/moy_wasm/wamr/core/iwasm/include/lib_export.h": "19c182c07246c971eee6c54ddf5bd552fcb5fee91be6970681815c0d19ea1264",
     "native/moy_wasm/wamr/core/iwasm/include/wasm_c_api.h": "ddde625be452251da2efbb96b074edd2605335c86c102c9cf09947c6b3f6bcfb",
-    "native/moy_wasm/wamr/core/iwasm/include/wasm_export.h": "e44926a0dcde20caea7340837b06a5c885f676f59546605f1b1ca25fc5cca589",
+    "native/moy_wasm/wamr/core/iwasm/include/wasm_export.h": "549d6d9fd375fe6862a86bd608b32e0dee3bb1515aca0b7c5ed20450f2b6551f",
     "native/moy_wasm/wamr/core/iwasm/interpreter/wasm.h": "169c7c207f0595c6e736d734bdd5eff510890eff737a2c4c0eebc7d8e20be559",
     "native/moy_wasm/wamr/core/iwasm/interpreter/wasm_interp.h": "2a30ae85f8b52d9a10f4a222164a5e06c35e4645862955269d72367c73d79411",
     "native/moy_wasm/wamr/core/iwasm/interpreter/wasm_interp_classic.c": "0fbb845ce4f8cc5633493d96a00e2ecd5222906b492c1ed29a50795169a5c3b4",
@@ -92,8 +92,8 @@
   },
   "upstream": {
     "branch": "moybyte-2.4.5",
-    "commit": "3e3909d8ce86afe8112f30b70427d3ffc5456f72",
-    "date": "2026-10-03",
+    "commit": "c207804a822d8e8a4bd78a426c1430a9293441c2",
+    "date": "2026-11-09",
     "repo": "moybyte-org/wasm-micro-runtime"
   }
 }

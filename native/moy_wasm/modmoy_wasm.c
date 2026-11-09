@@ -746,11 +746,13 @@ typedef struct sess {
     wasm_module_inst_t volatile inst;   // what moy_wasm_session_terminate stops
     lane_t lane[LANES_MAX + 1];     // [1..]: the par lanes, started on demand
     // its share of the runtime: the pool its load, instance and exec envs
-    // are allocated from (rt_malloc), and whether the runtime is being made
+    // are allocated from (rt_malloc), and whether what is allocated now is
+    // the runtime's own (PSRAM's heap): the runtime being made, or a const
+    // table's registration (moy_wasm_register_rows)
     uint8_t *pool;
     size_t pool_size;
     mem_allocator_t alloc;
-    volatile bool rt_init;
+    volatile bool rt_heap;
     struct sess *next;              // the next open session
 } sess_t;
 
@@ -764,11 +766,12 @@ static sess_t *g_sess;
 // One runtime serves every open session (WAMR counts its inits): it is made
 // by the first session's thread and goes with the last's. Each session keeps
 // its own pool, sized by moy_wasm_footprint.h's rule for its module, and what
-// the runtime allocates for a session -- its module, instance, exec envs and
-// import table registration -- comes from that session's pool, freed with
-// it. The runtime's own structures, made while the first session brings it
-// up, come from PSRAM's heap, so they outlive the session that made them. A
-// free goes to the pool the block lies in. The session being served is the
+// the runtime allocates for a session -- its module, instance and exec envs
+// -- comes from that session's pool, freed with it. The runtime's own
+// structures, made while the first session brings it up, and the import
+// tables' registrations (moy_wasm_register_rows) come from PSRAM's heap, so
+// they outlive the session that made them. A free goes to the pool the block
+// lies in. The session being served is the
 // current one: the VM's task calls one session at a time.
 
 static sess_t *pool_of(const void *p)
@@ -799,7 +802,7 @@ static sess_t *sess_here(void)
 static void *rt_malloc(unsigned int n)
 {
     sess_t *s = sess_here();
-    if (s != NULL && s->alloc != NULL && !s->rt_init) {
+    if (s != NULL && s->alloc != NULL && !s->rt_heap) {
         return mem_allocator_malloc(s->alloc, n);
     }
     return heap_caps_malloc(n, PSRAM_CAPS);
@@ -843,6 +846,19 @@ static void sess_wait(sess_t *s)
         xSemaphoreGive(s->vm_done);
     }
     s->waiting = false;
+}
+
+int moy_wasm_register_rows(const char *module, const NativeSymbol *rows, uint32_t n)
+{
+    sess_t *s = sess_here();
+    if (s != NULL) {
+        s->rt_heap = true;
+    }
+    bool ok = wasm_runtime_register_natives_sorted(module, rows, n);
+    if (s != NULL) {
+        s->rt_heap = false;
+    }
+    return ok ? 1 : 0;
 }
 
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg)
@@ -1033,9 +1049,9 @@ static void *sess_thread(void *arg)
     init.mem_alloc_option.allocator.malloc_func = (void *)rt_malloc;
     init.mem_alloc_option.allocator.realloc_func = (void *)rt_realloc;
     init.mem_alloc_option.allocator.free_func = (void *)rt_free;
-    s->rt_init = true;
+    s->rt_heap = true;
     bool inited = wasm_runtime_full_init(&init);
-    s->rt_init = false;
+    s->rt_heap = false;
     if (!inited) {
         rc = sess_fail(s, "runtime init", NULL);
         goto opened;
@@ -1492,7 +1508,7 @@ static MP_DEFINE_STR_OBJ(mod_chip_obj, KEY_CHIP);
 
 typedef struct {
     moy_wasi_t *w;
-    NativeSymbol *store;
+    bool registered;                // moy_wasi_register's tables, while it runs
     wasm_exec_env_t env;
     moy_wasm_ops ops;               // the session's, read while it lives
     sess_t *sess;
@@ -1506,12 +1522,11 @@ static cmd_t *g_cmd;
 static int cmd_up(void *user, char *err, size_t errlen)
 {
     cmd_t *c = user;
-    uint32_t term = 0, n = moy_wasi_count(&term);
-    c->store = wasm_runtime_malloc((n + term) * sizeof(NativeSymbol));
-    if (c->store == NULL || moy_wasi_register(c->store) != 0) {
+    if (moy_wasi_register() != 0) {
         snprintf(err, errlen, OUT_OF_MEMORY ": the WASI table would not register");
         return 1;
     }
+    c->registered = true;
     return 0;
 }
 
@@ -1544,10 +1559,9 @@ static int cmd_call(void *user, int what, float dt, char *err, size_t errlen)
 static void cmd_unbound(void *user)
 {
     cmd_t *c = user;
-    if (c->store != NULL) {
-        moy_wasi_unregister(c->store);
-        wasm_runtime_free(c->store);
-        c->store = NULL;
+    if (c->registered) {
+        moy_wasi_unregister();
+        c->registered = false;
     }
     c->env = NULL;
 }
@@ -1770,7 +1784,7 @@ typedef struct wsvc {
     struct wsvc *next;
     uint32_t pid;
     moy_wasi_t *w;
-    NativeSymbol *store;
+    bool registered;                // moy_wasi_register's tables, while it runs
     wasm_exec_env_t env;
     moy_wasm_ops ops;               // the session's, read while it lives
     sess_t *sess;
@@ -1785,12 +1799,11 @@ static wsvc_t *g_svcs;
 static int svc_up(void *user, char *err, size_t errlen)
 {
     wsvc_t *v = user;
-    uint32_t term = 0, n = moy_wasi_count(&term);
-    v->store = wasm_runtime_malloc((n + term) * sizeof(NativeSymbol));
-    if (v->store == NULL || moy_wasi_register(v->store) != 0) {
+    if (moy_wasi_register() != 0) {
         snprintf(err, errlen, OUT_OF_MEMORY ": the WASI table would not register");
         return 1;
     }
+    v->registered = true;
     return 0;
 }
 
@@ -1818,10 +1831,9 @@ static int svc_call(void *user, int what, float dt, char *err, size_t errlen)
 static void svc_unbound(void *user)
 {
     wsvc_t *v = user;
-    if (v->store != NULL) {
-        moy_wasi_unregister(v->store);
-        wasm_runtime_free(v->store);
-        v->store = NULL;
+    if (v->registered) {
+        moy_wasi_unregister();
+        v->registered = false;
     }
     v->env = NULL;
 }
