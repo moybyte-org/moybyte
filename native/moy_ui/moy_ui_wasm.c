@@ -40,10 +40,6 @@ static void *wasm_target(void) {
 uint32_t moy_app_wasm_theme(int32_t out[MOY_UI_TOKENS], uint32_t have, char *name,
                             uint32_t cap) __attribute__((weak));
 
-// The shape installed when the live theme names another than the one the
-// shell installed; while the shell's is this theme's, nothing is written.
-static moy_ui_shape_t s_shape;
-
 // What every drawing row opens with: the RUN sink over the run's target, lent
 // as `row`, the look current, the run's draw state saved in `saved` and reset.
 typedef struct {
@@ -71,9 +67,14 @@ static int open_run(run_t *r, moy_canvas *c) {
     }
     if (gen != s_gen) {
         const moy_ui_shape_t *now = moy_ui_shape();
-        if (name[0] && now != NULL && strcmp(name, now->name) != 0) {
-            moy_theme_shape(name, strlen(name), &s_shape);
-            moy_ui_shape_use(&s_shape);
+        // The live theme names another shape than the shell installed: it
+        // is resolved into a block of its own (PSRAM), which the UI copies.
+        moy_ui_shape_t *sh = name[0] && now != NULL && strcmp(name, now->name) != 0
+            ? CTX_ALLOC(sizeof(*sh)) : NULL;
+        if (sh != NULL) {
+            moy_theme_shape(name, strlen(name), sh);
+            moy_ui_shape_use(sh);
+            free(sh);
         }
         moy_ui_look_set(MOY_UI_LOOK_RUN, tok);
         s_gen = gen;

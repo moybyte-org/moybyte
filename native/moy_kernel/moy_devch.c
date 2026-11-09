@@ -29,7 +29,10 @@ static struct {
     gesture_t g;
     uint8_t *back;              // bytes handed back, taken before getc's
     uint32_t back_n, back_i;
+    char *state;                // `state`'s line while a run is in front
 } D;
+
+#define STATE_CAP 1024
 
 #define BACK_CAP 1024
 
@@ -222,11 +225,13 @@ static bool w_state(int argc, char **argv, const char *line) {
     if (!front() || moy_play_state_json == NULL) {
         return false;
     }
-    static char buf[1024];
-    memcpy(buf, "STATE ", 6);
-    buf[6] = 0;
-    moy_play_state_json(buf + 6, sizeof(buf) - 6);
-    moy_loop_say_line(buf);
+    if (D.state == NULL && (D.state = moy_loop_alloc(STATE_CAP)) == NULL) {
+        return false;
+    }
+    memcpy(D.state, "STATE ", 6);
+    D.state[6] = 0;
+    moy_play_state_json(D.state + 6, STATE_CAP - 6);
+    moy_loop_say_line(D.state);
     return true;
 }
 

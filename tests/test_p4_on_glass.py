@@ -154,8 +154,18 @@ LATE_SRAM = 5206 + 1107 - 3130
 # start's 4112.
 CORE_DUMP_SRAM = 4040
 BATCH6_SRAM = 72 + 48
+# Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
+# its first use: the per-verb profiler's counters (native/moycore/
+# moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
+# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# app's theme names another shape) and the dev channel's `state` line while a
+# run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
+# heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
+# heap's start sits where it was at eb0498275 or lower, and the largest
+# block with it.
+MOVED_SRAM = 4560
 WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM - LATE_SRAM
-                      - CORE_DUMP_SRAM - BATCH6_SRAM,
+                      - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM,
                       188416 - LATE_SRAM)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 

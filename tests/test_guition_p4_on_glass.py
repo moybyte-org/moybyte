@@ -127,9 +127,18 @@ KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 
 # the link map against dev eb0498275, 2026-11-09.
 CORE_DUMP_SRAM = 4016
 BATCH6_SRAM = 80
-# The largest block falls with the heap's start, by one of its steps.
-WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM - CORE_DUMP_SRAM - BATCH6_SRAM,
-                      94208 - 4096)
+# Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
+# its first use: the per-verb profiler's counters (native/moycore/
+# moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
+# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# app's theme names another shape) and the dev channel's `state` line while a
+# run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
+# heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
+# heap's start sits where it was at eb0498275 or lower, and the largest
+# block with it.
+MOVED_SRAM = 4560
+WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM - CORE_DUMP_SRAM - BATCH6_SRAM
+                      + MOVED_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
 

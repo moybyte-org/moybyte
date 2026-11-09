@@ -71,9 +71,17 @@ def board():
 # 70 bytes of .bss by the link map against dev eb0498275, 2026-11-09.
 CORE_DUMP_SRAM = 4450
 BATCH6_SRAM = 70
-# The largest block falls with the heap's start, by one of its steps (81920
-# and 77824 on two fresh boots of 65e7e49ae).
-WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM, 86016 - 4096)
+# Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
+# its first use: the per-verb profiler's counters (native/moycore/
+# moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
+# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# app's theme names another shape) and the dev channel's `state` line while a
+# run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
+# heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
+# heap's start sits where it was at eb0498275 or lower, and the largest
+# block with it.
+MOVED_SRAM = 4560
+WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM, 86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 

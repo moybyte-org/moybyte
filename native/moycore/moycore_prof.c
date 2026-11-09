@@ -4,6 +4,13 @@
 
 #include "modmoycore_int.h"
 
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define PROF_ALLOC(n) heap_caps_calloc(1, (n), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#else
+#define PROF_ALLOC(n) calloc(1, (n))
+#endif
+
 // -- the per-verb profiler ---------------------------------------------------
 //
 // WHY IT EXISTS. A Lua/p8 cart draws through libmoy's own C verbs straight into
@@ -36,7 +43,11 @@
 #define PROF_NAMES "moy.prof.names"   // registry: slot+1 -> the global's name
 #define PROF_ORIG  "moy.prof.orig"    // registry: slot+1 -> the original value
 
-static struct { uint32_t calls; uint32_t ticks; uint32_t self; } g_prof[PROF_MAX];
+// The counters, PSRAM made at the first install and kept: a meter asked for
+// twice a year holds no internal RAM until it is.
+typedef struct { uint32_t calls; uint32_t ticks; uint32_t self; } prof_slot_t;
+static prof_slot_t *g_prof;
+#define PROF_BYTES (sizeof(prof_slot_t) * PROF_MAX)
 static uint32_t g_prof_child;     // ticks charged to callees of the running verb
 uint32_t moycore_prof_frames;    // ticks since the reset, for per-frame means
 uint32_t moycore_prof_hz;        // profiler ticks per second, measured
@@ -133,6 +144,7 @@ void moycore_prof_install(lua_State *L)
 {
     int n = 0, i, top;
     if (moycore_prof_on) return;
+    if (g_prof == NULL && (g_prof = PROF_ALLOC(PROF_BYTES)) == NULL) return;
     top = lua_gettop(L);
     lua_newtable(L);                              // top+1: names
     lua_newtable(L);                              // top+2: originals
@@ -179,7 +191,7 @@ void moycore_prof_install(lua_State *L)
     lua_setfield(L, LUA_REGISTRYINDEX, PROF_NAMES);
     lua_settop(L, top);
 
-    memset(g_prof, 0, sizeof g_prof);
+    memset(g_prof, 0, PROF_BYTES);
     g_prof_child = 0;
     moycore_prof_frames = 0;
     moycore_prof_n = n;
@@ -246,7 +258,7 @@ MP_DEFINE_CONST_FUN_OBJ_0(moycore_verb_stats_obj, mod_verb_stats);
 // than a cadence baked in here.
 static mp_obj_t mod_verb_reset(void)
 {
-    memset(g_prof, 0, sizeof g_prof);
+    if (g_prof != NULL) memset(g_prof, 0, PROF_BYTES);
     g_prof_child = 0;
     moycore_prof_frames = 0;
     return mp_const_none;
