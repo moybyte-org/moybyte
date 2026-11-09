@@ -3288,6 +3288,87 @@ def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
         assert seen == ring.full(drv), name
 
 
+def _ring_desk(tmp_path, n):
+    """A popover desk on an `n`-buffer root, every buffer painted and settled."""
+    ws, drv = _popover_desk(tmp_path)
+    ring = _Ring(ws, n)
+    for _ in range(n):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv)
+    return ws, drv, ring
+
+
+@pytest.mark.parametrize("n,gap", ((1, 0), (3, 0), (3, 1), (3, 2)))
+def test_a_popover_swapped_back_within_its_debts_leaves_no_card(tmp_path, n, gap):
+    """The battery's card swapped for the calendar's and back, each swap a
+    close and an open in one step, the second before the first's restores
+    reached every buffer: both cards' snapshots are owed at once, so the
+    frame repaints whole, and every buffer is a full repaint's -- no
+    calendar card left under the battery's, no old battery card under its
+    new snapshot."""
+    ws, drv, ring = _ring_desk(tmp_path, n)
+    ws.widget_tap("battery")
+    ring.settle(drv)
+    ws.close_popover()
+    ws.widget_tap("clock")
+    ring.settle(drv, gap)
+    ws.close_popover()
+    ws.widget_tap("battery")
+    ring.settle(drv)
+    assert list(ring.bufs) == ring.full(drv)
+    ws.close_popover()
+    ring.settle(drv)
+    assert list(ring.bufs) == ring.full(drv)
+
+
+def test_the_calendar_swapped_for_the_battery_in_one_step(tmp_path):
+    """The calendar's card closed and the battery's opened in one step, on
+    a triple-buffered root: every buffer is a full repaint's, the calendar's
+    rect put back in each."""
+    ws, drv, ring = _ring_desk(tmp_path, 3)
+    ws.widget_tap("clock")
+    ring.settle(drv)
+    ws.close_popover()
+    ws.widget_tap("battery")
+    assert ring.settle(drv) == ["pop"] * 3
+    assert list(ring.bufs) == ring.full(drv)
+
+
+def test_the_system_menu_reopened_before_its_close_landed(tmp_path):
+    """The system menu closed, one buffer given its scrim's restore, then
+    opened and closed again with no frame between: the restore the other
+    buffer was owed is dropped, so every buffer repaints whole and none
+    keeps the scrim."""
+    ws, drv, ring = _ring_desk(tmp_path, 2)
+    ws.widget_tap("menu")
+    ring.settle(drv)
+    ws.widget_tap("menu")
+    ring.settle(drv, 1)
+    ws.widget_tap("menu")
+    ws.widget_tap("menu")
+    ring.settle(drv)
+    assert list(ring.bufs) == ring.full(drv)
+
+
+def test_the_system_menu_opened_while_a_full_paint_is_owed(tmp_path):
+    """The system menu opened while the frames still repaint whole the
+    Wi-Fi card's close into the other buffers: the full frame washes its
+    own buffer, and the rides after it wash the rest."""
+    ws, drv, ring = _ring_desk(tmp_path, 3)
+    ws.widget_tap("wifi")
+    ring.settle(drv, 1)
+    ws.close_popover()
+    assert ring.settle(drv, 1) == ["full"]
+    ws.widget_tap("menu")
+    assert ring.settle(drv, 1) == ["full"]
+    ring.settle(drv)
+    assert list(ring.bufs) == ring.full(drv)
+    ws.widget_tap("menu")
+    ring.settle(drv)
+    assert list(ring.bufs) == ring.full(drv)
+
+
 def test_the_wifi_card_that_grows_is_a_full_repaint_in_every_buffer(tmp_path):
     """The Wi-Fi card sized to what its scan finds: opened, then grown by a
     rescan that finds more networks, every buffer is a full repaint's -- no
