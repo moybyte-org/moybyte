@@ -470,8 +470,8 @@ service: the calls name no app, so no app reaches another's, and a
 permission beyond the cart's. A compiled app imports them as
 `moybyte_service_start` (`moybyte.app`), a WASI program as
 `moybyte.os.service_start`, a C program calls `moy_service_start`
-(`sdk/include/moybyte/os.h`), which answers -1 with `errno` set where the
-others answer ABSENT (`ENOENT` on the native tier).
+(`sdk/include/moybyte/os.h`), which answers -1 with `errno` `ENOENT` where
+the others answer ABSENT, a WASI program and a native module alike.
 
 **Its storage is its app's.** A service holds the roles its permissions
 grant, as a foreground run of the same app does: the same files folder, the

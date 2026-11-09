@@ -741,8 +741,9 @@ static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint
 // foreground command's at its job's step. The module's thread waits for the
 // answer in slices of CALL_SLICE_MS, CALL_MS at most (AGAIN past it: a
 // background command's door serves nothing while it waits). The answer is
-// the verb's number (true 1, false 0); a refusal (the verb's null, or its
-// raise) is ACCES.
+// the verb's number (true 1, false 0), a negative one a door code read as
+// its errno (role_errno: ABSENT is NOENT, FULL is RANGE, as an ELF module
+// reads them); a refusal (the verb's null, or its raise) is ACCES.
 static bool h_sleeps(moy_wasi_t *w);
 static void nap(moy_wasi_t *w, int ms);
 
@@ -782,6 +783,23 @@ static bool json_str(char *out, size_t cap, size_t *at, const char *p, uint32_t 
     return true;
 }
 
+// The errno of a door's negative answer (moy_app.h's codes), which a
+// console call's verb answers too (shell_servers' _DOOR_*, moybyte.ABSENT):
+// WASI's numbering of the errno an ELF module reads for it.
+static int32_t role_errno(int32_t r) {
+    switch (-r) {
+        case MOY_APP_DENIED: case MOY_APP_STALE: return W_ACCES;
+        case MOY_APP_FULL: return W_RANGE;
+        case MOY_APP_NOMEM: return W_NOMEM;
+        case MOY_APP_ABSENT: return W_NOENT;
+        case MOY_APP_NOSTORE: return W_NODEV;
+        case MOY_APP_IO: return W_IO;
+        case MOY_APP_NEEDS_VM: return W_AGAIN;
+        case MOY_APP_FORGED: return W_BADMSG;
+        default: return W_INVAL;
+    }
+}
+
 static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args, size_t n) {
     moy_wasi_t *w = os_run(e);
     if (w == NULL || w->pid == 0) {
@@ -810,6 +828,9 @@ static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args,
                     v = 0;
                 } else if ((t[0] >= '0' && t[0] <= '9') || t[0] == '-') {
                     v = (int32_t)strtol(t, NULL, 10);
+                    if (v < 0) {
+                        v = -role_errno(v);
+                    }
                 }
             }
             free(ans);
@@ -898,20 +919,6 @@ static void le32(uint8_t *q, uint32_t v) {
     q[1] = (uint8_t)(v >> 8);
     q[2] = (uint8_t)(v >> 16);
     q[3] = (uint8_t)(v >> 24);
-}
-
-static int32_t role_errno(int32_t r) {
-    switch (-r) {
-        case MOY_APP_DENIED: case MOY_APP_STALE: return W_ACCES;
-        case MOY_APP_FULL: return W_RANGE;
-        case MOY_APP_NOMEM: return W_NOMEM;
-        case MOY_APP_ABSENT: return W_NOENT;
-        case MOY_APP_NOSTORE: return W_NODEV;
-        case MOY_APP_IO: return W_IO;
-        case MOY_APP_NEEDS_VM: return W_AGAIN;
-        case MOY_APP_FORGED: return W_BADMSG;
-        default: return W_INVAL;
-    }
 }
 
 static int32_t os_role(wasm_exec_env_t e, uint32_t row, bool seq, const os_arg_t *a, int n,

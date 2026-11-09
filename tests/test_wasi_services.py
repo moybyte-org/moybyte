@@ -246,6 +246,9 @@ def test_a_wasi_service_notifies_under_its_permission_and_writes_the_log(svc, pe
     assert pid is not None
     assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "note", '["hi"]')[0] == 1)
     assert _polled(s, lambda: "noted" in _texts(since, pid))
+    # its own app declares no service: a `type: service` cart's call is
+    # ABSENT, read as WASI's NOENT (44), as an ELF module reads ENOENT
+    assert _polled(s, lambda: "service_running -1 errno 44" in _texts(since, pid))
     texts = _texts(since, pid)
     mine = [n for n in notifications.NOTES.list if n.pid == pid]
     if perms:
