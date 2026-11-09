@@ -73,6 +73,9 @@ WASM_OS = "moybyte.os"
 # Answers a call only from the background: an app in front opens, shares and
 # picks without it (docs/app_api_v1.md section 6).
 BACKGROUND_ONLY = ("front",)
+# Used with no call of the cart's own: the console arms the two-console
+# match for a cart that declares it (runtime/run/player.py, start).
+USED_UNCALLED = ("multiplayer",)
 SIM_STORE = os.path.expanduser("~/.moybyte/projects")
 SDK_INCLUDE = os.path.join(ROOT, "sdk", "include")
 STUBS = os.path.join(HERE, "stubs")
@@ -602,7 +605,7 @@ def check_cart(cart):
                              % (prog.label, ", ".join(names), p))
     for p in perms:
         b = _base(p)
-        if b in inferable and b not in used_any:
+        if b in inferable and b not in used_any and b not in USED_UNCALLED:
             warnings.append('"%s" is declared and nothing the cart calls needs it' % p)
     return errors, warnings, notes
 
