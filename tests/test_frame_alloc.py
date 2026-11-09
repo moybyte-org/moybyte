@@ -1241,6 +1241,13 @@ def main():
         def _load(self, boot, store):
             carts, root = boot.load_carts(store, [], root=ROOT + "/carts",
                                           media="SD")
+            # The card's built-ins were staged by hand, not written by a
+            # seed: record them as the seed's roster, which is how a board's
+            # store knows its built-ins (moy_store_base.seeded).
+            import os
+            import moy_store_base
+            moy_store_base.seeded(root, [n for n in os.listdir(root)
+                                         if moy_store_base.builtin_ns(n)])
             self.on_sd = True                # the T-Deck's store is its card
             return carts, root, None
 
