@@ -263,7 +263,7 @@
     {"name": "moybyte.at", "server": "python", "perm": "alarms", "py": ["moybyte.at"], "lua": ["moybyte.at"], "in": ["t:int"], "ret": "int", "how": "hop", "door": true, "wasm": true, "wasi": true, "elf": 87},
     {"name": "moybyte.service_start", "server": "call", "perm": null, "py": ["moybyte.service_start"], "lua": ["moybyte.service_start"], "in": [], "ret": "int", "how": "hop", "door": true, "wasm": true, "wasi": true, "elf": 97},
     {"name": "moybyte.service_stop", "server": "call", "perm": null, "py": ["moybyte.service_stop"], "lua": ["moybyte.service_stop"], "in": [], "ret": "int", "how": "hop", "door": true, "wasm": true, "wasi": true, "elf": 98},
-    {"name": "moybyte.service_running", "server": "call", "perm": null, "py": ["moybyte.service_running"], "lua": ["moybyte.service_running"], "in": [], "ret": "int", "how": "hop", "door": true, "wasm": true, "wasi": true, "elf": 99},
+    {"name": "moybyte.service_running", "server": "c", "perm": null, "py": ["moybyte.service_running"], "lua": ["moybyte.service_running"], "in": [], "ret": "int", "how": "here", "door": true, "wasm": true, "wasi": true, "elf": 99},
     {"name": "moybyte.http", "server": "python", "perm": "http", "py": ["moybyte.http"]},
     {"name": "moybyte.mic", "server": "python", "perm": "mic", "py": ["moybyte.mic"]},
     {"name": "moybyte.lora", "server": "python", "perm": "lora", "py": ["moybyte.lora"]},

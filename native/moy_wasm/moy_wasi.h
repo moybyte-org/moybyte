@@ -179,6 +179,10 @@ int moy_wasi_status(const moy_wasi_t *w, int main);
 // A service's run as process `pid` (A SERVICE above), its argv `id`; the
 // event queue is its scheduler's to open. NULL when memory refuses.
 moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id);
+// The pid of the live service whose argv is `id` (n bytes, its cart's id):
+// one not hung up, else 0. Any task may ask: moy_app's service_running row
+// (native/moy_app/moy_app.c, svc_row).
+uint32_t moy_wasi_service_of(const char *id, size_t n);
 // Its stop, from any task: the event descriptor hangs up.
 void moy_wasi_hangup(moy_wasi_t *w);
 // Its run ended with `code` from any task, as proc_exit ends it, and its

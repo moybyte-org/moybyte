@@ -108,6 +108,8 @@ struct moy_wasi {
     volatile uint8_t polling;   // inside a poll of the descriptor
     volatile uint8_t calling;   // waiting on the VM's queue (moy_vmq.h): not its wake's run
     volatile uint8_t hup;       // stopped: the descriptor hangs up
+    moy_wasi_t *svc_next;       // the live services' list (moy_wasi_service_of), under moy_lock
+    uint8_t listed;
     wasm_module_inst_t volatile inst;   // while `_start` runs: what a kill terminates
     // the watchdog's own, on the console's task
     uint32_t seen;              // `wakes` when it last looked
@@ -304,6 +306,32 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
     return w;
 }
 
+// The live services, which moy_wasi_service_of finds by id from any task:
+// listed at their start, taken off before their free, each under the
+// kernel's lock (native/moy_kernel/moy_lock.h; weak, for a build without it,
+// whose one task needs none).
+void moy_lock_take(void) __attribute__((weak));
+void moy_lock_give(void) __attribute__((weak));
+static moy_wasi_t *s_svcs;
+
+static void svcs_lock(bool take) {
+    if (moy_lock_take != NULL) {
+        take ? moy_lock_take() : moy_lock_give();
+    }
+}
+
+uint32_t moy_wasi_service_of(const char *id, size_t n) {
+    uint32_t pid = 0u;
+    svcs_lock(true);
+    for (moy_wasi_t *w = s_svcs; w != NULL && pid == 0u; w = w->svc_next) {
+        if (!w->hup && strncmp(w->argv[0], id, n) == 0 && w->argv[0][n] == 0) {
+            pid = w->pid;
+        }
+    }
+    svcs_lock(false);
+    return pid;
+}
+
 moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id) {
     moy_wasi_t *w = w_alloc(sizeof *w);
     if (w == NULL) {
@@ -330,12 +358,30 @@ moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id) {
     w->fd[MOY_EVQ_FD].kind = K_EVQ;
     w->fd[MOY_EVQ_FD].sh = -1;
     w->started_us = mono_us();
+    if (w->pid != 0u) {
+        svcs_lock(true);
+        w->svc_next = s_svcs;
+        s_svcs = w;
+        w->listed = 1;
+        svcs_lock(false);
+    }
     return w;
 }
 
 void moy_wasi_free(moy_wasi_t *w) {
     if (w == NULL) {
         return;
+    }
+    if (w->listed) {
+        svcs_lock(true);
+        for (moy_wasi_t **at = &s_svcs; *at != NULL; at = &(*at)->svc_next) {
+            if (*at == w) {
+                *at = w->svc_next;
+                break;
+            }
+        }
+        w->listed = 0;
+        svcs_lock(false);
     }
     if (w->pid != 0) {
         moy_evq_unwait(w->pid);         // the module's thread goes; its queue is the door's

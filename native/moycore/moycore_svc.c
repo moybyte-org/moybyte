@@ -157,6 +157,23 @@ typedef struct {
 static svc_t *s_row[MOYCORE_SVCS];
 static uint16_t s_gen;
 
+// A row is put in or taken out of the table under the kernel's lock
+// (native/moy_kernel/moy_lock.h; weak, for a build without it, whose one task
+// needs none), so moycore_svc_of may walk it from any task; every other walk
+// is the VM's task's, which alone writes it.
+void moy_lock_take(void) __attribute__((weak));
+void moy_lock_give(void) __attribute__((weak));
+
+static void row_put(uint32_t slot, svc_t *s) {
+    if (moy_lock_take != NULL) {
+        moy_lock_take();
+    }
+    s_row[slot] = s;
+    if (moy_lock_give != NULL) {
+        moy_lock_give();
+    }
+}
+
 // -- the clock, the memory -------------------------------------------------------
 
 static int64_t now_us(void) {
@@ -1102,7 +1119,7 @@ static svc_t *row_of(uint32_t h) {
 // task where a reaper deletes it.
 static void row_free(uint32_t slot) {
     svc_t *s = s_row[slot];
-    s_row[slot] = NULL;
+    row_put(slot, NULL);
     #ifdef SVC_STACK_PSRAM
     if (s->task != NULL) {
         vTaskDeleteWithCaps(s->task);
@@ -1175,7 +1192,7 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
         }
         s->own_q = 1;
     }
-    s_row[slot] = s;
+    row_put(slot, s);
     #ifdef SVC_TASKS
     #ifdef SVC_STACK_PSRAM
     BaseType_t made = xTaskCreatePinnedToCoreWithCaps(svc_task, "moy_svc", MOYCORE_SVC_STACK, s,
@@ -1186,7 +1203,7 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
                                               MOYCORE_SVC_PRIO, &s->task, SVC_CORE);
     #endif
     if (made != pdPASS) {
-        s_row[slot] = NULL;
+        row_put(slot, NULL);
         if (s->own_q) {
             moy_evq_close(pid);
         }
@@ -1266,6 +1283,28 @@ bool moycore_svc_tasks(void) {
     #endif
 }
 
+uint32_t moycore_svc_of(const char *id, size_t n) {
+    uint32_t pid = 0u;
+    if (n + 1u >= sizeof ((svc_t *)0)->id) {
+        return 0u;
+    }
+    if (moy_lock_take != NULL) {
+        moy_lock_take();
+    }
+    for (uint32_t i = 0; i < MOYCORE_SVCS && pid == 0u; i++) {
+        svc_t *s = s_row[i];
+        if (s != NULL && !s->stop_req && !s->orphan && !s->exiting
+            && (s->state == MOYCORE_SVC_STARTING || s->state == MOYCORE_SVC_RUNNING)
+            && strncmp(s->id + 1, id, n) == 0 && s->id[n + 1u] == 0) {
+            pid = s->pid;
+        }
+    }
+    if (moy_lock_give != NULL) {
+        moy_lock_give();
+    }
+    return pid;
+}
+
 uint32_t moycore_svc_step(uint32_t now_ms) {
     uint32_t wait = UINT32_MAX;
     #ifndef SVC_TASKS
@@ -1290,8 +1329,8 @@ void moycore_svc_reset(void) {
             if (s->state != MOYCORE_SVC_EXITED) {
                 end(s, MOY_PROC_KILLED);
             }
+            row_put(i, NULL);
             free(s);
-            s_row[i] = NULL;
         }
     }
     #endif

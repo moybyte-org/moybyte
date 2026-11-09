@@ -3581,14 +3581,17 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
     }
     const char *name = id != NULL && *id ? id : w > 0 ? "game" : "service";
     size_t k = strlen(name) + 1;
-    p->argv = os_alloc(2 * sizeof(char *) + k);
-    if (p->argv == NULL) {
+    char **argv = os_alloc(2 * sizeof(char *) + k);
+    if (argv == NULL) {
         snprintf(err, errlen, "out of memory");
         proc_end(p);
         return NULL;
     }
-    p->argv[0] = memcpy((char *)(p->argv + 2), name, k);
-    p->argv[1] = NULL;
+    argv[0] = memcpy((char *)(argv + 2), name, k);
+    argv[1] = NULL;
+    lock();                             // whole before moy_os_service_of reads it
+    p->argv = argv;
+    unlock();
     p->argc = 1;
     if (!(p->hooks & MOY_ELF_H_MAIN)) {
         snprintf(err, errlen, "not a %s: it defines no main", w > 0 ? "game" : "service");
@@ -3682,6 +3685,20 @@ static uint32_t services(moy_os_proc_t **out) {
     }
     unlock();
     return n;
+}
+
+uint32_t moy_os_service_of(const char *id, size_t n) {
+    uint32_t pid = 0u;
+    lock();
+    for (uint32_t i = 0; i < MOY_OS_PROCS && pid == 0u; i++) {
+        moy_os_proc_t *p = g_proc[i];
+        if (p != NULL && p->service && !p->hup && !p->ending && !p->reaped && p->argv != NULL
+            && strncmp(p->argv[0], id, n) == 0 && p->argv[0][n] == 0) {
+            pid = p->pid;
+        }
+    }
+    unlock();
+    return pid;
 }
 
 // THE WATCHDOG. Native code is not aborted where it stands by a timer: a

@@ -272,7 +272,7 @@ static int32_t w_moybyte_service_stop(void *e) {
     return run(e, HOP, MOY_T_MOYBYTE_SERVICE_STOP, NULL, 0, NULL, 0);
 }
 static int32_t w_moybyte_service_running(void *e) {
-    return run(e, HOP, MOY_T_MOYBYTE_SERVICE_RUNNING, NULL, 0, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_SERVICE_RUNNING, NULL, 0, NULL, 0);
 }
 static int32_t w_moybyte_random(void *e, int32_t n, uint8_t *data, uint32_t data_cap) {
     uint8_t q_n[4];

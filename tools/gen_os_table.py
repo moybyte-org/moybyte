@@ -223,6 +223,15 @@ def cap_packed(r):
     return r.get("server") != "c" or bool(r.get("door"))
 
 
+def py_twin(r):
+    """Whether a C row has the moybyte module's verb as its Python half: a
+    kernel answer first, on a compiled program's own task, and the console
+    call where the kernel has none (the door's). A Lua program, whose calls
+    are the VM's already, holds the console call itself."""
+    return (r.get("server") == "c" and bool(r.get("door")) and bool(r.get("py"))
+            and role_of(r) == "moybyte")
+
+
 def wasi_rows(src):
     """The rows a WASI program imports from moybyte.os."""
     return [r for r in src["rows"] if r.get("wasi")]
@@ -264,7 +273,8 @@ def console_calls(src):
     for r in door_rows(src):
         if role_of(r) != "moybyte":
             continue
-        if r.get("server") == "call" and (r.get("lua") or (r.get("wasi") and wasi_call(r))):
+        if (r.get("server") == "call" or py_twin(r)) and (
+                r.get("lua") or (r.get("wasi") and wasi_call(r))):
             out[r["name"]] = verb_of(r)
         elif r.get("server") == "python" and r.get("wasi") and wasi_call(r):
             out[r["name"]] = verb_of(r) + "_message"
@@ -1284,7 +1294,7 @@ def lua_names(src):
     out = []
     for r in door_rows(src):
         role = role_of(r)
-        if role == "moybyte" and (r.get("server") != "c" or r.get("lua_own")):
+        if role == "moybyte" and (r.get("server") != "c" or r.get("lua_own") or py_twin(r)):
             continue
         for n in r.get("lua") or ():
             tbl, _, fn = n.rpartition(".")
@@ -1296,7 +1306,8 @@ def lua_names(src):
 def lua_calls(src):
     """The console calls a Lua service holds as moybyte.<verb>."""
     return [verb_of(r) for r in door_rows(src)
-            if role_of(r) == "moybyte" and r.get("server") == "call" and r.get("lua")]
+            if role_of(r) == "moybyte" and (r.get("server") == "call" or py_twin(r))
+            and r.get("lua")]
 
 
 def lua_run_calls(src):

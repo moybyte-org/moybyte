@@ -17,6 +17,7 @@ the VM up, the app ABI's run grants ended but the kept services'
 and takes back at its first frame (scheduler.boot). The stepped Lua tier has
 no task to run on, so the stop's frame steps it in its place."""
 
+import ctypes
 import json
 import os
 import shutil
@@ -484,11 +485,13 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
         tmp_path, elf_built, wasi_built, fresh, monkeypatch, pins):
     """The device handles the kernel owns (native/moy_kernel/moy_dev.h) are
     served on each program's own task: with the VM down, an ELF service
-    drives a gpio handle's pin and reads it back, and a WASI service reads
+    drives a gpio handle's pin and reads it back, `service_running` finds
+    each service by its app's id in its tier's table, and a WASI service reads
     the edges a pin made during the stop from its handle, whose reader the
     stop kept, and puts text on the clipboard (native/moy_kernel/moy_lock.h);
     each lease the kernel took is no VM's, and a service's end closes its
     handles."""
+    import moy_app
     from runtime import moy_input
     N = pins
     perms = ["full_access", "lease:gpio"]
@@ -510,6 +513,16 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     assert N.held(N.VM) == 0, "the kernel's leases hold no VM stop off"
     rec, door = _stop(ws, s)
     moy_input._lib().moy_input_vm_stop()
+    app = ws.app_abi
+    row = moy_app.table().index("moybyte.service_running")
+    here = moy_app._lib.moy_app_role_here
+    here.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                     ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t]
+    here.restype = ctypes.c_int32
+    for name, pid in (("elf.svc", elf), ("wasi.svc", wasi), ("none.svc", -9)):
+        g = app.grant(name, [], run=True, owner=peer_e)
+        assert here(app._p, g, row, None, 0, None, 0) == pid, name  # -9: NEEDS_VM
+        app.end(g)
     N.sim_level(5, 1)
     N.sim_level(5, 0)
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["read"]')[0] == 1
@@ -559,6 +572,11 @@ print(moy_evq.send(8, "t.tick", "count", "[]")[0])
 moycore.svc_step(55)
 m = moy_evq.take(8)
 print(m[2], int(m[3][1:-1]) >= 9)
+import moy_app
+a = moy_app.kernel(False)
+g = a.grant("t.tick", [], run=True, owner=8)
+print(a.role(g, moy_app.table().index("moybyte.service_running"), b"", 0)[0])
+a.end(g)
 moy_evq.send(8, "t.tick", "ask", "[]")
 moycore.svc_step(60)
 t = moy_evq.next_call()
@@ -574,8 +592,9 @@ moycore.svc_reap(h)
 
 def test_on_the_vm_a_board_runs_a_lua_service_and_a_timer_run_on_with_no_vm(tmp_path):
     """The board's bindings with the VM down (moy_evq.vm): a kernel timer
-    posts, a Lua service steps and answers a message, and its console call
-    waits, answered once the VM is up."""
+    posts, a Lua service steps and answers a message, the kernel finds it by
+    its app's id (`service_running`), and its console call waits, answered
+    once the VM is up."""
     import subprocess
     from unix_mp import require_unix_mp
     exe = require_unix_mp("moycore", why="the services on the VM a board runs, with no VM")
@@ -584,7 +603,7 @@ def test_on_the_vm_a_board_runs_a_lua_service_and_a_timer_run_on_with_no_vm(tmp_
     done = subprocess.run([str(exe), str(script)], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout.splitlines() == [
-        "0 0", "False 0 True 1", "moybyte.timer True 0", "1", "counted True",
+        "0 0", "False 0 True 1", "moybyte.timer True 0", "1", "counted True", "9",
         "(9, 'day', '[]') (2, 0)", "(4, 7) True"], done.stdout
 
 

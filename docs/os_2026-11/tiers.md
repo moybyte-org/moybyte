@@ -296,9 +296,11 @@ model's, below; `notify`, `award`, `progress`, the wakes `every`,
 `after`, `at`, `cancel`, `open_with` and `pick`, the console calls a native
 service posts on the VM's queue, their natives generated from the source;
 `log`; the files, `nav_open_app`, prefs, clipboard, device-handle (`dev_*`)
-and item rows and `share`, each its role table row for the grant the
-program's start made, hopped to the VM's task as a C program's is,
-`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
+and item rows, `service_running` and `share`, each its role table row for
+the grant the program's start made, run as a C program's is: hopped to the
+VM's task, or, for a row `how` "here" (the clipboard's write, the device
+handles, `service_running`), run on the program's own task, hopped only
+where the kernel's half answers NEEDS_VM (`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
 row's types give, and the adapter's natives and the toolkit's are generated

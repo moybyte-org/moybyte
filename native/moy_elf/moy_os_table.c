@@ -253,7 +253,7 @@ int32_t moy_os_moy_service_stop(void) {
 }
 
 int32_t moy_os_moy_service_running(void) {
-    return moy_os_call(179u, MOY_OS_HOP, NULL, 0, NULL, 0u);   // moybyte.service_running
+    return moy_os_call(179u, MOY_OS_HERE, NULL, 0, NULL, 0u);   // moybyte.service_running
 }
 
 int32_t moy_os_moy_pick(const char *mime, const char *mode) {

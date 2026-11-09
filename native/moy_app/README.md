@@ -46,7 +46,12 @@ The role table is data, and every verb has one of four servers:
   owner under the grant's device permissions (`moy_app_grant_devs`, set from
   the run's granted permissions), and any other kind or handle answers
   `MOY_APP_NEEDS_VM` there and is handed to the door's Python half on the
-  VM's task (`door: true`, so its fields are the door's). Lua's `send`, `log` and wakes are its own
+  VM's task (`door: true`, so its fields are the door's). So is
+  `service_running`: the pid of the app's service where a kernel tier runs it
+  live under the grant's app id (`moycore_svc_of`, `moy_os_service_of`,
+  `moy_wasi_service_of`, each tier's table under its lock), else the door's
+  Python half's (`Scheduler.own`); a Lua program, whose calls are the VM's
+  already, keeps the console call (gen_os_table's `py_twin`). Lua's `send`, `log` and wakes are its own
   forms of them (`lua_own`: a Lua service's C, a Lua app's prelude over the
   `moybyte` module).
   The store's rows (`files.*`, `prefs.*`) are C too, and hop: each is run

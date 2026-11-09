@@ -175,6 +175,11 @@ int moycore_svc_stop(uint32_t h);
 int moycore_svc_info(uint32_t h, moycore_svc_info_t *out);
 // An exited service's row freed: OK, STALE, or BAD while it has not exited.
 int moycore_svc_reap(uint32_t h);
+// The pid of the live service named `id` (n bytes, its cart's id): one
+// starting or running whose stop nobody asked, else 0. Any task may ask (the
+// table's rows go in and out under the kernel's lock): moy_app's
+// service_running row (native/moy_app/moy_app.c, svc_row).
+uint32_t moycore_svc_of(const char *id, size_t n);
 // The rows' handles, in slot order (0 where empty).
 uint32_t moycore_svc_at(uint32_t slot);
 // Whether each service has a task of its own here (a board).

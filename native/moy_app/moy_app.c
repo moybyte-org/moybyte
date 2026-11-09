@@ -1895,6 +1895,43 @@ static int32_t dev_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t 
     return s_door(h, f->trow, f->p, f->n, ans, cap);
 }
 
+// A compiled process's moybyte.service_running: its app's service where a
+// kernel tier runs it live -- a Lua, ELF or WASI service started under the
+// app's id, the id its grant is made under (moycore_svc_of, moy_os_service_of,
+// moy_wasi_service_of; each weak, for an image without that tier) -- its pid,
+// on the caller's own task; anything else is the door's Python half's
+// (Scheduler.own: a service of Python's, none live or one stopping, an app
+// that declares none, the service asking of itself), NEEDS_VM where the call
+// runs where it was made, so the tier hops it, and handed to the door on the
+// VM's task.
+uint32_t moycore_svc_of(const char *id, size_t n) __attribute__((weak));
+uint32_t moy_os_service_of(const char *id, size_t n) __attribute__((weak));
+uint32_t moy_wasi_service_of(const char *id, size_t n) __attribute__((weak));
+
+static int32_t svc_row(moy_appabi_t *a, uint32_t h, args_t *f, uint8_t *ans, size_t cap) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return -MOY_APP_STALE;
+    }
+    a->counts[MOY_ROW_MOYBYTE_SERVICE_RUNNING]++;
+    uint32_t (*const of[])(const char *, size_t) = {
+        moycore_svc_of, moy_os_service_of, moy_wasi_service_of,
+    };
+    uint32_t pid = 0u;
+    for (size_t i = 0; i < sizeof of / sizeof of[0] && pid == 0u; i++) {
+        if (of[i] != NULL) {
+            pid = of[i](g->id, g->id_len);
+        }
+    }
+    if (pid != 0u && pid != g->owner && pid <= (uint32_t)INT32_MAX) {
+        return (int32_t)pid;
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
+}
+
 int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask) {
     moy_grant_t *g = grant_row(a, h);
     if (g == NULL) {
@@ -2156,6 +2193,8 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
         case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
         case MOY_ROW_MOYBYTE_DEV_GET:
             return dev_row(a, g, row, f, ans, cap);
+        case MOY_ROW_MOYBYTE_SERVICE_RUNNING:
+            return svc_row(a, g, f, ans, cap);
         case MOY_ROW_MOYBYTE_SEND:
             return send_row(a, g, f);
         case MOY_ROW_MOYBYTE_RECV:

@@ -622,7 +622,10 @@ every tier's same rows (`native/os_calls.json`); the calls name no app, so
 they reach only the caller's own, and a start or a stop is asked and run by
 the shell at the next tick, never inside the caller's callback, the VM's
 queue or a compiled call (`runtime/system/scheduler.py`, AN APP'S OWN
-SERVICE; `docs/app_api_v1.md` §7 has the shape and the answers).
+SERVICE; `docs/app_api_v1.md` §7 has the shape and the answers). A compiled
+program's `service_running` is the kernel's first, on its own task: the pid
+of a Lua, ELF or WASI service live under the app's id in its tier's table
+(`native/moy_app/moy_app.c`, svc_row), and the shell's answer otherwise.
 The install prompt says so: a service's lines, and an app's that declares
 its own service, end with "Runs in the background, and can do all of this
 with no window open"
