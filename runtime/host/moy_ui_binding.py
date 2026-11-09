@@ -178,7 +178,8 @@ class _FrameButton(c.Structure):
 
 class _Sink(c.Structure):
     _fields_ = [("kind", c.c_uint8), ("fs", c.c_uint8), ("look", c.c_uint8),
-                ("dst", c.c_void_p), ("cart", c.c_uint8)]
+                ("dst", c.c_void_p), ("cart", c.c_uint8),
+                ("shown", c.c_uint8)]
 
 
 _I16 = c.c_int16
@@ -311,12 +312,15 @@ _DRAW_SIGS = (
     ("moy_ui_inst_size", [], c.c_size_t),
     ("moy_ui_inst_init", [c.c_void_p], None),
     ("moy_ui_inst_free", [c.c_void_p], None),
-    ("moy_ui_inst_pull", [c.c_void_p, c.c_void_p, c.c_void_p, c.c_size_t], None),
+    ("moy_ui_inst_pull", [c.c_void_p, c.c_void_p, c.c_void_p, c.c_size_t, c.c_void_p], None),
     ("moy_ui_theme_gen", [], c.c_uint32),
     ("moy_ui_theme_size", [], c.c_size_t),
     ("moy_ui_theme_pull", [c.c_uint32, c.c_void_p, c.c_size_t], c.c_uint32),
     ("moy_ui_theme_put", [c.c_void_p, c.c_size_t], _I),
     ("moy_ui_theme_pal", [c.c_void_p], None),
+    ("moy_ui_theme_font", [c.c_uint32, c.c_uint32, c.c_void_p, c.c_size_t], c.c_uint32),
+    ("moy_ui_theme_font_ids", [c.c_void_p], _I),
+    ("moy_ui_sink_marks", [c.c_void_p], _I),
     ("moy_ui_over_block", [c.c_void_p, c.c_char_p, c.c_size_t], _I),
     ("moy_ui_api_begin", [c.c_void_p, c.c_void_p, _Box, _I, _I], _I),
     ("moy_ui_api_page", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.POINTER(_Box)],

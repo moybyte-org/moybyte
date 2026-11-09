@@ -199,5 +199,6 @@ int32_t moy_os_moy_status_remove(int32_t item);
 int moy_os_moy_screen(int *w, int *h);
 int moy_os_moy_present(const void *px, size_t n);
 uint32_t moy_os_moy_ui_pull(uint32_t have, void *buf, size_t cap);
+uint32_t moy_os_moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap);
 
 #endif // MOY_OS_ROWS_H

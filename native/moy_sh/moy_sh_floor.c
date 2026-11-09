@@ -286,7 +286,8 @@ int moy_sh_floor_frame(moy_sh_floor_t *fl, const moy_sh_floor_in_t *in, int *cho
     row->st[MOY_ST_CX1] = row->st[MOY_ST_W] = g->w;
     row->st[MOY_ST_CY1] = row->st[MOY_ST_H] = g->h;
     row->st[MOY_ST_FONT_SCALE] = g->fs;
-    moy_ui_sink_t s = {MOY_UI_SINK_RUN, (uint8_t)g->fs, MOY_UI_LOOK_KERNEL, row, 0};
+    moy_ui_sink_t s = {MOY_UI_SINK_RUN, (uint8_t)g->fs, MOY_UI_LOOK_KERNEL, row, 0,
+                       (uint8_t)moy_ui_marks_shown()};
     moy_ui_ctx_t *c = fl->ctx;
     moy_ui_box_t surf = {0, 0, (int16_t)g->w, (int16_t)g->h};
     int flags = (g->desk ? MOY_UI_DESK : 0)

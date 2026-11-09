@@ -2087,6 +2087,18 @@ uint32_t moy_os_moy_ui_pull(uint32_t have, void *buf, size_t cap) {
     return g;
 }
 
+// A font the toolkit's theme names (moy_ui.h's moy_ui_theme_font): the bytes
+// a copy loads as its own.
+uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap)
+    __attribute__((weak));
+
+uint32_t moy_os_moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap) {
+    thr_t *t = enter();
+    uint32_t n = moy_ui_theme_font != NULL ? moy_ui_theme_font(gen, font, buf, cap) : 0;
+    leave(t);
+    return n;
+}
+
 // -- the rows: the event descriptor ------------------------------------------------
 //
 // The process's event queue (moy_evq.h), read as descriptor MOY_EVQ_FD: by

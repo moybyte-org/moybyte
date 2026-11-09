@@ -535,6 +535,7 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_screen,
         (void *)moy_os_moy_present,
         (void *)moy_os_moy_ui_pull,
+        (void *)moy_os_moy_ui_font_pull,
     },
 };
 
@@ -659,4 +660,5 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_screen",
     "moy_present",
     "moy_ui_pull",
+    "moy_ui_font_pull",
 };

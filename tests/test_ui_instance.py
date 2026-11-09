@@ -290,13 +290,27 @@ def _block_colours():
     return list(pal)
 
 
+def _font_bytes(g):
+    """Every font the console's theme names at generation `g`, by id, as the
+    font row answers them."""
+    lib = _lib()
+    ptrs = (c.POINTER(c.c_uint32) * 16)()
+    out = {}
+    for i in range(lib.moy_ui_theme_font_ids(ptrs)):
+        fid = ptrs[i][0]
+        n = lib.moy_ui_theme_font(g, fid, None, 0) if fid else 0
+        if n and fid not in out:
+            buf = (c.c_uint8 * n)()
+            assert lib.moy_ui_theme_font(g, fid, buf, n) == n
+            out[fid] = bytes(buf)
+    return out
+
+
 def test_a_pulled_theme_draws_the_main_instances_pixels_and_moves_with_its_generation():
     from runtime.host import glass_binding
     lib = _lib()
     inp = array("i", [0] * ui_draw.UI_IN_LEN)
-    # slate and berry load the same font files, so the ids the block names
-    # stay loaded across the switch (a copy loads its own: the font row)
-    _resolve(_theme("slate", "dark"))
+    _resolve(_theme("night", "dark"))
     cv = make_system_canvas(320, 240)
     _page(ui_draw.ui_context(), cv, inp)
     _page(ui_draw.ui_context(), cv, inp)
@@ -307,15 +321,21 @@ def test_a_pulled_theme_draws_the_main_instances_pixels_and_moves_with_its_gener
     assert g != 0 and g % 2 == 0, "a settled theme's pull wrote no block"
     assert lib.moy_ui_theme_pull(g, block, size) == 0, "an unmoved theme pulled again"
     assert lib.moy_ui_theme_pull(0, block, size - 4) == 0, "a short buffer took a block"
-    slate_pal = _block_colours()
+    fonts = _font_bytes(g)
+    assert fonts, "night names no font: the font row goes untested"
+    assert lib.moy_ui_theme_font(g + 2, next(iter(fonts)), None, 0) == 0, (
+        "a font answered under a generation the theme is not at")
+    night_pal = _block_colours()
 
-    _resolve(_theme("berry", "dark"))
+    # platinum loads other fonts, so the ids night's block names are freed:
+    # what the copy draws them with is what the font row handed it
+    _resolve(_theme("platinum", "light"))
     assert lib.moy_ui_theme_gen() != g, "a theme change left the generation where it was"
     cv2 = make_system_canvas(320, 240)
     _page(ui_draw.ui_context(), cv2, inp)
-    assert _pixels(cv2) != want, "the other theme draws slate's pixels: the test proves nothing"
+    assert _pixels(cv2) != want, "the other theme draws night's pixels: the test proves nothing"
 
-    served = {"gen": g, "asks": [], "gave": 0}
+    served = {"gen": g, "asks": [], "gave": 0, "fonts": 0}
 
     @c.CFUNCTYPE(c.c_uint32, c.c_uint32, c.c_void_p, c.c_size_t)
     def pull(have, buf, cap):
@@ -326,16 +346,28 @@ def test_a_pulled_theme_draws_the_main_instances_pixels_and_moves_with_its_gener
         served["gave"] += 1
         return served["gen"]
 
+    @c.CFUNCTYPE(c.c_uint32, c.c_uint32, c.c_uint32, c.c_void_p, c.c_size_t)
+    def font_pull(gen, fid, buf, cap):
+        data = fonts.get(fid)
+        if data is None or gen != served["gen"]:
+            return 0
+        if buf and cap >= len(data):
+            c.memmove(buf, data, len(data))
+            served["fonts"] += 1
+        return len(data)
+
     inst = _inst()
     mine = (c.c_uint8 * size)()
     try:
-        lib.moy_ui_inst_pull(inst, c.cast(pull, c.c_void_p), mine, size)
+        lib.moy_ui_inst_pull(inst, c.cast(pull, c.c_void_p), mine, size,
+                             c.cast(font_pull, c.c_void_p))
         ctx = _ctx_in(inst)
         cv3 = make_system_canvas(320, 240)
         # a copy's own surface row takes the block's colours (moy_ui_theme_pal)
         _page(ctx, cv3, inp)
         assert served["gave"] == 1 and served["asks"] == [0]
-        assert _block_colours() == slate_pal, "the block did not carry the theme's colours"
+        assert served["fonts"] == len(fonts), "each font the block names fetched once"
+        assert _block_colours() == night_pal, "the block did not carry the theme's colours"
         glass_binding.block(_block_colours())
         _page(ctx, cv3, inp)
         _page(ctx, cv3, inp)
@@ -345,8 +377,10 @@ def test_a_pulled_theme_draws_the_main_instances_pixels_and_moves_with_its_gener
         served["gen"] = g + 2
         _page(ctx, cv3, inp)
         assert served["gave"] == 2 and served["asks"][-1] == g, "a moved generation went unpulled"
+        assert served["fonts"] == 2 * len(fonts)
         _page(ctx, cv3, inp)
         assert served["asks"][-1] == g + 2 and served["gave"] == 2
+        assert _pixels(cv3) == want
     finally:
         lib.moy_ui_inst_free(inst)
         _theme("night", "dark")

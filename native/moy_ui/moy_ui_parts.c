@@ -442,7 +442,7 @@ static int ink_danger(const pd_t *d) {
 static int current(const moy_ui_sink_t *s, pd_t *d, moy_ui_box_t b, int r, int ink, int kind,
                    int flags) {
     int mi = -1;
-    moy_ui_current_in(s, b, kind, r, (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK) | flags, d->fs,
+    moy_ui_current_in(s, b, kind, r, (s->shown ? 0 : MOY_UI_MARK_BACK) | flags, d->fs,
                       &mi, 0);
     return mi >= 0 ? mi : ink;
 }
@@ -704,7 +704,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
         if (oi >= 0) {
             lab = ink = dim = oi;
         }
-        if (om->mark == MOY_UI_MK_FILL && moy_ui_marks_shown()) {
+        if (om->mark == MOY_UI_MK_FILL && s->shown) {
             rowfill = moy_ui_mark_colour(s, MOY_UI_ITEM_ROW, MOY_UI_MS_ON);
         }
     }
@@ -784,7 +784,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     }
     if (on && om->mark == MOY_UI_MK_TINT) {
         rg = plate_of(rg, pal(&d, moy_ui_mark_colour(s, MOY_UI_ITEM_ROW, MOY_UI_MS_ON)),
-                      moy_ui_marks_shown() ? om->alpha : om->alpha * 6 / 10);
+                      s->shown ? om->alpha : om->alpha * 6 / 10);
     }
     if ((flags & MOY_UI_F_FOCUS) && m->active && fm->mark == MOY_UI_MK_TINT) {
         rg = plate_of(rg, pal(&d, moy_ui_mark_colour(s, MOY_UI_ITEM_ROW, MOY_UI_MS_FOCUS)),
@@ -1125,8 +1125,8 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
         cur_ink = current(s, &d, b, pr, -1, MOY_UI_ITEM_CARD, 0);
         int oc = moy_ui_mark_colour(s, MOY_UI_ITEM_CARD, MOY_UI_MS_ON);
         if (om->mark == MOY_UI_MK_TINT && oc >= 0) {
-            gc = mix(gc, pal(&d, oc), moy_ui_marks_shown() ? om->alpha : om->alpha * 6 / 10);
-        } else if (solid && moy_ui_marks_shown() && oc >= 0) {
+            gc = mix(gc, pal(&d, oc), s->shown ? om->alpha : om->alpha * 6 / 10);
+        } else if (solid && s->shown && oc >= 0) {
             gc = pal(&d, oc);
         }
     }
@@ -1143,7 +1143,7 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     int room = b.w - 2 * d.fs;
     int ink = tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
     int dim = tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
-    if ((flags & MOY_UI_F_ON) && solid && moy_ui_marks_shown() && cur_ink >= 0) {
+    if ((flags & MOY_UI_F_ON) && solid && s->shown && cur_ink >= 0) {
         ink = dim = cur_ink;
     }
     if (tone != MOY_UI_TONE_INK && tone != MOY_UI_TONE_DIM && tone != MOY_UI_TONE_LOCKED
@@ -1244,7 +1244,7 @@ int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t conte
     corners(&d, content, r, gnd);
     rrect(&d, content.x, content.y, content.w, content.h, r, 0, 0, d.fs,
           pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
-    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active) {
+    if ((flags & MOY_UI_F_FOCUS) && moy_ui_sink_marks(s)) {
         int mi = -1;
         moy_ui_focus_in(s, pic, MOY_UI_ITEM_CARD, r, MOY_UI_MARK_AFTER, d.fs, NULL, &mi, 0);
     }
@@ -1952,7 +1952,7 @@ int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int
     const moy_ui_marks_t *m = moy_ui_marks();
     int mi = -1;
     if (flags & MOY_UI_F_ON) {
-        moy_ui_current_in(s, b, MOY_UI_ITEM_CELL, r, moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK,
+        moy_ui_current_in(s, b, MOY_UI_ITEM_CELL, r, s->shown ? 0 : MOY_UI_MARK_BACK,
                           d.fs, &mi, 0);
     }
     if ((flags & MOY_UI_F_FOCUS) && m->active) {
@@ -2092,7 +2092,7 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
             }
             if (flags & MOY_UI_F_ON) {
                 moy_ui_current_in(s, mb, MOY_UI_ITEM_ROW, mr,
-                                  mf | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK), fs, &ink, 0);
+                                  mf | (s->shown ? 0 : MOY_UI_MARK_BACK), fs, &ink, 0);
             }
             if (flags & MOY_UI_F_FOCUS) {
                 ink = (flags & MOY_UI_F_HOT) ? ink_danger(&d) : -1;
@@ -2930,7 +2930,7 @@ int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph
     uint16_t under = g;
     if (on) {
         int mi = -1;
-        moy_ui_current_in(s, b, MOY_UI_ITEM_CELL, r, moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK,
+        moy_ui_current_in(s, b, MOY_UI_ITEM_CELL, r, s->shown ? 0 : MOY_UI_MARK_BACK,
                           d.fs, &mi, 0);
         if (mi >= 0) {
             ink_i = word_i = mi;
@@ -2940,7 +2940,7 @@ int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph
         under = plate_of(g, pal(&d, ink_i), interact == MOY_UI_PRESSED ? 51 : 26);
         rrect(&d, b.x, b.y, b.w, b.h, r, 1, under, 0, 0);
     }
-    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active) {
+    if ((flags & MOY_UI_F_FOCUS) && moy_ui_sink_marks(s)) {
         int mi = -1;
         moy_ui_focus_in(s, b, MOY_UI_ITEM_CELL, r, on ? MOY_UI_MARK_BOTH : 0, d.fs, NULL, &mi, 0);
         if (mi >= 0) {

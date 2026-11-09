@@ -971,3 +971,29 @@ int moy_ui_theme_put(const void *buf, size_t size) {
     moy_ui_theme_write(0);
     return rc;
 }
+
+uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap) {
+    if ((gen & 1u) || __atomic_load_n(&s_gen, __ATOMIC_ACQUIRE) != gen) {
+        return 0;
+    }
+    size_t n = 0;
+    const uint8_t *src = moy_font_bytes(font, &n);
+    if (src == NULL) {
+        return 0;
+    }
+    if (buf != NULL && cap >= n) {
+        memcpy(buf, src, n);
+    }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&s_gen, __ATOMIC_RELAXED) == gen ? (uint32_t)n : 0;
+}
+
+int moy_ui_theme_font_ids(uint32_t *ids[MOY_UI_THEME_FONTS]) {
+    int n = 0;
+    for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+        ids[n++] = &s_font[i];
+    }
+    ids[n++] = &s_icon_font[0];
+    ids[n++] = &s_icon_font[1];
+    return n;
+}

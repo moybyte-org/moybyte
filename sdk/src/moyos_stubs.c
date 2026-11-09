@@ -1226,3 +1226,13 @@ uint32_t moy_ui_pull(uint32_t have, void *buf, size_t cap)
     return ((moy_os_fn_moy_ui_pull *)__moy_os->fn[119])(have, buf, cap);
 }
 #endif
+
+#if MOY_OS_ROW(120)
+#include "moybyte/os.h"
+typedef uint32_t moy_os_fn_moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap);
+MOY_OS_USED(120);
+uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap)
+{
+    return ((moy_os_fn_moy_ui_font_pull *)__moy_os->fn[120])(gen, font, buf, cap);
+}
+#endif

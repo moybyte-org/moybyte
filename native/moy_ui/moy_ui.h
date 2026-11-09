@@ -39,7 +39,9 @@ typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
 
 #define MOY_UI_ABSENT INT32_MIN     // a token the theme does not hold
 #define MOY_UI_LOOKS 6
-#define MOY_UI_LOOK_RUN 4           // the compiled run's look
+#define MOY_UI_LOOK_RUN 4           // a run's: the live theme's nearest MOY64 tokens,
+                                    // put there at every publish (ui_draw.run_look) and
+                                    // at a compiled run's open; a linked copy's
 #define MOY_UI_LOOK_KERNEL 5        // the kernel's chrome's (ui_draw.kernel_look)
 
 // A kind's id by name: an unknown name is row's. kind_known: -1 instead.
@@ -246,7 +248,9 @@ typedef struct { const uint8_t *p; uint16_t n; } moy_ui_span_t;
 // checks it). RUN: a compiled run's libmoy canvas lent as a row of its own,
 // its draw state saved, reset and restored around the call (moy_ui_wasm.h).
 // `fs` is the scale text draws at; `look` the look its colours resolve in;
-// `cart` 1 inside the app-cart boundary (moy_ui_cart_text).
+// `cart` 1 inside the app-cart boundary (moy_ui_cart_text); `shown` the
+// focus word its marks draw under (moy_ui_marks_active: the console's for a
+// sink the console builds, a program's own for its surface).
 enum { MOY_UI_SINK_ROW = 1, MOY_UI_SINK_RUN = 2 };
 typedef struct {
     uint8_t kind;
@@ -254,6 +258,7 @@ typedef struct {
     uint8_t look;
     void *dst;
     uint8_t cart;
+    uint8_t shown;
 } moy_ui_sink_t;
 int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look);
 // A glyph through a sink (moy_ui_glyph_draw's raster, a fill per span).
@@ -476,6 +481,9 @@ const moy_ui_marks_t *moy_ui_marks(void);
 void moy_ui_marks_active(int active);
 int moy_ui_marks_shown(void);
 void moy_ui_marks_refresh(void);
+// Whether focus draws through sink `s`: its focus word, and an input in
+// use that is not touch.
+int moy_ui_sink_marks(const moy_ui_sink_t *s);
 // The focus marks drawn since the last reset.
 uint32_t moy_ui_marks_drawn(int reset);
 // How far `kind`'s focus mark reaches past its box (0: inside it): a ring's
@@ -1184,6 +1192,17 @@ int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int
 uint32_t moy_ui_theme_gen(void);
 size_t moy_ui_theme_size(void);
 uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap);
+// A font the block names (a role's, an icon set's mask), console side: its
+// file's length, written into `buf` where `cap` holds it, while the theme
+// is at generation `gen` from before the copy to after it; 0 for a font no
+// slot holds or a theme that moved (the next generation's pull asks again).
+uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap);
+// The words of the toolkit's records that hold font ids (each role's, then
+// the icon set's two masks), copy side: an install's fonts are the
+// console's ids, which a copy replaces with fonts of its own
+// (moy_ui_api.h's instance `font_pull`). Answers how many, into ids.
+#define MOY_UI_THEME_FONTS (MOY_THEME_FONT_ROLES + 2)
+int moy_ui_theme_font_ids(uint32_t *ids[MOY_UI_THEME_FONTS]);
 // A block installed: MOY_UI_OK; MOY_UI_BAD for one cut short or of another
 // layout (a toolkit built otherwise), which installs nothing.
 int moy_ui_theme_put(const void *buf, size_t n);

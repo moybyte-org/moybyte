@@ -114,6 +114,7 @@ static const wild_row_t WILD_ROWS[] = {
     { 117, "moy_screen", 2, { A_BUF0, A_BUF0 }, { -1, -1 } },
     { 118, "moy_present", 2, { A_BUF, A_VAL }, { 1, -1 } },
     { 119, "moy_ui_pull", 3, { A_VAL, A_BUF, A_VAL }, { -1, 2, -1 } },
+    { 120, "moy_ui_font_pull", 4, { A_VAL, A_VAL, A_BUF0, A_VAL }, { -1, -1, 3, -1 } },
 };
 
 #define WILD_NROWS (sizeof WILD_ROWS / sizeof WILD_ROWS[0])

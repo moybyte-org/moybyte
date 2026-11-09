@@ -782,6 +782,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moy_screen` | none |  |  |  | `moy_screen` |
 | `moy_present` | none |  |  |  | `moy_present` |
 | `moy_ui_pull` | none |  |  |  | `moy_ui_pull` |
+| `moy_ui_font_pull` | none |  |  |  | `moy_ui_font_pull` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first

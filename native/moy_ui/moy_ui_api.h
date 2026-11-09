@@ -317,6 +317,13 @@ typedef struct moy_ui_inst {
     void *theme_buf;
     size_t theme_cap;
     uint32_t theme_gen, theme_puts;
+    // The fonts an install names, fetched (the font row, moy_ui_theme_font
+    // across the OS's door: NULL keeps the console's ids, which an instance in
+    // the console's image reads) and loaded as the copy's own, the ids they
+    // replaced in `font_from` and the copy's in `font_local` (0: none), freed
+    // at the next install.
+    uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap);
+    uint32_t font_from[MOY_UI_THEME_FONTS], font_local[MOY_UI_THEME_FONTS];
 } moy_ui_inst_t;
 
 // The main instance; an instance's size, for a face that owns it as bytes; a
@@ -326,9 +333,11 @@ typedef struct moy_ui_inst {
 moy_ui_inst_t *moy_ui_inst_main(void);
 size_t moy_ui_inst_size(void);
 // An instance's theme taken from `pull` into `buf` (cap bytes) from its next
-// begin, nothing installed yet (NULL: the live theme).
+// begin, its fonts from `font_pull`, nothing installed yet (NULL: the live
+// theme).
 void moy_ui_inst_pull(moy_ui_inst_t *I, uint32_t (*pull)(uint32_t have, void *buf, size_t cap),
-                      void *buf, size_t cap);
+                      void *buf, size_t cap,
+                      uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap));
 void moy_ui_inst_init(moy_ui_inst_t *I);
 void moy_ui_inst_free(moy_ui_inst_t *I);
 

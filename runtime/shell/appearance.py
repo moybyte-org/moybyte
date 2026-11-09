@@ -1925,6 +1925,10 @@ class Appearance:
         # Strictly rising: the console's look may move before its ABI exists.
         self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
         _ui_draw.look_moved()
+        # A run's look is the live theme's from here on: the look a copy of
+        # the toolkit linked into a program draws in (moy_ui.h).
+        near = self.live.near
+        _ui_draw.run_look(near if near is not None else self.ws.theme_colors)
 
     def _go_live(self, name):
         """Make theme `name` (in the live variant) the colours the shell

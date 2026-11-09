@@ -94,6 +94,10 @@ void moy_ui_marks_active(int active) {
     moy_ui_marks_refresh();
 }
 
+int moy_ui_sink_marks(const moy_ui_sink_t *s) {
+    return s->shown && moy_ui_input() != MOY_UI_INPUT_TOUCH;
+}
+
 int moy_ui_marks_shown(void) {
     return s_shown;
 }

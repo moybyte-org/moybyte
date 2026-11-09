@@ -425,7 +425,7 @@ static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs
     int field = *on;
     int mi, how = draw ? 0 : MOY_UI_MARK_INK;
     if (flags & MOY_UI_F_ON) {
-        moy_ui_current_in(s, b, kind, r, how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK), fs,
+        moy_ui_current_in(s, b, kind, r, how | (s->shown ? 0 : MOY_UI_MARK_BACK), fs,
                           &mi, 0);
         *ink = mi >= 0 ? mi : *ink;
         *on = -1;
@@ -1167,7 +1167,7 @@ int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on
         // wear it (their plate's radius, 5 at the scale)
         int mi = -1, how = (phase & MOY_UI_PHASE_FRAME) ? 0 : MOY_UI_MARK_INK;
         moy_ui_current_in(s, r, MOY_UI_ITEM_CELL, 5 * fs,
-                          how | (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK),
+                          how | (s->shown ? 0 : MOY_UI_MARK_BACK),
                           fs, &mi, 0);
         ink_i = mi >= 0 ? mi : ink_i;
     }

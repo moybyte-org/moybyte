@@ -582,6 +582,12 @@ static int u_check_119(const moy_u_space_t *u, uint32_t have, void *buf, size_t 
     return U_BUF(buf, u_n((size_t)cap, 1), MOY_U_W);
 }
 
+// 120 moy_ui_font_pull
+_Static_assert(U_REGS(uint32_t) + U_REGS(uint32_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_ui_font_pull's registers");
+static int u_check_120(const moy_u_space_t *u, uint32_t gen, uint32_t font, void *buf, size_t cap) {
+    return U_BUF0(buf, u_n((size_t)cap, 1), MOY_U_W);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -668,6 +674,7 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 117: fn = (u_check_fn *)(void *)u_check_117; break;
     case 118: fn = (u_check_fn *)(void *)u_check_118; break;
     case 119: fn = (u_check_fn *)(void *)u_check_119; break;
+    case 120: fn = (u_check_fn *)(void *)u_check_120; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

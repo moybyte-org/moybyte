@@ -526,8 +526,16 @@ def _bind_theme(th):
     _TH, _LOOK, _FLAT = th, slot, ent[2]
 
 
+_LOOK_RUN = 4                         # moy_ui.h's MOY_UI_LOOK_RUN
 _LOOK_KERNEL = 5                      # moy_ui.h's MOY_UI_LOOK_KERNEL
 _KERNEL = [None, -1]                  # the theme dict the kernel's look holds, its look gen
+
+
+def run_look(th):
+    """Put `th`, the live theme's nearest MOY64 tokens, in a run's look: the
+    one a compiled run's page and a copy of the toolkit linked into a program
+    draw in (the theme block carries it, moy_ui.h's moy_ui_theme_pull)."""
+    _C.look(_LOOK_RUN, _pack(th))
 
 
 def kernel_look(th):

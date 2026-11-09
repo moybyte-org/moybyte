@@ -19,14 +19,60 @@ void moy_ui_inst_init(moy_ui_inst_t *I) {
 }
 
 void moy_ui_inst_pull(moy_ui_inst_t *I, uint32_t (*pull)(uint32_t have, void *buf, size_t cap),
-                      void *buf, size_t cap) {
+                      void *buf, size_t cap,
+                      uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap)) {
+    I->font_pull = font_pull;
     I->pull = pull;
     I->theme_buf = buf;
     I->theme_cap = cap;
     I->theme_gen = 0;
 }
 
+// The fonts the last install loaded, freed.
+static void fonts_drop(moy_ui_inst_t *I) {
+    for (int i = 0; i < MOY_UI_THEME_FONTS; i++) {
+        if (I->font_local[i] != 0) {
+            moy_font_free(I->font_local[i]);
+        }
+        I->font_from[i] = I->font_local[i] = 0;
+    }
+}
+
+// An install's fonts made the copy's: each id the block names fetched once
+// (roles share fonts), loaded, and its word rewritten; a font that cannot
+// be had draws in petme128.
+static void fonts_take(moy_ui_inst_t *I, uint32_t gen) {
+    uint32_t *ids[MOY_UI_THEME_FONTS];
+    int n = moy_ui_theme_font_ids(ids);
+    for (int i = 0; i < n; i++) {
+        uint32_t from = *ids[i], got = 0;
+        if (from == 0) {
+            continue;
+        }
+        for (int j = 0; j < MOY_UI_THEME_FONTS; j++) {
+            if (I->font_from[j] == from && I->font_local[j] != 0) {
+                got = I->font_local[j];
+                break;
+            }
+        }
+        uint32_t len = got != 0 ? 0 : I->font_pull(gen, from, NULL, 0);
+        uint8_t *buf = len > 0 ? (uint8_t *)KEPT_ALLOC(len) : NULL;
+        if (buf != NULL) {
+            if (I->font_pull(gen, from, buf, len) == len
+                && moy_font_load(buf, len, &got) == MOY_FONT_OK) {
+                I->font_from[i] = from;
+                I->font_local[i] = got;
+            } else {
+                got = 0;
+            }
+            KEPT_FREE(buf);
+        }
+        *ids[i] = got;
+    }
+}
+
 void moy_ui_inst_free(moy_ui_inst_t *I) {
+    fonts_drop(I);
     KEPT_FREE(I->kept);
     KEPT_FREE(I->text);
     KEPT_FREE(I->blocks);
@@ -884,7 +930,13 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     moy_ui_inst_t *I = c->inst;
     if (I->pull != NULL) {
         uint32_t g = I->pull(I->theme_gen, I->theme_buf, I->theme_cap);
+        if (g != 0 && I->font_pull != NULL) {
+            fonts_drop(I);
+        }
         if (g != 0 && moy_ui_theme_put(I->theme_buf, I->theme_cap) == MOY_UI_OK) {
+            if (I->font_pull != NULL) {
+                fonts_take(I, g);
+            }
             I->theme_gen = g;
             I->theme_puts++;
         }
