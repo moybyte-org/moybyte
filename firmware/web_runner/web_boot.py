@@ -124,7 +124,7 @@ def _media_open():
     """Whether the media service holds a stream: the mix then sounds with no
     session focused."""
     m = _media()
-    return m is not None and m.owner() != 0
+    return m is not None and m.pid() != 0
 
 
 class _PointerSink:
