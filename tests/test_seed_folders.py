@@ -101,9 +101,16 @@ def _seed(cmd, tmp, local):
     return lines[0], json.loads(lines[1]), _tree(root)
 
 
+# Every cart folder the bundle holds, taken or not: the carts a page's console
+# got from its site (web_boot's `_site_carts_made`). A folder with no manifest
+# anything reads is no cart.
+SERVED = ["demo.moy", "loose.moy", "moybyte.get_carts.moy", "same.moy",
+          "star.moy", "torn.moy"]
+
+
 def _check_returning(got, tree):
     wrote, removed = got["wrote"], got["removed"]
-    assert got["first"] is False
+    assert got["first"] is False and got["served"] == SERVED
     assert {"moybyte.get_carts.moy/cover.png", "moybyte.get_carts.moy/main.py",
             "moybyte.get_carts.moy/images/a.moyimg",
             "moybyte.get_carts.moy/manifest.json"} <= set(wrote), wrote
@@ -139,7 +146,7 @@ def test_a_returning_store_takes_only_its_system_carts(tmp_path):
 
 def test_a_first_visit_takes_every_cart(tmp_path):
     _native, got, tree = _seed([sys.executable], tmp_path, {})
-    assert got["first"] is True and got["removed"] == []
+    assert got["first"] is True and got["removed"] == [] and got["served"] == SERVED
     for rel in BUNDLE:
         if not rel.startswith("bad.moy/"):
             assert rel in got["wrote"] and tree[rel] == (

@@ -932,3 +932,50 @@ def test_a_built_in_and_a_made_cart_are_never_asked(tmp_path):
     assert made is not None
     assert ws.consent.get(app_perms.app_id(made)) == {"perms": None, "off": []}
     assert not app_perms.asks_first(made, ws.consent.get(app_perms.app_id(made)))
+
+
+@pytest.mark.first_run
+def test_a_pages_site_carts_are_its_own_and_a_dropped_cart_is_asked(tmp_path):
+    """The browser's console: the carts the seed found in the bundle the site
+    served are seeded, recorded as made at boot (web_boot's
+    `_site_carts_made`), so they run unasked; a cart dropped onto the page
+    arrived as files and is asked. A page served by a board records
+    nothing."""
+    import os
+    import sys
+    root = Path(__file__).resolve().parent.parent
+    for p in ("firmware/web_runner", "device", "runtime"):
+        if str(root / p) not in sys.path:
+            sys.path.insert(0, str(root / p))
+    try:
+        import web_boot
+    except Exception as exc:  # noqa: BLE001 -- a wasm-only dep would skip, not fail
+        pytest.skip("web_boot not importable on the host: %s" % exc)
+    from runtime import moy_sync
+    carts = str(tmp_path / "carts")
+    _write_cart(carts, "Served", COPIED_SRC, perms=["prefs"])
+    _write_cart(carts, "Dropped", COPIED_SRC, perms=["prefs"])
+    ws = build_ws(tmp_path)
+    served = next(c for c in ws.carts.all if c.get("title") == "Served")
+    dropped = next(c for c in ws.carts.all if c.get("title") == "Dropped")
+    assert os.path.basename(served["path"]) == "Served.moy"
+    saved = (dict(web_boot._S), moy_sync._SERVED[0])
+    try:
+        moy_sync._SERVED[0] = ("Served.moy",)
+        web_boot._S["store_mode"] = "board"
+        web_boot._site_carts_made(ws)
+        assert ws.consent.for_run(served) is app_perms.UNASKED
+        web_boot._S["store_mode"] = "site"
+        web_boot._site_carts_made(ws)
+        assert ws.consent.get(app_perms.app_id(served)) == {"perms": None, "off": []}
+        assert ws.consent.for_run(dropped) is app_perms.UNASKED
+        # No seed ran (a store with no OPFS took the bundle whole): every cart
+        # on the shelf is the site's.
+        moy_sync._SERVED[0] = None
+        web_boot._S["store_mode"] = "none"
+        web_boot._site_carts_made(ws)
+        assert ws.consent.for_run(dropped) is not app_perms.UNASKED
+    finally:
+        web_boot._S.clear()
+        web_boot._S.update(saved[0])
+        moy_sync._SERVED[0] = saved[1]

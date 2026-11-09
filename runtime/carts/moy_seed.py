@@ -311,12 +311,13 @@ def _copy_cart(src, d, rel, keep):
 def seed_folders(src, root=CARTS_DIR, record=True):
     """The cart folders under `src` seeded into the store `root`: {"first":
     whether the store had no cart, "wrote": the store-relative paths written,
-    each cart's manifest last, "removed": those a re-seed removed}. A store of
-    `record` takes every cart only on its first visit; one that is a cache of
-    the built-ins (the host's, as a board's) takes every cart every time."""
+    each cart's manifest last, "removed": those a re-seed removed, "served":
+    every cart folder `src` holds, taken or not}. A store of `record` takes
+    every cart only on its first visit; one that is a cache of the built-ins
+    (the host's, as a board's) takes every cart every time."""
     have = _listing(root) or {}
     first = not any(have[n] and n.endswith(CART_EXT) for n in have)
-    wrote, removed = [], []
+    wrote, removed, served = [], [], []
     names = _listing(src) or {}
     for name in sorted(names):
         if not (names[name] and name.endswith(CART_EXT)):
@@ -327,6 +328,7 @@ def seed_folders(src, root=CARTS_DIR, record=True):
             continue                  # not a manifest anything reads: not a cart
         if not isinstance(man, dict):
             continue
+        served.append(name)
         d = cart_path(root, name)
         there = _exists(d)
         # A non-system cart after the first visit: only a torn seed of one.
@@ -342,7 +344,8 @@ def seed_folders(src, root=CARTS_DIR, record=True):
             continue
         wrote += _copy_cart(src + "/" + name, d, name, _RESEED_PRESERVE)
         removed += [r for r in before if not _exists(store_path(root, r))]
-    return {"first": first, "wrote": wrote, "removed": removed}
+    return {"first": first, "wrote": wrote, "removed": removed,
+            "served": served}
 
 
 def adopt_bundle(src, dest, top=None, skip=None):

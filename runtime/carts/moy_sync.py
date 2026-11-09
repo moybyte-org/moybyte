@@ -571,11 +571,22 @@ def roots_json(carts_root):
     return _json.dumps(out)
 
 
+# The cart folders the served bundle held when the carts root was seeded
+# (`seed_store`), or None before a seed: the carts this page's console got
+# from the site that serves it.
+_SERVED = [None]
+
+
+def served_carts():
+    return _SERVED[0]
+
+
 def seed_store(root_id, src, carts_root):
     """What a store of record takes from the served bundle staged at `src`
     (the browser's, on a static host): the carts by `moy_seed.seed_folders`,
     every other root the bundle whole when it holds none of its files yet.
-    The same report either way: {"first", "wrote", "removed"}."""
+    The same report either way: {"first", "wrote", "removed"}. The carts'
+    served folders stay behind for `served_carts`."""
     try:
         import moy_seed
     except ImportError:  # pragma: no cover - host fallback
@@ -583,7 +594,9 @@ def seed_store(root_id, src, carts_root):
     root = root_by_id(root_id)
     dest = root.path(carts_root)
     if root_id == CARTS_ROOT_ID:
-        return moy_seed.seed_folders(src, dest)
+        got = moy_seed.seed_folders(src, dest)
+        _SERVED[0] = tuple(got.pop("served"))
+        return got
     return moy_seed.adopt_bundle(src, dest, root.top,
                                  root.watch_skip(True) or _skip)
 

@@ -540,12 +540,15 @@ class Consent:
         self._all()[aid] = {"perms": list(perms), "off": off}
         yield from self._put_steps()
 
-    def made(self, aid):
-        """A cart made on this console, as app `aid`: a record consenting to
-        nothing in particular (`perms` None), so it runs on its manifest as
-        written and is never asked. A record it has already stays."""
-        if self.get(aid) is None:
+    def made(self, *aids):
+        """Carts made on this console, as apps `aids`: each a record
+        consenting to nothing in particular (`perms` None), so it runs on its
+        manifest as written and is never asked. A record one has already
+        stays; the records are written once."""
+        new = [aid for aid in aids if self.get(aid) is None]
+        for aid in new:
             self._all()[aid] = {"perms": None, "off": []}
+        if new:
             self._put()
 
     def forget(self, aid):

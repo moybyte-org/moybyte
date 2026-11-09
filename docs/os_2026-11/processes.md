@@ -362,7 +362,12 @@ on the console: making one, or copying one that is not waiting to be asked,
 writes a record consenting to its manifest as written (`Consent.made`),
 less what Settings turns off. A cart `tools/push_cart.py`
 pushes over the USB cable is made on the console too: anyone at the cable is the
-owner, and the tool writes the record after its rescan. Deleting a cart forgets its record.
+owner, and the tool writes the record after its rescan. So is a cart a
+browser page got from the site that serves it (its baked or site carts,
+`docs/moycore_direction.md`): the page's console is seeded with them, and
+its boot records each folder the seed found in the served bundle as made
+(`web_boot._site_carts_made`, `moy_sync.served_carts`); a `.moy` dropped
+onto the page arrived as files and is asked. Deleting a cart forgets its record.
 
 **The permission table.** One JSON source, `native/os_calls.json`'s
 `"permissions"` beside the rows of every call (`tiers.md` §1), which

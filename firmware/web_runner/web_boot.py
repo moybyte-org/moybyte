@@ -418,9 +418,29 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     _S["sink"] = _PointerSink(driver)
     _S["root"] = carts_root
     _S["exit"] = ws._exit_to_caller     # the real exit (reload_cart uses it)
+    _site_carts_made(ws)
     if cart:
         open_cart(cart)
     return True
+
+
+def _site_carts_made(ws):
+    """The carts this page got from the site that serves it are its console's
+    own, seeded like a board's: each is recorded as made on this console
+    (`Consent.made`), so its first run asks nothing. They are the folders the
+    seed found in the served bundle (`moy_sync.served_carts`), or every cart
+    on the shelf when no seed ran (the bundle went whole into a store with
+    no OPFS: mode "none"). A board's page runs the board's carts under the
+    board's records, and a cart dropped onto the page arrived as files:
+    asked on its first run."""
+    if _S.get("store_mode") not in ("site", "none"):
+        return
+    import app_perms
+    import moy_sync
+    served = moy_sync.served_carts()
+    ws.consent.made(*[app_perms.app_id(c) for c in ws.carts.all
+                      if served is None
+                      or (c.get("path") or "").rsplit("/", 1)[-1] in served])
 
 
 def _cart_seams(ws, mode):
