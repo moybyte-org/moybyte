@@ -84,6 +84,8 @@ def _lib():
         d.moy_os_reap.restype = _U32
         d.moy_os_stop.argtypes = [_U32]
         d.moy_os_stop.restype = _I
+        d.moy_os_services_end.argtypes = []
+        d.moy_os_services_end.restype = _U32
         d.moy_os_info.argtypes = [_U32, ctypes.POINTER(Info)]
         d.moy_os_info.restype = _I
         d.moy_os_stats.argtypes = [ctypes.POINTER(Stats)]
@@ -217,6 +219,11 @@ def on_net(fn):
 
 def stop(pid):
     return _lib().moy_os_stop(int(pid))
+
+
+def services_end():
+    """Every service stopped (moy_os.h, a soft reset's): how many."""
+    return _lib().moy_os_services_end()
 
 
 def info(pid):

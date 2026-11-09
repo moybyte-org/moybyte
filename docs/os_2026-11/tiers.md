@@ -213,7 +213,7 @@ each message of the name (the radios' `net` and `ble` from the system,
 console is the VM task's: `moybyte.notify`, `open_with`, `share`,
 `award`, `progress` and `pick` (the source's console calls, §1, generated
 into the state's `moybyte` table and the scheduler's `_CALLS`), the console
-half of `moybyte.at` (an alarm of the console's, heard as the system's
+half of `moybyte.at` (a kernel alarm the console sets, heard as the system's
 message `"moybyte.at"`) and the functions the console hands a
 system process (its `env`, whose values become globals) are CONSOLE CALLS,
 posted on the VM's queue (`native/moy_kernel/moy_vmq.h`), which yield the

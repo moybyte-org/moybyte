@@ -137,7 +137,8 @@ def test_a_reused_pid_hears_its_timer_whatever_its_queue_s_last_owner(sched):
     pid = _app("t.reused")
     for _ in range(2):
         assert moy_evq.open(pid, "t.reused", "", False) == moy_evq.OK
-        wid = _as(pid, lambda: moybyte.after_message(0))
+        rc, wid = moy_evq.timer(pid, 0)
+        assert rc == moy_evq.OK
         sched.tick(0)
         assert moy_evq.take(pid)[2:] == (moybyte.TIMER, "[%d]" % wid)
         assert moy_evq.close(pid) == moy_evq.OK

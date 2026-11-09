@@ -26,6 +26,7 @@
 //   vm_stop() -> closed  the VM's queues closed, as its teardown does
 //   live()             the queues open
 //   timer(pid, ms, every=0) -> (rc, id)   a timer of its queue (TIMERS)
+//   alarm(pid, ms) -> (rc, id), woke() -> pid or 0      ALARMS
 //   timer_cancel(pid, id) -> bool, timers(pid) -> n
 //   timers_run() -> ms to the next      the due ones posted
 //   want(bits), wanted(mask) -> bits    THE VM'S WAKE: bits wanted, and those
@@ -226,6 +227,20 @@ static mp_obj_t ev_timer(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_timer_obj, 2, 3, ev_timer);
 
+static mp_obj_t ev_alarm(mp_obj_t pid, mp_obj_t ms) {
+    uint32_t id = 0;
+    mp_int_t m = mp_obj_get_int(ms);
+    int rc = moy_evq_alarm((uint32_t)mp_obj_get_int(pid), m > 0 ? (uint32_t)m : 0u, &id);
+    mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(rc), mp_obj_new_int_from_uint(id) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ev_alarm_obj, ev_alarm);
+
+static mp_obj_t ev_woke(void) {
+    return mp_obj_new_int_from_uint(moy_evq_woke());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_woke_obj, ev_woke);
+
 static mp_obj_t ev_timer_cancel(mp_obj_t pid, mp_obj_t id) {
     return mp_obj_new_bool(moy_evq_timer_cancel((uint32_t)mp_obj_get_int(pid),
                                                 (uint32_t)mp_obj_get_int_truncated(id)));
@@ -315,6 +330,8 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_vm), MP_ROM_PTR(&ev_vm_obj) },
     { MP_ROM_QSTR(MP_QSTR_timer), MP_ROM_PTR(&ev_timer_obj) },
     { MP_ROM_QSTR(MP_QSTR_timer_cancel), MP_ROM_PTR(&ev_timer_cancel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&ev_alarm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_woke), MP_ROM_PTR(&ev_woke_obj) },
     { MP_ROM_QSTR(MP_QSTR_timers), MP_ROM_PTR(&ev_timers_obj) },
     { MP_ROM_QSTR(MP_QSTR_timers_run), MP_ROM_PTR(&ev_timers_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_TIMER_ID), MP_ROM_INT(MOY_EVQ_TIMER_ID) },

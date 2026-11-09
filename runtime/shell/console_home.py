@@ -27,6 +27,7 @@ try:
     from cart_manager import today_ymd as _today_ymd
     from chrome import NAMES
     import scheduler as _scheduler
+    import cron as _cron
     from achievements import is_proc as _is_ach_proc
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.home_icons import IconHome
@@ -37,7 +38,32 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_manager import today_ymd as _today_ymd
     from runtime.chrome import NAMES
     from runtime import scheduler as _scheduler
+    from runtime import cron as _cron
     from runtime.achievements import is_proc as _is_ach_proc
+
+RESUME_MAX = 512        # the kernel's resume record's bytes (MOY_KERNEL_RESUME_MAX)
+
+
+def _with_cron(rec, json):
+    """Record `rec`'s text with what cron carries through the stop
+    (cron.held), as many at jobs as fit RESUME_MAX, soonest first; one
+    that does not fit is logged and left behind."""
+    held = _cron.CRON.held()
+    jobs = held["at"]
+    if held["due"] is None and not jobs:
+        return json.dumps(rec)
+    rec["cron"] = c = {"due": held["due"], "at": []}
+    text = json.dumps(rec)
+    for i, job in enumerate(jobs):
+        c["at"].append(job)
+        more = json.dumps(rec)
+        if len(more.encode()) > RESUME_MAX:
+            c["at"].pop()
+            print("Moybyte resume: %d at jobs do not fit the record" % (len(jobs) - i))
+            break
+        text = more
+    return text
+
 
 # The home's arrangements by the layout's `home` value
 # (docs/theme_and_shell_2026-11.md §8.10); an unknown one is the carousel.
@@ -136,10 +162,11 @@ class HomeVerbs:
         import json
         lw = self.launcher
         sel = lw.selected() or {}
-        return json.dumps({"tab": lw.tab, "sel": int(lw.sel),
-                           "search": self.search_query, "path": sel.get("path"),
-                           "svc": _scheduler.SCHED.running_paths(),
-                           "keep": _scheduler.SCHED.kept_rows()})
+        rec = {"tab": lw.tab, "sel": int(lw.sel),
+               "search": self.search_query, "path": sel.get("path"),
+               "svc": _scheduler.SCHED.running_paths(),
+               "keep": _scheduler.SCHED.kept_rows()}
+        return _with_cron(rec, json)
 
     def resume_launcher(self, text):
         """Land the launcher where the resume record left it. A record that
@@ -167,6 +194,7 @@ class HomeVerbs:
             if isinstance(svc, list):
                 _scheduler.SCHED.resumed = tuple(p for p in svc if isinstance(p, str))
             _scheduler.SCHED.kept = _scheduler.kept_of(rec)
+            _cron.CRON.carry(rec.get("cron"))
         except (ValueError, TypeError, AttributeError) as exc:
             print("Moybyte resume: %s" % exc)
 

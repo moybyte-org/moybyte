@@ -1981,23 +1981,44 @@ static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_start_obj, 6, 7, mod_service_start);
 
-static mp_obj_t mod_service_stop(mp_obj_t pid_in)
+// Live service `v` stopped: hung up, killed past MOY_WASI_STOP_US; its exit
+// status.
+static int svc_stop(wsvc_t *v)
 {
-    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
-    if (v == NULL) {
-        return MP_OBJ_NEW_SMALL_INT(-1);
-    }
     if (!v->returned) {
         moy_wasi_hangup(v->w);
         if (!svc_wait(v, MOY_WASI_STOP_US)) {
             moy_wasi_kill(v->w, MOY_PROC_KILLED);
             if (!svc_wait(v, 100000)) {
                 v->stopped = true;
-                return MP_OBJ_NEW_SMALL_INT(MOY_PROC_KILLED);
+                return MOY_PROC_KILLED;
             }
         }
     }
-    return MP_OBJ_NEW_SMALL_INT(svc_end(v));
+    return svc_end(v);
+}
+
+static mp_obj_t mod_service_stop(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    return MP_OBJ_NEW_SMALL_INT(v == NULL ? -1 : svc_stop(v));
+}
+
+// Every service stopped as service_stop stops one, its exit logged: a soft
+// reset (moy_kernel.c), whose next VM has no record to take them back by.
+void moy_wasm_services_end(void)
+{
+    wsvc_t *next;
+    for (wsvc_t *v = g_svcs; v != NULL; v = next) {
+        next = v->next;
+        if (v->stopped) {
+            continue;
+        }
+        uint32_t pid = v->pid;
+        char line[40];
+        int k = snprintf(line, sizeof(line), "exit %d (a soft reset)", svc_stop(v));
+        moy_log_write(MOY_LOG_INFO, pid, line, (size_t)k);
+    }
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_stop_obj, mod_service_stop);
 

@@ -54,6 +54,8 @@ _ROWS = ("damage.all", "damage.again",
          "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", "ui.held",
          "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last",
          "ui.held_all",
+         # the kernel's timers: native/moy_kernel/moy_evq.h's, counted by nothing here
+         "moybyte.every", "moybyte.after", "moybyte.cancel",
          # the crypto rows: native/moy_net/moy_crypto.h's, counted by nothing here
          "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256",
          "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519",

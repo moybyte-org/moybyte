@@ -280,7 +280,7 @@ _DOC_GRANT = "moybyte.document"
 
 
 def make_system_api(ctx_factory, cart, canvas=None,
-                    editor=None, request=None, keep=None, perms=None):
+                    editor=None, request=None, keep=None, perms=None, owner=0):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
     `ctx_factory(app_id, needs, prefs_ns)` is `Workstation.app_context` -- the
@@ -302,7 +302,9 @@ def make_system_api(ctx_factory, cart, canvas=None,
     The context is a RUN grant (native/moy_app), keyed by the cart's id and
     made from its permissions by the C policy (`moy_app.policy`): `perms`,
     the run's granted ones (`app_perms.check`), else the manifest's; `keep`
-    is handed the context so the run can end its grant when it ends."""
+    is handed the context so the run can end its grant when it ends;
+    `owner` is the run's pid, whose timers a compiled app's are (native/
+    moy_app/moy_app.c, timer_row)."""
     if perms is None:
         perms = cart.get("permissions") if cart else None
     roles, kind = _moy_app.policy(perms)
@@ -313,7 +315,7 @@ def make_system_api(ctx_factory, cart, canvas=None,
     needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)
-    ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind)
+    ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind, owner=owner or 0)
     if keep is not None:
         keep(ctx)
 

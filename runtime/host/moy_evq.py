@@ -80,6 +80,8 @@ _SIGS = (
     ("moy_vmq_vm", [ctypes.c_bool], None),
     ("moy_evq_timer", [_U32, _U32, _U32, ctypes.POINTER(_U32)], _I),
     ("moy_evq_timer_cancel", [_U32, _U32], ctypes.c_bool),
+    ("moy_evq_alarm", [_U32, _U32, ctypes.POINTER(_U32)], _I),
+    ("moy_evq_woke", [], _U32),
     ("moy_evq_timers", [_U32], _U32),
     ("moy_evq_timers_run", [], _U32),
     ("moy_vmq_vm_up", [], ctypes.c_bool),
@@ -228,6 +230,17 @@ def timer(pid, ms, every=0):
     t = _U32(0)
     rc = _lib().moy_evq_timer(pid, max(0, int(ms)), max(0, int(every)), ctypes.byref(t))
     return rc, t.value
+
+
+def alarm(pid, ms):
+    """An alarm of `pid`'s queue (moy_evq.h, TIMERS): (rc, its id)."""
+    t = _U32(0)
+    rc = _lib().moy_evq_alarm(pid, max(0, int(ms)), ctypes.byref(t))
+    return rc, t.value
+
+
+def woke():
+    return _lib().moy_evq_woke()
 
 
 def timer_cancel(pid, tid):

@@ -228,6 +228,10 @@ bool moy_os_watch(void);
 // swept. Its exit status (137 when main ran out of time), or -1 for no such
 // service.
 int moy_os_stop(uint32_t pid);
+// Every service stopped as moy_os_stop stops one, its exit logged: a soft
+// reset, whose next VM has no record to take them back by (a VM stop keeps
+// them, docs/os_2026-11/processes.md section 5). How many it stopped.
+uint32_t moy_os_services_end(void);
 
 // What the OS knows of process `pid`: 0, or -1 for none.
 typedef struct {

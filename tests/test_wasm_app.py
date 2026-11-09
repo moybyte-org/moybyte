@@ -242,16 +242,13 @@ def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(ta
              % rep[0].split()[1]]
     assert ticks and "cancel 1" in lines, lines
     assert lines.count("cancel 1") == 1, "a tick after the cancel is a cancel of none"
-    was = L.current()
-    L.current(moybyte.SHELL)
-    shell = moybyte.WAKES.after(60000, lambda: None)
-    try:
-        L.current(pid)
-        assert moybyte.cancel_message(shell) == 0, "another process's wake is not its own"
-        assert shell in moybyte.WAKES.by_id
-    finally:
-        L.current(was)
-        moybyte.WAKES.cancel(shell)
+    other = L.spawn("other")
+    assert moy_evq.open(other, "other", "", False) == moy_evq.OK
+    rc, theirs = moy_evq.timer(other, 60000)
+    assert rc == moy_evq.OK
+    assert not moy_evq.timer_cancel(pid, theirs), "another process's timer is not its own"
+    assert moy_evq.timers(other) == 1
+    moy_evq.close(other)
     assert "timers %d -2" % (moybyte.TIMERS_MAX - 3) in lines, lines
     assert "uncap %d" % (moybyte.TIMERS_MAX - 4) in lines, lines
     assert moy_evq.timers(pid) == 1 and not [w for w in moybyte.WAKES.list if w[1] == pid]

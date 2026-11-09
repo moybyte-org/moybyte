@@ -73,7 +73,11 @@
 // ms after (a tick its queue cannot take is dropped). They are the kernel's,
 // so they run on through a VM stop, and they go with the queue. The kernel's
 // frame runs them (moy_evq_timers_run, a loop job while one is set); a
-// harness with no frames, and the host's scheduler, call it.
+// harness with no frames, and the host's scheduler, call it. An ALARM
+// (moy_at, a Lua service's moybyte.at: the console turns its wall time into
+// ms from now) is a timer of the same table that goes off once, posts
+// MOY_EVQ_AT instead and names its process to the console's screen wake
+// (moy_evq_woke), so a kept service's alarm goes off through a VM stop too.
 //
 // Any task may call any function; no ISR may. Posting allocates the
 // message's copy (outside the lock); nothing else allocates but an open.
@@ -108,6 +112,7 @@ enum {
 #define MOY_EVQ_SYSTEM "system"     // the app a message from pid 0 or 1 is from
 #define MOY_EVQ_TIMERS 16u          // timers a queue holds
 #define MOY_EVQ_TIMER "moybyte.timer"   // a timer's message
+#define MOY_EVQ_AT "moybyte.at"         // an alarm's message
 #define MOY_EVQ_TIMER_ID 0x40000000u    // a timer's id has this bit: apart from the console's wakes
 
 #define MOY_EVQ_VM 0x01u            // the VM's task serves it (a Python process)
@@ -209,6 +214,11 @@ uint32_t moy_evq_listening(const char *name);
 // STALE (no queue), FULL (MOY_EVQ_TIMERS held, or no name left to listen
 // on). Cancel: whether `pid` held timer `id`. How many it holds.
 int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id);
+// An alarm: a timer due once, `ms` from now, posting MOY_EVQ_AT (listened on).
+int moy_evq_alarm(uint32_t pid, uint32_t ms, uint32_t *id);
+// The pid whose alarm went off next, oldest first (the console's screen wake;
+// eight kept at most), 0 for none.
+uint32_t moy_evq_woke(void);
 bool moy_evq_timer_cancel(uint32_t pid, uint32_t id);
 uint32_t moy_evq_timers(uint32_t pid);
 // The due timers posted: the ms to the next one, UINT32_MAX for none.

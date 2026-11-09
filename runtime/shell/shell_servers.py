@@ -771,12 +771,6 @@ class ConsoleCalls:
     def at(self, g, t):
         return self._wake(g, _moybyte.at_message, t)
 
-    def every(self, g, ms):
-        return self._wake(g, _moybyte.every_message, ms)
-
-    def after(self, g, ms):
-        return self._wake(g, _moybyte.after_message, ms)
-
     def _wake(self, g, fn, v):
         if self._own(g) is None:
             return _DOOR_STALE
@@ -784,11 +778,6 @@ class ConsoleCalls:
             return self._as(g, fn, v)
         except OSError as exc:
             return _DOOR_DENIED if exc.args and exc.args[0] == _moybyte.EPERM else _DOOR_FULL
-
-    def cancel(self, g, wid):
-        if self.__ws.procs.pid_of(g) is None:
-            return _DOOR_STALE
-        return self._as(g, _moybyte.cancel_message, wid)
 
     def log(self, g, level, text):
         if self.__ws.procs.pid_of(g) is None:
@@ -989,9 +978,6 @@ DOOR_ARGS = {
     "moybyte.award": "s",
     "moybyte.progress": "si",
     "moybyte.on": "si",
-    "moybyte.every": "i",
-    "moybyte.after": "i",
-    "moybyte.cancel": "i",
     "moybyte.pick": "so",
     "moybyte.log": "is",
     "moybyte.recv": "i",

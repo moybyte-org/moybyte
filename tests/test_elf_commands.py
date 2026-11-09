@@ -203,12 +203,12 @@ def test_a_native_command_s_status_item_hears_its_panel_and_its_end_sweeps_it(te
 
 def test_a_native_command_hears_its_timers_and_alarm_and_its_end_sweeps_them(term):
     """`moy_after`, `moy_every` and `moy_at` from C (elf_app.moy's `app
-    timer`) answer the wake's id and go off as the system's message on the
-    command's event descriptor, a timer's "moybyte.timer", the alarm's
+    timer`) answer the kernel timer's id and go off as the system's message
+    on the command's event descriptor, a timer's "moybyte.timer", the alarm's
     "moybyte.at", each carrying it; `moy_cancel` ends the repeating one at its
-    first tick. Past TIMERS_MAX a timer is ERANGE (the door's FULL), and the
-    timer it keeps goes with its end."""
-    from runtime import moy_sh, moybyte
+    first tick. Past TIMERS_MAX a timer is ERANGE (FULL), and the timer it
+    keeps goes with its end."""
+    from runtime import moy_evq, moy_sh, moybyte
     from runtime import scheduler as S
     _ws, app = term
     app.face.take()
@@ -216,10 +216,7 @@ def test_a_native_command_hears_its_timers_and_alarm_and_its_end_sweeps_them(ter
     app.face.set_line("elf.app/app timer; echo status $?")
     app.face.submit()
     ends = []
-
-    def end(pid):
-        ends.append((pid, [w[3] for w in moybyte.WAKES.list if w[1] == pid]))
-    moybyte.ENDS.append(end)
+    moybyte.ENDS.append(ends.append)
     try:
         t0 = time.monotonic()
         while app.face.busy() and time.monotonic() - t0 < 20:
@@ -227,7 +224,7 @@ def test_a_native_command_hears_its_timers_and_alarm_and_its_end_sweeps_them(ter
             S.SCHED.tick(0)
             time.sleep(0.002)
     finally:
-        moybyte.ENDS.remove(end)
+        moybyte.ENDS.remove(ends.append)
     app.face.take()
     lines = [re.sub("\x1b\\[[0-9;]*m", "", ln) for ln in app.face.lines()][len(before):]
     at = next(i for i, ln in enumerate(lines) if ln.startswith("after "))
@@ -235,9 +232,9 @@ def test_a_native_command_hears_its_timers_and_alarm_and_its_end_sweeps_them(ter
         "after 1", "heard.after 1", "every 1", "heard.every 1", "cancel.every 1", "at 1",
         "heard.at 1", "timers %d" % moybyte.TIMERS_MAX, "timers.full -1 ERANGE",
         "uncap %d" % (moybyte.TIMERS_MAX - 1), "status 0"]
-    pid = [p for p, held in ends if held == [60000]]
-    assert len(pid) == 1, ends
-    pid = pid[0]
+    assert len(ends) == 1, ends
+    pid = ends[0]
+    assert moy_evq.timers(pid) == 0, "the kernel's timers went with its queue"
     assert not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail if w[1] == pid]
 
 

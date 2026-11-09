@@ -48,9 +48,10 @@ enum {
     MOY_ROW_UI_RULE, MOY_ROW_UI_TEXT_VIEW, MOY_ROW_UI_TABLE_PART, MOY_ROW_UI_PART_AT,
     MOY_ROW_UI_SPLIT, MOY_ROW_UI_TABLE_DIST, MOY_ROW_UI_TABLE_FLOOR, MOY_ROW_UI_HELD,
     MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
-    MOY_ROW_UI_HELD_ALL, MOY_ROW_MOYBYTE_RANDOM, MOY_ROW_MOYBYTE_SHA256,
-    MOY_ROW_MOYBYTE_HMAC_SHA256, MOY_ROW_MOYBYTE_AES_GCM_SEAL, MOY_ROW_MOYBYTE_AES_GCM_OPEN,
-    MOY_ROW_MOYBYTE_X25519, MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
+    MOY_ROW_UI_HELD_ALL, MOY_ROW_MOYBYTE_EVERY, MOY_ROW_MOYBYTE_AFTER, MOY_ROW_MOYBYTE_CANCEL,
+    MOY_ROW_MOYBYTE_RANDOM, MOY_ROW_MOYBYTE_SHA256, MOY_ROW_MOYBYTE_HMAC_SHA256,
+    MOY_ROW_MOYBYTE_AES_GCM_SEAL, MOY_ROW_MOYBYTE_AES_GCM_OPEN, MOY_ROW_MOYBYTE_X25519,
+    MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
     MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
@@ -73,9 +74,10 @@ enum {
     "ui.popover", "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", \
     "ui.table_part", "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", \
     "ui.held", "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last", "ui.held_all", \
-    "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256", "moybyte.aes_gcm_seal", \
-    "moybyte.aes_gcm_open", "moybyte.x25519", "moybyte.ed25519_public", \
-    "moybyte.ed25519_sign", "moybyte.ed25519_verify", \
+    "moybyte.every", "moybyte.after", "moybyte.cancel", "moybyte.random", "moybyte.sha256", \
+    "moybyte.hmac_sha256", "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", \
+    "moybyte.x25519", "moybyte.ed25519_public", "moybyte.ed25519_sign", \
+    "moybyte.ed25519_verify", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -305,9 +307,9 @@ enum {
     { "moybyte.award", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.progress", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.on", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.every", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.after", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.cancel", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.every", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_EVERY }, \
+    { "moybyte.after", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AFTER }, \
+    { "moybyte.cancel", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_CANCEL }, \
     { "moybyte.pick", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.log", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.recv", MOY_ROLE_MOYBYTE, -1 }, \

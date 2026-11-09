@@ -3784,6 +3784,25 @@ uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
     return got;
 }
 
+uint32_t moy_os_services_end(void) {
+    moy_os_proc_t *svc[MOY_OS_PROCS];
+    uint32_t pids[MOY_OS_PROCS];
+    uint32_t n = services(svc), got = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        pids[i] = svc[i]->reaped ? 0u : svc[i]->pid;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        int code = pids[i] != 0u ? moy_os_stop(pids[i]) : -1;
+        if (code >= 0) {
+            char line[40];
+            int k = snprintf(line, sizeof line, "exit %d (a soft reset)", code);
+            moy_log_write(MOY_LOG_INFO, pids[i], line, (size_t)k);
+            got++;
+        }
+    }
+    return got;
+}
+
 // Service or game `p` stopped on the console's task (moy_os_stop).
 static int loop_stop(moy_os_proc_t *p) {
     uint32_t pid = p->pid;

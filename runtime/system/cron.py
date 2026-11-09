@@ -17,12 +17,16 @@ wallclock.py), so no line runs while the clock is not synced: the table
 then looks at the clock once a minute and arms once it is. One alarm of the
 shell's is armed at the next minute a line runs; when it goes off, the
 lines that match that minute (in the zone in force then) run, and the next
-is armed. A minute the console was not running (a VM stop, a power-off) is
-not run afterwards. A crontab edited by hand is read at the next start or
-by `cron reload`, as `settings reload` reads the settings.
+is armed. The armed minute that passed during an S3's VM stop runs its
+lines once the console is back (the resume record carries it, `held` and
+`carry`); a minute the console was not running for any other reason (a
+power-off) is not run afterwards. A crontab edited by hand is read at the
+next start or by `cron reload`, as `settings reload` reads the settings.
 
 AT JOBS (`at TIME COMMAND`): an alarm each, kept until it runs or `at -r`
-removes it, in RAM: a restart forgets them.
+removes it, in RAM: a restart forgets them, but a VM stop carries them in
+the resume record (as many as fit it), and one due during the stop runs
+once the console is back.
 
 A JOB runs its line in a shell session of its own (native/moy_sh/
 moy_sh_job.h, `moy_sh.Job`) as a process: a pid from the OS log, named
@@ -320,6 +324,7 @@ class Cron:
         self.job = None             # [pid, face] running
         self.poll = None            # its wake while it is parked
         self.exits = []             # [(pid, name, code)], newest first
+        self.carried = None         # what the resume record carried (`carry`)
 
     def _s(self):
         return self.sched or _sched.SCHED
@@ -436,6 +441,39 @@ class Cron:
             self.queue.append(("at", got[1]))
             self.pump()
 
+    # -- across a VM stop ------------------------------------------------------------
+
+    def held(self):
+        """What the resume record carries through a VM stop: the crontab
+        alarm's minute (Unix seconds, or None) and the at jobs, [[Unix
+        seconds, command]] soonest first."""
+        return {"due": self.due_at,
+                "at": sorted([t, cmd] for t, cmd, _w in self.ats.values())}
+
+    def carry(self, held):
+        """The record's `held()`, for `resume` at the first frame."""
+        self.carried = held if isinstance(held, dict) else None
+
+    def resume(self):
+        """What a VM stop carried, put back: the at jobs armed again (one
+        whose time passed runs at the next frame), and the crontab minute
+        the stop held, if it passed, run once."""
+        held, self.carried = self.carried, None
+        if held is None:
+            return
+        for job in held.get("at") or ():
+            if (isinstance(job, list) and len(job) == 2 and isinstance(job[0], int)
+                    and isinstance(job[1], str)):
+                self.add_at(job[0], job[1])
+        due = held.get("due")
+        if isinstance(due, int) and _wc.synced() and due <= _wc.now():
+            ran = [cmd for spec, cmd, _line in self.lines if matches(spec, due)]
+            for cmd in ran:
+                self.queue.append(("cron", cmd))
+            if ran:
+                _log("INFO", SHELL, "cron: the minute a VM stop held runs after it")
+            self.pump()
+
     # -- the jobs ----------------------------------------------------------------
 
     def pump(self):
@@ -521,5 +559,6 @@ def boot(ws):
     try:
         CRON.bind(ws)
         CRON.reload()
+        CRON.resume()
     except Exception as exc:  # noqa: BLE001 -- the desk comes up regardless
         print("Moybyte cron: %s" % (exc,))

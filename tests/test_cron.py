@@ -344,3 +344,52 @@ def test_kill_interrupts_a_parked_job(monkeypatch, tmp_path):
     assert time.monotonic() - t0 < 2
     assert _logged(pid)[-1] == (L.INFO, "exit 130")
     moy_sh.jobs()
+
+
+def test_a_vm_stop_carries_the_at_jobs_and_runs_the_minute_it_held(monkeypatch, tmp_path):
+    """The resume record carries what the stop would lose (cron.held): the at
+    jobs, armed again after it, one whose time passed meanwhile run at the
+    next frame, and the crontab minute the stop held, run once."""
+    _sh()
+    clock = _Clock(monkeypatch, _at(2026, 11, 8, 6, 29, 30))
+    ws = _WS(tmp_path)
+    (ws.system / "crontab").write_text("30 6 * * * echo minute\n")
+    tab = C.Cron()
+    tab.bind(ws)
+    tab.reload()
+    tab.add_at(_at(2026, 11, 8, 6, 40), "echo late")
+    tab.add_at(_at(2026, 11, 9), "echo later")
+    held = tab.held()
+    assert held == {"due": _at(2026, 11, 8, 6, 30),
+                    "at": [[_at(2026, 11, 8, 6, 40), "echo late"], [_at(2026, 11, 9), "echo later"]]}
+    for wid in [tab.wid] + [a[2] for a in tab.ats.values()]:
+        S.SCHED.plain_cancel(wid)                          # the VM goes, its alarms with it
+    clock.t = _at(2026, 11, 8, 6, 45)
+    after = C.Cron()
+    after.bind(ws)
+    after.carry(held)
+    seq = L.next()
+    after.reload()
+    after.resume()
+    _settle(after)
+    _tick()
+    _settle(after)
+    ran = [r[4] for r in L.read(seq, 1 << 30) if L.name(r[3]) == "cron"]
+    late = [r[4] for r in L.read(seq, 1 << 30) if L.name(r[3]) == "at"]
+    assert ran == ["echo minute", "minute", "exit 0"]
+    assert late == ["echo late", "late", "exit 0"]
+    assert [a[:2] for a in after.ats.values()] == [(_at(2026, 11, 9), "echo later")]
+    assert after.due_at == _at(2026, 11, 9, 6, 30)
+
+
+def test_the_resume_record_keeps_the_at_jobs_that_fit(monkeypatch):
+    from runtime import console_home
+    import json
+    monkeypatch.setattr(C.CRON, "ats", {i: (1000 + i, "echo %s" % ("x" * 60), 0)
+                                         for i in range(20)})
+    monkeypatch.setattr(C.CRON, "due_at", 60)
+    text = console_home._with_cron({"tab": "games"}, json)
+    rec = json.loads(text)
+    assert len(text.encode()) <= console_home.RESUME_MAX
+    assert rec["cron"]["due"] == 60 and 0 < len(rec["cron"]["at"]) < 20
+    assert rec["cron"]["at"][0] == [1000, "echo " + "x" * 60]

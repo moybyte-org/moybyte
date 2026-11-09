@@ -102,7 +102,8 @@ TIERS = ("python", "lua", "wasm", "elf")
 SPEC_TIERS = ("python", "lua", "wasm")
 
 ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "door", "wasm", "wasi", "elf",
-              "lua", "py", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
+              "lua", "lua_own", "py", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
+              "u"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 PERM_FIELDS = {"perm", "grants", "prompt", "needs", "py", "doc", "tiers", "spec"}
 # A row's argument rule (u): one token a kernel parameter. A row the door
@@ -1271,7 +1272,7 @@ def lua_names(src):
     out = []
     for r in door_rows(src):
         role = role_of(r)
-        if role == "moybyte" and r.get("server") != "c":
+        if role == "moybyte" and (r.get("server") != "c" or r.get("lua_own")):
             continue
         for n in r.get("lua") or ():
             tbl, _, fn = n.rpartition(".")
@@ -1298,11 +1299,12 @@ def lua_own(src):
     call: its wakes and the log, each a service's own C
     (native/moycore/moycore_svc.c) and an app run's prelude over the moybyte
     module (runtime/run/lua_ext.py). A row served in C is the run's role
-    binding's (lua_names)."""
+    binding's (lua_names), but a lua_own one's: Lua's name for it is its own
+    form (a function where the C row posts a message)."""
     calls = set(lua_calls(src))
     out = []
     for r in src["rows"]:
-        if r.get("server") == "c":
+        if r.get("server") == "c" and not r.get("lua_own"):
             continue
         for n in r.get("lua") or ():
             if n.startswith("moybyte.") and n[8:] not in calls and n[8:] not in out:

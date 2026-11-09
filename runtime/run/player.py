@@ -1446,7 +1446,8 @@ class Player(PlayerDiag):
             ns.update(make_system_api(ws.app_context, cart, self.run.canvas,
                                       editor=self._open_cart_editor,
                                       request=ws.take_text_request(),
-                                      keep=self._keep_grant, perms=self.granted))
+                                      keep=self._keep_grant, perms=self.granted,
+                                      owner=self.pid))
             if "ui" in ns:
                 self._uh = _ui_draw.AppHost()
                 self._ui = [self._uh.ctx, _array("i", [0] * _UI_IN_LEN), self.run.canvas]
@@ -1721,7 +1722,7 @@ class Player(PlayerDiag):
         roles, kind = _moy_app.policy(self.granted)
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
         app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
-        g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True)
+        g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True, owner=self.pid or 0)
         app.stop_hold(app.run(g, roles))
 
     def _bind_play(self, run):

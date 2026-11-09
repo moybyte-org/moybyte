@@ -189,8 +189,9 @@ needs), whose paths the resume record names (`running_paths`), and closes
 the device handles of the others (`_handles_end`: Python objects in the
 heap the stop ends); the record also names the others as rows the kernel
 keeps (`kept_rows`: pid, cart path, Lua handle). Their grants outlive the
-stop (console._app_abi, moy_app_stop_end's `keep`); their timers are the
-kernel's (moy_evq.h, TIMERS) and go off meanwhile, and a message between
+stop (console._app_abi, moy_app_stop_end's `keep`); their timers and alarms
+are the kernel's (moy_evq.h, TIMERS) and go off meanwhile, an alarm's
+screen wake told at the next VM's first tick (`_E.woke`), and a message between
 processes on their own tasks is delivered; a call or a role row that needs
 Python waits on the VM's queue until the VM is back (moy_vmq.h, WITH NO
 VM), and a message to a Python process meanwhile is not taken (its queue
@@ -204,6 +205,8 @@ running one). The Python services start again (`moy_start`), records their
 sources took during the stop not delivered. `adopt` is the same row for a
 service the kernel starts on demand (a C one: its runtime answers
 `figures`, `reap` and `stop`), so it shows, stops and ends as any other.
+A soft reset has no record: the kernel stops those services in its place
+(moy_os_services_end, moy_wasm_services_end, moycore_svc_vm_stop).
 """
 
 try:
@@ -236,9 +239,6 @@ _CALLS = {
     "moybyte.send": _moybyte.send,
     "moybyte.award": _moybyte.award,
     "moybyte.progress": _moybyte.progress,
-    "moybyte.every": _moybyte.every_message,
-    "moybyte.after": _moybyte.after_message,
-    "moybyte.cancel": _moybyte.cancel_message,
     "moybyte.pick": _moybyte.pick,
     "moybyte.at": _moybyte.at_message,
     "moybyte.service_start": _moybyte.service_start,
@@ -445,6 +445,11 @@ class Scheduler:
         f = self.frame + 1
         self.frame = f = 0 if f >= MOY_BG_SLICE_EVERY else f
         _E.timers_run()                 # the kernel's frame runs them too (moy_evq.h, TIMERS)
+        woke = _E.woke()
+        while woke:                     # a kernel alarm went off: the screen's wake
+            if self.wakes.woke is not None:
+                self.wakes.woke(woke)
+            woke = _E.woke()
         w = self.wakes
         if not w.list and not w.queued:
             self._n = self._i = 0

@@ -528,13 +528,19 @@ queue, its tier's table, its run grant, its timers, `moy_evq.h` TIMERS); the
 Player's pause sends it no TERM and the resume record names it, and the
 console that starts after the stop takes its row back at its first frame,
 the same pid, with no second start (`runtime/system/scheduler.py`, ACROSS A
-VM STOP). Meanwhile its timers go off, a message between processes on their
+VM STOP). Meanwhile its timers and alarms go off (the kernel's, `moy_evq.h`
+TIMERS, set and cancelled with no VM), a message between processes on their
 own tasks is delivered, and files and the kernel's services answer; a call
 that needs Python (a console call, a role row the door serves) waits on the
 VM's queue and is answered once the VM is back (`native/moy_kernel/moy_vmq.h`,
 WITH NO VM), and a message to a Python process is not taken, its queue
 having closed with the VM. Its device handles are Python objects, closed at
-the pause. **A Python service pauses**: the Player TERMs it just before the
+the pause. A soft reset carries no record, so it stops each such service as
+a stop would and logs its exit (`moy_os_services_end`, the WASI tier's
+`moy_wasm_services_end`, the Lua services' `moycore_svc_vm_stop`). The
+shell's cron and at jobs are the console's alarms: the resume record carries
+the at jobs and the crontab's armed minute, and one whose time passed during
+the stop runs once the console is back (`runtime/system/cron.py`). **A Python service pauses**: the Player TERMs it just before the
 stop (its `moy_stop` persists what it needs), the resume record names it,
 and the console that starts after the stop starts it again (`moy_start`), a
 new process, so its timers start afresh and the records its sources took

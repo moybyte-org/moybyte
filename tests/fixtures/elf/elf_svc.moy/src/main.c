@@ -7,7 +7,9 @@
 // moy_service_running answers ("absent": -1 with errno ENOENT, the answer a
 // `type: service` cart's process gets); a "wake" sets a timer that goes off
 // at once and answers "timed" with the timer's message (the system's
-// "moybyte.timer", its id) as it hears it; a "quit" returns 7; a "spin" runs
+// "moybyte.timer", its id) as it hears it, and a "rearm" sets one 10 ms off
+// that its timer's message sets again each time it answers "timed"; a "quit"
+// returns 7; a "spin" runs
 // on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. A thread it makes sleeps until the process's end
 // sweeps it.
@@ -57,7 +59,8 @@ int main(int argc, char **argv) {
     (void)argc;
     pthread_t t;
     say("start", 0);
-    static const char *const hears[] = { "ping", "note", "quit", "spin", "wake" };
+    static const char *const hears[] = { "ping", "note", "quit", "spin", "wake", "rearm" };
+    int rearm = 0;
     static char waker[MOY_EVQ_APP];
     for (unsigned i = 0; i < sizeof hears / sizeof hears[0]; i++) {
         if (moy_on(hears[i], 1) < 0) {
@@ -106,8 +109,14 @@ int main(int argc, char **argv) {
         } else if (strcmp(m.ev.name, "wake") == 0) {
             memcpy(waker, m.ev.app, sizeof waker);
             say("after", moy_after(0) > 0);
+        } else if (strcmp(m.ev.name, "rearm") == 0) {
+            memcpy(waker, m.ev.app, sizeof waker);
+            rearm = moy_after(10) > 0;
         } else if (strcmp(m.ev.name, "moybyte.timer") == 0 && waker[0]) {
             moy_send(waker, "timed", m.b + sizeof m.ev);
+            if (rearm) {
+                rearm = moy_after(10) > 0;
+            }
         } else if (strcmp(m.ev.name, "quit") == 0) {
             return 7;
         } else if (strcmp(m.ev.name, "spin") == 0) {

@@ -1,7 +1,8 @@
 """A service on a task of its own runs on through an S3's VM stop, whoever
 wrote it (docs/os_2026-11/processes.md section 5; runtime/system/
 scheduler.py, ACROSS A VM STOP): a Lua, a WASI and an ELF service keep their
-pid and their timers, a message between processes on their own tasks is
+pid and their timers (one set again from its own tick, and a Lua alarm,
+the kernel's), a message between processes on their own tasks is
 answered during the stop, a call that needs Python waits and is answered
 once the VM is back, and the next VM's scheduler takes each back from the
 kernel's tables with no second start. A Python service still pauses: it is
@@ -32,13 +33,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 LUA_SVC = '''
 n = 0
-moybyte.every(5, function()
-    n = n + 1
-    if n == 20 then
-        print("noted " .. tostring(moybyte.notify("Ticker", "twenty")))
-    end
+moybyte.every(5, function() n = n + 1 end)
+moybyte.on("note", function()
+    print("noted " .. tostring(moybyte.notify("Ticker", "twenty")))
 end)
 moybyte.on("count", function(who) moybyte.send(who, "counted", n) end)
+moybyte.on("alarm", function()
+    moybyte.at(os.time() + 1, function() print("rang") end)
+    print("alarm set")
+end)
 '''
 
 PY_SVC = '''
@@ -138,7 +141,8 @@ def _lua_step():
 @pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
 def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
         tmp_path, fresh, monkeypatch):
-    _cart(tmp_path / "carts", "t.tick", "service.lua", LUA_SVC, ("notifications", "autostart"))
+    _cart(tmp_path / "carts", "t.tick", "service.lua", LUA_SVC,
+          ("notifications", "autostart", "alarms"))
     ws = build_ws(tmp_path)
     since = L.next()
     pid = S.boot(ws)[0]
@@ -148,6 +152,10 @@ def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
     peer = L.spawn("peer")
     assert moy_evq.open(peer, "t.tick", "", False) == moy_evq.OK
     assert moy_evq.listen(peer, "counted", True) == moy_evq.OK
+    assert moy_evq.send(peer, "t.tick", "alarm", "[]")[0] == 1
+    assert _polled(fresh, lambda: "alarm set" in _texts(since, pid))
+    woke = []
+    monkeypatch.setattr(moybyte.WAKES, "woke", woke.append)
     rec, door = _stop(ws, fresh)
     path = _shelf(ws, "t.tick")["path"]
     assert rec["keep"] == [[pid, path, h]] and path not in rec["svc"]
@@ -159,7 +167,13 @@ def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
     _during(20, _lua_step)
     got = moy_evq.take(peer)
     assert got is not None and got[2] == "counted" and json.loads(got[3])[0] >= 4
-    # Its twentieth tick's notify waits for the VM.
+    # Its alarm, the kernel's, rings during the stop; its notify waits for
+    # the VM.
+    t0 = time.monotonic()
+    while "rang" not in _texts(since, pid):
+        assert time.monotonic() - t0 < 3, "its alarm rings during the stop"
+        _during(20, _lua_step)
+    assert moy_evq.send(peer, "t.tick", "note", "[]")[0] == 1
     _during(150, _lua_step)
     assert moycore.svc_info(h)[:2] == (2, 0)            # RUNNING (moycore_svc.h)
     assert moy_evq.next_call() is not None
@@ -171,6 +185,8 @@ def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
         "the autostart started no second one"
     assert _polled(s, lambda: any(t.startswith("noted ") for t in _texts(since, pid)))
     assert "taken back t.tick" in _texts(since, pid)
+    s.tick()
+    assert woke == [pid], "the alarm's screen wake reaches the console's next frame"
     assert s.stop(pid) and q.state == S.EXITED
     moy_evq.close(peer)
 
@@ -234,11 +250,13 @@ def _compiled_ws(tmp_path, built, name):
     return build_workstation(str(carts))
 
 
-def _through_a_stop(ws, s, monkeypatch, cid, tier, noted, timed):
+def _through_a_stop(ws, s, monkeypatch, cid, tier, noted, rearm, ticks):
     """A compiled service started, a VM stop and back: it keeps its pid, a
-    ping from a process on its own task is answered during the stop, a
-    timer of the kernel's goes off meanwhile (`timed(texts, got, id)`), and
-    its notify, which needs the console, is answered once the VM is back."""
+    ping from a process on its own task is answered during the stop, a timer
+    it sets again from its own timer's message (`rearm`, the message that
+    starts it) keeps going off meanwhile (`ticks(texts, got)` counts them),
+    and its notify, which needs the console, is answered once the VM is
+    back."""
     since = L.next()
     cart = _shelf(ws, cid)
     pid = S.start_cart(ws, cart, s)
@@ -257,9 +275,8 @@ def _through_a_stop(ws, s, monkeypatch, cid, tier, noted, timed):
             m = moy_evq.take(peer)
         return noted(_texts(since, pid), got)
     assert _polled(s, lambda: any(t in ("listening", "started") for t in _texts(since, pid)))
-    if cid == "elf.svc":                         # its "wake" names who hears its timers
-        assert moy_evq.send(peer, cid, "wake", "[]")[0] == 1
-        assert _polled(s, lambda: s.tick() >= 0 and (heard() or "timed" in got))
+    assert moy_evq.send(peer, cid, rearm[0], rearm[1])[0] == 1
+    assert _polled(s, lambda: s.tick() >= 0 and (heard() or ticks(_texts(since, pid), got) > 0))
     rec, door = _stop(ws, s)
     assert rec["keep"] == [[pid, cart["path"], 0]]
     assert moy_evq.send(peer, cid, "ping", "[3]")[0] == 1
@@ -267,12 +284,10 @@ def _through_a_stop(ws, s, monkeypatch, cid, tier, noted, timed):
     while not (heard() or "pong" in got):
         assert time.monotonic() - t0 < 5, "a ping during the stop is answered"
         _during(10)
-    rc, tid = moy_evq.timer(pid, 20)
-    assert rc == moy_evq.OK
-    n = len(got)
+    n = ticks(_texts(since, pid), got)
     t0 = time.monotonic()
-    while not (heard() or timed(_texts(since, pid), got[n:], tid)):
-        assert time.monotonic() - t0 < 5, "its timer goes off during the stop"
+    while not (heard() or ticks(_texts(since, pid), got) >= n + 3):
+        assert time.monotonic() - t0 < 5, "its timer, set again from its tick, runs on"
         _during(10)
     assert moy_evq.send(peer, cid, "note", '["x"]')[0] == 1
     _during(150)
@@ -292,8 +307,8 @@ def test_an_elf_service_runs_on_through_a_vm_stop(tmp_path, elf_built, fresh, mo
     if "elf" not in ws.runtimes:
         pytest.skip("no ELF tier on this host")
     texts = _through_a_stop(ws, fresh, monkeypatch, "elf.svc", "elf",
-                            lambda texts, got: "noted" in got,
-                            lambda texts, got, tid: "timed" in got)
+                            lambda texts, got: "noted" in got, ("rearm", "[]"),
+                            lambda texts, got: got.count("timed"))
     assert "taken back elf.svc" in texts and "ping 3" in texts, "|".join(texts)
 
 
@@ -304,8 +319,8 @@ def test_a_wasi_service_runs_on_through_a_vm_stop(tmp_path, wasi_built, fresh, m
     texts = _through_a_stop(ws, fresh, monkeypatch, "wasi.svc", "wasm",
                             lambda texts, got: any(t.startswith("service_running ")
                                                    for t in texts),
-                            lambda texts, got, tid: "moybyte.timer from system [%d]" % tid
-                            in texts)
+                            ("wake", '["rearm"]'),
+                            lambda texts, got: texts.count("rearmed"))
     note = next(i for i, t in enumerate(texts) if t.startswith("note "))
     assert texts.index("taken back wasi.svc") < note, "its notify was answered after the stop"
     assert "stopped after 1 pings, ticking" in texts
@@ -362,3 +377,21 @@ def test_on_the_vm_a_board_runs_a_lua_service_and_a_timer_run_on_with_no_vm(tmp_
     assert done.stdout.splitlines() == [
         "0 0", "False 0 True 1", "moybyte.timer True 0", "1", "counted True",
         "(9, 'day', '[]') (2, 0)", "(4, 7) True"], done.stdout
+
+
+def test_a_soft_reset_ends_an_elf_service_with_its_exit_logged(tmp_path, elf_built, fresh):
+    """A soft reset has no record to take a service back by, so the kernel
+    stops each ELF service as a stop would (moy_os_services_end), its exit
+    logged, nothing left running for the next VM."""
+    from runtime import elf_binding
+    ws = _compiled_ws(tmp_path, elf_built, "elf_svc.moy")
+    if "elf" not in ws.runtimes:
+        pytest.skip("no ELF tier on this host")
+    since = L.next()
+    pid = S.start_cart(ws, _shelf(ws, "elf.svc"), fresh)
+    rt = ws.runtimes["elf"]
+    assert _polled(fresh, lambda: "started" in _texts(since, pid))
+    assert elf_binding.services_end() == 1
+    assert rt.figures(pid) is None
+    assert "exit 0 (a soft reset)" in _texts(since, pid)
+    assert elf_binding.services_end() == 0

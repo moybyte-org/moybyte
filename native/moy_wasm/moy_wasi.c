@@ -819,6 +819,7 @@ static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args,
     w->calling++;
     int32_t v = call_wait(w, ticket, t0);
     w->calling--;
+    w->hopped_us += mono_us() - t0;     // the console's time, not its wake's
     return v;
 }
 

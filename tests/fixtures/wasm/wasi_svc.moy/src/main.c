@@ -31,7 +31,9 @@
 // opened (nav_open_app, under `launch` and the front's gate), a document
 // shared and one picked; the pick reaches it as "moy_open" (handle, mime,
 // mode, name), whose item it reads, writes and reads again through its
-// handle, and a handle it was never given; a "wake" carrying ["media", path]
+// handle, and a handle it was never given; a "wake" carrying ["rearm"] sets a
+// timer 10 ms off that its own message sets again, printing "rearmed" each
+// time; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
 // reads back, and keeps it playing until the service ends; a "wake" carrying
@@ -73,7 +75,7 @@ int main(void) {
         moy_evq_ev_t ev;
         char b[sizeof(moy_evq_ev_t) + 256];
     } m;
-    int ticks = 0, pings = 0, ticker = 0, net = 0;
+    int ticks = 0, pings = 0, ticker = 0, net = 0, rearm = 0;
     long next = now_ms() + TICK_MS;
     for (;;) {
         long left = next - now_ms();
@@ -159,6 +161,16 @@ int main(void) {
             printf("net_open %d errno %d\n", net > 0 ? 1 : net, net < 0 ? errno : 0);
             int r = (int)moy_dev_write(net, "svc", 3);
             printf("net_write %d errno %d\n", r, r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"rearm\"]") == 0) {
+            rearm = (int)moy_after(10);
+            printf("rearm %d\n", rearm > 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "moybyte.timer") == 0 && rearm > 0
+                   && atoi(m.b + sizeof m.ev + 1) == rearm) {
+            rearm = (int)moy_after(10);
+            printf("rearmed\n");
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0
                    && strcmp(m.b + sizeof m.ev, "[\"timers\"]") == 0) {

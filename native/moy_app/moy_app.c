@@ -1,10 +1,17 @@
 // The app ABI's kernel half (moy_app.h has the contract).
 
+#include <stdbool.h>
 #include <string.h>
 
 #include "moy_app.h"
 #include "moy_crypto.h"
 #include "moy_route.h"
+
+// The kernel's timers (native/moy_kernel/moy_evq.h, TIMERS): weak, for a
+// build of the layer alone, where a timer row answers STALE.
+int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id)
+    __attribute__((weak));
+bool moy_evq_timer_cancel(uint32_t pid, uint32_t id) __attribute__((weak));
 
 struct moy_app {
     const moy_htab_mem_t *mem;
@@ -1633,6 +1640,7 @@ static int no_args(int row) {
         case MOY_ROW_PREFS_GET: case MOY_ROW_PREFS_SET: case MOY_ROW_PREFS_CLEAR:
         case MOY_ROW_WALLPAPER_SAVE_COPY: case MOY_ROW_ARTWORK_FOLLOW:
         case MOY_ROW_CLIPBOARD_PUT_TEXT:
+        case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL:
         case MOY_ROW_MOYBYTE_RANDOM: case MOY_ROW_MOYBYTE_SHA256:
         case MOY_ROW_MOYBYTE_HMAC_SHA256: case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
         case MOY_ROW_MOYBYTE_AES_GCM_OPEN: case MOY_ROW_MOYBYTE_X25519:
@@ -1642,6 +1650,28 @@ static int no_args(int row) {
         default:
             return 1;
     }
+}
+
+// A compiled process's timers (moybyte.every, after, cancel): the kernel's,
+// of the process the grant names (its owner, the pid a compiled run's grant
+// is made for), so they go off and are set with no VM. A timer answers its
+// id, FULL past MOY_EVQ_TIMERS; a cancel 1 where one of its own went, else 0.
+static int32_t timer_row(moy_appabi_t *a, uint32_t h, int row, int32_t v) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL || g->owner == 0u || moy_evq_timer == NULL) {
+        return -MOY_APP_STALE;
+    }
+    a->counts[row]++;
+    if (row == MOY_ROW_MOYBYTE_CANCEL) {
+        return moy_evq_timer_cancel(g->owner, (uint32_t)v) ? 1 : 0;
+    }
+    uint32_t ms = v > 0 ? (uint32_t)v : 0u;
+    if (row == MOY_ROW_MOYBYTE_EVERY && ms == 0u) {
+        ms = 1u;
+    }
+    uint32_t id = 0;
+    int rc = moy_evq_timer(g->owner, ms, row == MOY_ROW_MOYBYTE_EVERY ? ms : 0u, &id);
+    return rc == 0 ? (int32_t)id : rc == 2 ? -MOY_APP_FULL : -MOY_APP_STALE;  // MOY_EVQ_OK, FULL
 }
 
 // The C rows a compiled app reaches through the door.
@@ -1880,6 +1910,13 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return moy_app_clip_kind(a, g);
         case MOY_ROW_CLIPBOARD_SEQ:
             return moy_app_clip_seq(a, g);
+        case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL: {
+            int32_t v = arg_int(f);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return timer_row(a, g, row, v);
+        }
         case MOY_ROW_MOYBYTE_RANDOM: {
             int32_t want = arg_int(f);
             if (f->bad || f->at != f->n) {

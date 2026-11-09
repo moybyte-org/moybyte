@@ -207,17 +207,17 @@ static int32_t w_os_progress(wasm_exec_env_t e, const char *id, uint32_t id_n, i
 
 static int32_t w_os_every(wasm_exec_env_t e, int32_t ms) {
     const os_arg_t a[1] = { OS_I(ms) };
-    return os_call(e, "moybyte.every", a, 1);
+    return os_role(e, MOY_T_MOYBYTE_EVERY, false, a, 1, NULL, 0);
 }
 
 static int32_t w_os_after(wasm_exec_env_t e, int32_t ms) {
     const os_arg_t a[1] = { OS_I(ms) };
-    return os_call(e, "moybyte.after", a, 1);
+    return os_role(e, MOY_T_MOYBYTE_AFTER, false, a, 1, NULL, 0);
 }
 
 static int32_t w_os_cancel(wasm_exec_env_t e, int32_t id) {
     const os_arg_t a[1] = { OS_I(id) };
-    return os_call(e, "moybyte.cancel", a, 1);
+    return os_role(e, MOY_T_MOYBYTE_CANCEL, false, a, 1, NULL, 0);
 }
 
 static int32_t w_os_pick(wasm_exec_env_t e, const char *mime, uint32_t mime_n, const char *mode,

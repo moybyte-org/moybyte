@@ -133,6 +133,8 @@ void moy_play_stopped_run(void) __attribute__((weak));
 // its letting go of what the ending VM's heap held.
 uint32_t moy_app_kernel_grants(void) __attribute__((weak));
 void moy_app_vm_stop(void) __attribute__((weak));
+void moy_wasm_services_end(void) __attribute__((weak));
+uint32_t moy_os_services_end(void) __attribute__((weak));
 // The input table's readers, which the ending VM's processes held
 // (native/moy_input), where the image has it.
 void moy_input_vm_stop(void) __attribute__((weak));
@@ -2022,6 +2024,16 @@ soft_reset_exit:
     moy_loop_board_vm_stop();
     moy_kernel_rest();
     moy_kernel_kstop_line("before");
+    // MOY: a soft reset ends the services on tasks of their own, whose rows
+    // no record carries to the next VM; a stop keeps them (processes.md §5).
+    if (s_stop == MOY_STOP_NONE) {
+        if (moy_wasm_services_end != NULL) {
+            moy_wasm_services_end();
+        }
+        if (moy_os_services_end != NULL) {
+            moy_os_services_end();
+        }
+    }
     moy_play_vm_stop();
     moy_glass_vm_stop();
     moy_text_vm_stop();
