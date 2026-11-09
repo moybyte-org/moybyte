@@ -53,6 +53,7 @@ void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) __attribute__((weak));
 #define ROLE_POLL_MS 10                 // a waiting role command's step, at most this often
 #define RUN_STACK (24u * 1024u)         // a runner's stack (the SSH face's task's)
 #define ABORT_TURNS 256                 // a parked run's turns to end at its session's end
+#define MEDIA_SRC_MAX 512               // moy_media.h's MOY_MEDIA_SRC_MAX
 
 // -- memory ---------------------------------------------------------------------
 
@@ -648,6 +649,24 @@ static int b_ble(moy_sh_t *s, int argc, char **argv) {
 }
 #endif
 
+// `media play SRC` names a file by the session's path, which crosses as the
+// store's (moy_sh_resolve): the console's VM has no session folder. A URL
+// crosses as it is. 0, or the errno that refused the path.
+static int media_src(moy_sh_t *s, int argc, char **argv, char *out, size_t cap) {
+    if (argc != 3 || strcmp(argv[0], "media") != 0 || strcmp(argv[1], "play") != 0
+        || strstr(argv[2], "://") != NULL) {
+        return 0;
+    }
+    int r = moy_sh_resolve(s, argv[2], out, cap);
+    if (r != 0) {
+        char line[160];
+        snprintf(line, sizeof line, "media: %s: %s\n", argv[2],
+                 r == ENOENT ? "not a file in the store" : why_of(r));
+        say(s, 2, line);
+    }
+    return r;
+}
+
 // A role command is a job the console steps: `role JOB ARGV...` starts it
 // and runs its first step, `step JOB` each one after, while it answers
 // RUNNING; between them the session waits (b_sleep: a runner's run parks,
@@ -660,6 +679,10 @@ static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
             return served[i](s, argc, argv);
         }
     }
+    char src[MEDIA_SRC_MAX] = "";
+    if (media_src(s, argc, argv, src, sizeof src) != 0) {
+        return 1;
+    }
     char job[2 * sizeof(uintptr_t) + 1];
     job_of(s, job, sizeof job);
     char **all = b_alloc(NULL, ((size_t)argc + 1) * sizeof *all);
@@ -668,6 +691,9 @@ static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     }
     all[0] = job;
     memcpy(all + 1, argv, (size_t)argc * sizeof *argv);
+    if (src[0]) {
+        all[3] = src;
+    }
     int32_t r = door_int("role", argc + 1, all);
     b_free(NULL, all);
     if (r == DOOR_NEEDS_VM) {

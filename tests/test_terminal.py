@@ -216,6 +216,30 @@ def _slow_role(monkeypatch, steps=3, ms=30):
     return ended
 
 
+def test_media_play_names_a_file_by_the_sessions_folder(term, monkeypatch):
+    """`media play SRC` crosses the door with a file's path made the store's
+    against the session's folder (native/moy_sh/moy_sh_board.c, media_src):
+    the VM has no session folder. A URL crosses as it is, and a path the
+    store has no file for is refused before it crosses."""
+    import os
+    from runtime import sh_roles
+    got = []
+
+    def media(d, a):
+        got.append(list(a))
+        return 0
+    monkeypatch.setattr(sh_roles, "r_media", media)
+    _ws, app = term
+    run(app, "mkdir /tunes; cd /tunes; touch a.mp3; media play a.mp3; "
+             "media play ../tunes/a.mp3; media play http://radio.example/live")
+    assert len(got) == 3 and got[0][0] == "play" and got[0][1] == got[1][1]
+    assert got[0][1].endswith("/tunes/a.mp3") and os.path.isfile(got[0][1])
+    assert got[2] == ["play", "http://radio.example/live"]
+    run(app, "media play /proc/x.mp3")
+    said = "".join(plain(app)[-2:])                    # the grid wraps the line
+    assert len(got) == 3 and said.endswith("media: /proc/x.mp3: not a file in the store")
+
+
 def test_a_waiting_role_command_parks_and_its_output_streams(term, monkeypatch):
     """A role command that waits is stepped across the door a frame at a
     time: Enter returns while it waits (the run parks on the session's

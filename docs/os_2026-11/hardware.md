@@ -387,7 +387,10 @@ read through the store's volume seam), and a job of the console's frame
 (`moy_loop_job`, on the VM's task) opens the current file, reads it into the
 stream buffer a few KiB at a time with the card's bus gate around each read,
 sizes it and seeks it, so a store op never runs on the PSRAM stack and no
-Python runs while a file plays. The host has no task; the same job runs one
+Python runs while a file plays. The shell's `media play SRC` names a file
+by the session's folder: the C shell makes it the store's path
+(`moy_sh_resolve`) before it crosses the door, a URL crossing as it is. The
+host has no task; the same job runs one
 pass of its loop. The job and a teardown (close, the lease's end, the VM's
 end) take turns at the service's life gate, so a teardown from any task
 frees nothing the job is reading, and the job, finding no service, is dropped
