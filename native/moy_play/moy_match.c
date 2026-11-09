@@ -1045,6 +1045,36 @@ static void inbox_put(moy_match_t *m, const uint8_t *body, size_t n) {
     m->inbox_n++;
 }
 
+static moy_match_port_t *port_of(moy_match_t *m, uint16_t port) {
+    for (int i = 0; port != 0 && i < MOY_MATCH_PORTS; i++) {
+        if (m->ports[i].port == port) {
+            return &m->ports[i];
+        }
+    }
+    return NULL;
+}
+
+// A T_PORT frame: queued on its port where the port is open and hears the
+// sender (WHO IS HEARD).
+static void on_port(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, size_t n) {
+    if (n < MOY_MATCH_PORT_HDR || n - MOY_MATCH_PORT_HDR > MOY_MATCH_MSG_MAX) {
+        return;
+    }
+    moy_match_port_t *q = port_of(m, (uint16_t)(msg[2] | (msg[3] << 8)));
+    if (q == NULL || (q->from == MOY_MATCH_FROM_MATCH && !from_partner(m, mac))) {
+        return;
+    }
+    if (q->n >= MOY_MATCH_PORT_DEPTH) {
+        q->drops++;
+        return;
+    }
+    unsigned at = (q->head + q->n) % MOY_MATCH_PORT_DEPTH;
+    memcpy(q->mac[at], mac, 6);
+    q->len[at] = (uint8_t)(n - MOY_MATCH_PORT_HDR);
+    memcpy(q->data[at], msg + MOY_MATCH_PORT_HDR, n - MOY_MATCH_PORT_HDR);
+    q->n++;
+}
+
 void moy_match_dispatch(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg,
                         size_t n, uint32_t now) {
     if (n < 2 || msg[0] != MOY_MATCH_PROTO) {
@@ -1063,6 +1093,9 @@ void moy_match_dispatch(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg
             if (m->s.live ? from_partner(m, mac) : from_lobby(m, mac)) {
                 inbox_put(m, msg + 2, n - 2u);
             }
+            return;
+        case MOY_MATCH_T_PORT:
+            on_port(m, mac, msg, n);
             return;
         case MOY_MATCH_T_START:
             // 8 header bytes, then the destination.
@@ -1248,6 +1281,93 @@ int moy_match_take_msg(moy_match_t *m, uint8_t *out, size_t cap) {
     m->inbox_head = (uint8_t)((at + 1u) % MOY_MATCH_INBOX);
     m->inbox_n--;
     return (int)n;
+}
+
+int moy_match_port_open(moy_match_t *m, uint16_t port, int from) {
+    if (port == 0 || (from != MOY_MATCH_FROM_ANY && from != MOY_MATCH_FROM_MATCH)) {
+        return MOY_MATCH_PORT_BAD;
+    }
+    if (port_of(m, port) != NULL) {
+        return MOY_MATCH_PORT_BUSY;
+    }
+    for (int i = 0; i < MOY_MATCH_PORTS; i++) {
+        moy_match_port_t *q = &m->ports[i];
+        if (q->port == 0) {
+            q->port = port;
+            q->from = (uint8_t)from;
+            q->n = q->head = 0;
+            q->drops = 0;
+            return 0;
+        }
+    }
+    return MOY_MATCH_PORT_FULL;
+}
+
+int moy_match_port_close(moy_match_t *m, uint16_t port) {
+    moy_match_port_t *q = port_of(m, port);
+    if (q == NULL) {
+        return MOY_MATCH_PORT_ABSENT;
+    }
+    q->port = 0;
+    q->n = 0;
+    return 0;
+}
+
+int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size_t n) {
+    if (port == 0 || n > MOY_MATCH_MSG_MAX) {
+        return MOY_MATCH_PORT_BAD;
+    }
+    if (!m->active) {
+        return MOY_MATCH_PORT_DOWN;
+    }
+    uint8_t p[MOY_MATCH_PORT_HDR + MOY_MATCH_MSG_MAX];
+    p[0] = MOY_MATCH_PROTO;
+    p[1] = MOY_MATCH_T_PORT;
+    p[2] = (uint8_t)(port & 0xFF);
+    p[3] = (uint8_t)(port >> 8);
+    if (n) {
+        memcpy(p + MOY_MATCH_PORT_HDR, body, n);
+    }
+    return broadcast(m, p, MOY_MATCH_PORT_HDR + n) ? 0 : MOY_MATCH_PORT_DOWN;
+}
+
+int moy_match_port_take(moy_match_t *m, uint16_t port, uint8_t mac[6], uint8_t *out,
+                        size_t cap) {
+    moy_match_port_t *q = port_of(m, port);
+    if (q == NULL) {
+        return MOY_MATCH_PORT_ABSENT;
+    }
+    if (q->n == 0) {
+        return -1;
+    }
+    unsigned at = q->head;
+    size_t n = q->len[at];
+    if (n > cap) {
+        return MOY_MATCH_PORT_FULL;
+    }
+    memcpy(mac, q->mac[at], 6);
+    memcpy(out, q->data[at], n);
+    q->head = (uint8_t)((at + 1u) % MOY_MATCH_PORT_DEPTH);
+    q->n--;
+    return (int)n;
+}
+
+int32_t moy_match_port_drops(const moy_match_t *m, uint16_t port) {
+    const moy_match_port_t *q = port_of((moy_match_t *)m, port);
+    return q == NULL ? -1 : (int32_t)q->drops;
+}
+
+int moy_match_port_waiting(const moy_match_t *m, uint16_t port) {
+    const moy_match_port_t *q = port_of((moy_match_t *)m, port);
+    return q == NULL ? -1 : q->n;
+}
+
+int moy_match_ports_open(const moy_match_t *m) {
+    int n = 0;
+    for (int i = 0; i < MOY_MATCH_PORTS; i++) {
+        n += m->ports[i].port != 0;
+    }
+    return n;
 }
 
 int moy_match_action(moy_match_t *m, char *cart, size_t cap) {

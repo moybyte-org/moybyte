@@ -583,12 +583,12 @@ def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
 
 
 def test_a_processs_tag_names_its_process(tmp_path):
-    """`cart`, `http`, `media` and `native` are held under a pid, so the
+    """`cart`, `http`, `media`, `native` and `net` are held under a pid, so the
     holders name who holds the radio; the console's own tags are bare."""
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    for tag in ("cart", "http", "media", "native"):
+    for tag in ("cart", "http", "media", "native", "net"):
         with pytest.raises(ValueError):
             ws.wifi_hold(tag)
     assert ws.wifi_hold("http", 7) and ws.wifi_hold("settings")

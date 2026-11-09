@@ -312,7 +312,7 @@ static const mp_rom_obj_tuple_t wifi_tags_tuple = {
         MP_ROM_QSTR(MP_QSTR_web), MP_ROM_QSTR(MP_QSTR_update), MP_ROM_QSTR(MP_QSTR_settings),
         MP_ROM_QSTR(MP_QSTR_cart), MP_ROM_QSTR(MP_QSTR_link), MP_ROM_QSTR(MP_QSTR_carts),
         MP_ROM_QSTR(MP_QSTR_dev), MP_ROM_QSTR(MP_QSTR_http), MP_ROM_QSTR(MP_QSTR_media),
-        MP_ROM_QSTR(MP_QSTR_ssh),
+        MP_ROM_QSTR(MP_QSTR_ssh), MP_ROM_QSTR(MP_QSTR_native), MP_ROM_QSTR(MP_QSTR_net),
     }
 };
 

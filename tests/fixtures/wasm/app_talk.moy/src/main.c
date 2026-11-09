@@ -12,7 +12,9 @@
 // handle (gpio20 driven high and read back, kept until its run ends, a
 // second handle refused) and the LoRa radio by handle,
 // starting an OTAA join it keeps running (an uplink before it is accepted
-// refused, the radio busy while it runs), then asks for minute-long timers
+// refused, the radio busy while it runs), opens port 7 of the radio link by
+// a `net` handle and says "talk" on it (the handle kept until its run ends),
+// then asks for minute-long timers
 // until the console answers FULL and cancels all but the first, which it keeps
 // for its run's end to sweep. It puts a status item in the bar, paused, with
 // a panel of each kind of row (a description refused BAD), shows it ON, and
@@ -20,7 +22,8 @@
 // for its run's end to sweep, and a press in its panel is the system's
 // message "moybyte.status" [item, id, value]. Every _update reads the messages queued for it, one record
 // each (moy_evq_ev_t, sdk/include/moybyte/os.h, its arguments a JSON array
-// after it), and logs what it heard: a timer is the system's message
+// after it), and logs what it heard, then the net handle's records (the
+// sender's last byte, the port and the bytes): a timer is the system's message
 // "moybyte.timer" carrying its id, and the repeating one's first tick
 // cancels it; an item handed
 // to it (its window event moy_open, a message from the system carrying the
@@ -108,6 +111,7 @@ static void say(void) {
 }
 
 static int32_t ticker;
+static int32_t net;
 
 EXPORT(_init) void init(void) {
     moybyte_on(S("pong"), 1);
@@ -209,6 +213,13 @@ EXPORT(_init) void init(void) {
     put(S("status_gone "));
     put_int(moybyte_status_state(gone, MOY_STATUS_ERROR));
     say();
+    net = moybyte_dev_open(S("net"), S("port=7"));
+    put(S("net_open "));
+    put_int(net > 0 ? 1 : net);
+    say();
+    put(S("net_write "));
+    put_int(moybyte_dev_write(net, S("talk")));
+    say();
     static int32_t held[64];
     int32_t t = 0, r = 0;
     while (t < 64 && (r = moybyte_after(60000)) > 0) {
@@ -255,6 +266,20 @@ static union {
     char b[sizeof(moy_evq_ev_t) + 128];
 } m;
 
+static void net_heard(void) {
+    static uint8_t r[256];
+    int32_t n = net > 0 ? moybyte_dev_read(net, (char *)r, sizeof r) : 0;
+    for (int32_t k = 0; k + 10 <= n; k += 10 + (r[k + 8] | r[k + 9] << 8)) {
+        put(S("net_heard "));
+        put_int(r[k + 5]);
+        put(S(" "));
+        put_int(r[k + 6] | r[k + 7] << 8);
+        put(S(" "));
+        put((const char *)r + k + 10, (uint32_t)(r[k + 8] | r[k + 9] << 8));
+        say();
+    }
+}
+
 EXPORT(_update) void update(float dt) {
     (void)dt;
     int32_t n;
@@ -282,6 +307,7 @@ EXPORT(_update) void update(float dt) {
             say();
         }
     }
+    net_heard();
 }
 
 EXPORT(_draw) void draw(void) {

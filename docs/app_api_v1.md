@@ -383,7 +383,7 @@ opens a text file from Files with (Notes).
 | `launch` | `open_app(id)`: another app, by its registered id | python, lua, wasm, elf |
 | `clipboard` | `clipboard`, the console's clipboard, which the editor handle uses too (§5) | python, lua, wasm, elf |
 | `network` | `wifi` | python, elf |
-| `multiplayer` | `net`, `on_net` (`docs/moy_cart_api.md`, Multiplayer) | python, lua, wasm |
+| `multiplayer` | `net`, `on_net` (`docs/moy_cart_api.md`, Multiplayer) | python, lua, wasm, elf |
 | `pins` | `pin_write`, `pin_read` (`docs/moy_cart_api.md`, Pins); by handle on the compiled tiers (§10, Devices by handle) | python, lua, wasm, elf |
 | `console` | `print` writes to the text console's scrollback instead of drawing (a script's, the terminal's) | python, lua |
 | `notifications` | `moybyte.notify` posts (below) | python, lua, wasm, elf |
@@ -759,13 +759,13 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
 | `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
 | `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
-| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
-| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
-| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
-| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
-| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
-| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
-| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
+| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
+| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
+| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
+| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
+| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
+| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
+| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
 | `moybyte.ed25519_public` | none | `moybyte.ed25519_public` | `moybyte.ed25519_public` | `moybyte_ed25519_public`, `moybyte.os.ed25519_public` | `moy_ed25519_public` |
 | `moybyte.ed25519_sign` | none | `moybyte.ed25519_sign` | `moybyte.ed25519_sign` | `moybyte_ed25519_sign`, `moybyte.os.ed25519_sign` | `moy_ed25519_sign` |
 | `moybyte.ed25519_verify` | none | `moybyte.ed25519_verify` | `moybyte.ed25519_verify` | `moybyte_ed25519_verify`, `moybyte.os.ed25519_verify` | `moy_ed25519_verify` |
@@ -854,8 +854,8 @@ a native module) holds a lease or a device API by a handle where a Python
 program holds an object (`runtime/system/dev_handles.py` is the authority
 on every name, key and answer). `dev_open(name, cfg)` answers the handle:
 `name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
-`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`, `"camera"`, `"media"`) or the `pins` permission's
-pins (`"pins"`), `cfg` words
+`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`, `"camera"`, `"media"`), the `pins` permission's
+pins (`"pins"`) or a port of the console-to-console radio link (`"net"`), `cfg` words
 `key=value` (`"mode=out value=1"`, `"baudrate=9600"`, `"scl=20 sda=21
 addr=0x48"`, `"url=http://example.com/ cap=4096"`). On the handle,
 `dev_read(h, buf, cap)` takes what waits (0 when nothing does),
@@ -929,9 +929,25 @@ one (an input where it was not driven). It takes each pin of the board's
 gpio row for the process at its first use, under `pins` alone (no
 `lease:gpio`), and its close gives them back, left safe.
 
+A `net` handle is one port of the radio link other consoles hear
+(`docs/netplay_v1.md`, Ports), the way a socket is: any process opens it,
+whatever runs in front, and each port's messages reach only its holder.
+`dev_open("net", "port=7")` takes port 7 (1 to 65535, one holder a port:
+port 0 is the game in front's `net.send` and `on_net`), `dev_write` sends
+one message of at most 240 bytes to every console in range on that port,
+and `dev_read` takes the messages heard on it as records: the sender's MAC
+(6 bytes), the port and the length (2 bytes each), then the bytes. Radio
+input is untrusted, so the sender is in every record for the program to
+judge; `"from=match"` narrows a port to the live match's peer and hears
+nothing outside a match. A port keeps four messages unread (`dev_get(h,
+"drops")` counts what it dropped while full); a process holds four ports and
+the console eight, FULL past either. The radio stays up while any port is
+open, and a match's inputs never reach a port.
+
 Each name needs what Python's needs: `lease:<row>` (`lease:gpio` for
 anything on the pins: a pin, a PWM, an ADC, an I²C bus), `http`, `lora`,
-`mic`, `ble`, `usb`, `midi`, `camera`, `media` (or `media:url`), `pins`. One holder a lease or a device, whatever the tiers: a
+`mic`, `ble`, `usb`, `midi`, `camera`, `media` (or `media:url`), `pins`,
+`multiplayer` (`net`). One holder a lease or a device, whatever the tiers: a
 resource a Python program's object holds is BUSY to a handle and the
 reverse (`-11` to a compiled app, `EBUSY` to a native or WASI program), and
 a process opens a radio, the microphone, the USB host, the camera, the

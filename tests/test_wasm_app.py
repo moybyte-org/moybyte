@@ -154,10 +154,10 @@ def test_the_verdict_keeps_the_vm_for_a_shell_import(tmp_path):
 
 
 
-def _talk(tmp_path, off=()):
+def _talk(tmp_path, off=(), prep=None):
     """App Talk opened beside the running Echo service, its permissions `off`
-    turned off in Settings first: its process's OS log lines after its frames
-    and the scheduler's serves, and its pid."""
+    turned off in Settings first and `prep(ws)` run: its process's OS log
+    lines after its frames and the scheduler's serves, and its pid."""
     import shutil
     _binding_or_skip()
     if S._svc() is None:
@@ -176,6 +176,8 @@ def _talk(tmp_path, off=()):
     assert echo is not None
     for perm in off:
         ws.consent.turn("local.talk", perm, False)
+    if prep is not None:
+        prep(ws)
     since = L.next()
     try:
         open_cart(ws, "Talk")
@@ -197,8 +199,8 @@ def talk(tmp_path):
     """_talk, its run closed after, so its queue goes with it."""
     held = []
 
-    def run(off=()):
-        got = _talk(tmp_path, off)
+    def run(off=(), prep=None):
+        got = _talk(tmp_path, off, prep)
         held.append(got[:2])
         return got
     yield run
@@ -320,6 +322,43 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
             leases.LEASES.sweep(p)
         N.reset()
         leases.stand_in(None, None)
+
+
+def test_a_compiled_app_talks_on_a_port_of_the_radio_link_by_handle(talk):
+    """A `net` handle from a wasm app (runtime/system/dev_handles.py, docs/
+    netplay_v1.md Ports): its "talk" on port 7 reaches a second console's
+    port 7 from this console's MAC; the second console's message on port 7
+    is the app's record and one on port 8 is not; its run's end closes the
+    port and the radio goes down. The two consoles share
+    tests/test_espnow_link.py's fake air."""
+    from runtime import players as P
+    from test_espnow_link import _Air, _Clock, _FakeRadio, _FakeWlan
+    air, clock = _Air(), _Clock()
+
+    def make(mac, name):
+        radio, wlan = _FakeRadio(air, mac), _FakeWlan(mac)
+        radio.wlan = wlan
+        return P.EspNowLink(board="p4", name=name, ticks_ms=clock, radio=radio, wlan=wlan)
+
+    peer = make(b"\x02" * 6, "Bo")
+    assert peer.open_port(7) == 0 and peer.open_port(8) == 0
+
+    def prep(ws):
+        ws.link = make(b"\x01" * 6, "Ada")
+
+    ws, pid, lines = talk(prep=prep)
+    assert [ln for ln in lines if ln.startswith("net_")] == ["net_open 1", "net_write 4"], lines
+    peer.poll()
+    assert peer.port_take(7) == (b"\x01" * 6, b"talk") and peer.port_take(8) is None
+    since = L.next()
+    assert peer.port_send(7, b"hi there") == 0 and peer.port_send(8, b"not yours") == 0
+    ws.link.poll()
+    _frames(ws, 2)
+    heard = [t for _s, _t, _l, q, t in os_log.records(since, 64)
+             if q == pid and t.startswith("net_")]
+    assert heard == ["net_heard 2 7 hi there"], heard
+    ws.exit()
+    assert ws.link.ports_open() == 0 and not ws.link.active
 
 
 def test_a_compiled_app_joins_a_lorawan_network_by_handle(talk):

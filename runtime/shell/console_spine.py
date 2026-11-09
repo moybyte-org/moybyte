@@ -30,7 +30,7 @@ import moy_app as _moy_app
 
 # The radio's holders: a process's tags, each held under its pid, and the
 # owner of the console's own (moy_lease.SHELL, the shell's pid).
-PROC_TAGS = ("cart", "http", "media", "native")
+PROC_TAGS = ("cart", "http", "media", "native", "net")
 _SHELL = 1
 
 
@@ -497,7 +497,9 @@ class SpineVerbs:
         (`PROC_TAGS`): "cart" (a run with the "network" permission), "http"
         (its `moybyte.http` requests while one runs, dev_http.py), "media"
         (its stream while a URL of its list may play, dev_media.py), "native"
-        (a native process from its first socket to its end, elf_run.py); its
+        (a native process from its first socket to its end, elf_run.py),
+        "net" (its radio link's ports, from the first open to the last
+        close, dev_handles.py); its
         end lets exactly its holds go (the lease table's sweep, then
         `wifi_settle`). A new consumer of the network takes a tag here and
         releases it on its way out, or the radio never goes off again. The

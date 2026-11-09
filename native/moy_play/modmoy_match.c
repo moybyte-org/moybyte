@@ -8,6 +8,9 @@
 //   start(mac), stop(), announce(cart, state), set_config(cfg|None),
 //   offer(cart, now[, seed]) -> bool, poll(now), drain(now, budget), end(),
 //   broadcast(b), send_msg(b) -> 0|-1|-2, take_msg() -> bytes|None,
+//   port_open(port, from) -> 0|code, port_close(port) -> 0|code,
+//   port_send(port, b) -> 0|code, port_take(port, cap) -> (mac, bytes)|None|code,
+//   port_drops(port), port_waiting(port) -> n|-1, ports_open() -> n,
 //   action() -> title|None, dispatch(mac, msg, now), peers(),
 //   candidate(cart, now), begin(index, seed, session, cfg), close(),
 //   pending(now), due(now), advance(held[, now]) -> 1|0|-1, resend(),
@@ -142,6 +145,60 @@ static mp_obj_t mt_take_msg(mp_obj_t self) {
     return n < 0 ? mp_const_none : mp_obj_new_bytes(buf, (size_t)n);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mt_take_msg_obj, mt_take_msg);
+
+static uint16_t port_arg(mp_obj_t o) {
+    mp_int_t p = mp_obj_get_int(o);
+    return p > 0 && p <= 0xFFFF ? (uint16_t)p : 0;
+}
+
+static mp_obj_t mt_port_open(mp_obj_t self, mp_obj_t port, mp_obj_t from) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_open(M(self), port_arg(port),
+                                                    mp_obj_get_int(from)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_port_open_obj, mt_port_open);
+
+static mp_obj_t mt_port_close(mp_obj_t self, mp_obj_t port) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_close(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_close_obj, mt_port_close);
+
+static mp_obj_t mt_port_send(mp_obj_t self, mp_obj_t port, mp_obj_t data) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_send(M(self), port_arg(port), b.buf, b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_port_send_obj, mt_port_send);
+
+static mp_obj_t mt_port_take(mp_obj_t self, mp_obj_t port, mp_obj_t cap) {
+    uint8_t mac[6], buf[MOY_MATCH_MSG_MAX];
+    mp_int_t c = mp_obj_get_int(cap);
+    size_t room = c < 0 ? 0u : (c > MOY_MATCH_MSG_MAX ? MOY_MATCH_MSG_MAX : (size_t)c);
+    int n = moy_match_port_take(M(self), port_arg(port), mac, buf, room);
+    if (n == -1) {
+        return mp_const_none;
+    }
+    if (n < 0) {
+        return MP_OBJ_NEW_SMALL_INT(n);
+    }
+    mp_obj_t t[2] = {mp_obj_new_bytes(mac, 6), mp_obj_new_bytes(buf, (size_t)n)};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_port_take_obj, mt_port_take);
+
+static mp_obj_t mt_port_drops(mp_obj_t self, mp_obj_t port) {
+    return mp_obj_new_int(moy_match_port_drops(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_drops_obj, mt_port_drops);
+
+static mp_obj_t mt_port_waiting(mp_obj_t self, mp_obj_t port) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_waiting(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_waiting_obj, mt_port_waiting);
+
+static mp_obj_t mt_ports_open(mp_obj_t self) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_ports_open(M(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mt_ports_open_obj, mt_ports_open);
 
 static mp_obj_t mt_action(mp_obj_t self) {
     char cart[MOY_MATCH_CART + 1];
@@ -368,6 +425,13 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_broadcast), MP_ROM_PTR(&mt_broadcast_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_msg), MP_ROM_PTR(&mt_send_msg_obj) },
     { MP_ROM_QSTR(MP_QSTR_take_msg), MP_ROM_PTR(&mt_take_msg_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_open), MP_ROM_PTR(&mt_port_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_close), MP_ROM_PTR(&mt_port_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_send), MP_ROM_PTR(&mt_port_send_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_take), MP_ROM_PTR(&mt_port_take_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_drops), MP_ROM_PTR(&mt_port_drops_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_waiting), MP_ROM_PTR(&mt_port_waiting_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ports_open), MP_ROM_PTR(&mt_ports_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_action), MP_ROM_PTR(&mt_action_obj) },
     { MP_ROM_QSTR(MP_QSTR_dispatch), MP_ROM_PTR(&mt_dispatch_obj) },
     { MP_ROM_QSTR(MP_QSTR_peers), MP_ROM_PTR(&mt_peers_obj) },

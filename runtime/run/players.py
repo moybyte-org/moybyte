@@ -7,6 +7,7 @@
 #   Peer              a console the link can hear
 #   EspNowNet         net.* over the link
 #   EspNowLink        the radio's bring-up and the link's actions
+#   open_port         a process's port: its messages, apart from the game's
 #   launch_cart       the guest's half: open the cart a host named
 """The unified, transport-neutral MULTIPLAYER layer (#65).
 
@@ -337,7 +338,12 @@ except ImportError:                     # CPython: the host's ctypes module
     from runtime import moy_play as _mp
 
 PROTO = 3
-T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE = 1, 2, 3, 4, 5, 6
+T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT = 1, 2, 3, 4, 5, 6, 7
+# A process's port (moy_match.h, PORTS): the sender rule it opens with, and
+# what the port calls answer where they fail.
+FROM_ANY, FROM_MATCH = 0, 1
+PORT_BAD, PORT_FULL, PORT_BUSY, PORT_ABSENT, PORT_DOWN = -1, -2, -3, -4, -5
+PORT_MSG_MAX = 240                      # MOY_MATCH_MSG_MAX
 TICK_HZ = 30
 TICK_FAST = 60
 LOCK_MS = 16                            # moy_match.h's MOY_MATCH_LOCK_MS
@@ -692,6 +698,13 @@ class EspNowLink:
     """The console's half of the radio link: the radio's bring-up and
     teardown, the session's slots and the actions the C link leaves.
 
+    Two kinds of holder keep the radio up: the game in front (`start` and
+    `stop`, the Player's, around a run with the "multiplayer" permission)
+    and a process's open port (`open_port` and `close_port`, its `net`
+    handle's: runtime/system/dev_handles.py). The radio stops when the last
+    of them lets go; a game's stop with a port open ends the match and
+    leaves the radio up, its beacon at the launcher's.
+
     `radio`, `wlan` and `launch(ws, title) -> bool` are injectable; left None
     on a board, the radio is the kernel's (`moy_net.Link`'s ring) and the link
     the kernel's instance, which the loop's tail polls with no crossing."""
@@ -764,10 +777,16 @@ class EspNowLink:
             return 0 if m is None else getattr(m, name)
         raise AttributeError(name)
 
+    _game = False                       # the game in front holds the radio
+
     # -- lifecycle --
     def start(self):
-        """Bring the radio up with the measured recipe. Idempotent; a board
+        """The game's radio up with the measured recipe. Idempotent; a board
         with no ESP-NOW degrades to an inactive link, never a crash."""
+        self._game = True
+        return self._up()
+
+    def _up(self):
         if self.active:
             return True
         try:
@@ -827,7 +846,17 @@ class EspNowLink:
             return False
 
     def stop(self, ws=None):
+        """The game's radio let go: the match ends, and the radio stops
+        unless a process's port holds it."""
+        self._game = False
         self.end_match(ws)
+        if self._m is not None and self._m.ports_open():
+            self._m.announce("", 0)
+            self._m.action()            # the stopped run's request, as stop() drops it
+            return
+        self._down()
+
+    def _down(self):
         if self.radio is not None:
             try:
                 self.radio.active(False)
@@ -844,6 +873,47 @@ class EspNowLink:
 
     def broadcast(self, payload):
         return self.active and self._m.broadcast(payload)
+
+    # -- a process's ports --
+    def open_port(self, port, frm=FROM_ANY):
+        """Port `port` (1..65535) opened, the radio brought up for it: 0, or
+        PORT_BAD, PORT_FULL (every slot taken), PORT_BUSY (open already),
+        PORT_DOWN (no radio)."""
+        if not 0 < port <= 0xFFFF:
+            return PORT_BAD
+        if not self._up():
+            return PORT_DOWN
+        return self._m.port_open(port, frm)
+
+    def close_port(self, port):
+        """Port `port` closed, what waits on it dropped; the last port's close
+        stops the radio when no game holds it."""
+        if self._m is None:
+            return PORT_ABSENT
+        rc = self._m.port_close(port)
+        if not self._game and not self._m.ports_open():
+            self._down()
+        return rc
+
+    def port_send(self, port, body):
+        """One broadcast message on `port`: 0, PORT_BAD (more than
+        PORT_MSG_MAX bytes) or PORT_DOWN."""
+        return PORT_DOWN if self._m is None else self._m.port_send(port, body)
+
+    def port_take(self, port, cap=PORT_MSG_MAX):
+        """(sender's MAC, bytes) of the oldest message on `port`, None with
+        none, PORT_FULL where it is longer than `cap` (it waits on), or
+        PORT_ABSENT."""
+        return PORT_ABSENT if self._m is None else self._m.port_take(port, cap)
+
+    def port_drops(self, port):
+        return -1 if self._m is None else self._m.port_drops(port)
+
+    def port_waiting(self, port):
+        return -1 if self._m is None else self._m.port_waiting(port)
+
+    def ports_open(self):
+        return 0 if self._m is None else self._m.ports_open()
 
     # -- the frame --
     def drain_input(self, budget=DRAIN_MAX):

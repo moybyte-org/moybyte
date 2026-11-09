@@ -28,6 +28,7 @@
 #   _media_roots             the folders a process's media handle plays from
 #   _Media                   media: the media service's stream by handle
 #   _Pins                    pins: the console's pins switched by handle
+#   _Net                     net: the radio link's messages on a port
 """Leases and device APIs by handle: what a compiled program (a wasm app, a
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
@@ -38,7 +39,7 @@ WASI program, an ELF module) holds where a Python program holds an object
                             "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",
                             "adc<n>", "i2c") or a device API ("http", "lora",
                             "mic", "ble", "usb", "midi", "camera",
-                            "media", "pins"), configured by `cfg`
+                            "media", "pins", "net"), configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
   write(h, bytes) -> n      what was sent
@@ -158,6 +159,21 @@ answers:
             pins) drives each as an output; get gpio<n> reads one, an input
             where it was not driven; a pin another process holds is BUSY;
             its close gives back the pins it took
+  net       the console-to-console radio link (docs/netplay_v1.md, Ports),
+            one port a handle: cfg port=1..65535 (required; port 0 is the
+            game's net.send and on_net) and from=any|match (any by
+            default: every console in range, as a datagram socket hears;
+            match: only the live match's peer, nothing outside a match);
+            a port another process holds is BUSY; write: one message, at
+            most 240 bytes, to every console in range on the handle's port
+            (BAD for more, IO where the radio refused it); read: the
+            messages heard on it, whole records only (FULL where the next
+            does not fit, which waits): the sender's MAC (6 bytes), the
+            port (u16) and n (u16), then n bytes; get port, drops (messages
+            the port's queue, four deep, dropped while full), peers
+            (consoles heard). A process holds NET_PORTS ports at most (FULL
+            past them), and the console MOY_MATCH_PORTS (FULL too); the
+            radio stays up while any port is open
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
@@ -167,7 +183,8 @@ device (a Python program's object, or another compiled program's handle; a
 process opens every device API but http and midi once), BAD for a name, a
 key or a value this console does not take, ABSENT for a handle not open, a
 device this console lacks and a radio verb that needs a connection or a
-join, FULL where `into` cannot hold one record, IO where the driver failed.
+join, FULL where `into` cannot hold one record or a table has no room, IO
+where the driver failed.
 The process's end (moybyte.ENDS) closes every handle it left open, before
 the leases' sweep and the device APIs' run.
 
@@ -1259,13 +1276,102 @@ class _Pins(_Handle):
         self.took = []
 
 
+NET_HEAD = 10               # a net record's head: the sender (6 bytes), port, n (u16)
+NET_PORTS = 4               # the ports a process holds at once
+_NET_CODE = {-1: EINVAL, -2: ENOSPC, -3: EBUSY, -4: EBADF, -5: EIO}
+
+
+def _link():
+    try:
+        import devices
+    except ImportError:  # host: the runtime package
+        from runtime import devices
+    ws = devices.console
+    link = getattr(ws, "link", None)
+    if link is None:
+        raise OSError(ENODEV, "this console has no radio link")
+    return ws, link
+
+
+def _net_rc(rc):
+    if rc < 0:
+        raise OSError(_NET_CODE.get(rc, EIO), "net %d" % rc)
+    return rc
+
+
+class _Net(_Handle):
+    """One port of the radio link (players.EspNowLink's ports), the
+    process's radio hold ("net") taken at its first port and let go at its
+    last."""
+
+    def __init__(self, pid, cfg):
+        _only(cfg, ("port", "from"))
+        port = _int(cfg.get("port"), 1, 0xFFFF, "port")
+        frm = {"any": 0, "match": 1}.get(cfg.get("from", "any"))
+        if frm is None:
+            raise OSError(EINVAL, "from=%r" % (cfg.get("from"),))
+        if sum(1 for x in HANDLES.get(pid, {}).values() if type(x) is _Net) >= NET_PORTS:
+            raise OSError(ENOSPC, "a process holds %d ports" % NET_PORTS)
+        ws, self.link = _link()
+        self.port = port
+        hold = getattr(ws, "wifi_hold", None)
+        if hold is not None:
+            hold("net", pid)
+        try:
+            _net_rc(self.link.open_port(port, frm))
+        except BaseException:
+            self._let_go(ws, pid)
+            raise
+
+    def write(self, data):
+        if len(data) > 240:
+            raise OSError(EINVAL, "a message is at most 240 bytes")
+        _net_rc(self.link.port_send(self.port, data))
+        return len(data)
+
+    def read(self, cap):
+        out = bytearray()
+        head = self.port.to_bytes(2, "little")
+        while True:
+            room = cap - len(out) - NET_HEAD
+            r = self.link.port_take(self.port, room) if room >= 0 else None
+            if r is None or r == -2:
+                break
+            if isinstance(r, int):
+                _net_rc(r)
+            mac, body = r
+            out += mac + head + len(body).to_bytes(2, "little") + body
+        if not out and (r == -2 or (r is None and self.link.port_waiting(self.port) > 0)):
+            return FULL
+        return bytes(out)
+
+    def get(self, what):
+        if what == "port":
+            return self.port
+        if what == "drops":
+            return _net_rc(self.link.port_drops(self.port))
+        if what == "peers":
+            return len(self.link.peers)
+        raise OSError(EINVAL, "no %s" % what)
+
+    def _let_go(self, ws, pid):
+        if not any(type(x) is _Net for x in HANDLES.get(pid, {}).values()):
+            release = getattr(ws, "wifi_release", None)
+            if release is not None:
+                release("net", pid)
+
+    def close(self, pid):
+        self.link.close_port(self.port)
+        self._let_go(_link()[0], pid)
+
+
 _DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb,
             "midi": _Midi, "camera": _Camera,
-            "media": _Media, "pins": _Pins}
+            "media": _Media, "pins": _Pins, "net": _Net}
 # A device with one holder: a process opens it once.
 _ONE = ("lora", "mic", "ble", "usb", "camera", "media", "pins")
 # The permissions a device needs, one of them, where they are not its name.
-_PERMS = {"media": ("media", "media:url")}
+_PERMS = {"media": ("media", "media:url"), "net": ("multiplayer",)}
 
 
 def _need(pid, name):
@@ -1305,7 +1411,7 @@ def open(pid, name, cfg=None):  # noqa: A001 -- the row's verb
             _need(pid, name)
             if name in _ONE and any(type(x) is dev for x in HANDLES.get(pid, {}).values()):
                 raise OSError(EBUSY, "%s is open" % name)
-            hd = dev(c)
+            hd = dev(pid, c) if dev is _Net else dev(c)
         h = _NEXT[0]
         _NEXT[0] += 1
         HANDLES.setdefault(pid, {})[h] = hd

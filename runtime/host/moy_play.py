@@ -767,6 +767,9 @@ _M_CART = 121
 _M_CFG = 101
 _M_FRAME = 250
 _M_CHECKS = 4
+_M_MSG = 240
+_M_PORTS = 8
+_M_PORT_DEPTH = 4
 
 
 class _Peer(ctypes.Structure):
@@ -809,6 +812,17 @@ class _Lockstep(ctypes.Structure):
                 ("slew_ms", _I32), ("peer_mac", _U8 * 6), ("bound", _B)]
 
 
+class _Port(ctypes.Structure):
+    _fields_ = [("port", _U16), ("from_", _U8), ("n", _U8), ("head", _U8), ("drops", _U32),
+                ("mac", (_U8 * 6) * _M_PORT_DEPTH), ("len", _U8 * _M_PORT_DEPTH),
+                ("data", (_U8 * _M_MSG) * _M_PORT_DEPTH)]
+
+
+def _port(port):
+    port = int(port)
+    return port if 0 < port <= 0xFFFF else 0
+
+
 class _MatchS(ctypes.Structure):
     _fields_ = [("io", ctypes.c_void_p), ("active", _B), ("mac", _U8 * 6),
                 ("name", ctypes.c_char * 24), ("board", ctypes.c_char * 16),
@@ -821,7 +835,8 @@ class _MatchS(ctypes.Structure):
                 ("defer_mac", (_U8 * 6) * 8), ("defer_len", _U8 * 8),
                 ("defer", (_U8 * _M_FRAME) * 8), ("inbox_n", _U8), ("inbox_head", _U8),
                 ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
-                ("inbox_drops", _U32), ("act", _U8), ("act_cart", ctypes.c_char * _M_CART),
+                ("inbox_drops", _U32), ("ports", _Port * _M_PORTS), ("act", _U8),
+                ("act_cart", ctypes.c_char * _M_CART),
                 ("error", ctypes.c_char * 48), ("world_check", _B), ("rate", _U8),
                 ("hold", _B), ("ch", _U8), ("pinned", _B), ("probe", _U8), ("probe_at", _U8)]
 
@@ -858,6 +873,15 @@ _MSIGS = (
     ("moy_match_send_msg", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_int),
     ("moy_match_take_msg", [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t], ctypes.c_int),
     ("moy_match_action", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_port_open", [ctypes.c_void_p, _U16, ctypes.c_int], ctypes.c_int),
+    ("moy_match_port_close", [ctypes.c_void_p, _U16], ctypes.c_int),
+    ("moy_match_port_send", [ctypes.c_void_p, _U16, ctypes.c_char_p, ctypes.c_size_t],
+     ctypes.c_int),
+    ("moy_match_port_take", [ctypes.c_void_p, _U16, ctypes.c_void_p, ctypes.c_void_p,
+                             ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_port_drops", [ctypes.c_void_p, _U16], _I32),
+    ("moy_match_port_waiting", [ctypes.c_void_p, _U16], ctypes.c_int),
+    ("moy_match_ports_open", [ctypes.c_void_p], ctypes.c_int),
     ("moy_match_dispatch", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
                             ctypes.c_size_t, _U32], None),
     ("moy_match_candidate", [ctypes.c_void_p, ctypes.c_char_p, _U32], ctypes.c_void_p),
@@ -1088,6 +1112,36 @@ class Match:
         buf = ctypes.create_string_buffer(_M_FRAME)
         n = self._d.moy_match_take_msg(self._p, buf, _M_FRAME)
         return None if n < 0 else buf.raw[:n]
+
+    def port_open(self, port, frm):
+        return self._d.moy_match_port_open(self._p, _port(port), int(frm))
+
+    def port_close(self, port):
+        return self._d.moy_match_port_close(self._p, _port(port))
+
+    def port_send(self, port, body):
+        body = bytes(body)
+        return self._d.moy_match_port_send(self._p, _port(port), body, len(body))
+
+    def port_take(self, port, cap):
+        """(sender, bytes) of the oldest record on `port`, None with none
+        waiting, or a MOY_MATCH_PORT_* code."""
+        mac = ctypes.create_string_buffer(6)
+        buf = ctypes.create_string_buffer(_M_MSG)
+        n = self._d.moy_match_port_take(self._p, _port(port), mac, buf,
+                                        max(0, min(int(cap), _M_MSG)))
+        if n == -1:
+            return None
+        return n if n < 0 else (mac.raw, buf.raw[:n])
+
+    def port_drops(self, port):
+        return self._d.moy_match_port_drops(self._p, _port(port))
+
+    def port_waiting(self, port):
+        return self._d.moy_match_port_waiting(self._p, _port(port))
+
+    def ports_open(self):
+        return self._d.moy_match_ports_open(self._p)
 
     def action(self):
         buf = ctypes.create_string_buffer(_M_CART)

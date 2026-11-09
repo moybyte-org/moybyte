@@ -34,7 +34,10 @@
 // handle, and a handle it was never given; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
-// reads back, and keeps it playing until the service ends; a "bye" ends it, a "quit" returns
+// reads back, and keeps it playing until the service ends; a "wake" carrying
+// ["net"] opens port 7 of the radio link by handle and says "svc" on it, and
+// from then on each tick reads the port's records and prints each (the
+// sender's last byte, the port and the bytes); a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -70,7 +73,7 @@ int main(void) {
         moy_evq_ev_t ev;
         char b[sizeof(moy_evq_ev_t) + 256];
     } m;
-    int ticks = 0, pings = 0, ticker = 0;
+    int ticks = 0, pings = 0, ticker = 0, net = 0;
     long next = now_ms() + TICK_MS;
     for (;;) {
         long left = next - now_ms();
@@ -82,6 +85,13 @@ int main(void) {
         if (n == 0) {
             ticks++;
             next += TICK_MS;
+            unsigned char r[256];
+            int k = net > 0 ? (int)moy_dev_read(net, r, sizeof r) : 0;
+            for (int at = 0; at + 10 <= k; at += 10 + (r[at + 8] | r[at + 9] << 8)) {
+                printf("net_heard %d %d %.*s\n", r[at + 5], r[at + 6] | r[at + 7] << 8,
+                       r[at + 8] | r[at + 9] << 8, (const char *)r + at + 10);
+                fflush(stdout);
+            }
             continue;
         }
         ssize_t got = read(MOY_EVQ_FD, &m, sizeof m);
@@ -143,6 +153,12 @@ int main(void) {
             printf("ble_connect %d errno %d\n", c, c < 0 ? errno : 0);
             c = (int)moy_dev_get(h, "connected");
             printf("ble_connected %d errno %d\n", c, c < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0 && strcmp(m.b + sizeof m.ev, "[\"net\"]") == 0) {
+            net = (int)moy_dev_open("net", "port=7");
+            printf("net_open %d errno %d\n", net > 0 ? 1 : net, net < 0 ? errno : 0);
+            int r = (int)moy_dev_write(net, "svc", 3);
+            printf("net_write %d errno %d\n", r, r < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0
                    && strcmp(m.b + sizeof m.ev, "[\"timers\"]") == 0) {

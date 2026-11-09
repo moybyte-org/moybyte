@@ -541,8 +541,8 @@ moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s
 Leases (Python gets them as `machine` objects, §1:
 `moybyte.lease(name, **cfg)` and `moybyte.pins()`; `pins` is the digital
 subset every tier may hold), and on the compiled tiers leases and the
-`http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices and the
-`pins` by handle (`runtime/system/dev_handles.py`;
+`http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices, the
+`pins` and the radio link's ports (`net`) by handle (`runtime/system/dev_handles.py`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
 ```
@@ -581,6 +581,10 @@ media dev_write: play the source the bytes name; volume=<0..100> pause=1|0 seek=
       stamp, mine, ...; dev_read: title, artist, station, src (four lines);
       dev_xfer: a file's probe (seconds u32, then title and artist)
 pins  gpio<n>=0|1 ...: each pin driven; dev_get gpio<n>: one read (an input if not driven)
+net   open: port=<1..65535> [from=any|match], one port a handle (docs/netplay_v1.md §2)
+      dev_write: one message to every console in range on the port, 240 bytes at most
+      dev_read: the port's messages, whole records: the sender's MAC (6 bytes),
+                port u16, n u16, then n bytes; dev_get: port, drops, peers
 ```
 
 A `ble`, `usb` or `midi` handle reads its driver's ring through a reader

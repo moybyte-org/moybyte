@@ -96,7 +96,7 @@ TABLE = (
     ("clipboard", "role:clipboard", ("python", "lua", "wasm", "elf"),
      "Use the clipboard", None, ("clipboard",)),
     ("network", "api:wifi", ("python", "elf"), "Use Wi-Fi and the internet", "wifi", ("wifi",)),
-    ("multiplayer", "api:net", ("python", "lua", "wasm"),
+    ("multiplayer", "api:net", ("python", "lua", "wasm", "elf"),
      "Talk to nearby consoles", "net", ("net", "on_net")),
     ("pins", "api:gpio", ("python", "lua", "wasm", "elf"),
      "Switch the console's pins", "gpio", ("pin_write", "pin_read")),

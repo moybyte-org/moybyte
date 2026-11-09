@@ -194,6 +194,33 @@ on, so it re-runs that cart and opens nothing else. A console that takes the
 peer's address can still do all of it: the check narrows who, it does not
 authenticate.
 
+**Ports: the link is a device any process opens** (owner, 2026-11-09,
+recorded on #246). Like a socket, the link belongs to no one game: the
+lockstep match stays the game in front's, and messages are delivered to each
+holder by port. `net.send` and `on_net` are port 0, the game's, on the wire
+they always spoke (`T_MSG`, no port byte). A process opens a port 1..65535
+by a `net` handle (`runtime/system/dev_handles.py`, under `multiplayer`;
+`docs/app_api_v1.md` §10), one holder a port, and a port's message is
+`T_PORT` (`MOY_MATCH_T_PORT`, 7): the port as two little-endian bytes after
+the type, then at most 240 bytes. A new frame type left `MOY_MATCH_PROTO` at
+3: a console without ports drops a `T_PORT` as an unknown type and still
+plays and talks on port 0. Each open port keeps its own queue
+(`MOY_MATCH_PORT_DEPTH` deep, the newest dropped and counted while it is
+full), a message for a port nobody opened is dropped, and a read takes whole
+records carrying the sender's MAC. Who a port hears is chosen per port: port
+0 keeps the rule above (the match's peer, else a console beaconing this
+cart); an open port (`from=any`, the default) hears every console in range,
+a datagram socket's rule, its holder judging the sender (radio input is
+untrusted: `docs/os_2026-11/threat_model.md` §5); a `from=match` port hears
+only the live match's peer and nothing outside a match. No port reaches the
+session: an input frame is `T_INPUT` and a `T_PORT` never is, whatever its
+bytes. The radio is up while the game holds it or any port is open
+(`EspNowLink`'s two holders, the process's radio lease `net`); a game's end
+with a port open ends the match and leaves the radio beaconing the
+launcher's state, and the last port's close takes it down. A process holds
+four ports and the console `MOY_MATCH_PORTS` (8); the process's end closes
+what it left open.
+
 ## 3. Nothing waits forever — every death has one exit
 
 A frozen screen with no explanation is what this removes. Every way a match can
@@ -250,7 +277,8 @@ either field, and the kernel's loop writes both from its own match
 ## 4. Radio facts, one session each
 
 - **A restart must not stop the link.** `Player.release_world` stops it only
-  when `ws.netplay` is None. A match forms by a peer's invite reaching a console
+  when `ws.netplay` is None, and the stop leaves the radio up while a
+  process's port holds it (§2, Ports). A match forms by a peer's invite reaching a console
   already playing, which re-runs the cart from frame zero; the dying run used to
   tear down the session that caused the restart, presenting as a host frozen at
   frame 0 showing a tank nobody drove.

@@ -54,6 +54,16 @@
 // a net message is taken from a console heard beaconing this cart). A START
 // is taken only for the cart this console sits on (announce) and from a
 // console heard beaconing, so it can re-run that cart and open nothing else.
+// A PORT's message is taken from the console its port names: FROM_ANY any
+// console in range (a datagram socket's rule: its record carries the sender
+// for the process to judge), FROM_MATCH only the live match's peer.
+//
+// PORTS. T_MSG is port 0, the game's: the cart in front's net.send and
+// on_net. A process opens a port 1..65535 (one opener a port), and T_PORT
+// carries its number; a message for a port nobody opened is dropped, and
+// each open port keeps its own queue, PORT_DEPTH records deep, the newest
+// dropped and counted while it is full. A port never sees an INPUT frame,
+// and a port's frame never reaches the session or the game's inbox.
 //
 // THE CONSOLE'S HALF. What the link cannot do itself -- open the cart a host
 // named, re-run the cart from frame zero -- it leaves as one ACTION the
@@ -76,6 +86,7 @@
 enum {
     MOY_MATCH_T_BEACON = 1, MOY_MATCH_T_JOIN = 2, MOY_MATCH_T_START = 3,
     MOY_MATCH_T_INPUT = 4, MOY_MATCH_T_MSG = 5, MOY_MATCH_T_BYE = 6,
+    MOY_MATCH_T_PORT = 7,               // [proto, 7, port lo, port hi, body]
 };
 
 // The lockstep clock and its levers (configuration; docs/netplay_v1.md has
@@ -141,6 +152,18 @@ enum {
 #define MOY_MATCH_CART 120              // the title START carries
 #define MOY_MATCH_DEFER 8               // non-input frames a mid-frame drain parks
 #define MOY_MATCH_INBOX 8               // net.* messages waiting for the cart
+#define MOY_MATCH_PORTS 8               // ports open on this console at once
+#define MOY_MATCH_PORT_DEPTH 4          // records a port keeps unread
+#define MOY_MATCH_PORT_HDR 4
+enum { MOY_MATCH_FROM_ANY = 0, MOY_MATCH_FROM_MATCH = 1 };
+// What the port calls answer where they fail.
+enum {
+    MOY_MATCH_PORT_BAD = -1,            // port 0 or out of range, a body too big
+    MOY_MATCH_PORT_FULL = -2,           // no port free; a take's `cap` short of the record
+    MOY_MATCH_PORT_BUSY = -3,           // the port is open already
+    MOY_MATCH_PORT_ABSENT = -4,         // the port is not open
+    MOY_MATCH_PORT_DOWN = -5,           // the link is down or the radio refused the send
+};
 
 // The transport. `recv` answers the payload's length, -1 when the ring is
 // empty, -2 on a radio error (the link then calls `recover`).
@@ -167,6 +190,17 @@ typedef struct {
     uint8_t ch;                         // the channel it beacons on; 0 unsaid
     bool pinned;                        // ...an associated station's, which it cannot leave
 } moy_match_peer_t;
+
+// One open port's queue, oldest first.
+typedef struct {
+    uint16_t port;                      // 0: the slot is free
+    uint8_t from;                       // MOY_MATCH_FROM_*
+    uint8_t n, head;
+    uint32_t drops;
+    uint8_t mac[MOY_MATCH_PORT_DEPTH][6];
+    uint8_t len[MOY_MATCH_PORT_DEPTH];
+    uint8_t data[MOY_MATCH_PORT_DEPTH][MOY_MATCH_MSG_MAX];
+} moy_match_port_t;
 
 typedef struct {
     bool live;
@@ -284,6 +318,7 @@ typedef struct {
     uint8_t inbox_len[MOY_MATCH_INBOX];
     uint8_t inbox[MOY_MATCH_INBOX][MOY_MATCH_FRAME];
     uint32_t inbox_drops;
+    moy_match_port_t ports[MOY_MATCH_PORTS];
     // The console's pending action.
     uint8_t act;
     char act_cart[MOY_MATCH_CART + 1];
@@ -339,6 +374,26 @@ bool moy_match_broadcast(moy_match_t *m, const uint8_t *p, size_t n);
 int moy_match_send_msg(moy_match_t *m, const uint8_t *body, size_t n);
 // The oldest waiting net.* message into `out`: its length, or -1 with none.
 int moy_match_take_msg(moy_match_t *m, uint8_t *out, size_t cap);
+// PORTS: `port` 1..65535 opened, its sender rule `from` (MOY_MATCH_FROM_*):
+// 0, or MOY_MATCH_PORT_BAD, _FULL (every slot taken), _BUSY (open already).
+// The port stays open across the link's stop and start; its close drops
+// what waits.
+int moy_match_port_open(moy_match_t *m, uint16_t port, int from);
+int moy_match_port_close(moy_match_t *m, uint16_t port);
+// One broadcast T_PORT carrying `body` on `port` (open or not): 0, or _BAD
+// (port 0, more than MOY_MATCH_MSG_MAX bytes), _DOWN.
+int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size_t n);
+// The oldest record waiting on `port`: its sender into `mac`, its bytes into
+// `out`, and its length; -1 with none waiting, _FULL where `cap` is short
+// of it (it waits on), _ABSENT where the port is not open.
+int moy_match_port_take(moy_match_t *m, uint16_t port, uint8_t mac[6], uint8_t *out,
+                        size_t cap);
+// Records `port` dropped while its queue was full, and how many wait: -1
+// where it is not open.
+int32_t moy_match_port_drops(const moy_match_t *m, uint16_t port);
+int moy_match_port_waiting(const moy_match_t *m, uint16_t port);
+// How many ports are open.
+int moy_match_ports_open(const moy_match_t *m);
 // The console's pending action, taken: ACT_LAUNCH with the cart's title.
 int moy_match_action(moy_match_t *m, char *cart, size_t cap);
 int moy_match_peer_count(const moy_match_t *m, uint32_t now);

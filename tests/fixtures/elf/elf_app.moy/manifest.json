@@ -14,7 +14,8 @@
       "lease:uart1",
       "lease:spi2",
       "ble",
-      "usb"
+      "usb",
+      "multiplayer"
     ],
     "achievements": [
       {

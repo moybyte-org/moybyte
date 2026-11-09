@@ -26,6 +26,10 @@
 // device's line opened and written, the write's SENT record read back, a
 // keyboard's line refused and a second handle refused; it ends holding the
 // host, for its end to let go.
+// `app net` opens port 7 of the radio link by handle and says "elf" on it,
+// reads the port until a record comes (two seconds at most) and prints it
+// (the sender's last byte, the port and the bytes), a second handle on the
+// port refused; it ends holding the port, for its end to close.
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -242,6 +246,25 @@ static int usb(void) {
     return 0;
 }
 
+static int net(void) {
+    uint8_t r[256];
+    int32_t h = moy_dev_open("net", "port=7");
+    said("dev_open.net", h > 0 ? 1 : h, NULL);
+    said("dev_write", moy_dev_write(h, "elf", 3), NULL);
+    int32_t n = 0;
+    for (int i = 0; i < 200 && (n = moy_dev_read(h, r, sizeof r)) == 0; i++) {
+        usleep(10000);
+    }
+    if (n >= 10) {
+        printf("heard %d %d %.*s\n", r[5], r[6] | r[7] << 8, r[8] | r[9] << 8,
+               (const char *)r + 10);
+    } else {
+        said("dev_read", n, NULL);
+    }
+    said("dev_open.again", moy_dev_open("net", "port=7"), NULL);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "pick") == 0) {
         return pick();
@@ -260,6 +283,9 @@ int main(int argc, char **argv) {
     }
     if (argc > 1 && strcmp(argv[1], "usb") == 0) {
         return usb();
+    }
+    if (argc > 1 && strcmp(argv[1], "net") == 0) {
+        return net();
     }
     char buf[256];
     int32_t r = moy_prefs_set("level", "42");

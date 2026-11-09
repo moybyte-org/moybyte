@@ -348,6 +348,42 @@ def test_a_native_command_drives_the_usb_host_by_handle_and_its_end_lets_it_go(t
         usb_sim.remove()
 
 
+def test_a_native_command_talks_on_a_port_of_the_radio_link_and_its_end_closes_it(
+        term, monkeypatch):
+    """`moy_dev_*` on a `net` handle (elf_app.moy's `app net`, docs/
+    netplay_v1.md Ports): its "elf" on port 7 reaches a second console, whose
+    answer on port 7 is the record it reads, the sender's MAC first; a
+    second handle on the port EBUSY. Its end closes the port and the radio
+    goes down. The two consoles share tests/test_espnow_link.py's fake air,
+    each polled at the loop's tail as a board's kernel polls its link."""
+    from runtime import moy_sh
+    from runtime import players as P
+    from test_espnow_link import _Air, _Clock, _FakeRadio, _FakeWlan
+    ws, app = term
+    air, clock = _Air(), _Clock()
+
+    def make(mac, name):
+        radio, wlan = _FakeRadio(air, mac), _FakeWlan(mac)
+        radio.wlan = wlan
+        return P.EspNowLink(board="p4", name=name, ticks_ms=clock, radio=radio, wlan=wlan)
+    ws.link, other = make(b"\x01" * 6, "Ada"), make(b"\x02" * 6, "Bo")
+    assert other.open_port(7) == 0
+    real = moy_sh.jobs
+
+    def jobs():
+        other.poll()
+        got = other.port_take(7)
+        if got is not None:
+            other.port_send(7, b"hi " + got[1])
+        ws.link.poll()
+        return real()
+    monkeypatch.setattr(moy_sh, "jobs", jobs)
+    assert out(app, "elf.app/app net; echo status $?") == [
+        "dev_open.net 1", "dev_write 3", "heard 2 7 hi elf", "dev_open.again -1 EBUSY",
+        "status 0"]
+    assert ws.link.ports_open() == 0 and not ws.link.active
+
+
 def test_the_crypto_rows_answer_a_native_command(term):
     """The crypto rows from C (tests/fixtures/elf/elf_crypto.moy): the known
     answers, and each length refused an errno, never a crash."""

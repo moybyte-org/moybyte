@@ -385,7 +385,7 @@ def test_a_micropython_lib_driver_runs_unchanged_on_a_leased_bus(tmp_path):
 
 def test_the_radios_tags_are_the_closed_set():
     assert N.WIFI_TAGS == ("web", "update", "settings", "cart", "link", "carts", "dev",
-                           "http", "media", "ssh", "native")
+                           "http", "media", "ssh", "native", "net")
     w = N.Wifi()
     for i, tag in enumerate(N.WIFI_TAGS):
         assert w.hold(tag) == (1 << (i + 1)) - 1 and w.held(tag)

@@ -372,6 +372,60 @@ def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms):
     assert s.stop(pid)
 
 
+def _links():
+    """Two consoles' links on tests/test_espnow_link.py's fake air: this
+    console's (radio down) and a peer's."""
+    from runtime import players as P
+    from test_espnow_link import _Air, _Clock, _FakeRadio, _FakeWlan
+    air, clock = _Air(), _Clock()
+
+    def make(mac, name):
+        radio, wlan = _FakeRadio(air, mac), _FakeWlan(mac)
+        radio.wlan = wlan
+        return P.EspNowLink(board="p4", name=name, ticks_ms=clock, radio=radio, wlan=wlan)
+    return make(b"\x01" * 6, "Ada"), make(b"\x02" * 6, "Bo")
+
+
+@pytest.mark.parametrize("perms", [("multiplayer",), ()])
+def test_a_wasi_service_talks_on_a_port_of_the_radio_link_by_handle(svc, perms):
+    """moybyte.os `dev_*` on a `net` handle (docs/netplay_v1.md, Ports): its
+    "svc" on port 7 reaches a second console's port 7, the second console's
+    message on port 7 is a record its tick reads and one on port 8 is not;
+    its end closes the port and the radio goes down, its stop serving the
+    read a tick of it waits on. Each refused ACCES without `multiplayer`."""
+    ws, s, cart, peer = svc
+    link, other = _links()
+    ws.link = link
+    assert other.open_port(7) == 0 and other.open_port(8) == 0
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["net"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("net_write ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    got = [t for t in _texts(since, pid) if t.startswith("net_")]
+    if not perms:
+        assert got == ["net_open -1 errno 2", "net_write -1 errno 44"], got
+        assert not link.active
+        assert s.stop(pid)
+        return
+    assert got == ["net_open 1 errno 0", "net_write 3 errno 0"], got
+    other.poll()
+    assert other.port_take(7) == (b"\x01" * 6, b"svc")
+    assert other.port_send(7, b"hello svc") == 0 and other.port_send(8, b"not yours") == 0
+
+    def heard():
+        link.poll()
+        return any(t.startswith("net_heard ") for t in _texts(since, pid))
+    assert _polled(s, heard), _texts(since, pid)
+    assert [t for t in _texts(since, pid) if t.startswith("net_heard ")] == [
+        "net_heard 2 7 hello svc"]
+    assert s.stop(pid)
+    assert _texts(since, pid)[-1] == "exit 0", "its stop answered the read its tick hopped with"
+    assert link.ports_open() == 0
+    assert not link.active
+
+
 def test_the_fixture_is_a_service():
     with open(os.path.join(FIXTURE, "manifest.json")) as f:
         man = json.load(f)
