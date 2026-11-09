@@ -116,14 +116,21 @@ def test_its_app_calls_are_answered_on_the_vms_task(svc):
 
 def test_a_native_service_s_timer_is_the_system_s_message(svc):
     """moy_after answers its timer's id, which goes off as the system's
-    message "moybyte.timer" on the service's event descriptor."""
+    message "moybyte.timer" on the service's event descriptor. The tick that
+    fires the timer also serves the VM's queues, so the peer hears "timed"
+    as a VM process does, through its handler."""
     ws, s, cart, peer = svc
     pid = S.start_cart(ws, cart, s)
+    heard = []
+    L.current(peer)
+    try:
+        moybyte.on("timed", lambda app, wid: heard.append((app, wid)))
+    finally:
+        L.current(L.SHELL)
     assert _polled(s, lambda: moy_evq.send(peer, "elf.svc", "wake", "[]")[0] == 1)
-    assert _polled(s, lambda: s.tick() >= 0 and moy_evq.queued(peer) == 1)
-    frm, app, name, args = moy_evq.take(peer)
-    assert (frm, app, name) == (pid, "elf.svc", "timed")
-    assert int(json.loads(args)[0]) > 0
+    assert _polled(s, lambda: s.tick() >= 0 and heard)
+    [(app, wid)] = heard
+    assert app == "elf.svc" and wid > 0
     assert s.stop(pid)
 
 
