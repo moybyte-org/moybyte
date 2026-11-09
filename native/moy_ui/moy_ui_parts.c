@@ -64,7 +64,7 @@ static int tok(const pd_t *d, int token, int alt) {
 }
 
 static uint16_t pal(const pd_t *d, int ci) {
-    return d->row->pal[moy_ui_pidx(ci)];
+    return d->row->pal[moy_ui_pidx(d->s->cart, ci)];
 }
 
 // A look colour (an index, or RGB) in the buffer's order.
@@ -219,12 +219,12 @@ static pf_t font_of(const pd_t *d, int role) {
     pf_t f = {MOY_FONT_PETME128, MOY_TEXT_CELL, MOY_TEXT_CELL - 1, MOY_TEXT_CELL};
     if (!d->run) {
         moy_font_info_t fi;
-        f.id = moy_ui_font(role, &fi);
+        f.id = moy_ui_font(d->s->cart, role, &fi);
         f.line = fi.line;
         f.ascent = fi.ascent;
         f.deep = fi.h;
         if (role == MOY_UI_FONT_CAPTION && f.id == MOY_FONT_PETME128) {
-            f.id = moy_ui_font(MOY_UI_FONT_UI, &fi);
+            f.id = moy_ui_font(d->s->cart, MOY_UI_FONT_UI, &fi);
             f.line = fi.line;
             f.ascent = fi.ascent;
             f.deep = fi.h;
@@ -236,11 +236,17 @@ static pf_t font_of(const pd_t *d, int role) {
 // The row of a font's line its letters' ink starts at (a capital's top, an
 // ascender's), probed once a font by drawing them a row at a time: the
 // room a line keeps above its letters (an accent's) is not the letters'.
+// Kept a font slot (moy_text's id: the slot in its low byte, its generation
+// above) in one word, the id's generation, the top and a set bit, so any
+// task reads a whole entry or none: two that probe at once write the same.
+static uint32_t s_ink_top[MOY_FONT_SLOTS + 1];
+
 static int ink_top(const pf_t *f) {
-    static uint32_t s_font = 0xFFFFFFFFu;
-    static int s_top = 0;
-    if (f->id == s_font) {
-        return s_top;
+    uint32_t k = f->id & 0xffu;
+    uint32_t *e = k <= MOY_FONT_SLOTS ? &s_ink_top[k] : NULL;
+    uint32_t w = e != NULL ? __atomic_load_n(e, __ATOMIC_RELAXED) : 0;
+    if ((w & 0x80u) && (w >> 8) == (f->id >> 8)) {
+        return (int)(w & 0x7fu);
     }
     static const uint8_t probe[] = "MHdlkbij";
     uint16_t px[96];
@@ -259,8 +265,9 @@ static int ink_top(const pf_t *f) {
             break;
         }
     }
-    s_font = f->id;
-    s_top = top;
+    if (e != NULL && top < 0x80) {
+        __atomic_store_n(e, (f->id & ~0xffu) | 0x80u | (uint32_t)top, __ATOMIC_RELAXED);
+    }
     return top;
 }
 
@@ -461,7 +468,7 @@ static int icon_d(pd_t *d, int slot, int glyph, moy_ui_box_t b, int ci) {
     }
     uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
     uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
-    if (slot >= 0 && font && !d->run && moy_ui_cmask() != 63) {   // a cart's: the glyph
+    if (slot >= 0 && font && !d->run && !d->s->cart) {   // a cart's: the glyph
         int size = font == f24 ? 24 : 16;
         int w = moy_text_glyph(&d->t, font, MOY_UI_ICON_FIRST + slot,
                                b.x + moy_ui_fdiv(b.w - size, 2),
@@ -520,7 +527,7 @@ static uint32_t colour_at(const uint8_t *p, int i) {
 // A swatch's colour on the sink: exact on the shell's glass, MOY64's nearest
 // on a cart's canvas (a run, or inside the app-cart boundary).
 static uint16_t swatch(const pd_t *d, uint32_t rgb) {
-    if (d->run || moy_ui_cmask() == 63) {
+    if (d->run || d->s->cart) {
         return pal(d, moy_theme_nearest(MOY_THEME_RGB | (int32_t)(rgb & 0xffffff)));
     }
     return moy_shape_wire(moy_theme_rgb565(MOY_THEME_RGB | (int32_t)(rgb & 0xffffff)));
@@ -1330,7 +1337,7 @@ int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, in
     uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
     uint32_t font = f24 ? f24 : f16;
     int half = (content.w < content.h ? content.w : content.h) / 2;
-    if (slot >= 0 && font && !d.run && moy_ui_cmask() != 63) {
+    if (slot >= 0 && font && !d.run && !d.s->cart) {
         if (font == f24 && half < 24 && f16) {
             font = f16;
         }
@@ -2134,18 +2141,38 @@ int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
 static int s_input = MOY_UI_INPUT_KEYS;
 static int s_keys = MOY_UI_INPUT_KEYS;
 
-void moy_ui_set_input(int input) {
+static void moy_ui_set_input_w(int input) {
     s_input = input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS;
     s_keys = s_input;
     moy_ui_marks_refresh();         // touch shows no focus
+}
+
+void moy_ui_set_input(int input) {
+    int v = input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS;
+    if (v == s_input && v == s_keys) {
+        moy_ui_marks_refresh();
+        return;                         // (no move: an instance pulls nothing)
+    }
+    moy_ui_theme_write(1);
+    moy_ui_set_input_w(input);
+    moy_ui_theme_write(0);
 }
 
 int moy_ui_input(void) {
     return s_input;
 }
 
-void moy_ui_set_hint_input(int input) {
+static void moy_ui_set_hint_input_w(int input) {
     s_keys = input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS;
+}
+
+void moy_ui_set_hint_input(int input) {
+    if ((input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS) == s_keys) {
+        return;
+    }
+    moy_ui_theme_write(1);
+    moy_ui_set_hint_input_w(input);
+    moy_ui_theme_write(0);
 }
 
 int moy_ui_hint_input(void) {
@@ -2872,7 +2899,7 @@ static int icon_col(pd_t *d, int slot, int glyph, moy_ui_box_t b, uint16_t col) 
     int box = b.w < b.h ? b.w : b.h;
     uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
     uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
-    if (slot >= 0 && font && !d->run && moy_ui_cmask() != 63) {
+    if (slot >= 0 && font && !d->run && !d->s->cart) {
         int size = font == f24 ? 24 : 16;
         int w = moy_text_glyph(&d->t, font, MOY_UI_ICON_FIRST + slot,
                                b.x + moy_ui_fdiv(b.w - size, 2),
@@ -2969,4 +2996,10 @@ int moy_ui_tip_draw(const moy_ui_sink_t *s, moy_ui_box_t at, moy_ui_span_t t, mo
     rrect(&d, x, y, w, h, 6 * k, 1, pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)), 0, 0);
     text(&d, &f, t.p, t.n, x + pad, y, h, g, sc);
     return MOY_UI_OK;
+}
+
+int moy_ui_recs_parts(moy_ui_rec_t *r) {
+    r[0] = (moy_ui_rec_t){&s_input, NULL, sizeof(s_input)};
+    r[1] = (moy_ui_rec_t){&s_keys, NULL, sizeof(s_keys)};
+    return 2;
 }

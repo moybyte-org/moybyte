@@ -176,20 +176,28 @@ enum {
 // Install `font` (an id moy_font_load gave, or 0 for petme128) for `role`:
 // 1, or 0 for an unknown role or font, which installs nothing.
 int moy_ui_font_use(int role, uint32_t font);
-// The font `role` draws in, its metrics into *out.
-uint32_t moy_ui_font(int role, moy_font_info_t *out);
+// The font `role` draws in, its metrics into *out; inside the boundary
+// (`cart`, below) petme128.
+uint32_t moy_ui_font(int cart, int role, moy_font_info_t *out);
 // The app-cart boundary (§4.7): while a cart's code runs, every role draws in
 // petme128 and so does the print font (moy_text.h), which comes back when the
 // cart's code returns, and a colour index is masked to 0..63 (a cart's
 // colour is its index modulo 64) where the shell's reaches the theme's block
-// at 64..127 (moy_canvas.h). Answers whether it was on.
+// at 64..127 (moy_canvas.h). The console's: a sink it builds carries it as
+// its `cart` flag (moy_ui_sink_row, the RUN sink), and a draw reads the
+// flag of the sink it draws through, so a program's sink over its own
+// surface is outside it whatever the console runs. Answers whether it was
+// on; moy_ui_cart_on reads it.
 int moy_ui_cart_text(int on);
-// What a colour index is masked with now: 127, or 63 inside the boundary.
+int moy_ui_cart_on(void);
+// What a colour index is masked with: 127, or 63 inside the boundary
+// (moy_ui_cmask: the console's).
 int moy_ui_cmask(void);
+int moy_ui_cmask_of(int cart);
 // The index a palette row is read at for a colour `ci`: 127-masked, and inside
 // the boundary a block colour (64..127, the theme's own) is its nearest MOY64,
 // where the mask alone read it as index 0..63 (black for the page's ground).
-int moy_ui_pidx(int ci);
+int moy_ui_pidx(int cart, int ci);
 // The shell's print font (moy_text_print_font_use), the one put aside while a
 // cart's code runs: the font it replaced, or -1 for one not loaded.
 int64_t moy_ui_print_font(uint32_t font);
@@ -205,10 +213,12 @@ int moy_ui_pattern_unreadable(int look, const moy_ui_shape_t *sh, uint8_t (*out)
 
 // The painter (moy_ui_paint.c): surface `sf` into box `b` of a target, its
 // terms resolved through `look` (`field` and `edge` stand for
-// MOY_UI_TERM_STYLE; -1 paints nothing), its outline cut by the corner mask
-// of `radius` (0-3). Never draws outside the box. Answers the fills it made.
-int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[128], int look,
-                         moy_ui_box_t b, const moy_ui_surface_t *sf, int field, int edge,
+// MOY_UI_TERM_STYLE; -1 paints nothing) and its colours read from `pal`
+// inside the app-cart boundary where `cart`, its outline cut by the corner
+// mask of `radius` (0-3). Never draws outside the box. Answers the fills it
+// made.
+int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[128], int cart,
+                         int look, moy_ui_box_t b, const moy_ui_surface_t *sf, int field, int edge,
                          int radius);
 
 // -- glyphs (moy_ui_glyph.c) ----------------------------------------------------
@@ -235,13 +245,15 @@ typedef struct { const uint8_t *p; uint16_t n; } moy_ui_span_t;
 // a canvas row of the glass, named by its CANVAS handle (moy_ui_sink_row
 // checks it). RUN: a compiled run's libmoy canvas lent as a row of its own,
 // its draw state saved, reset and restored around the call (moy_ui_wasm.h).
-// `fs` is the scale text draws at; `look` the look its colours resolve in.
+// `fs` is the scale text draws at; `look` the look its colours resolve in;
+// `cart` 1 inside the app-cart boundary (moy_ui_cart_text).
 enum { MOY_UI_SINK_ROW = 1, MOY_UI_SINK_RUN = 2 };
 typedef struct {
     uint8_t kind;
     uint8_t fs;
     uint8_t look;
     void *dst;
+    uint8_t cart;
 } moy_ui_sink_t;
 int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look);
 // A glyph through a sink (moy_ui_glyph_draw's raster, a fill per span).
@@ -455,7 +467,6 @@ enum {
 };
 typedef struct {
     uint8_t active, dark, plate_alpha;
-    uint32_t drawn;
 } moy_ui_marks_t;
 const moy_ui_marks_t *moy_ui_marks(void);
 // Whether focus draws: the shell's word (it clears it while a window behind
@@ -1146,5 +1157,55 @@ const moy_ui_display_t *moy_ui_display(void);
 // (MOY_UI_F_FOCUS), the theme's by size class.
 int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int fs,
                 int desk);
+
+// -- the theme as a block (a toolkit linked into a program) -------------------------
+//
+// What every instance reads and only the console writes -- the looks, the
+// shape and the button leaves, the depth, its marks and keycaps, the fonts
+// and icons, the keycaps' input, the text view's word table and tones, the
+// theme's block colours and role sheet -- as one block: a copy of the
+// toolkit linked into a program (a native module, a WASI one) holds none of
+// it until it installs one. A record is the state as the setters left it,
+// resolved, so a copy installs it with none of the theme packages it was
+// resolved from. Fonts and icon masks are moy_text ids, which name a font
+// only inside the image that loaded it.
+//
+// The console's setters move a generation around their writes
+// (moy_ui_theme_write: odd while one writes, even after), so a pull from
+// another task copies the records between two reads of the same even
+// generation or answers none. moy_ui_theme_pull writes the block into
+// `buf` and answers its generation where the theme is past `have`, else 0:
+// the theme has not moved, a setter was writing meanwhile (the next frame's
+// pull takes it), or `cap` is short of moy_ui_theme_size(). An instance
+// with a `pull` (moy_ui_api.h) asks it at each begin and installs what it
+// answers, so a theme change reaches its frames at the next begin, never
+// inside a frame.
+#define MOY_UI_THEME_MAGIC 0x3174756du     // "mut1"
+uint32_t moy_ui_theme_gen(void);
+size_t moy_ui_theme_size(void);
+uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap);
+// A block installed: MOY_UI_OK; MOY_UI_BAD for one cut short or of another
+// layout (a toolkit built otherwise), which installs nothing.
+int moy_ui_theme_put(const void *buf, size_t n);
+// The theme's block colours as a canvas row's entries 64..127 hold them
+// (moy_canvas.h, the build's wire order): what a copy's own surface row
+// takes after an install.
+void moy_ui_theme_pal(uint16_t out[64]);
+// A setter of the shared state, around its writes: 1 before, 0 after; the
+// console's task alone writes, so they nest.
+void moy_ui_theme_write(int begin);
+// The block's records, each file's own: one at `p`, or the block a static
+// pointer (`heap`) holds (NULL there: none held), `n` bytes.
+typedef struct {
+    void *p;
+    void **heap;
+    uint32_t n;
+} moy_ui_rec_t;
+int moy_ui_recs_ui(moy_ui_rec_t *r);       // moy_ui.c
+int moy_ui_recs_depth(moy_ui_rec_t *r);    // moy_ui_depth.c
+int moy_ui_recs_parts(moy_ui_rec_t *r);    // moy_ui_parts.c
+int moy_ui_recs_text(moy_ui_rec_t *r);     // moy_ui_text.c
+int moy_ui_recs_tones(moy_ui_rec_t *r);    // moy_ui_api_text.c
+int moy_ui_recs_theme(moy_ui_rec_t *r);    // moy_theme.c
 
 #endif // MOY_UI_H

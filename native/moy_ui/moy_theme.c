@@ -2655,7 +2655,7 @@ int moy_theme_sheet_check(const uint8_t *src, size_t n, int rows_max, int *rows)
     return sheet_walk(src, n, rows_max, rows, NULL, 0);
 }
 
-int moy_theme_sheet_load(const uint8_t *src, size_t n) {
+static int moy_theme_sheet_load_w(const uint8_t *src, size_t n) {
     s_sheet_on = 0;
     int rc = sheet_walk(src, n, MOY_THEME_SPRITES_MAX_ROWS, NULL, NULL, 0);
     if (rc != MOY_THEME_OK) {
@@ -2685,8 +2685,21 @@ int moy_theme_sheet_load(const uint8_t *src, size_t n) {
     return MOY_THEME_OK;
 }
 
-void moy_theme_sheet_clear(void) {
+int moy_theme_sheet_load(const uint8_t *src, size_t n) {
+    moy_ui_theme_write(1);
+    int rc = moy_theme_sheet_load_w(src, n);
+    moy_ui_theme_write(0);
+    return rc;
+}
+
+static void moy_theme_sheet_clear_w(void) {
     s_sheet_on = 0;
+}
+
+void moy_theme_sheet_clear(void) {
+    moy_ui_theme_write(1);
+    moy_theme_sheet_clear_w();
+    moy_ui_theme_write(0);
 }
 
 const uint8_t *moy_theme_sheet(void) {
@@ -3186,12 +3199,18 @@ int moy_theme_place(const int32_t *in, int n, int32_t *out, int32_t *near,
     return used;
 }
 
-void moy_theme_block_use(const uint16_t block[MOY_THEME_BLOCK], int used) {
+static void moy_theme_block_use_w(const uint16_t block[MOY_THEME_BLOCK], int used) {
     memcpy(s_live, block, sizeof(s_live));
     s_live_n = used;
     for (int k = 0; k < MOY_THEME_BLOCK; k++) {
         s_live_near[k] = k < used && s_placed[k] == block[k] ? s_placed_near[k] : -1;
     }
+}
+
+void moy_theme_block_use(const uint16_t block[MOY_THEME_BLOCK], int used) {
+    moy_ui_theme_write(1);
+    moy_theme_block_use_w(block, used);
+    moy_ui_theme_write(0);
 }
 
 // The look: each package's entries into out, nearest first, a package's
@@ -4662,3 +4681,14 @@ int moy_theme_custom(const uint8_t *src, size_t n, int accent, int tint,
 const int moy_theme_custom_dims[5] = {
     MOY_THEME_ACCENTS, MOY_THEME_TINTS, MOY_THEME_RAMP_MAX, MOY_THEME_BYTES, MOY_THEME_PRESETS,
 };
+
+int moy_ui_recs_theme(moy_ui_rec_t *r) {
+    moy_ui_rec_t v[] = {
+        {s_live, NULL, sizeof(s_live)}, {&s_live_n, NULL, sizeof(s_live_n)},
+        {s_live_near, NULL, sizeof(s_live_near)},
+        {NULL, (void **)&s_sheet, (uint32_t)MOY_THEME_SHEET_W * MOY_THEME_SPRITE_ROWS},
+        {&s_sheet_on, NULL, sizeof(s_sheet_on)}, {s_cell_set, NULL, sizeof(s_cell_set)},
+    };
+    memcpy(r, v, sizeof(v));
+    return (int)(sizeof(v) / sizeof(v[0]));
+}

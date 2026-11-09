@@ -293,11 +293,18 @@ typedef struct {
 // (moy_ui_inst_main), and a program that runs the toolkit on a task of its
 // own makes its own, so no two tasks' frames write the same bytes.
 //
-// An instance holds none of the theme: the looks, the shape, the depth, the
-// fonts and icons, the text view's word table and tones, the keycaps' input
-// and the cart-text boundary are the console's, written on its task between
-// its frames and read by every instance, so a theme change shows from the
-// next frame an instance begins.
+// An instance holds none of the theme (moy_ui.h's theme block): the looks,
+// the shape, the depth, the fonts and icons, the text view's word table and
+// tones and the keycaps' input are the console's, written on its task
+// between its frames. An instance in the console's image reads the live
+// ones, so a theme change shows from the next frame it begins. A copy of
+// the toolkit linked into a program holds the theme it installed: its
+// instance's `pull` (the theme row, moy_ui_theme_pull across the OS's door)
+// is asked at each begin with the generation installed last and answers a
+// newer block into `theme_buf` (moy_ui_theme_size() bytes, the program's),
+// which begin installs before the pass (moy_ui_theme_put; theme_puts counts
+// them), so a change reaches the copy's frames at its next begin. The
+// cart-text boundary is the sink's (moy_ui.h).
 typedef struct moy_ui_inst {
     struct mua_kept_mem *kept;      // the kept rings and the faces' record
     uint32_t fc_owner, fc_ids;      // the context holding the faces' ticket, the last given
@@ -306,6 +313,10 @@ typedef struct moy_ui_inst {
     uint32_t block_tick, block_gen;
     uint32_t fades;                 // moy_ui_api_fades's count
     uint32_t audit_on, audit_fail;  // moy_ui_api_audit's switch and failures
+    uint32_t (*pull)(uint32_t have, void *buf, size_t cap);    // NULL: the live theme
+    void *theme_buf;
+    size_t theme_cap;
+    uint32_t theme_gen, theme_puts;
 } moy_ui_inst_t;
 
 // The main instance; an instance's size, for a face that owns it as bytes; a
@@ -314,6 +325,10 @@ typedef struct moy_ui_inst {
 // that takes an instance takes NULL as the main one.
 moy_ui_inst_t *moy_ui_inst_main(void);
 size_t moy_ui_inst_size(void);
+// An instance's theme taken from `pull` into `buf` (cap bytes) from its next
+// begin, nothing installed yet (NULL: the live theme).
+void moy_ui_inst_pull(moy_ui_inst_t *I, uint32_t (*pull)(uint32_t have, void *buf, size_t cap),
+                      void *buf, size_t cap);
 void moy_ui_inst_init(moy_ui_inst_t *I);
 void moy_ui_inst_free(moy_ui_inst_t *I);
 

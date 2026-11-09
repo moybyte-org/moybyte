@@ -98,12 +98,12 @@ int moy_ui_marks_shown(void) {
     return s_shown;
 }
 
+// The focus marks every task's frames drew: a count only, a relaxed add.
+static uint32_t s_marks_drawn;
+
 uint32_t moy_ui_marks_drawn(int reset) {
-    uint32_t n = s_marks.drawn;
-    if (reset) {
-        s_marks.drawn = 0;
-    }
-    return n;
+    return reset ? __atomic_exchange_n(&s_marks_drawn, 0u, __ATOMIC_RELAXED)
+                 : __atomic_load_n(&s_marks_drawn, __ATOMIC_RELAXED);
 }
 
 static uint8_t alpha_of(const moy_theme_look_t *lk, const char *name, int dflt) {
@@ -195,7 +195,7 @@ static void display_of(const moy_theme_look_t *lk) {
     s_scrim_a = alpha_of(lk, "scrim.alpha", 70);
 }
 
-void moy_ui_depth_use(const char *name, size_t n, int light) {
+static void moy_ui_depth_use_w(const char *name, size_t n, int light) {
     moy_ui_depth_t *d = &s_depth;
     memset(d, 0, sizeof(*d));
     keycap_none();
@@ -206,10 +206,8 @@ void moy_ui_depth_use(const char *name, size_t n, int light) {
     s_scrim_c = MOY_THEME_NONE;
     s_scrim_a = 178;
     uint8_t active = s_marks.active;
-    uint32_t drawn = s_marks.drawn;
     memset(&s_marks, 0, sizeof(s_marks));
     s_marks.active = active;
-    s_marks.drawn = drawn;
     if (name == NULL) {
         name = moy_theme_seed_names[0];
         n = strlen(name);
@@ -219,6 +217,12 @@ void moy_ui_depth_use(const char *name, size_t n, int light) {
         depth_of(d, look, name, n, light);
         free(look);
     }
+}
+
+void moy_ui_depth_use(const char *name, size_t n, int light) {
+    moy_ui_theme_write(1);
+    moy_ui_depth_use_w(name, n, light);
+    moy_ui_theme_write(0);
 }
 
 static void depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, size_t n,
@@ -340,6 +344,7 @@ typedef struct {
     moy_canvas_row_t *row;
     moy_text_target_t t;
     int look;
+    int cart;
 } dd_t;
 
 // A crossing counts once (moy_ui_count_call): the frame's own draw is inside
@@ -351,6 +356,7 @@ static void open_dd(const moy_ui_sink_t *s, dd_t *d, int crossing) {
     moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
     const int32_t *st = row->st;
     d->row = row;
+    d->cart = s->cart;
     d->t.px = row->px;
     d->t.cap = row->cap;
     d->t.dw = (int)st[MOY_ST_W];
@@ -364,14 +370,14 @@ static void open_dd(const moy_ui_sink_t *s, dd_t *d, int crossing) {
 }
 
 static uint16_t tok(const dd_t *d, int token) {
-    return d->row->pal[moy_ui_pidx(moy_ui_token(d->look, token))];
+    return d->row->pal[moy_ui_pidx(d->cart, moy_ui_token(d->look, token))];
 }
 
 // A look's colour value in the buffer's order: an index through the row's
 // table, RGB through RGB565.
 static uint16_t val(const dd_t *d, int32_t v) {
     if (v >= 0 && v < 128) {
-        return d->row->pal[moy_ui_pidx(v)];
+        return d->row->pal[moy_ui_pidx(d->cart, v)];
     }
     return moy_shape_wire(moy_theme_rgb565(v));
 }
@@ -741,7 +747,7 @@ static void ring_a(const dd_t *d, int x, int y, int w, int h, int r, int t, uint
 // The ink a part filled in colour index `ci` takes: black or white, the one
 // that clears it (a light accent, Contrast's yellow, takes black).
 static int ink_over(const dd_t *d, int ci) {
-    uint16_t c = moy_shape_wire(d->row->pal[moy_ui_pidx(ci)]);
+    uint16_t c = moy_shape_wire(d->row->pal[moy_ui_pidx(d->cart, ci)]);
     int r = (c >> 11) * 255 / 31, g = ((c >> 5) & 63) * 255 / 63, b = (c & 31) * 255 / 31;
     return 2126 * r + 7152 * g + 722 * b > 1400000 ? 0 : 7;
 }
@@ -777,7 +783,7 @@ static int km_fill_ink(const dd_t *d, const moy_ui_mark_t *k, int ci) {
 // underline's outside, so it never lands on a neighbour.
 static void km_draw(const dd_t *d, const moy_ui_mark_t *k, int x, int y, int w, int h, int r,
                     int flags, int f, int ci, int alpha) {
-    uint16_t c = d->row->pal[moy_ui_pidx(ci)];
+    uint16_t c = d->row->pal[moy_ui_pidx(d->cart, ci)];
     int t = k->w * f, g = k->gap * f, kw = k->key_w * f;
     int bx = x, by = y, bw = w, bh = h, br = r, inner = 1, cn = corners_of(flags);
     switch (k->mark) {
@@ -832,7 +838,7 @@ static void km_draw(const dd_t *d, const moy_ui_mark_t *k, int x, int y, int w, 
 // under a fill in colour index `ci`: the fill would not clear it 4.5:1.
 static int keeps_danger(const dd_t *d, int danger, int ci) {
     return danger >= 0 && ci >= 0
-           && !clears_by(d->row->pal[moy_ui_pidx(danger)], d->row->pal[moy_ui_pidx(ci)], 9, 2);
+           && !clears_by(d->row->pal[moy_ui_pidx(d->cart, danger)], d->row->pal[moy_ui_pidx(d->cart, ci)], 9, 2);
 }
 
 static int clamp_kind(int kind) {
@@ -920,14 +926,14 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int
             }
             km_draw(&d, &ring, x, y, w, h, r, 0, f, km_ci(&d, cm, -1), 255);
             if (flags & MOY_UI_MARK_COUNT) {
-                s_marks.drawn++;
+                __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
             }
         }
         return MOY_UI_OK;
     }
     if (flags & MOY_UI_MARK_PILL) {
         const moy_ui_mark_t *cm = moy_ui_mark_of(MOY_UI_ITEM_CELL, MOY_UI_MS_FOCUS);
-        uint16_t c = d.row->pal[moy_ui_pidx(km_ci(&d, cm, -1))];
+        uint16_t c = d.row->pal[moy_ui_pidx(d.cart, km_ci(&d, cm, -1))];
         if (after) {
             ring_a(&d, x, y, w, h, r, 2 * f, c, 255);
             if (cm->key_w > 0 && set(cm->key_c)) {
@@ -937,7 +943,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int
             }
         } else {
             if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
-                s_marks.drawn++;
+                __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
             }
             tint(&d, x, y, w, h, r, c, m->plate_alpha, NULL);
         }
@@ -973,7 +979,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int
         return MOY_UI_OK;
     }
     if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
-        s_marks.drawn++;
+        __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
     }
     int under = both && on->mark == MOY_UI_MK_FILL ? km_ci(&d, on, -1) : -1;
     int ci = km_ci(&d, k, under);
@@ -1035,7 +1041,7 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, i
     }
     fs = fs < 1 ? 1 : fs;
     if (outline) {
-        ring_c(&d, b.x, b.y, b.w, b.h, r, corners_of(flags), fs, d.row->pal[moy_ui_pidx(ci)],
+        ring_c(&d, b.x, b.y, b.w, b.h, r, corners_of(flags), fs, d.row->pal[moy_ui_pidx(d.cart, ci)],
                255);
         return MOY_UI_OK;
     }
@@ -1053,7 +1059,7 @@ int moy_ui_plate(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int c
     dd_t d;
     open_dd(s, &d, 0);
     if (ci >= 0) {
-        tint_at(&d, b.x, b.y, b.w, b.h, r, flags, d.row->pal[moy_ui_pidx(ci)], alpha);
+        tint_at(&d, b.x, b.y, b.w, b.h, r, flags, d.row->pal[moy_ui_pidx(d.cart, ci)], alpha);
     }
     return MOY_UI_OK;
 }
@@ -1222,4 +1228,22 @@ int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill) {
               dp->tile_line_w, val(&d, dp->tile_line_c), -1, NULL);
     }
     return 1;
+}
+
+int moy_ui_recs_depth(moy_ui_rec_t *r) {
+    moy_ui_rec_t v[] = {
+        {&s_depth, NULL, sizeof(s_depth)}, {s_paint, NULL, sizeof(s_paint)},
+        {&s_paints, NULL, sizeof(s_paints)}, {&s_marks, NULL, sizeof(s_marks)},
+        {NULL, (void **)&s_km, sizeof(kmarks_t)}, {&s_keycap, NULL, sizeof(s_keycap)},
+        {&s_display, NULL, sizeof(s_display)}, {&s_scrim_c, NULL, sizeof(s_scrim_c)},
+        {&s_scrim_a, NULL, sizeof(s_scrim_a)},
+    };
+    memcpy(r, v, sizeof(v));
+    return (int)(sizeof(v) / sizeof(v[0]));
+}
+
+void moy_ui_theme_pal(uint16_t out[MOY_THEME_BLOCK]) {
+    for (int k = 0; k < MOY_THEME_BLOCK; k++) {
+        out[k] = moy_shape_wire(moy_theme_rgb565(MOY_THEME_SLOT0 + k));
+    }
 }

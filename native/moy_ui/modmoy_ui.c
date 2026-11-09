@@ -874,7 +874,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(ui_use_font_obj, ui_use_font);
 // box's width, its line advance and its baseline.
 static mp_obj_t ui_font(mp_obj_t role) {
     moy_font_info_t f;
-    uint32_t id = moy_ui_font(font_role(role), &f);
+    uint32_t id = moy_ui_font(moy_ui_cart_on(), font_role(role), &f);
     mp_obj_t t[4] = {mp_obj_new_int_from_uint(id), MP_OBJ_NEW_SMALL_INT(f.w),
                      MP_OBJ_NEW_SMALL_INT(f.line), MP_OBJ_NEW_SMALL_INT(f.ascent)};
     return ret_tuple(4, t);

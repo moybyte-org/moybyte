@@ -1100,7 +1100,7 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
         fa = full_app(f);               // a key of the row may have ended it
     }
     moy_font_info_t mono;
-    moy_ui_font(MOY_UI_FONT_MONO, &mono);
+    moy_ui_font(s->cart, MOY_UI_FONT_MONO, &mono);
     int32_t fw = mono.w * fs > 1 ? mono.w * fs : 1;
     int32_t pad = 8 * fs;
     int32_t cols = (page[2] - pad) / fw;

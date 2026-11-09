@@ -28,9 +28,9 @@ static tfont_t tfont_of(uint32_t id, const moy_font_info_t *fi) {
     return f;
 }
 
-static tfont_t role_font(int role) {
+static tfont_t role_font(int cart, int role) {
     moy_font_info_t fi;
-    uint32_t id = moy_ui_font(role, &fi);
+    uint32_t id = moy_ui_font(cart, role, &fi);
     return tfont_of(id, &fi);
 }
 
@@ -60,6 +60,7 @@ typedef struct {
     int tfs;                    // the scale print draws at: the row's font scale
     tfont_t f;                  // the font text draws in
     int run;                    // a compiled run's canvas: petme128 whatever the role
+    int cart;                   // the sink's app-cart boundary
     int look;
     const moy_ui_shape_t *sh;   // the theme's shape
     // The part being drawn: its text effect and that effect's colour, and the
@@ -82,7 +83,8 @@ static void open_quiet(const moy_ui_sink_t *s, draw_t *d) {
     d->t.cy1 = (int)st[MOY_ST_CY1];
     d->tfs = s->fs;
     d->run = s->kind == MOY_UI_SINK_RUN;
-    d->f = d->run ? petme() : role_font(MOY_UI_FONT_UI);
+    d->cart = s->cart;
+    d->f = d->run ? petme() : role_font(d->cart, MOY_UI_FONT_UI);
     d->look = s->look;
     d->sh = moy_ui_shape();
     d->fx = d->fx_c = d->pdx = d->pdy = 0;
@@ -96,7 +98,7 @@ static void open_draw(const moy_ui_sink_t *s, draw_t *d) {
 // Text that follows draws in `role`'s font.
 static void use_font(draw_t *d, int role) {
     if (!d->run) {
-        d->f = role_font(role);
+        d->f = role_font(d->cart, role);
     }
 }
 
@@ -126,13 +128,13 @@ static void use_part(draw_t *d, int kind, int state, int fs) {
 }
 
 static void fill(draw_t *d, int x, int y, int w, int h, int ci) {
-    moy_target_fill(&d->t, x, y, w, h, d->row->pal[moy_ui_pidx(ci)]);
+    moy_target_fill(&d->t, x, y, w, h, d->row->pal[moy_ui_pidx(d->cart, ci)]);
     d->row->st[MOY_ST_N_FILL]++;
 }
 
 // The canvas's rectb: four clipped fills, one op.
 static void rectb(draw_t *d, int x, int y, int w, int h, int ci) {
-    uint16_t c = d->row->pal[moy_ui_pidx(ci)];
+    uint16_t c = d->row->pal[moy_ui_pidx(d->cart, ci)];
     moy_target_fill(&d->t, x, y, w, 1, c);
     moy_target_fill(&d->t, x, y + h - 1, w, 1, c);
     moy_target_fill(&d->t, x, y, 1, h, c);
@@ -161,7 +163,7 @@ static void text_col(draw_t *d, int table, const uint8_t *s, size_t n, int x, in
 
 static void text_paint(draw_t *d, const uint8_t *s, size_t n, int x, int y, int ci,
                        const moy_text_paint_t *p) {
-    text_col(d, 0, s, n, x, y, d->row->pal[moy_ui_pidx(ci)], p);
+    text_col(d, 0, s, n, x, y, d->row->pal[moy_ui_pidx(d->cart, ci)], p);
 }
 
 int moy_ui_text_in(const moy_ui_sink_t *s, uint32_t font, int table, moy_ui_span_t t, int x,
@@ -206,7 +208,7 @@ static void text_over(draw_t *d, const uint8_t *s, size_t n, int x, int y, int c
         text(d, s, n, x, y, ci);
         return;
     }
-    moy_text_paint_t p = {d->row->pal[moy_ui_pidx(field)], box.x, box.y, box.w, box.h,
+    moy_text_paint_t p = {d->row->pal[moy_ui_pidx(d->cart, field)], box.x, box.y, box.w, box.h,
                           MOY_TEXT_NO_SHADOW, 0, 0, 0};
     text_paint(d, s, n, x + d->pdx, y + d->pdy, ci, &p);
 }
@@ -223,7 +225,7 @@ static moy_ui_box_t span_box(int x0, int x1, moy_ui_box_t b, int edge) {
 
 static void glyph(draw_t *d, int g, int x, int y, int w, int h, int ci, int scale) {
     d->row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&d->t, g, x + d->pdx, y + d->pdy, w, h,
-                                                   d->row->pal[moy_ui_pidx(ci)], scale);
+                                                   d->row->pal[moy_ui_pidx(d->cart, ci)], scale);
 }
 
 // -- sprites (docs/theme_and_shell_2026-11.md §3.6) ---------------------------------------
@@ -311,7 +313,8 @@ static int sprite(draw_t *d, moy_ui_box_t b, int cell, int scale) {
                     x2++;
                 }
                 if (ci >= 0) {
-                    moy_target_fill(&d->t, b.x + x, b.y + y, x2 - x, y2 - y, d->row->pal[moy_ui_pidx(ci)]);
+                    moy_target_fill(&d->t, b.x + x, b.y + y, x2 - x, y2 - y,
+                                    d->row->pal[moy_ui_pidx(d->cart, ci)]);
                 }
                 x = x2;
                 ci = next;
@@ -335,8 +338,9 @@ static int surface(draw_t *d, moy_ui_box_t b, int part, int state, int field, in
     if (sf == NULL) {
         return 0;
     }
-    d->row->st[MOY_ST_N_FILL] += moy_ui_paint_surface(&d->t, d->row->pal, d->look, b, sf, field,
-                                                      edge, d->sh->metric[MOY_THEME_M_RADIUS]);
+    d->row->st[MOY_ST_N_FILL] += moy_ui_paint_surface(&d->t, d->row->pal, d->cart, d->look, b,
+                                                      sf, field, edge,
+                                                      d->sh->metric[MOY_THEME_M_RADIUS]);
     return 1;
 }
 
@@ -621,10 +625,10 @@ int moy_ui_label_paint(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, 
         int y = b.y + moy_ui_fdiv(b.h - d.f.line * d.tfs, 2);
         moy_text_paint_t p = {MOY_TEXT_BG_READ, b.x, b.y, b.w, b.h, MOY_TEXT_NO_SHADOW, 0, 0, 0};
         if (lp != NULL && lp->bg >= 0) {
-            p.bg = d.row->pal[moy_ui_pidx(lp->bg)];
+            p.bg = d.row->pal[moy_ui_pidx(d.cart, lp->bg)];
         }
         if (lp != NULL && lp->shadow >= 0 && lp->shadow_a > 0) {
-            p.shadow = d.row->pal[moy_ui_pidx(lp->shadow)];
+            p.shadow = d.row->pal[moy_ui_pidx(d.cart, lp->shadow)];
             p.shadow_a = lp->shadow_a;
             p.shadow_dx = lp->dx;
             p.shadow_dy = lp->dy;
@@ -704,7 +708,7 @@ int moy_ui_divider(const moy_ui_sink_t *s, moy_ui_box_t b, int across, int hw, i
         moy_shape_paint_t fillp;
         memset(&fillp, 0, sizeof(fillp));
         fillp.n = 1;
-        fillp.c[0] = d.row->pal[moy_ui_pidx(moy_ui_token(d.look, MOY_UI_T_BORDER))];
+        fillp.c[0] = d.row->pal[moy_ui_pidx(d.cart, moy_ui_token(d.look, MOY_UI_T_BORDER))];
         moy_shape_rrect_t sr;
         memset(&sr, 0, sizeof(sr));
         int r = hw / 2;
@@ -733,7 +737,7 @@ void moy_ui_paper(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int ci) {
     moy_shape_paint_t fillp;
     memset(&fillp, 0, sizeof(fillp));
     fillp.n = 1;
-    fillp.c[0] = d.row->pal[moy_ui_pidx(ci)];
+    fillp.c[0] = d.row->pal[moy_ui_pidx(d.cart, ci)];
     moy_shape_rrect_t sr;
     memset(&sr, 0, sizeof(sr));
     for (int i = 0; i < 4; i++) {
@@ -860,7 +864,7 @@ static int button_iw(int flags, int fs) {
 int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs) {
     int iw = button_iw(flags, fs);
     int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
-    tfont_t f = role_font(MOY_UI_FONT_UI);
+    tfont_t f = role_font(moy_ui_cart_on(), MOY_UI_FONT_UI);
     int ln = t_fit(&f, label, b.w - 2 * pad - iw, fs);
     return b.x + button_off(b, iw, t_w(&f, label.p, (size_t)ln, fs), fs);
 }
@@ -909,17 +913,17 @@ static void button_body(draw_t *d, moy_ui_box_t b, const moy_ui_btn_style_t *bs,
     sr.stepped = (uint8_t)moy_ui_depth()->stepped;
     if (bg >= 0) {
         fillp.n = 1;
-        fillp.c[0] = d->row->pal[moy_ui_pidx(bg)];
+        fillp.c[0] = d->row->pal[moy_ui_pidx(d->cart, bg)];
         sr.fill = &fillp;
         *on = bg;
     }
     if (bevel) {
         sr.line = (uint8_t)(n > 0 ? n : 1);
-        sr.line_hi = d->row->pal[moy_ui_pidx(moy_ui_token(d->look, MOY_UI_T_SHADE_HI))];
-        sr.line_lo = d->row->pal[moy_ui_pidx(moy_ui_token(d->look, MOY_UI_T_SHADE_LO))];
+        sr.line_hi = d->row->pal[moy_ui_pidx(d->cart, moy_ui_token(d->look, MOY_UI_T_SHADE_HI))];
+        sr.line_lo = d->row->pal[moy_ui_pidx(d->cart, moy_ui_token(d->look, MOY_UI_T_SHADE_LO))];
     } else if (n > 0 && edge >= 0) {
         sr.line = (uint8_t)n;
-        sr.line_hi = d->row->pal[moy_ui_pidx(edge)];
+        sr.line_hi = d->row->pal[moy_ui_pidx(d->cart, edge)];
         sr.line_lo = -1;
     }
     *ring = sr.line;
@@ -934,7 +938,7 @@ static void label_font(draw_t *d, const moy_ui_btn_style_t *bs, moy_ui_span_t la
     if (d->run || bs->font < 0) {
         return;
     }
-    tfont_t f = role_font(bs->font == 0 ? MOY_UI_FONT_KEY : MOY_UI_FONT_OP);
+    tfont_t f = role_font(d->cart, bs->font == 0 ? MOY_UI_FONT_KEY : MOY_UI_FONT_OP);
     if (f.id != MOY_FONT_PETME128 && moy_text_covers(f.id, label.p, label.n)) {
         d->f = f;
     }
@@ -981,7 +985,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
             moy_shape_shadow_t sh;
             memset(&sh, 0, sizeof(sh));
             sh.r = bs.shape == BTN_CIRCLE ? (w < h ? w : h) / 2 : r;
-            sh.col = d.row->pal[moy_ui_pidx(moy_ui_token(d.look, MOY_UI_T_SURFACE))];
+            sh.col = d.row->pal[moy_ui_pidx(d.cart, moy_ui_token(d.look, MOY_UI_T_SURFACE))];
             sh.alpha = 128;
             sh.stepped = moy_ui_depth()->stepped;
             moy_shape_hole_t none = {0, 0, 0, 0, 0};
@@ -1018,7 +1022,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
         if (!ln && !d.run && bs.font >= 0) {
             // an icon alone on a key whose kind names a face (a calculator's
             // ⌫ among its digits) stands as tall as that face's line
-            tfont_t kf = role_font(bs.font == 0 ? MOY_UI_FONT_KEY : MOY_UI_FONT_OP);
+            tfont_t kf = role_font(d.cart, bs.font == 0 ? MOY_UI_FONT_KEY : MOY_UI_FONT_OP);
             int fl = kf.id != MOY_FONT_PETME128 ? kf.line * d.tfs : 0;
             side = fl > side && fl <= h ? fl : side;
         }
@@ -1106,7 +1110,7 @@ int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int coun
                      int gap, moy_ui_box_t *out, int *labels_on) {
     int pad = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_PAD) * fs;
     int icon_w = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_ICON) * fs;
-    tfont_t f = role_font(MOY_UI_FONT_UI);
+    tfont_t f = role_font(moy_ui_cart_on(), MOY_UI_FONT_UI);
     if (gap == MOY_UI_DEFAULT) {
         gap = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_GAP) * fs;
     }
@@ -1545,7 +1549,7 @@ int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot) {
 }
 
 static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int btns, int fs,
-                               frame_lay_t *L) {
+                               int cart, frame_lay_t *L) {
     const moy_ui_depth_t *dp = moy_ui_depth();
     L->style = MOY_THEME_FRAME_FLAT;
     L->align = dp->align == 1 ? MOY_THEME_ALIGN_CENTER : MOY_THEME_ALIGN_LEFT;
@@ -1576,7 +1580,7 @@ static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int 
         L->b[lead + i] = (moy_ui_frame_button_t){
             {(int16_t)(c - b / 2), (int16_t)by, (int16_t)b, (int16_t)b}, ids[i], 1};
     }
-    tfont_t f = role_font(MOY_UI_FONT_TITLE);
+    tfont_t f = role_font(cart, MOY_UI_FONT_TITLE);
     int x0 = depth_title_x(w, th, btns);
     int limit = L->b[lead].box.x - depth_px(th, 8);
     L->maxc = limit - x0 > 0 ? moy_ui_fdiv(limit - x0, f.w * fs) : 0;
@@ -1593,9 +1597,9 @@ static void frame_layout_depth(moy_ui_box_t w, int th, moy_ui_span_t title, int 
 }
 
 static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_ui_span_t title,
-                         int btns, int fs, frame_lay_t *L) {
+                         int btns, int fs, int cart, frame_lay_t *L) {
     if (moy_ui_depth()->frames) {
-        frame_layout_depth(w, th, title, btns, fs, L);
+        frame_layout_depth(w, th, title, btns, fs, cart, L);
         return;
     }
     int style = sh != NULL && sh->frame[0] ? sh->frame[0] - 1 : MOY_THEME_FRAME_CLASSIC;
@@ -1633,7 +1637,7 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
     }
     int lw = nl ? nl * bw + (nl - 1) * gap : 0;
     int rw = nr ? nr * bw + (nr - 1) * gap : 0;
-    tfont_t f = role_font(MOY_UI_FONT_TITLE);
+    tfont_t f = role_font(cart, MOY_UI_FONT_TITLE);
     int cell = f.w * fs;
     int lx = w.x + margin + (back ? stripe_w(style, fs) : 0);    // the left group, past the stripe
     int x0 = (nl ? lx + lw : w.x + stripe_w(style, fs)) + 4 * fs;
@@ -1681,7 +1685,7 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
 int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int btns, int fs,
                          moy_ui_frame_button_t out[MOY_UI_FRAME_BUTTONS]) {
     frame_lay_t L;
-    frame_layout(moy_ui_shape(), win, title_h, title, btns, fs, &L);
+    frame_layout(moy_ui_shape(), win, title_h, title, btns, fs, moy_ui_cart_on(), &L);
     for (int i = 0; i < L.n; i++) {
         out[i] = L.b[i];
     }
@@ -1698,8 +1702,8 @@ static int fb_glyph(int id) {
 static void own_surface(draw_t *d, moy_ui_box_t b, int part, int state,
                         const moy_ui_surface_t *own) {
     if (!surface(d, b, part, state, -1, -1)) {
-        d->row->st[MOY_ST_N_FILL] += moy_ui_paint_surface(&d->t, d->row->pal, d->look, b, own,
-                                                          -1, -1, 0);
+        d->row->st[MOY_ST_N_FILL] += moy_ui_paint_surface(&d->t, d->row->pal, d->cart,
+                                                          d->look, b, own, -1, -1, 0);
     }
 }
 
@@ -1715,7 +1719,7 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
     draw_t d;
     open_draw(s, &d);
     frame_lay_t L;
-    frame_layout(d.sh, w, th, title, btns, fs, &L);
+    frame_layout(d.sh, w, th, title, btns, fs, d.cart, &L);
     int st = active ? MOY_THEME_S_ACTIVE : MOY_THEME_S_INACTIVE;
     int look = d.look;
     int edge = L.style == MOY_THEME_FRAME_CLASSIC
@@ -1788,7 +1792,7 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
             moy_ui_surface_t ps =
                 surf_of(MOY_UI_EDGE_FLAT, MOY_UI_FILL_PINSTRIPE, MOY_UI_T_SHADE_LO, t_bg, -1);
             d.row->st[MOY_ST_N_FILL] +=
-                moy_ui_paint_surface(&d.t, d.row->pal, look, pin, &ps, -1, -1, 0);
+                moy_ui_paint_surface(&d.t, d.row->pal, d.cart, look, pin, &ps, -1, -1, 0);
             if (L.tn > 0) {
                 fill(&d, L.tx - 4 * fs, pin.y, L.tw + 2 * 4 * fs, pin.h, bg);
             }
@@ -1825,7 +1829,7 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
             if (!active && moy_ui_disabled() >= 0) {
                 ink = moy_ui_disabled();    // a window behind: its controls dimmed
             }
-            if (!moy_ui_icon_button(&d.t, face, b, d.row->pal[moy_ui_pidx(ink)])) {
+            if (!moy_ui_icon_button(&d.t, face, b, d.row->pal[moy_ui_pidx(d.cart, ink)])) {
                 glyph(&d, fb_glyph(face), b.x, b.y, b.w, b.h, ink, d.tfs);
             }
             continue;

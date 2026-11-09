@@ -98,6 +98,7 @@ static int open_run(run_t *r, moy_canvas *c) {
     r->s.fs = 1;
     r->s.look = MOY_UI_LOOK_RUN;
     r->s.dst = &r->row;
+    r->s.cart = (uint8_t)moy_ui_cart_on();
     return 0;
 }
 

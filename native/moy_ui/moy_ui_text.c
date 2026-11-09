@@ -158,7 +158,7 @@ static int word_find(const uint8_t *p, size_t n) {
     return -1;
 }
 
-void moy_ui_text_words_reset(void) {
+static void moy_ui_text_words_reset_w(void) {
     words_t *m = s_words;
     if (m != NULL) {
         m->pool_n = 0;
@@ -167,7 +167,13 @@ void moy_ui_text_words_reset(void) {
     }
 }
 
-int moy_ui_text_words(int syntax, const uint8_t *words, size_t n, int tone) {
+void moy_ui_text_words_reset(void) {
+    moy_ui_theme_write(1);
+    moy_ui_text_words_reset_w();
+    moy_ui_theme_write(0);
+}
+
+static int moy_ui_text_words_w(int syntax, const uint8_t *words, size_t n, int tone) {
     if ((syntax != MOY_UI_SYN_PYTHON && syntax != MOY_UI_SYN_LUA) || tone < 0
         || tone >= MOY_UI_TT_N) {
         return MOY_UI_BAD;
@@ -210,6 +216,13 @@ int moy_ui_text_words(int syntax, const uint8_t *words, size_t n, int tone) {
         i = j + 1;
     }
     return MOY_UI_OK;
+}
+
+int moy_ui_text_words(int syntax, const uint8_t *words, size_t n, int tone) {
+    moy_ui_theme_write(1);
+    int rc = moy_ui_text_words_w(syntax, words, n, tone);
+    moy_ui_theme_write(0);
+    return rc;
 }
 
 static int word_tone(const uint8_t *p, size_t n, int lua) {
@@ -1027,7 +1040,7 @@ typedef struct {
 } dr_t;
 
 static uint16_t c565(const dr_t *d, int ci) {
-    return d->row->pal[moy_ui_pidx(ci)];
+    return d->row->pal[moy_ui_pidx(d->s->cart, ci)];
 }
 
 static void target(dr_t *d) {
@@ -1415,3 +1428,7 @@ void moy_ui_text_note(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, i
     t->want = 0;
 }
 
+int moy_ui_recs_text(moy_ui_rec_t *r) {
+    r[0] = (moy_ui_rec_t){NULL, (void **)&s_words, sizeof(words_t)};
+    return 1;
+}

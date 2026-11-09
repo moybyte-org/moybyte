@@ -1,5 +1,6 @@
 // moy_ui's style resolution (moy_ui.h).
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "moy_ui.h"
@@ -8,9 +9,10 @@
 #if __has_include("esp_heap_caps.h")
 #include "esp_heap_caps.h"
 #define UI_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
+#define REC_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
 #else
-#include <stdlib.h>
 #define UI_ALLOC(n) malloc(n)
+#define REC_ALLOC(n) malloc(n)
 #endif
 
 typedef struct {
@@ -32,7 +34,6 @@ typedef struct {
     moy_ui_shape_t shape;
     btn_row_t btn[1 + MOY_THEME_APPBTN_CAP];
     uint8_t n_btn;                  // rows in use, row 0 always
-    uint32_t calls;                 // primitive entries: one per widget drawn
 } ui_t;
 
 static void btn_row_clear(btn_row_t *r) {
@@ -99,18 +100,19 @@ int moy_ui_state(const char *name, size_t n) {
     return find(moy_ui_state_names, MOY_UI_STATES, name, n);
 }
 
+// The primitive entries, one per widget drawn, by every task's frames: a
+// count only, so a relaxed add, which no task's frame waits on.
+static uint32_t s_calls;
+
 void moy_ui_count_call(void) {
-    ui_t *u = ui();
-    if (u != NULL) {
-        u->calls++;
-    }
+    __atomic_fetch_add(&s_calls, 1u, __ATOMIC_RELAXED);
 }
 
 uint32_t moy_ui_calls(void) {
-    return s_ui != NULL ? s_ui->calls : 0;
+    return __atomic_load_n(&s_calls, __ATOMIC_RELAXED);
 }
 
-int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]) {
+static int moy_ui_look_set_w(int look, const int32_t tokens[MOY_UI_TOKENS]) {
     ui_t *u = ui();
     if (u == NULL) {
         return MOY_UI_NOMEM;
@@ -133,6 +135,13 @@ int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]) {
         l->slot[i] = (int16_t)(v == MOY_UI_ABSENT ? -1 : (v & 127));
     }
     return MOY_UI_OK;
+}
+
+int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]) {
+    moy_ui_theme_write(1);
+    int rc = moy_ui_look_set_w(look, tokens);
+    moy_ui_theme_write(0);
+    return rc;
 }
 
 const int16_t *moy_ui_sprite_slots(int look) {
@@ -213,8 +222,14 @@ static void flatten(look_t *l, int kind) {
 // The live theme's disabled ink (its look's `disabled`, placed), or -1.
 static int16_t s_disabled = -1;
 
-void moy_ui_set_disabled(int32_t v) {
+static void moy_ui_set_disabled_w(int32_t v) {
     s_disabled = v < 0 || v == MOY_THEME_OFF ? -1 : (int16_t)(v & 127);
+}
+
+void moy_ui_set_disabled(int32_t v) {
+    moy_ui_theme_write(1);
+    moy_ui_set_disabled_w(v);
+    moy_ui_theme_write(0);
 }
 
 int moy_ui_disabled(void) {
@@ -224,8 +239,14 @@ int moy_ui_disabled(void) {
 // The live theme's menu danger ink (its look's `danger_ink`, placed), or -1.
 static int16_t s_danger_ink = -1;
 
-void moy_ui_set_danger_ink(int32_t v) {
+static void moy_ui_set_danger_ink_w(int32_t v) {
     s_danger_ink = v < 0 || v == MOY_THEME_OFF ? -1 : (int16_t)(v & 127);
+}
+
+void moy_ui_set_danger_ink(int32_t v) {
+    moy_ui_theme_write(1);
+    moy_ui_set_danger_ink_w(v);
+    moy_ui_theme_write(0);
 }
 
 int moy_ui_danger_ink(void) {
@@ -271,7 +292,7 @@ static const uint8_t k_own[MOY_THEME_BTN_KINDS] = {
     0,
 };
 
-void moy_ui_buttons_clear(void) {
+static void moy_ui_buttons_clear_w(void) {
     ui_t *u = ui();
     if (u != NULL) {
         btn_row_clear(&u->btn[0]);
@@ -279,7 +300,13 @@ void moy_ui_buttons_clear(void) {
     }
 }
 
-int moy_ui_buttons_app(const char *name, size_t n) {
+void moy_ui_buttons_clear(void) {
+    moy_ui_theme_write(1);
+    moy_ui_buttons_clear_w();
+    moy_ui_theme_write(0);
+}
+
+static int moy_ui_buttons_app_w(const char *name, size_t n) {
     ui_t *u = ui();
     if (u == NULL || name == NULL) {
         return -1;
@@ -292,8 +319,15 @@ int moy_ui_buttons_app(const char *name, size_t n) {
     return -1;
 }
 
-int moy_ui_buttons_set(const char *app, size_t n, int bkind,
-                       const int32_t leaves[MOY_THEME_BTN_LEAVES]) {
+int moy_ui_buttons_app(const char *name, size_t n) {
+    moy_ui_theme_write(1);
+    int rc = moy_ui_buttons_app_w(name, n);
+    moy_ui_theme_write(0);
+    return rc;
+}
+
+static int moy_ui_buttons_set_w(const char *app, size_t n, int bkind,
+                                const int32_t leaves[MOY_THEME_BTN_LEAVES]) {
     ui_t *u = ui();
     if (u == NULL) {
         return MOY_UI_NOMEM;
@@ -318,6 +352,14 @@ int moy_ui_buttons_set(const char *app, size_t n, int bkind,
     }
     memcpy(r->v[bkind], leaves, sizeof(r->v[bkind]));
     return MOY_UI_OK;
+}
+
+int moy_ui_buttons_set(const char *app, size_t n, int bkind,
+                       const int32_t leaves[MOY_THEME_BTN_LEAVES]) {
+    moy_ui_theme_write(1);
+    int rc = moy_ui_buttons_set_w(app, n, bkind, leaves);
+    moy_ui_theme_write(0);
+    return rc;
 }
 
 int moy_ui_button_of(int kind) {
@@ -459,7 +501,7 @@ static void fill_chains(moy_ui_shape_t *sh) {
     }
 }
 
-int moy_ui_shape_use(const moy_ui_shape_t *sh) {
+static int moy_ui_shape_use_w(const moy_ui_shape_t *sh) {
     ui_t *u = ui();
     if (u == NULL) {
         return MOY_UI_NOMEM;
@@ -473,6 +515,13 @@ int moy_ui_shape_use(const moy_ui_shape_t *sh) {
     return MOY_UI_OK;
 }
 
+int moy_ui_shape_use(const moy_ui_shape_t *sh) {
+    moy_ui_theme_write(1);
+    int rc = moy_ui_shape_use_w(sh);
+    moy_ui_theme_write(0);
+    return rc;
+}
+
 const moy_ui_shape_t *moy_ui_shape(void) {
     ui_t *u = ui();
     return u != NULL ? &u->shape : NULL;
@@ -482,13 +531,20 @@ const moy_ui_shape_t *moy_ui_shape(void) {
 
 static uint32_t s_font[MOY_THEME_FONT_ROLES];   // 0, petme128, where none is installed
 
-int moy_ui_font_use(int role, uint32_t font) {
+static int moy_ui_font_use_w(int role, uint32_t font) {
     moy_font_info_t fi;
     if (role < 0 || role >= MOY_THEME_FONT_ROLES || !moy_font_info(font, &fi)) {
         return 0;
     }
     s_font[role] = font;
     return 1;
+}
+
+int moy_ui_font_use(int role, uint32_t font) {
+    moy_ui_theme_write(1);
+    int rc = moy_ui_font_use_w(role, font);
+    moy_ui_theme_write(0);
+    return rc;
 }
 
 static int s_cart;                              // a cart's code is running
@@ -506,12 +562,20 @@ int moy_ui_cart_text(int on) {
     return was;
 }
 
+int moy_ui_cart_on(void) {
+    return s_cart;
+}
+
 int moy_ui_cmask(void) {
     return s_cart ? 63 : 127;
 }
 
-int moy_ui_pidx(int ci) {
-    if (!s_cart) {
+int moy_ui_cmask_of(int cart) {
+    return cart ? 63 : 127;
+}
+
+int moy_ui_pidx(int cart, int ci) {
+    if (!cart) {
         return ci & 127;
     }
     // The theme's colours are the shell's block at 64..127, which a cart's
@@ -534,8 +598,8 @@ int64_t moy_ui_print_font(uint32_t font) {
     return was;
 }
 
-uint32_t moy_ui_font(int role, moy_font_info_t *out) {
-    uint32_t id = !s_cart && role >= 0 && role < MOY_THEME_FONT_ROLES ? s_font[role]
+uint32_t moy_ui_font(int cart, int role, moy_font_info_t *out) {
+    uint32_t id = !cart && role >= 0 && role < MOY_THEME_FONT_ROLES ? s_font[role]
                                                                       : MOY_FONT_PETME128;
     if (!moy_font_info(id, out)) {
         id = MOY_FONT_PETME128;
@@ -642,23 +706,35 @@ int moy_ui_pattern_unreadable(int look, const moy_ui_shape_t *sh, uint8_t (*out)
 static uint32_t s_icon_font[2];         // the 16 and 24 px masks
 static uint8_t s_icon_code[3];
 
-void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
+static void moy_ui_icons_use_w(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
     s_icon_font[0] = f16;
     s_icon_font[1] = f24;
     memcpy(s_icon_code, codes, sizeof(s_icon_code));
+}
+
+void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
+    moy_ui_theme_write(1);
+    moy_ui_icons_use_w(f16, f24, codes);
+    moy_ui_theme_write(0);
 }
 
 // Moy, slot 0: pixel art in every theme, not a mask (runtime/toolkit/iconsets.py).
 static uint8_t s_moy[256];
 static int16_t s_moy_clear = -1;        // -1: no tile installed
 
-void moy_ui_moy_use(const uint8_t px[256], int clear) {
+static void moy_ui_moy_use_w(const uint8_t px[256], int clear) {
     if (px == NULL) {
         s_moy_clear = -1;
         return;
     }
     memcpy(s_moy, px, sizeof(s_moy));
     s_moy_clear = (int16_t)(clear & 255);
+}
+
+void moy_ui_moy_use(const uint8_t px[256], int clear) {
+    moy_ui_theme_write(1);
+    moy_ui_moy_use_w(px, clear);
+    moy_ui_theme_write(0);
 }
 
 const uint8_t *moy_ui_moy(int *clear) {
@@ -758,3 +834,140 @@ int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint1
                           b.y + moy_ui_fdiv(b.h - size, 2), col, 1) >= 0;
 }
 
+// -- the theme as a block (moy_ui.h) ------------------------------------------------
+
+int moy_ui_recs_ui(moy_ui_rec_t *r) {
+    moy_ui_rec_t v[] = {
+        {NULL, (void **)&s_ui, sizeof(ui_t)}, {&s_disabled, NULL, sizeof(s_disabled)},
+        {&s_danger_ink, NULL, sizeof(s_danger_ink)}, {s_font, NULL, sizeof(s_font)},
+        {s_icon_font, NULL, sizeof(s_icon_font)}, {s_icon_code, NULL, sizeof(s_icon_code)},
+        {s_moy, NULL, sizeof(s_moy)}, {&s_moy_clear, NULL, sizeof(s_moy_clear)},
+    };
+    memcpy(r, v, sizeof(v));
+    return (int)(sizeof(v) / sizeof(v[0]));
+}
+
+#define THEME_RECS 32
+
+static int theme_recs(moy_ui_rec_t *r) {
+    int n = moy_ui_recs_ui(r);
+    n += moy_ui_recs_depth(r + n);
+    n += moy_ui_recs_parts(r + n);
+    n += moy_ui_recs_text(r + n);
+    n += moy_ui_recs_tones(r + n);
+    n += moy_ui_recs_theme(r + n);
+    return n;
+}
+
+// The block: magic, the layout (each record's size, hashed), its
+// generation and its record count; then each record as a word that says
+// whether it is held and its bytes, padded to a word.
+#define THEME_HEAD 4
+
+static uint32_t round4(uint32_t n) {
+    return (n + 3u) & ~3u;
+}
+
+static uint32_t theme_layout(const moy_ui_rec_t *r, int n) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < n; i++) {
+        h = (h ^ r[i].n ^ (r[i].heap != NULL ? 0x80000000u : 0u)) * 16777619u;
+    }
+    return h;
+}
+
+static uint32_t s_gen = 2;              // even: settled; odd: a setter is writing
+static int s_writing;
+
+void moy_ui_theme_write(int begin) {
+    if (begin ? s_writing++ == 0 : --s_writing == 0) {
+        if (begin) {
+            __atomic_fetch_add(&s_gen, 1u, __ATOMIC_RELAXED);
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+        } else {
+            __atomic_fetch_add(&s_gen, 1u, __ATOMIC_RELEASE);
+        }
+    }
+}
+
+uint32_t moy_ui_theme_gen(void) {
+    return __atomic_load_n(&s_gen, __ATOMIC_ACQUIRE);
+}
+
+size_t moy_ui_theme_size(void) {
+    moy_ui_rec_t r[THEME_RECS];
+    int n = theme_recs(r);
+    size_t size = THEME_HEAD * sizeof(uint32_t);
+    for (int i = 0; i < n; i++) {
+        size += sizeof(uint32_t) + round4(r[i].n);
+    }
+    return size;
+}
+
+uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap) {
+    uint32_t g = __atomic_load_n(&s_gen, __ATOMIC_ACQUIRE);
+    if (g == have || (g & 1u) || buf == NULL || cap < moy_ui_theme_size()) {
+        return 0;
+    }
+    moy_ui_rec_t r[THEME_RECS];
+    int n = theme_recs(r);
+    uint32_t *w = (uint32_t *)buf;
+    w[0] = MOY_UI_THEME_MAGIC;
+    w[1] = theme_layout(r, n);
+    w[2] = g;
+    w[3] = (uint32_t)n;
+    uint8_t *at = (uint8_t *)buf + THEME_HEAD * sizeof(uint32_t);
+    for (int i = 0; i < n; i++) {
+        const void *src = r[i].heap != NULL ? *r[i].heap : r[i].p;
+        uint32_t held = src != NULL;
+        memcpy(at, &held, sizeof(held));
+        at += sizeof(held);
+        if (held) {
+            memcpy(at, src, r[i].n);
+        } else {
+            memset(at, 0, r[i].n);
+        }
+        memset(at + r[i].n, 0, round4(r[i].n) - r[i].n);
+        at += round4(r[i].n);
+    }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&s_gen, __ATOMIC_RELAXED) == g ? g : 0;
+}
+
+int moy_ui_theme_put(const void *buf, size_t size) {
+    moy_ui_rec_t r[THEME_RECS];
+    int n = theme_recs(r);
+    const uint32_t *w = (const uint32_t *)buf;
+    if (buf == NULL || size < moy_ui_theme_size() || w[0] != MOY_UI_THEME_MAGIC
+        || w[1] != theme_layout(r, n) || w[3] != (uint32_t)n) {
+        return MOY_UI_BAD;
+    }
+    moy_ui_theme_write(1);
+    int rc = MOY_UI_OK;
+    const uint8_t *at = (const uint8_t *)buf + THEME_HEAD * sizeof(uint32_t);
+    for (int i = 0; i < n; i++) {
+        uint32_t held;
+        memcpy(&held, at, sizeof(held));
+        at += sizeof(held);
+        void *dst = r[i].p;
+        if (r[i].heap != NULL) {
+            if (held && *r[i].heap == NULL) {
+                *r[i].heap = REC_ALLOC(r[i].n);
+            }
+            dst = *r[i].heap;
+            if (held && dst == NULL) {
+                rc = MOY_UI_NOMEM;
+            }
+        }
+        if (held && dst != NULL) {
+            memcpy(dst, at, r[i].n);
+        } else if (!held && r[i].heap != NULL && *r[i].heap != NULL) {
+            free(*r[i].heap);           // (the console holds none: neither does the copy)
+            *r[i].heap = NULL;
+        }
+        at += round4(r[i].n);
+    }
+    moy_ui_marks_refresh();             // the marks' `active` is this image's input's
+    moy_ui_theme_write(0);
+    return rc;
+}

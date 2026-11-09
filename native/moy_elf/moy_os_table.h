@@ -10,8 +10,8 @@
 
 #include <stdint.h>
 
-#define MOY_OS_VERSION 119u
-#define MOY_OS_ROWS 119u
+#define MOY_OS_VERSION 120u
+#define MOY_OS_ROWS 120u
 
 typedef struct {
     uint32_t version;     // bumped on every append; never on anything else
@@ -139,6 +139,7 @@ enum {
     MOY_OS_ROW_moy_status_remove = 116,
     MOY_OS_ROW_moy_screen = 117,
     MOY_OS_ROW_moy_present = 118,
+    MOY_OS_ROW_moy_ui_pull = 119,
 };
 
 extern const moy_os_table_t moy_os_table;

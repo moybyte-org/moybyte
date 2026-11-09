@@ -2075,6 +2075,18 @@ int moy_os_moy_present(const void *px, size_t n) {
     return 0;
 }
 
+// The toolkit's theme as a block (moy_ui.h's moy_ui_theme_pull), which a copy
+// of the toolkit a module links installs; weak, so an image without the
+// toolkit answers none.
+uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap) __attribute__((weak));
+
+uint32_t moy_os_moy_ui_pull(uint32_t have, void *buf, size_t cap) {
+    thr_t *t = enter();
+    uint32_t g = moy_ui_theme_pull != NULL ? moy_ui_theme_pull(have, buf, cap) : 0;
+    leave(t);
+    return g;
+}
+
 // -- the rows: the event descriptor ------------------------------------------------
 //
 // The process's event queue (moy_evq.h), read as descriptor MOY_EVQ_FD: by

@@ -18,6 +18,14 @@ void moy_ui_inst_init(moy_ui_inst_t *I) {
     memset(I, 0, sizeof(*I));
 }
 
+void moy_ui_inst_pull(moy_ui_inst_t *I, uint32_t (*pull)(uint32_t have, void *buf, size_t cap),
+                      void *buf, size_t cap) {
+    I->pull = pull;
+    I->theme_buf = buf;
+    I->theme_cap = cap;
+    I->theme_gen = 0;
+}
+
 void moy_ui_inst_free(moy_ui_inst_t *I) {
     KEPT_FREE(I->kept);
     KEPT_FREE(I->text);
@@ -872,6 +880,14 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     static const int32_t none[MOY_UI_IN_LEN] = {0};
     if (in == NULL) {
         in = none;
+    }
+    moy_ui_inst_t *I = c->inst;
+    if (I->pull != NULL) {
+        uint32_t g = I->pull(I->theme_gen, I->theme_buf, I->theme_cap);
+        if (g != 0 && moy_ui_theme_put(I->theme_buf, I->theme_cap) == MOY_UI_OK) {
+            I->theme_gen = g;
+            I->theme_puts++;
+        }
     }
     int was_held = (c->last_ptr & MOY_UI_P_LIVE) && (c->last_ptr & MOY_UI_P_HELD);
     memcpy(c->in, in, sizeof(c->in));

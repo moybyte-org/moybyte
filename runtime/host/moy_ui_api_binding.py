@@ -1178,7 +1178,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
 
     def font(role):
         out = (c.c_int * 8)()
-        fid = lib.moy_ui_font(font_role(role), out)
+        fid = lib.moy_ui_font(lib.moy_ui_cart_on(), font_role(role), out)
         return (fid, out[0], out[2], out[3])
 
     m.theme = theme

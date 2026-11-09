@@ -7,8 +7,14 @@
 
 static int16_t s_tones[6] = {-1, -1, -1, -1, -1, -1};
 
-void moy_ui_text_tones(const int16_t tones[6]) {
+static void moy_ui_text_tones_w(const int16_t tones[6]) {
     memcpy(s_tones, tones, sizeof(s_tones));
+}
+
+void moy_ui_text_tones(const int16_t tones[6]) {
+    moy_ui_theme_write(1);
+    moy_ui_text_tones_w(tones);
+    moy_ui_theme_write(0);
 }
 
 // Line i's rows at `cols` columns: its breaks into starts (the first
@@ -144,8 +150,8 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     moy_font_info_t fi;
     // the caller's font where it names a loaded one, outside a cart's code
     uint32_t font = (uint32_t)opt[MOY_UI_TXO_FONT];
-    if (font == 0 || moy_ui_cmask() != 127 || !moy_font_info(font, &fi)) {
-        font = moy_ui_font(MOY_UI_FONT_MONO, &fi);
+    if (font == 0 || s->cart || !moy_font_info(font, &fi)) {
+        font = moy_ui_font(s->cart, MOY_UI_FONT_MONO, &fi);
     }
     int cell = (fi.w > 0 ? fi.w : 8) * fs, th, lh;
     if (font != 0 && fi.first == 0) {
@@ -576,4 +582,9 @@ void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int 
     }
     w->over0 = y0 < w->over0 ? y0 : w->over0;
     w->over1 = y1 > w->over1 ? y1 : w->over1;
+}
+
+int moy_ui_recs_tones(moy_ui_rec_t *r) {
+    r[0] = (moy_ui_rec_t){s_tones, NULL, sizeof(s_tones)};
+    return 1;
 }
