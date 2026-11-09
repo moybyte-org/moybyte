@@ -8,7 +8,7 @@
 // (tests/test_web_persist_e2e.py). Both write paths are exercised: Chrome uses
 // the sync access handle, a browser without one falls back to createWritable.
 import * as store from "./moy_store.mjs";
-import { crash, fakeNav } from "./fake_opfs.mjs";
+import { crash, fakeNav, vmRules } from "./fake_opfs.mjs";
 
 let fail = 0;
 function ok(name, cond, extra = "") {
@@ -17,6 +17,7 @@ function ok(name, cond, extra = "") {
 }
 
 const enc = new TextEncoder(), dec = new TextDecoder();
+await vmRules(store);
 
 // ---- mode detection ---------------------------------------------------------
 const reply = (status) => async () => ({ ok: status >= 200 && status < 300, status });
@@ -91,7 +92,7 @@ for (const sync of [true, false]) {
     const label = sync ? "sync handle" : "createWritable";
     const s = await store.openStore(fakeNav(sync));
     ok("openStore works (" + label + ")", !!s);
-    ok("a fresh store is empty (" + label + ")", await store.isEmpty(s));
+    ok("a fresh store is empty (" + label + ")", !Object.keys(await store.readAll(s)).length);
 
     await store.seed(s, {
         "a.moy/manifest.json": '{"title":"A"}',
@@ -101,7 +102,7 @@ for (const sync of [true, false]) {
         // console's own store keeps it (the system root, below).
         "system.json": "{}",
     });
-    ok("seeded store is not empty (" + label + ")", !(await store.isEmpty(s)));
+    ok("seeded store is not empty (" + label + ")", !!Object.keys(await store.readAll(s)).length);
     let all = await store.readAll(s);
     ok("seed round-trips its cart files (" + label + ")",
        all["a.moy/main.py"] === "print(1)" && all["b.moy/manifest.json"] === '{"title":"B"}',
@@ -175,7 +176,7 @@ for (const sync of [true, false]) {
     const s = await store.openStore(nav, "system");
     ok("the console's store opens beside the carts (" + label + ")",
        !!s && s.root.id === "system" && s.root.endpoint === "console.json");
-    ok("a fresh console store is empty (" + label + ")", await store.isEmpty(s));
+    ok("a fresh console store is empty (" + label + ")", !Object.keys(await store.readAll(s)).length);
     const sheet = new Uint8Array(300).map((_, i) => (i * 7) & 255);
     const SYS = '{"theme": "dusk", "show_fps": false, "volume": 3}';
     const r = await store.applyOps(s, [
@@ -193,9 +194,9 @@ for (const sync of [true, false]) {
        (await dirNames(s.carts)).join() ===
        "shared.moygfx,system/settings",
        (await dirNames(s.carts)).join());
-    ok("the console store is not empty now (" + label + ")", !(await store.isEmpty(s)));
+    ok("the console store is not empty now (" + label + ")", !!Object.keys(await store.readAll(s)).length);
     ok("...and the carts store never saw any of it (" + label + ")",
-       !Object.keys(await store.readAll(carts)).length && await store.isEmpty(carts));
+       !Object.keys(await store.readAll(carts)).length);
 
     const big = "{\"name\": \"" + "z".repeat(40) + "\"}";
     const chunked = await store.applyOps(s, [
@@ -220,12 +221,10 @@ for (const sync of [true, false]) {
         { p: "system/settings~part", t: "x" },
         { p: "../system/settings", t: "x" },
         { p: SET, dc: 1 },
-
-        { p: SET, b: store.toBase64(sheet) },
     ]);
-    ok("a secret, another sibling, a cart path, a folder delete and bytes for a"
-       + " text file are all refused (" + label + ")",
-       bad.applied === 0 && bad.errors.length === 11, JSON.stringify(bad.errors));
+    ok("a secret, another sibling, a cart path and a folder delete are all"
+       + " refused (" + label + ")",
+       bad.applied === 0 && bad.errors.length === 10, JSON.stringify(bad.errors));
     ok("...and nothing they named was written (" + label + ")",
        (await dirNames(s.carts)).join() ===
        "system/settings",
@@ -301,9 +300,6 @@ for (const sync of [true, false]) {
 
 // ---- a theme package's fonts and sheets cross as BYTES -----------------------
 {
-    ok("a theme package's font and sheet are binary, its theme.json is not",
-       store.isBinary("dusk.moy/ui.fnt") && store.isBinary("dusk.moy/parts.moygfx")
-       && !store.isBinary("dusk.moy/theme.json") && !store.isBinary(".fnt"));
     const s = await store.openStore(fakeNav(true));
     const fnt = new Uint8Array(700);
     for (let i = 0; i < fnt.length; i++) fnt[i] = (i * 29 + 3) & 255;
@@ -322,8 +318,8 @@ for (const sync of [true, false]) {
     const b64 = store.toBase64(png);
     await store.seed(s, { "c.moy/manifest.json": "{}", "c.moy/cover.png": { b: b64 } });
     let all = await store.readAll(s);
-    ok("a seeded cover reads back as {b: base64} of the same bytes",
-       all["c.moy/cover.png"] && all["c.moy/cover.png"].b === b64);
+    ok("a seeded cover reads back as its bytes",
+       all["c.moy/cover.png"] instanceof Uint8Array);
     ok("fileData turns that back into the bytes",
        store.fileData(all["c.moy/cover.png"]).length === png.length
        && store.fileData(all["c.moy/cover.png"]).every((v, i) => v === png[i]));
@@ -333,12 +329,11 @@ for (const sync of [true, false]) {
         { p: "c.moy/cover.png", b: store.toBase64(png.subarray(third, 2 * third)), part: 1 },
         { p: "c.moy/cover.png", b: store.toBase64(png.subarray(2 * third)), part: 2 },
         { p: "c.moy/cover.png", pub: 1 },
-        { p: "c.moy/main.py", b: "AAAA" },
     ]);
     all = await store.readAll(s);
-    ok("a chunked cover publishes whole, and only a cover takes bytes",
-       r.applied === 4 && r.errors.length === 1 && r.errors[0][1] === "not a binary file"
-       && all["c.moy/cover.png"].b === b64, JSON.stringify(r.errors));
+    ok("a chunked cover publishes whole",
+       r.applied === 4 && !r.errors.length
+       && store.toBase64(all["c.moy/cover.png"]) === b64, JSON.stringify(r.errors));
 }
 
 // ---- Get Carts' installs: old or new, at every point a reload can land --------

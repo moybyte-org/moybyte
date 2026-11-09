@@ -503,10 +503,10 @@ function mkdirs(p) {
     }
 }
 
-// The carts VFS root, from the registry (store.ROOTS) so there is one source of
-// the path. Only the carts-specific export/import code below names a root
-// directly; everything else iterates store.ROOTS.
-const CARTS_ROOT = store.rootById("carts").vfs;
+// The console's carts folder (web_boot.boot's), from which the VM's registry
+// places every other root (bindStore). Only the carts-specific export/import
+// code below names a root directly; everything else iterates store.roots().
+const CARTS_ROOT = "/moy/carts";
 // Get Carts' record, beside the carts folder as on every console
 // (runtime/carts/cart_index.py's RECORD_NAME, moy_store_base._sibling_path).
 const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.RECORD_NAME;
@@ -611,20 +611,7 @@ async function seedRoot(root, data, site) {
                 mp.FS.writeFile(RECORD_VFS, rec);
             }
         }
-        if (root.id === "carts") return await seedCarts(root, s, data);
-        if (await store.isEmpty(s)) {
-            // First visit: the served bundle is the seed AND the baseline, so
-            // the first sweep has nothing to say. On a static host the bundle
-            // of every other root is empty, which correctly seeds an empty
-            // store the kid's first drawing then persists into.
-            writeStore(root.vfs, data);
-            await store.seed(s, data);
-            return "seed";
-        }
-        // The local store WINS over the served bundle: it is the kid's work.
-        // "load" (vs "seed") is the evidence that a reload READ FROM local.
-        writeStore(root.vfs, await store.readAll(s));
-        return "load";
+        return await seedLocal(root, s, data);
     } catch (e) {
         writeStore(root.vfs, data);
         opfsStores[root.id] = null;
@@ -633,19 +620,21 @@ async function seedRoot(root, data, site) {
     }
 }
 
-// The carts store of record, and what of the served bundle it takes. The
-// VM decides (moy_seed.seed_folders: everything on a first visit, else the
-// system carts a board would seed and a torn seed of any); this only moves
-// bytes: OPFS into the VFS, the bundle into a staging folder the VM reads,
-// and back into OPFS what the VM wrote and removed, in its order -- each
-// cart's manifest last, so a reload part-way is seeded again.
+// A root's store of record, and what of the served bundle it takes. The VM
+// decides (moy_sync.seed_store: the carts by moy_seed.seed_folders --
+// everything on a first visit, else the system carts a board would seed and
+// a torn seed of any -- every other root the bundle whole on a first visit);
+// this only moves bytes: OPFS into the VFS, the bundle into a staging folder
+// the VM reads, and back into OPFS what the VM wrote and removed, in its
+// order -- each cart's manifest last, so a reload part-way is seeded again.
+// "seed" (a first visit) vs "load" is the evidence the E2E reads back.
 const SEED_VFS = "/seed";
-async function seedCarts(root, s, data) {
+async function seedLocal(root, s, data) {
     writeStore(root.vfs, await store.readAll(s));
     writeStore(SEED_VFS, data);
-    mp.runPython("import moy_seed, json\n_moy_seeded = json.dumps(moy_seed.seed_folders("
-                 + JSON.stringify(SEED_VFS) + ", " + JSON.stringify(root.vfs) + "))\n"
-                 + "moy_seed._rmtree(" + JSON.stringify(SEED_VFS) + ")\n");
+    mp.runPython("import moy_sync, moy_seed, json\n_moy_seeded = json.dumps(moy_sync.seed_store("
+                 + [root.id, SEED_VFS, CARTS_ROOT].map((v) => JSON.stringify(v)).join(", ")
+                 + "))\nmoy_seed._rmtree(" + JSON.stringify(SEED_VFS) + ")\n");
     const got = JSON.parse(mp.globals.get("_moy_seeded"));
     mp.runPython("del _moy_seeded");
     for (const rel of got.removed) await store.removeFile(s, rel);
@@ -653,6 +642,18 @@ async function seedCarts(root, s, data) {
     for (const rel of got.wrote) wrote[rel] = mp.FS.readFile(root.vfs + "/" + rel);
     await store.seed(s, wrote);
     return got.first ? "seed" : "load";
+}
+
+// The store module's two rules, from the VM before any store is opened: the
+// registry (moy_sync.roots_json) and the skip predicate (the native
+// store's, moy_fs.h's moy_store_skip).
+function bindStore() {
+    mp.runPython("import moy_sync\n_moy_roots = moy_sync.roots_json("
+                 + JSON.stringify(CARTS_ROOT) + ")\n");
+    store.setRoots(JSON.parse(mp.globals.get("_moy_roots")));
+    mp.runPython("del _moy_roots");
+    const native = mp.pyimport("moy_store");
+    store.setSkip((name, history) => native.skip(name, history));
 }
 
 // Decide the world and seed EVERY registered root. Runs BEFORE the console
@@ -673,7 +674,7 @@ async function initStore(fetched) {
     if (keep && keep.state !== "granted") self.postMessage({ t: "keep" });
     let anySite = false, anyNone = false, loaded = false;
     seededRoots = [];
-    for (const root of store.ROOTS) {
+    for (const root of store.roots()) {
         const data = fetched[root.id];
         // A sibling root the host does not serve (files.json or console.json
         // 404 -> null): in BOARD mode skip it (no watcher, no empty dir: the
@@ -1215,6 +1216,7 @@ async function init(search, coarse, channel, scheme, signin) {
         // Before the seed, which is the VM's too.
         mp.runPython("import sys\nsys.path.insert(0, '/modules')\n");
     }
+    bindStore();
     await initStore({ carts: carts, files: files, system: system, apps: appsRes.json });
     // Music's songs: the serving board's music folder, or this browser's.
     await mediaList(mode === "board" ? () => gated("/media").then((r) => r.json) : siteSongs);
@@ -1266,7 +1268,7 @@ async function init(search, coarse, channel, scheme, signin) {
         + "web_boot.store_mode(" + JSON.stringify(mode || "") + ", "
         + JSON.stringify(seededRoots || []) + ")\n"
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
-        + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
+        + "web_boot.boot(" + JSON.stringify(CARTS_ROOT) + bootArgs + ")\n"
         // AFTER boot(), unlike gpio_enable: this one hangs the updater on the
         // live Workstation, which boot() is what creates.
         + (updateDoc ? "web_boot.update_enable("

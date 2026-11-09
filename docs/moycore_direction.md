@@ -148,16 +148,16 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
 
   | JavaScript rule | twin | divergence | now |
   |---|---|---|---|
-  | `systemSeeds`, `cartVersion`, `RESEED_PRESERVE` | `moy_seed.seed_builtins` (`moy_seed.c`) | a torn local copy was diffed as version 0, where a board rewrites it whole | the VM's: `moy_seed.seed_folders` over the board's `_make_room`; the worker's `seedCarts` moves bytes |
+  | `systemSeeds`, `cartVersion`, `RESEED_PRESERVE` | `moy_seed.seed_builtins` (`moy_seed.c`) | a torn local copy was diffed as version 0, where a board rewrites it whole | the VM's: `moy_seed.seed_folders` over the board's `_make_room`; the worker's `seedLocal` moves bytes |
   | `zipStore`, `crc32`, `walkVfs` | `moy_pack.pack` (`moy_pack.c`) | none | the VM's: export runs `web_boot.export_cart` |
   | `unzip`, `inflateRaw`, `zipTopDir` | `moy_pack.unpack` (`moy_pack.c`) | the C refused a member over `MOY_SEED_MAX`, the page had no cap; the C streams each member now | the VM's: `web_boot.import_archive_json` |
   | `cartBase`, `uniqueCartDir`, `p8Base` | `moy_pack.import_archive` | Python named an import `Hop.moy`, the page `local.hop.moy` | the VM's: `moy_pack.import_base`/`import_target`, the page's rule kept |
   | `themeOf`, `uniqueThemeDir`, `landedTheme`, `renamedTheme` | `moy_pack._theme_of` | a fallback name's runs of other characters | the VM's: `import_archive` |
-  | `SKIP_*`, `skipName`; `SITE_SKIP_*`, `skipLocal` | `moy_sync._skip` and its site list, C `moy_store_skip` | none (`tests/test_web_store.py`) | mirror: filters the OPFS walk and the op apply |
-  | `BINARY_*`, `isBinary` | `moy_sync.BINARY_*` | none (`tests/test_web_store.py`) | mirror: `readAll`'s `{b:}` values |
-  | `ROOTS`, `rootById` | `moy_sync.SYNC_ROOTS` | none (`tests/test_web_store.py`) | mirror: `initStore` iterates it |
+  | `SKIP_*`, `skipName`; `SITE_SKIP_*`, `skipLocal` | `moy_sync._skip` and its site list, C `moy_store_skip` | none | the VM's: the worker hands the store the wasm's `moy_store.skip` |
+  | `BINARY_*`, `isBinary` | `moy_sync.BINARY_*` | none | gone: `readAll` hands text or bytes, and the ops are the VM's own sweep |
+  | `ROOTS`, `rootById` | `moy_sync.SYNC_ROOTS` | the delete arity lived only in the page and the C | the VM's: `moy_sync.roots_json`, `Root.dc` held to the C |
   | `safeSegments`, `localParts` | `moy_sync_apply.c`'s path rule | not compared | mirror: the OPFS write guard |
-  | `isEmpty` (roots other than carts) | `seed_folders`' `first` | none | mirror: a first visit adopts the served bundle |
+  | `isEmpty` (roots other than carts) | `seed_folders`' `first` | none | the VM's: `moy_sync.seed_store` (`moy_seed.adopt_bundle`) |
   | `probeMode` | the boards' `GET /sync` | none | JavaScript's: it decides what the VFS is seeded from |
 
   `web_boot.py` holds no copy: it reads `moy_sync`'s registry and skip rules.

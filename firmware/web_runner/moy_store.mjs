@@ -36,43 +36,18 @@
 // Everything here is deliberately free of the VM and of the Worker globals, so
 // node can drive it directly (worker_persist_test.mjs) against a fake OPFS.
 
-// What never crosses THE WIRE or goes into a zip -- the JS mirror of
-// runtime/carts/moy_sync's `_skip`, which is the ONE predicate for what stays home.
-// journal/ is the durable undo history, thumbs/ a regenerable cache, .bak/.tmp
-// moy_fs's crash-safety artifacts.
-const SKIP_DIRS = ["thumbs", "__pycache__", "journal"];
-const SKIP_FILES = ["journal.jsonl"];
-const SKIP_SUFFIXES = [".bak", ".tmp"];
+// What never crosses THE WIRE (`skipName`) and what never reaches THE LOCAL
+// STORE (`skipLocal`, which keeps the journal: in mode 1 this store is of
+// record, and the undo history lives with it) are the native store's one
+// predicate, `moy_store.skip(name, history)` in the VM (moy_fs.h), handed in
+// by `setSkip` before any store is opened.
+let skipFn = null;
 
-// ...and what never reaches THE LOCAL STORE, which since 2026-08-25 is a
-// SHORTER list: in mode 1 this OPFS store is the store of record, so the undo
-// history belongs in it (moy_sync's "the journal lives with the store of
-// record"; #193's "with its undo history"). The mirror of moy_sync's
-// SITE_SKIP_*. A zip and a wire batch keep the longer list: a board has its own
-// journal and must never be handed somebody else's.
-const SITE_SKIP_DIRS = ["thumbs", "__pycache__"];
-const SITE_SKIP_FILES = [];
+export function setSkip(fn) { skipFn = fn; }
 
-function skipIn(name, dirs, files) {
-    if (dirs.indexOf(name) >= 0 || files.indexOf(name) >= 0) return true;
-    return SKIP_SUFFIXES.some((s) => name.endsWith(s));
-}
+export function skipName(name) { return !!skipFn(name, false); }
 
-export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
-
-// The binary files that cross -- a cart's cover (SPEC.md 3.6) by name, a theme
-// package's fonts and sheets by suffix -- the JS mirror of runtime/carts/moy_sync's
-// BINARY_FILES and BINARY_SUFFIXES. They travel as base64: `b` where text
-// rides as `t` in a batch op, `{b: ...}` as a value in a served bundle, and as
-// BYTES once they are in the VFS or this store.
-const BINARY_FILES = ["cover.png"];
-const BINARY_SUFFIXES = [".fnt", ".moygfx"];
-
-export function isBinary(rel) {
-    const name = String(rel).slice(String(rel).lastIndexOf("/") + 1);
-    return BINARY_FILES.indexOf(name) >= 0
-        || BINARY_SUFFIXES.some((s) => name.length > s.length && name.endsWith(s));
-}
+export function skipLocal(name) { return !!skipFn(name, true); }
 
 export function fromBase64(b) {
     const s = atob(b);
@@ -99,36 +74,20 @@ export function fileData(v) {
     return null;
 }
 
-export function skipLocal(name) {
-    return skipIn(name, SITE_SKIP_DIRS, SITE_SKIP_FILES);
-}
+// THE SYNC ROOTS, as the VM's registry hands them (moy_sync.roots_json, by
+// `setRoots` before any store is opened): each root's id, VFS path and
+// served endpoint, its whole-folder delete arity (`dcMin`/`dcMax`, null: no
+// folder delete), the named files a root of them IS (`top`), whether every
+// file is bytes (`binary`) and whether a site-mode page leaves it to another
+// keeper (`site: false`, the apps' folders: commitWritten below).
+let rootList = [];
 
-// The SYNC ROOT REGISTRY -- the JS MIRROR of runtime/carts/moy_sync.SYNC_ROOTS, so the
-// worker and this store iterate roots instead of naming carts/files. A static
-// host has no server to ask for this, so it is a constant, pinned against the
-// Python registry by tests/test_web_store.py (a drift there fails the build).
-// The per-root behaviour the browser store needs is the whole-folder delete
-// ARITY (a cart is one segment, a files item a folder's file or a folder item
-// below it; null: no folder delete at all), and for the console's own documents the
-// named files the store IS, each a path in it (`top`, moy_sync.SYSTEM_FILES), which a
-// board serves through its VM (`console.json`) when its firmware has the root.
-// The apps' private folders (`apps/<id>/<key>`) are `binary` (every file is
-// bytes) and `site: false`: in site mode the keeper below (commitWritten) is
-// their one writer, so initStore neither seeds nor watches them there.
-// Kinds are not validated here -- these ops are the browser's own
-// sweep of its own store, and `.history`/`.Trash` persisting to a SITE-mode OPFS
-// is the kid's own undo/recovery surviving the tab, which is correct.
-export const ROOTS = [
-    { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
-    { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
-    { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
-      top: ["system/settings", "shared.moygfx"] },
-    { id: "apps", vfs: "/moy/apps", endpoint: "apps.json", dcMin: 1, dcMax: 1,
-      binary: true, site: false },
-];
+export function setRoots(list) { rootList = list; }
+
+export function roots() { return rootList; }
 
 export function rootById(id) {
-    for (const r of ROOTS) if (r.id === id) return r;
+    for (const r of rootList) if (r.id === id) return r;
     return null;
 }
 
@@ -433,7 +392,6 @@ async function applyOne(store, op) {
         return null;
     }
     if (op.b !== undefined) {
-        if (!isBinary(key)) return "not a binary file";
         if (typeof op.b !== "string") return "no bytes";
         const bytes = fromBase64(op.b);
         if (op.part === undefined || op.part === null) {
@@ -460,9 +418,9 @@ async function applyOne(store, op) {
     return null;
 }
 
-// Every syncable file in the local store as {rel: text}, and {rel: {b: base64}}
-// for a binary one -- the served bundle's shape. This is what a site-mode boot
-// writes into the VFS INSTEAD of the served carts.json.
+// Every syncable file in the local store as {rel: text, or its bytes when it
+// is not UTF-8}: what a site-mode boot writes into the VFS before the VM
+// decides what of the served bundle to add.
 export async function readAll(store) {
     const out = {};
     if (store.root.top) {
@@ -484,7 +442,7 @@ export async function readAll(store) {
             const leaf = name.slice(cut + 1);
             if (!at || !at[1].includes(leaf)) continue;
             const fh = await at[0].getFileHandle(leaf);
-            out[name] = asValue(name, new Uint8Array(await (await fh.getFile()).arrayBuffer()));
+            out[name] = asValue(new Uint8Array(await (await fh.getFile()).arrayBuffer()));
         }
         return out;
     }
@@ -492,9 +450,9 @@ export async function readAll(store) {
     return out;
 }
 
-// A file's bytes as the bundle value readAll hands out.
-function asValue(rel, bytes) {
-    if (isBinary(rel)) return { b: toBase64(bytes) };
+// A file's bytes as the value readAll hands out: its text when it is UTF-8
+// throughout, else the bytes.
+function asValue(bytes) {
     try { return strict.decode(bytes); } catch (e) { return bytes; }
 }
 
@@ -514,7 +472,7 @@ async function walk(dir, prefix, out, depth, leave) {
         // Top-level files are not cart files; the sweep never ships them and
         // the VFS must not be seeded with them either.
         if (rel.indexOf("/") < 0) continue;
-        out[rel] = asValue(rel, new Uint8Array(await (await handle.getFile()).arrayBuffer()));
+        out[rel] = asValue(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
     }
 }
 
@@ -558,14 +516,6 @@ export async function keepSong(store, name, bytes) {
         return null;
     await writeText(store, [MUSIC_DIR, base], bytes);
     return base;
-}
-
-export async function isEmpty(store) {
-    if (store.root.top) return !Object.keys(await readAll(store)).length;
-    for await (const [name, handle] of store.carts.entries()) {
-        if (handle.kind === "directory" && !skipLocal(name)) return false;
-    }
-    return true;
 }
 
 // One file of a cart store removed; one already gone is no error.

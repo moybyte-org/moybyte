@@ -35,80 +35,39 @@ def test_the_browser_store_passes_its_own_suite():
     assert p.returncode == 0, p.stdout + p.stderr
 
 
-def test_the_two_skip_predicates_agree():
-    """`_skip` is the ONE rule for what never leaves a cart folder, and mode 1
-    added a JS copy of it -- so it can now rot. A file the sweep ships but the
-    local store refuses would vanish on the next reload."""
+def test_the_browser_store_takes_its_rules_from_the_vm():
+    """The page's store holds no copy of the skip predicate, the binary rule or
+    the root registry: the worker hands it the native store's `skip` and
+    `moy_sync.roots_json` before any store is opened (bindStore), and a copy
+    could rot -- a file the sweep ships but the local store refuses vanishes on
+    the next reload."""
+    js = _read("firmware", "web_runner", "moy_store.mjs")
+    worker = _read("firmware", "web_runner", "worker.js")
+    for gone in ("SKIP_DIRS", "SITE_SKIP_DIRS", "BINARY_FILES", "export const ROOTS"):
+        assert gone not in js, gone
+    bind = worker[worker.index("function bindStore()"):]
+    bind = bind[:bind.index("\n}\n")]
+    assert "moy_sync.roots_json" in bind and "store.setRoots(" in bind
+    assert 'mp.pyimport("moy_store")' in bind and "store.setSkip(" in bind
+    init = worker[worker.index("async function init("):]
+    assert init.index("bindStore()") < init.index("initStore({")
+
+
+def test_the_root_registry_the_browser_reads_is_the_receivers():
+    """`moy_sync.roots_json` is what the browser's store iterates: each root's
+    VFS path and endpoint from the registry, and the whole-folder-delete arity
+    (`Root.dc`) the receiving C applies, which this holds against the C."""
+    import json
     from runtime import moy_sync
 
-    js = _read("firmware", "web_runner", "moy_store.mjs")
-
-    def arr(name):
-        m = re.search(r"const %s = \[([^\]]*)\]" % name, js)
-        assert m, "no %s in moy_store.mjs" % name
-        return tuple(re.findall(r'"([^"]*)"', m.group(1)))
-
-    assert arr("SKIP_DIRS") == moy_sync.SKIP_DIRS
-    assert arr("SKIP_FILES") == moy_sync.SKIP_FILES
-    assert arr("SKIP_SUFFIXES") == moy_sync.SKIP_SUFFIXES
-    # ...and the SITE-mode pair, which is the same rule minus the journal
-    # (2026-08-25: the journal lives with the store of record, and in mode 1
-    # that is the browser). Two languages, two lists, same drift risk.
-    assert arr("SITE_SKIP_DIRS") == moy_sync.SITE_SKIP_DIRS
-    assert arr("SITE_SKIP_FILES") == moy_sync.SITE_SKIP_FILES
-
-
-def test_the_binary_rule_agrees_across_languages():
-    """The wire's binary predicate has a JS copy (and two C ones, held by
-    tests/test_moy_webhost.py): a font a theme package carries must cross
-    as bytes from every side."""
-    from runtime import moy_sync
-    js = _read("firmware", "web_runner", "moy_store.mjs")
-    for name, want in (("BINARY_FILES", moy_sync.BINARY_FILES),
-                       ("BINARY_SUFFIXES", moy_sync.BINARY_SUFFIXES)):
-        m = re.search(r"const %s = \[([^\]]*)\]" % name, js)
-        assert m, "no %s in moy_store.mjs" % name
-        assert tuple(re.findall(r'"([^"]*)"', m.group(1))) == want
-
-
-def test_the_sync_root_registry_agrees_across_languages():
-    """A static host has no server to hand the page the root list, so
-    moy_store.mjs carries a MIRROR of moy_sync.SYNC_ROOTS. The mirror can rot --
-    a root whose dc arity or vfs path drifts would persist a kid's drawing into
-    the wrong place or reject a legal delete -- so pin id, endpoint, vfs, the
-    whole-folder-delete arity and the named top-level files against the
-    Python registry, in order -- and which roots cross every file as bytes
-    and which a site-mode page leaves to another keeper."""
-    from runtime import moy_sync
-
-    js = _read("firmware", "web_runner", "moy_store.mjs")
-    block = re.search(r"export const ROOTS = \[(.*?)\];", js, re.S)
-    assert block, "no ROOTS registry in moy_store.mjs"
-    entries = re.findall(r"\{([^}]*)\}", block.group(1))
-    assert len(entries) == len(moy_sync.SYNC_ROOTS), \
-        "the JS registry has %d roots, Python has %d" % (
-            len(entries), len(moy_sync.SYNC_ROOTS))
-
-    def field(entry, name):
-        m = re.search(r'%s:\s*("([^"]*)"|null|true|false|\d+)' % name, entry)
-        if m is None:
-            return None
-        v = m.group(1)
-        if v in ("null", "true", "false"):
-            return {"null": None, "true": True, "false": False}[v]
-        return m.group(2) if v.startswith('"') else int(v)
-
-    for entry, root in zip(entries, moy_sync.SYNC_ROOTS):
-        assert field(entry, "id") == root.id, entry
-        assert field(entry, "endpoint") == (
-            None if root.endpoint is None else root.endpoint.lstrip("/")), entry
-        assert field(entry, "vfs") == root.path("/moy/carts"), entry
-        top = re.search(r"top:\s*\[([^\]]*)\]", entry)
-        assert (tuple(re.findall(r'"([^"]*)"', top.group(1))) if top else None) \
-            == root.top, entry
-        assert bool(field(entry, "binary")) == root.binary, entry
-        assert (field(entry, "site") is not False) == root.site, entry
-        lo, hi = field(entry, "dcMin"), field(entry, "dcMax")
+    got = json.loads(moy_sync.roots_json("/moy/carts"))
+    assert [r["id"] for r in got] == [r.id for r in moy_sync.SYNC_ROOTS]
+    for entry, root in zip(got, moy_sync.SYNC_ROOTS):
+        assert entry["endpoint"] == root.endpoint.lstrip("/"), entry
+        assert entry["vfs"] == root.path("/moy/carts"), entry
+        assert entry["top"] == (list(root.top) if root.top else None), entry
+        assert entry["binary"] == root.binary and entry["site"] == root.site, entry
+        lo, hi = entry["dcMin"], entry["dcMax"]
         assert [n for n in (1, 2, 3, 4) if lo is not None and n >= lo
                 and (hi is None or n <= hi)] == _dc_depths(root), entry
 

@@ -244,10 +244,9 @@ BATCH_BUDGET = 32 * 1024
 # `{"b": ...}` as a value in a pull bundle. A binary chunk is BINARY_PART bytes,
 # which is PART_MAX characters of base64 exactly, so every piece decodes on its
 # own. Every other binary file stays home (the module docstring says why). The
-# rule has three more copies, each pinned to this one by its test:
+# rule has two more copies, each pinned to this one by its test:
 # native/moy_net/moy_sync_apply.c and moy_webhost.c (tests/test_moy_sync.py,
-# tests/test_moy_webhost.py) and firmware/web_runner/moy_store.mjs
-# (tests/test_web_store.py).
+# tests/test_moy_webhost.py).
 BINARY_FILES = ("cover.png",)
 BINARY_SUFFIXES = (".fnt", ".moygfx")
 BINARY_PART = PART_MAX * 3 // 4
@@ -397,10 +396,8 @@ def files_root(carts_root):
 # own documents beside them (`SYSTEM_ROOT`, whose board half is the VM's) and
 # the apps' private folders (`APPS_ROOT`).
 #
-# The JS side mirrors this list (firmware/web_runner/moy_store.mjs ROOTS), pinned
-# by tests/test_web_store.py, because a STATIC host has no server to ask for it --
-# the roots are ours and few, so a mirrored constant is honest where a fetched
-# manifest would only move the coupling.
+# The browser's store reads this list from its own VM (`roots_json`, the
+# worker's bindStore), so a static host needs no server to ask for it.
 # ---------------------------------------------------------------------------
 
 
@@ -435,6 +432,9 @@ class Root:
                root's: moy_store.commitWritten). A board-served page does both.
       skip     None, or the name predicate this root's watcher sweeps with
                in either mode, in place of the wire's `_skip`.
+      dc       None, or the (least, most) segments a whole-folder delete of
+               this root names (most None: no bound) -- the receiving C's
+               rule, which the browser's store applies too (`roots_json`).
 
     What a receiver does per root -- the carts root journals and dirties the
     shelf, a whole-cart delete is one segment, the files root is made on its
@@ -444,7 +444,7 @@ class Root:
 
     def __init__(self, id, wire, path, endpoint, kinds=False,
                  site_keep_journal=False, top=None, wire_top=None,
-                 binary=False, site=True, skip=None):
+                 binary=False, site=True, skip=None, dc=None):
         self.id = id
         self.wire = wire
         self._path = path
@@ -456,6 +456,7 @@ class Root:
         self.binary = binary
         self.site = site
         self._skip = skip
+        self.dc = dc
 
     def path(self, carts_root):
         return self._path(carts_root)
@@ -481,7 +482,7 @@ class Root:
 
 CARTS_ROOT = Root(
     CARTS_ROOT_ID, PROTOCOL_V, lambda carts_root: carts_root, "/carts.json",
-    site_keep_journal=True)
+    site_keep_journal=True, dc=(1, 1))
 
 FILES_ROOT = Root(
     # A lambda, not the bare `files_root` reference, so the name resolves at CALL
@@ -489,7 +490,7 @@ FILES_ROOT = Root(
     # here and the endpoint 404s, exactly as it should, per call rather than per
     # registry construction.
     FILES_ROOT_ID, PROTOCOL_V_ROOTED, lambda carts_root: files_root(carts_root),
-    "/files.json", kinds=True)
+    "/files.json", kinds=True, dc=(2, None))
 
 # The console's own documents, the files a board keeps BESIDE its carts
 # folder (moy_carts' sibling stores): `system/settings` (the Settings rows and
@@ -545,7 +546,7 @@ def skip_staged(name):
 # thing that writes OPFS apps/, so this root is neither seeded nor swept there.
 APPS_ROOT = Root(
     APPS_ROOT_ID, PROTOCOL_V_ROOTED, apps_root, "/apps.json",
-    binary=True, site=False, skip=skip_staged)
+    binary=True, site=False, skip=skip_staged, dc=(1, 1))
 
 SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT, SYSTEM_ROOT, APPS_ROOT)
 ROOT_IDS = tuple(r.id for r in SYNC_ROOTS)
@@ -555,6 +556,36 @@ _ROOT_BY_ID = {r.id: r for r in SYNC_ROOTS}
 def root_by_id(root_id):
     """The Root for a wire root id, or None."""
     return _ROOT_BY_ID.get(root_id)
+
+
+def roots_json(carts_root):
+    """The registry as the browser's store reads it (moy_store.mjs's
+    `setRoots`), each root's directory under `carts_root`."""
+    out = []
+    for r in SYNC_ROOTS:
+        lo, hi = r.dc if r.dc is not None else (None, None)
+        out.append({"id": r.id, "vfs": r.path(carts_root),
+                    "endpoint": r.endpoint.lstrip("/"), "dcMin": lo, "dcMax": hi,
+                    "top": list(r.top) if r.top is not None else None,
+                    "binary": r.binary, "site": r.site})
+    return _json.dumps(out)
+
+
+def seed_store(root_id, src, carts_root):
+    """What a store of record takes from the served bundle staged at `src`
+    (the browser's, on a static host): the carts by `moy_seed.seed_folders`,
+    every other root the bundle whole when it holds none of its files yet.
+    The same report either way: {"first", "wrote", "removed"}."""
+    try:
+        import moy_seed
+    except ImportError:  # pragma: no cover - host fallback
+        from runtime import moy_seed
+    root = root_by_id(root_id)
+    dest = root.path(carts_root)
+    if root_id == CARTS_ROOT_ID:
+        return moy_seed.seed_folders(src, dest)
+    return moy_seed.adopt_bundle(src, dest, root.top,
+                                 root.watch_skip(True) or _skip)
 
 
 def _entries(path, _listdir=None, _isdir=None):

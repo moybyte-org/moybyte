@@ -118,3 +118,24 @@ export async function loadTree(tree, sync = true) {
     }
     return root;
 }
+
+// The two rules a worker hands the store from its VM (worker.js, bindStore),
+// read here from CPython's copy of the same modules: the registry
+// (moy_sync.roots_json) and the skip predicate (moy_pack.pack_skip, the
+// native store's twin), over every name the store asks about.
+export async function vmRules(store) {
+    const { execFileSync } = await import("node:child_process");
+    const repo = new URL("../..", import.meta.url).pathname;
+    const out = execFileSync(process.env.MOY_PY || "python3", ["-c",
+        "import sys, json; sys.path.insert(0, sys.argv[1])\n"
+        + "from runtime import moy_sync\n"
+        + "print(json.dumps({'roots': json.loads(moy_sync.roots_json('/moy/carts')),"
+        + " 'wire': [list(moy_sync.SKIP_DIRS + moy_sync.SKIP_FILES), list(moy_sync.SKIP_SUFFIXES)],"
+        + " 'site': [list(moy_sync.SITE_SKIP_DIRS + moy_sync.SITE_SKIP_FILES)]}))", repo],
+        { encoding: "utf-8" });
+    const r = JSON.parse(out);
+    store.setRoots(r.roots);
+    const [wire, suffixes] = r.wire, site = r.site[0];
+    store.setSkip((name, history) => (history ? site : wire).includes(name)
+        || suffixes.some((s) => name.endsWith(s)));
+}

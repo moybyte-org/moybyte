@@ -155,3 +155,33 @@ def test_the_native_store_seeds_the_same(tmp_path):
         cp = _seed([sys.executable], tmp_path / ("cp-" + tag), local)
         assert vm[0] == "native True"
         assert vm[1] == cp[1] and vm[2] == cp[2], tag
+
+
+def test_every_other_root_adopts_the_bundle_on_a_first_visit_alone(tmp_path):
+    """moy_sync.seed_store for the roots that are not carts: the served bundle
+    whole when the store holds none of its files (a root of named files only
+    those), else nothing -- the store of record wins."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from runtime import moy_sync
+    carts = str(tmp_path / "moy" / "carts")
+    os.makedirs(carts)
+    src = str(tmp_path / "seed")
+    _write(src, {"system/settings": "theme=moy\n", "shared.moygfx": b"\x00\x01",
+                 "wifi.json": "[]"})
+    got = moy_sync.seed_store("system", src, carts)
+    assert got == {"first": True, "removed": [],
+                   "wrote": ["system/settings", "shared.moygfx"]}
+    assert not os.path.exists(str(tmp_path / "moy" / "wifi.json"))
+    _write(src, {"system/settings": "theme=other\n"})
+    again = moy_sync.seed_store("system", src, carts)
+    assert again["first"] is False and again["wrote"] == []
+    with open(str(tmp_path / "moy" / "system" / "settings")) as f:
+        assert f.read() == "theme=moy\n"
+
+    fsrc = str(tmp_path / "fseed")
+    _write(fsrc, {"Pictures/a.moyimg": "img", "top.txt": "loose"})
+    got = moy_sync.seed_store("files", fsrc, carts)
+    assert got["first"] is True and got["wrote"] == ["Pictures/a.moyimg"]
+    os.remove(str(tmp_path / "moy" / "files" / "Pictures" / "a.moyimg"))
+    _write(fsrc, {"Music/b.mp3": "x"})
+    assert moy_sync.seed_store("files", fsrc, carts)["first"] is False

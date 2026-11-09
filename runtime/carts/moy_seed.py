@@ -334,6 +334,35 @@ def seed_folders(src, root=CARTS_DIR):
     return {"first": first, "wrote": wrote, "removed": removed}
 
 
+def adopt_bundle(src, dest, top=None, skip=None):
+    """The bundle staged at `src` copied whole into the store `dest` when the
+    store holds none of its files yet (a first visit): with `top`, its named
+    files (paths in it) alone, else every file in a folder of it, nothing
+    `skip` names. The report `seed_folders` gives."""
+    if top is not None:
+        first = not any(_exists(dest + "/" + t) for t in top)
+        wrote = []
+        if first:
+            for t in top:
+                if _exists(src + "/" + t):
+                    segs = t.split("/")
+                    for k in range(1, len(segs)):
+                        _mkdir(dest + "/" + "/".join(segs[:k]))
+                    _write_bytes(dest + "/" + t, _read_bytes(src + "/" + t, 1 << 30))
+                    wrote.append(t)
+        return {"first": first, "wrote": wrote, "removed": []}
+    have = _listing(dest) or {}
+    first = not any(have[n] and not (skip and skip(n)) for n in have)
+    wrote = []
+    if first:
+        names = _listing(src) or {}
+        _mkdir(dest)
+        for n in sorted(names):
+            if names[n] and not (skip and skip(n)):
+                wrote += _copy_cart(src + "/" + n, dest + "/" + n, n, ())
+    return {"first": first, "wrote": wrote, "removed": []}
+
+
 # -- the PACKED seed roster (2026-08-30) -------------------------------------
 #
 # `seed_builtins` above takes cart DICTS, and on the console boards those come

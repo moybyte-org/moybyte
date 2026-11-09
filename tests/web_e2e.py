@@ -57,10 +57,11 @@ FEATURES = {
              "dist/worker.js predates the sync client"),
     "store": (lambda: (DIST / "moy_store.mjs").exists(),
               "dist/ predates the browser store (no moy_store.mjs)"),
-    # The apps' private folders as a sync root, and the worker's `open`.
-    "apps": (lambda: ('endpoint: "apps.json"' in (DIST / "moy_store.mjs").read_text()
+    # The apps' private folders as a sync root (the store takes the VM's
+    # registry, which has it), and the worker's `open`.
+    "apps": (lambda: ("setRoots" in (DIST / "moy_store.mjs").read_text()
                       and 'm.t === "open"' in (DIST / "worker.js").read_text()),
-             "dist/ predates the apps root (no apps.json in its registry, or no "
+             "dist/ predates the apps root (no registry from the VM, or no "
              "open message in the worker)"),
     # The sign-in: the page's pairing prompt and the browser's end of the
     # crypto (native/moy_net/moy_seal_web.c) in the wasm.

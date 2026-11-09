@@ -23,23 +23,6 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "firmware" / "web_runner"
 
 MIRRORS = {
-    # what never crosses the wire (test_web_store: the two skip predicates)
-    "SKIP_DIRS": "moy_sync.SKIP_DIRS / moy_fs.h moy_store_skip",
-    "SKIP_FILES": "moy_sync.SKIP_FILES",
-    "SKIP_SUFFIXES": "moy_sync.SKIP_SUFFIXES",
-    "skipIn": "moy_sync._skip",
-    "skipName": "moy_sync._skip",
-    # what never reaches the local store (test_web_store)
-    "SITE_SKIP_DIRS": "moy_sync.SITE_SKIP_DIRS",
-    "SITE_SKIP_FILES": "moy_sync.SITE_SKIP_FILES",
-    "skipLocal": "moy_sync.Root.watch_skip(site=True)",
-    # which files are bytes (test_web_store: the binary rule)
-    "BINARY_FILES": "moy_sync.BINARY_FILES",
-    "BINARY_SUFFIXES": "moy_sync.BINARY_SUFFIXES",
-    "isBinary": "moy_sync.is_binary",
-    # the root registry (test_web_store: the sync root registry)
-    "ROOTS": "moy_sync.SYNC_ROOTS",
-    "rootById": "moy_sync.SYNC_ROOTS",
     # the receiving path rule (native/moy_net/moy_sync_apply.c)
     "safeSegments": "moy_sync_apply.c's path rule",
     "localParts": "moy_sync.Root's per-root shape",
@@ -49,11 +32,12 @@ MIRRORS = {
     "WRITTEN_ROOT": "cart_files' apps/ sibling",
     "MUSIC_DIR": "media_link.MUSIC",
     "isSong": "media_link's song listing",
-    # first visit of a root other than carts: the store adopts the bundle
-    "isEmpty": "moy_seed.seed_folders' `first` (carts)",
 }
 
 IO = (
+    # the VM's rules, handed in by the worker's bindStore
+    "skipFn", "setSkip", "skipName", "skipLocal", "rootList", "setRoots", "roots",
+    "rootById",
     "fromBase64", "toBase64", "fileData", "probeMode", "requestPersistence",
     "mbytes", "storageNote", "enc", "strict", "CHANNEL_DIR_PREFIX", "channelNav",
     "openStore", "dirFor", "namedAt", "writeText", "writeIn", "removeAt",
@@ -70,6 +54,8 @@ MOVED = (
     "crc32", "CRC_TABLE", "zipStore", "inflateRaw", "unzip", "zipTopDir",
     "cartBase", "uniqueCartDir", "themeOf", "themeName", "THEME_NAME_MAX",
     "uniqueThemeDir", "landedTheme", "renamedTheme", "p8Base", "walkVfs",
+    "SKIP_DIRS", "SKIP_FILES", "SKIP_SUFFIXES", "SITE_SKIP_DIRS", "SITE_SKIP_FILES",
+    "skipIn", "BINARY_FILES", "BINARY_SUFFIXES", "isBinary", "ROOTS", "isEmpty",
 )
 
 _TOP = re.compile(r"^(?:export\s+)?(?:(?:async\s+)?function\*?|const|let|var)\s+"
