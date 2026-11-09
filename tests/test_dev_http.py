@@ -228,7 +228,7 @@ def test_a_get_needs_the_permission(ws, server):
 
 
 def test_the_permission_row_and_its_absence_without_wifi(ws):
-    assert P.line("http") == "Fetch pages from the internet"
+    assert P.line("http") == "Fetch pages from the internet and your network"
     assert P.row("http")[P.NEEDS] == "wifi"
     cart = {"id": "t.h", "runtime": "python", "permissions": ["http"], "required": ["http"]}
     ok, _why = P.check(cart, None, P.services(ws))[:2]

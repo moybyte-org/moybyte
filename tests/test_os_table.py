@@ -45,6 +45,18 @@ def test_the_generated_files_are_the_source_s():
             assert f.read() == text, "%s is stale: run tools/gen_os_table.py" % path
 
 
+def test_the_http_prompt_says_it_reaches_the_local_network():
+    """`http` reaches any host, the LAN's included, with no address filter
+    (owner, 2026-11-09): its install prompt line, generated from the
+    source's permission, says so."""
+    from runtime import app_perms
+    src = next(p for p in gen_os_table.load()["permissions"] if p["perm"] == "http")
+    assert src["prompt"] == "Fetch pages from the internet and your network"
+    assert app_perms.row("http")[app_perms.PROMPT] == src["prompt"]
+    assert app_perms.prompt({"runtime": "lua", "permissions": ["http"]}) is None
+    assert app_perms.prompt({"runtime": "wasm", "permissions": ["http"]}) == [src["prompt"]]
+
+
 def test_the_rows_are_the_frozen_copy_line_for_line():
     frozen = [ln for ln in open(FROZEN).read().splitlines() if ln and not ln.startswith("#")]
     rows = _table()["rows"]
