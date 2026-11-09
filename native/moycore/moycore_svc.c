@@ -566,10 +566,11 @@ static void open_names(lua_State *L) {
         luaL_requiref(L, libs[i].name, libs[i].func, 1);
         lua_pop(L, 1);
     }
-    lua_pushnil(L);
-    lua_setglobal(L, "dofile");
-    lua_pushnil(L);
-    lua_setglobal(L, "loadfile");
+    static const char *const banned[] = { "load", "dofile", "loadfile", NULL };
+    for (const char *const *b = banned; *b; b++) {
+        lua_pushnil(L);
+        lua_setglobal(L, *b);
+    }
     lua_pushcfunction(L, l_print);
     lua_setglobal(L, "print");
     luaL_newlib(L, OS);

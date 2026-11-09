@@ -97,6 +97,21 @@ def test_an_error_is_a_crash_with_its_line(sched):
     assert any("bad" in t for t in _texts(since, p.pid))
 
 
+BYTECODE = """
+local blob = string.dump(function() return 1 end)
+local ok = pcall(function() return load(blob, "x", "b") end)
+print("load " .. type(load) .. " " .. tostring(ok) .. " " .. type(dofile) .. " " .. type(loadfile))
+moybyte.after(1, function() moybyte.exit(0) end)
+"""
+
+
+def test_a_service_cannot_load_a_binary_chunk(sched):
+    since = L.next()
+    pid = sched.start(_cart(BYTECODE))
+    _run(sched, 30)
+    assert "load nil false nil nil" in _texts(since, pid)
+
+
 def test_a_callback_that_never_returns_is_struck_out_through_its_pcall(sched, monkeypatch):
     spin = """
 moybyte.every(1, function()

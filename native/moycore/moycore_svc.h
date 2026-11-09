@@ -18,7 +18,8 @@
 // run when moycore_svc_step is called (the scheduler's poll, every POLL_MS), on
 // the caller's task, the same code with the caller's clock.
 //
-// THE STATE has base (no dofile, no loadfile), coroutine, table, string and
+// THE STATE has base (no load, dofile or loadfile: a binary chunk would
+// reach the kernel's memory, as for a cart), coroutine, table, string and
 // math, `os.time` and `os.clock` (the service's own time), the role names
 // its app's run grants (below), and `moybyte`:
 //   moybyte.every(ms, fn) -> id    fn every `ms` (1 at least), from now
