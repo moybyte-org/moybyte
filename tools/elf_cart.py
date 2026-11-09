@@ -16,8 +16,9 @@ with that chip's toolchain (the ESP-IDF's, from ~/.espressif) into
 `"moybyte": {"native": [...]}`, and copies everything else as it is. A module
 is a relocatable ELF that imports nothing: it links the SDK's runtime,
 libmoyos.a (sdk/src/: the entry, and a stub per row of the OS table that calls
-it by ordinal; sdk/libc/: the SDK's C library), the toolchain's PURE C
-library members and its libm and libgcc, every symbol hidden. The host's
+it by ordinal; sdk/libc/: the SDK's C library, and on RISC-V its libm), the
+toolchain's PURE C library members and its libm and libgcc, every symbol
+hidden. The host's
 chip links the host's C library dynamically behind the SDK's own.
 
 An app's own service (`"moybyte": {"entries": {"service": "<stem>.elf"}}`,
@@ -51,27 +52,34 @@ SDK_INCLUDE = os.path.join(SDK, "include")
 SDK_SRC = os.path.join(SDK, "src")
 SDK_LIBC = os.path.join(SDK, "libc")
 SDK_SYSROOT = os.path.join(SDK, "sysroot", "include")
+SDK_LIBM = os.path.join(SDK_LIBC, "m")
 CACHE = os.path.join(ROOT, ".build", "sdk")
 TABLE = os.path.join(ROOT, "native", "os_calls.json")
 ELF_H = os.path.join(ROOT, "native", "moy_elf", "moy_elf.h")
 
 # Per chip: the toolchain's folder and prefix, the code flags, the link
-# flags, and the sections strip takes off (elf_loader's project_elf(), 2.1.0).
+# flags, the sections strip takes off (elf_loader's project_elf(), 2.1.0),
+# and whether libmoyos carries the SDK's libm (sdk/libc/m/): the RISC-V
+# toolchain's libm addresses its constants absolutely, which no module can
+# relocate.
 # The S3's ld (esp-14.2.0) double-frees on some module links, depending on
 # the output path; --no-keep-memory re-reads symbol tables instead of
 # caching them, and those links come out byte-identical.
 CHIPS = {
     "esp32s3": {"tools": "xtensa-esp-elf", "prefix": "xtensa-esp32s3-elf-",
                 "flags": ["-mlongcalls"], "link": ["-Wl,--no-keep-memory"],
-                "strip": [".xt.lit", ".xt.prop", ".xtensa.info"]},
+                "strip": [".xt.lit", ".xt.prop", ".xtensa.info"], "libm": False},
     "esp32p4": {"tools": "riscv32-esp-elf", "prefix": "riscv32-esp-elf-",
                 "flags": ["-march=rv32imafc_zicsr_zifencei", "-mabi=ilp32f"], "link": [],
-                "strip": [".riscv.attributes"]},
-    "host": {"tools": None, "prefix": "", "flags": [], "link": [], "strip": []},
+                "strip": [".riscv.attributes"], "libm": True},
+    "host": {"tools": None, "prefix": "", "flags": [], "link": [], "strip": [], "libm": False},
 }
 
 CFLAGS = ["-Os", "-fPIC", "-ffunction-sections", "-fdata-sections", "-fvisibility=hidden",
           "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0", "-fno-stack-protector"]
+# The SDK's libm keeps each operation as its source writes it: its range
+# reductions and extra-precision steps count on every product rounding.
+LIBM_FLAGS = ["-ffp-contract=off"]
 LINK = ["-shared", "-nostartfiles", "-e", "_moy_entry", "-Wl,--gc-sections",
         "-Wl,--exclude-libs,ALL"]
 
@@ -149,13 +157,14 @@ def _sdk_sources():
     srcs.append(os.path.join(SDK_INCLUDE, "moybyte", "os.h"))
     srcs += sorted(glob.glob(os.path.join(SDK_LIBC, "*.[ch]")))
     srcs += sorted(glob.glob(os.path.join(SDK_SYSROOT, "**", "*.h"), recursive=True))
+    srcs += sorted(glob.glob(os.path.join(SDK_LIBM, "**", "*.[ch]"), recursive=True))
     return srcs
 
 
 def libmoyos(chip):
     """The SDK runtime for `chip` (built once per content into .build/sdk/):
     the entry, one object per row, so a module links only what it calls,
-    and the SDK's C library (sdk/libc/)."""
+    and the SDK's C library (sdk/libc/; on RISC-V, with its libm)."""
     cc, ar, _strip = toolchain(chip)
     srcs = _sdk_sources()
     h = hashlib.sha256()
@@ -182,6 +191,12 @@ def libmoyos(chip):
         o = os.path.join(tmp, "lc_" + os.path.basename(src)[:-2] + ".o")
         _run(base + ["-fno-builtin", "-I", SDK_LIBC, src, "-o", o])
         objs.append(o)
+    if CHIPS[chip]["libm"]:
+        for part, inc in (("libm", "libm"), ("libm_dbl", "libm_dbl"), ("", "libm")):
+            for src in sorted(glob.glob(os.path.join(SDK_LIBM, part, "*.c"))):
+                o = os.path.join(tmp, "m_%s_%s.o" % (part or "lc", os.path.basename(src)[:-2]))
+                _run(base + LIBM_FLAGS + ["-I", os.path.join(SDK_LIBM, inc), src, "-o", o])
+                objs.append(o)
     _run([ar, "rcs", os.path.join(tmp, "libmoyos.a")] + objs)
     if os.path.isdir(out_dir):
         shutil.rmtree(tmp, ignore_errors=True)

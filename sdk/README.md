@@ -137,8 +137,16 @@ so the host suite tests the library a board runs (`tests/test_sdk_libc.py`).
   64-bit division, double division and float/64-bit conversion helpers are
   not position-independent; `libc/lc_rv32.c` carries those
   (`elf_loader` relocates only absolute and PLT words on RISC-V).
-- libm links on the S3. On the P4 the toolchain's libm is not
-  position-independent, and a module that calls it fails its link.
+- libm is the toolchain's on the S3. On the P4 the toolchain's libm
+  addresses its constants absolutely, as its libgcc's helpers do, so
+  `libc/m/` carries one: MicroPython's copies of fdlibm's float functions and
+  musl's double ones (`libc/m/README.md`), compiled into the P4's libmoyos
+  without FP contraction. It sets no errno and keeps no state.
+  `tests/test_sdk_libm.py` holds a module that calls it to the loader's
+  relocations and runs the same objects under qemu's RISC-V user mode.
+  A libm function it lacks (`hypot`, `cbrt`, `exp2`, `log2`) links from the
+  toolchain only where that member is position-independent, and otherwise
+  fails the module's link.
 
 ## Building outside a cart
 
