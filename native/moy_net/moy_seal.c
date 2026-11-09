@@ -15,10 +15,13 @@
 #include "moy_seal.h"
 
 #ifdef SEAL_BOARD
-#include <sys/lock.h>
 #include "bootloader_random.h"
+#include "esp_heap_caps.h"
 #include "esp_random.h"
 #include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/idf_additions.h"
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -75,15 +78,38 @@ static int hw_entropy(void *ctx, unsigned char *p, size_t n) {
 #define SEED_GAP_US 40                  // a word every 40 us, many ADC samples apart
 #define ADD_BYTES 16                    // the hardware's bytes mixed into every draw
 
-static uint8_t s_seed[SEED_WORDS * 4];
-static mbedtls_hmac_drbg_context s_drbg;
-static int s_drbg_on;
+// The boot's seed, held until the first draw seeds the generator with it and
+// frees it, and the generator's state. On a board both live in PSRAM, as
+// mbedTLS's own allocations do, so the random source costs none of the
+// internal SRAM that WiFi, BLE and a run's thread share.
+static uint8_t *s_seed;
+static mbedtls_hmac_drbg_context *s_drbg;
 
 #ifdef SEAL_BOARD
+static void *seal_alloc(size_t n) {
+    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p != NULL ? p : calloc(1, n);
+}
+
+static void seal_free(void *p) {
+    heap_caps_free(p);
+}
+
+static SemaphoreHandle_t s_lock;
+
 // Before app_main, so before anything starts the radio or an ADC unit: the
 // SAR ADC's noise mixed into the RNG while the boot's seed is read, then the
-// ADC handed back as the bootloader hands it over.
+// ADC handed back as the bootloader hands it over. PSRAM joins the heap before
+// the constructors run.
 __attribute__((constructor)) static void boot_seed(void) {
+    s_lock = xSemaphoreCreateMutexWithCaps(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_lock == NULL) {
+        s_lock = xSemaphoreCreateMutex();
+    }
+    s_seed = seal_alloc(SEED_WORDS * 4);
+    if (s_lock == NULL || s_seed == NULL) {
+        return;                         // the first draw aborts: never a key from nothing
+    }
     bootloader_random_enable();
     for (int i = 0; i < SEED_WORDS; i++) {
         esp_rom_delay_us(SEED_GAP_US);
@@ -93,10 +119,23 @@ __attribute__((constructor)) static void boot_seed(void) {
     bootloader_random_disable();
 }
 
-static _lock_t s_lock;
-#define RNG_LOCK() _lock_acquire(&s_lock)
-#define RNG_UNLOCK() _lock_release(&s_lock)
+static void rng_lock(void) {
+    if (s_lock == NULL) {
+        abort();
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+}
+#define RNG_LOCK() rng_lock()
+#define RNG_UNLOCK() xSemaphoreGive(s_lock)
 #else
+static void *seal_alloc(size_t n) {
+    return calloc(1, n);
+}
+
+static void seal_free(void *p) {
+    free(p);
+}
+
 static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 #define RNG_LOCK() pthread_mutex_lock(&s_lock)
 #define RNG_UNLOCK() pthread_mutex_unlock(&s_lock)
@@ -105,22 +144,30 @@ static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 void moy_seal_random(void *p, size_t n) {
     uint8_t *b = p, add[ADD_BYTES];
     RNG_LOCK();
-    if (!s_drbg_on) {
+    if (s_drbg == NULL) {
         #ifndef SEAL_BOARD
-        hw_random(s_seed, sizeof s_seed);
+        s_seed = seal_alloc(SEED_WORDS * 4);
+        if (s_seed != NULL) {
+            hw_random(s_seed, SEED_WORDS * 4);
+        }
         #endif
-        mbedtls_hmac_drbg_init(&s_drbg);
-        if (mbedtls_hmac_drbg_seed(&s_drbg, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
-                                   hw_entropy, NULL, s_seed, sizeof s_seed) != 0) {
+        s_drbg = seal_alloc(sizeof *s_drbg);
+        if (s_seed == NULL || s_drbg == NULL) {
             abort();                    // never a key from nothing
         }
-        moy_seal_wipe(s_seed, sizeof s_seed);
-        s_drbg_on = 1;
+        mbedtls_hmac_drbg_init(s_drbg);
+        if (mbedtls_hmac_drbg_seed(s_drbg, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
+                                   hw_entropy, NULL, s_seed, SEED_WORDS * 4) != 0) {
+            abort();                    // never a key from nothing
+        }
+        moy_seal_wipe(s_seed, SEED_WORDS * 4);
+        seal_free(s_seed);
+        s_seed = NULL;
     }
     while (n > 0) {
         size_t k = n < MBEDTLS_HMAC_DRBG_MAX_REQUEST ? n : MBEDTLS_HMAC_DRBG_MAX_REQUEST;
         hw_random(add, sizeof add);
-        if (mbedtls_hmac_drbg_random_with_add(&s_drbg, b, k, add, sizeof add) != 0) {
+        if (mbedtls_hmac_drbg_random_with_add(s_drbg, b, k, add, sizeof add) != 0) {
             abort();
         }
         b += k;
