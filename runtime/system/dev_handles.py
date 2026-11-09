@@ -8,7 +8,7 @@ WASI program, an ELF module) holds where a Python program holds an object
                             "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",
                             "adc<n>", "i2c") or a device API ("http", "lora",
                             "mic", "ble", "usb", "midi", "camera",
-                            "media"), configured by `cfg`
+                            "media", "pins"), configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
   write(h, bytes) -> n      what was sent
@@ -119,18 +119,24 @@ answers:
             its path in, its length in seconds (u32) then its title and
             artist on two lines out, ABSENT where it reads none. Its close
             and its process's end stop the stream
+  pins      the `pins` permission's digital pins (Python's pin_write and
+            pin_read), each a pin of the board's gpio row taken for the
+            process at its first use: set gpio<n>=0|1 (several words, several
+            pins) drives each as an output; get gpio<n> reads one, an input
+            where it was not driven; a pin another process holds is BUSY;
+            its close gives back the pins it took
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
-name needs (leases.perm_of's `lease:<row>`, a device's own), BUSY where
-another process holds the lease or the device (a Python program's object, or
-another compiled program's handle; a process opens lora, mic, ble, usb, the
-camera and media once),
-BAD for a name, a key or a value this console does not take, ABSENT for a
-handle not open, a device this console lacks and a radio verb that needs a
-connection or a join, FULL where `into` cannot hold one record, IO where the
-driver failed. The process's end (moybyte.ENDS) closes every handle it left open, before the
-leases' sweep and the device APIs' run.
+name needs (leases.perm_of's `lease:<row>`, a device's own, `media` or
+`media:url` for media), BUSY where another process holds the lease or the
+device (a Python program's object, or another compiled program's handle; a
+process opens every device API but http and midi once), BAD for a name, a
+key or a value this console does not take, ABSENT for a handle not open, a
+device this console lacks and a radio verb that needs a connection or a
+join, FULL where `into` cannot hold one record, IO where the driver failed.
+The process's end (moybyte.ENDS) closes every handle it left open, before
+the leases' sweep and the device APIs' run.
 
 Ring records are read through their handle, on every tier: a compiled program
 polls its handles where it polls its messages (in `_update`, or on a timer
@@ -1110,11 +1116,58 @@ class _Media(_Handle):
         self.f.sweep(pid)
 
 
+def _pin_of(key):
+    if not isinstance(key, str) or not key.startswith("gpio") or not key[4:].isdigit():
+        raise OSError(EINVAL, "a pin is gpio<n>: %r" % (key,))
+    return int(key[4:])
+
+
+class _Pins(_Handle):
+    def __init__(self, cfg):
+        g = _leases().local_pins()
+        if g is None:
+            raise OSError(ENODEV, "this console has no pins")
+        self.g = g
+        self.took = []          # the pins this handle took, given back at its close
+        if cfg:
+            try:
+                self.set(cfg)
+            except BaseException:
+                self.close(0)
+                raise
+
+    def _pin(self, key, out):
+        n = _pin_of(key)
+        L = _leases()
+        had = L.LEASES.of(L._pid(), "gpio%d" % n)
+        p = self.g.take(n, out)
+        if had is None:
+            self.took.append(p)
+        return p
+
+    def set(self, cfg):
+        for k in cfg:
+            _pin_of(k)
+            _int(cfg[k], 0, 1, k)
+        for k in sorted(cfg):
+            self._pin(k, True).value(cfg[k])
+        return 0
+
+    def get(self, what):
+        return self._pin(what, False).value()
+
+    def close(self, pid):
+        L = _leases()
+        for p in self.took:
+            L.LEASES.drop(p)
+        self.took = []
+
+
 _DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb,
             "midi": _Midi, "camera": _Camera,
-            "media": _Media}
+            "media": _Media, "pins": _Pins}
 # A device with one holder: a process opens it once.
-_ONE = ("lora", "mic", "ble", "usb", "camera", "media")
+_ONE = ("lora", "mic", "ble", "usb", "camera", "media", "pins")
 # The permissions a device needs, one of them, where they are not its name.
 _PERMS = {"media": ("media", "media:url")}
 

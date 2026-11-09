@@ -114,8 +114,9 @@ costs are #227's.
   system's message `moy_open` (handle, type, mode, name; a cancel's handle 0)
   on the event descriptor, as a compiled app hears it, and the device
   handles `moy_dev_open` to `moy_dev_get` (leases and the `http`, `lora`
-  (with LoRaWAN), `mic`, `ble`, `usb`, `midi` and `camera` devices and the
-  media service, `hardware.md` §1, §3 and §4). Each is
+  (with LoRaWAN), `mic`, `ble`, `usb`, `midi` and `camera` devices, the
+  media service and the `pins` permission's pins, `hardware.md` §1, §3 and
+  §4). Each is
   its role table row run through the ROLE door for the process's app run: a
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and

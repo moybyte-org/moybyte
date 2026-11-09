@@ -281,7 +281,9 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
     """moybyte_dev_* (runtime/system/dev_handles.py): a pin the app drives and
     reads back, a UART it writes and reads through its peer, each DENIED with
     its `lease:<row>` turned off; the pin it keeps is BUSY to a Python
-    program while it runs and safe once its run ends."""
+    program while it runs and safe once its run ends. A `pins` handle
+    (its own permission, no lease's) drives gpio20 high and reads it back,
+    one a process, and its run's end leaves the pin safe."""
     import sys
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import board_config
@@ -295,19 +297,24 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
     try:
         ws, pid, lines = talk(off)
         got = [ln for ln in lines if ln.startswith("dev_")]
+        assert [ln for ln in lines if ln.startswith("pins_")] == [
+            "pins_open 1", "pins_get 1", "pins_again -11"], lines
+        assert N.pin_state(20) & N.PIN_OUT and N.sim_get(20) == 1
         if not off:
             assert got == ["dev_open 1", "dev_get 1", "dev_write 4", "dev_read ping",
                            "dev_close 0"], lines
-            assert N.pin_state(6) & N.PIN_OUT and N.held() == 1
+            assert N.pin_state(6) & N.PIN_OUT and N.held() == 2
             with pytest.raises(OSError) as e:
                 leases.LEASES.take(moybyte.SHELL, "gpio6")
             assert e.value.errno == 16                                  # EBUSY
             ws.exit()
-            assert N.held() == 0 and N.pin_state(6) == N.PIN_SAFE
+            assert N.held() == 0 and N.pin_state(6) == N.PIN_SAFE == N.pin_state(20)
         else:
             assert got == ["dev_open -4", "dev_get -8", "dev_write -8", "dev_read -8",
                            "dev_close -8"], lines                       # DENIED, ABSENT
-            assert N.held() == 0
+            assert N.held() == 1                                         # the pins'
+            ws.exit()
+            assert N.held() == 0 and N.pin_state(20) == N.PIN_SAFE
     finally:
         for p in list(leases.LEASES.held):
             leases.LEASES.sweep(p)

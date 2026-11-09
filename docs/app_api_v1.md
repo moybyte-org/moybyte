@@ -365,7 +365,7 @@ opens a text file from Files with (Notes).
 | `clipboard` | `clipboard`, the console's clipboard, which the editor handle uses too (§5) | python, lua, wasm, elf |
 | `network` | `wifi` | python, elf |
 | `multiplayer` | `net`, `on_net` (`docs/moy_cart_api.md`, Multiplayer) | python, lua, wasm |
-| `pins` | `pin_write`, `pin_read` (`docs/moy_cart_api.md`, Pins) | python, lua |
+| `pins` | `pin_write`, `pin_read` (`docs/moy_cart_api.md`, Pins); by handle on the compiled tiers (§10, Devices by handle) | python, lua, wasm, elf |
 | `console` | `print` writes to the text console's scrollback instead of drawing (a script's, the terminal's) | python, lua |
 | `notifications` | `moybyte.notify` posts (below) | python, lua, wasm, elf |
 | `front` | nothing by name: from the background, `open_app`, `open_with`, `share` and `pick` go straight through (§5) | python, lua, wasm, elf |
@@ -735,13 +735,13 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
 | `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
 | `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
-| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
-| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
-| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
-| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
-| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
-| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
-| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
+| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
+| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
+| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
+| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
+| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
+| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
+| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -817,7 +817,8 @@ a native module) holds a lease or a device API by a handle where a Python
 program holds an object (`runtime/system/dev_handles.py` is the authority
 on every name, key and answer). `dev_open(name, cfg)` answers the handle:
 `name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
-`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`, `"camera"`, `"media"`), `cfg` words
+`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`, `"camera"`, `"media"`) or the `pins` permission's
+pins (`"pins"`), `cfg` words
 `key=value` (`"mode=out value=1"`, `"baudrate=9600"`, `"scl=20 sda=21
 addr=0x48"`, `"url=http://example.com/ cap=4096"`). On the handle,
 `dev_read(h, buf, cap)` takes what waits (0 when nothing does),
@@ -881,13 +882,19 @@ artist, station, source) and `dev_xfer` probes a file without playing it
 (its length in seconds as 4 bytes, then its title and artist on two
 lines). Closing the handle, or the process's end, stops the stream.
 
+A `pins` handle is Python's `pin_write` and `pin_read`: `dev_set(h,
+"gpio6=1 gpio20=0")` drives each pin it names, `dev_get(h, "gpio5")` reads
+one (an input where it was not driven). It takes each pin of the board's
+gpio row for the process at its first use, under `pins` alone (no
+`lease:gpio`), and its close gives them back, left safe.
+
 Each name needs what Python's needs: `lease:<row>` (`lease:gpio` for
 anything on the pins: a pin, a PWM, an ADC, an I²C bus), `http`, `lora`,
-`mic`, `ble`, `usb`, `midi`, `camera`, `media` (or `media:url`). One holder a lease or a device, whatever the tiers: a
+`mic`, `ble`, `usb`, `midi`, `camera`, `media` (or `media:url`), `pins`. One holder a lease or a device, whatever the tiers: a
 resource a Python program's object holds is BUSY to a handle and the
 reverse (`-11` to a compiled app, `EBUSY` to a native or WASI program), and
-a process opens a radio, the microphone, the USB host, the camera or the
-media service once. A refused permission is
+a process opens a radio, the microphone, the USB host, the camera, the
+media service or its pins once. A refused permission is
 DENIED (`EACCES`), a name, key or value the console does not take BAD
 (`EINVAL`), a handle not open, or a radio verb that needs a connection or a
 join, ABSENT (`ENOENT`), a buffer that cannot hold one record FULL

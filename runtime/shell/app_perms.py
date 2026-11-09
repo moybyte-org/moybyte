@@ -86,7 +86,7 @@ TABLE = (
     ("network", "api:wifi", ("python", "elf"), "Use Wi-Fi and the internet", "wifi", ("wifi",)),
     ("multiplayer", "api:net", ("python", "lua", "wasm"),
      "Talk to nearby consoles", "net", ("net", "on_net")),
-    ("pins", "api:gpio", ("python", "lua"),
+    ("pins", "api:gpio", ("python", "lua", "wasm", "elf"),
      "Switch the console's pins", "gpio", ("pin_write", "pin_read")),
     ("console", "api:console", ("python", "lua"), None, None, ()),
     ("notifications", "api:notify", ("python", "lua", "wasm", "elf"),

@@ -8,7 +8,9 @@
 // already due, a timer that goes off once and one that repeats, asks its
 // documents for a free name, writes the OS log, and opens leases by handle
 // (a pin it drives high and keeps until its run ends, a UART it writes and
-// reads back through its peer and closes) and the LoRa radio by handle,
+// reads back through its peer and closes), the `pins` permission's pins by
+// handle (gpio20 driven high and read back, kept until its run ends, a
+// second handle refused) and the LoRa radio by handle,
 // starting an OTAA join it keeps running (an uplink before it is accepted
 // refused, the radio busy while it runs), then asks for minute-long timers
 // until the console answers FULL and cancels all but the first, which it keeps
@@ -150,6 +152,16 @@ EXPORT(_init) void init(void) {
     say();
     put(S("dev_close "));
     put_int(moybyte_dev_close(u));
+    say();
+    int32_t pins = moybyte_dev_open(S("pins"), S("gpio20=1"));
+    put(S("pins_open "));
+    put_int(pins > 0 ? 1 : pins);
+    say();
+    put(S("pins_get "));
+    put_int(moybyte_dev_get(pins, S("gpio20")));
+    say();
+    put(S("pins_again "));
+    put_int(moybyte_dev_open(S("pins"), S("")));
     say();
     int32_t lora = moybyte_dev_open(S("lora"), S("send=2"));
     put(S("lora_open "));

@@ -787,3 +787,44 @@ def test_a_media_handle_needs_either_permission_and_its_end_stops_the_stream(med
     assert moy_media.owner() == a
     moybyte.end(a)
     assert a not in H.HANDLES and (media._s["stopping"] or not media._s["pid"])
+
+
+# -- the pins ----------------------------------------------------------------------------
+
+
+def test_a_pins_handle_drives_and_reads_the_pins_it_takes():
+    pid, py = L.spawn("t.pins"), L.spawn("t.py")
+    h = _open(pid, "pins", "gpio6=1")
+    assert h > 0 and N.pin_state(6) & N.PIN_OUT and N.sim_get(6) == 1
+    assert _as(pid, lambda: H.set(pid, h, "gpio6=0 gpio20=1")) == 0
+    assert N.sim_get(6) == 0 and N.sim_get(20) == 1
+    N.sim_level(5, 1)
+    assert _get(pid, h, "gpio5") == 1 and not N.pin_state(5) & N.PIN_OUT   # an input
+    assert _get(pid, h, "gpio6") == 0
+    assert _as(py, lambda: leases.LocalPins(leases.LEASES).write(6, 1)) is False  # Python's
+    for bad in ("gpio6=2", "pin6=1", "gpio=1", "warp", "gpio7=1"):          # 7: not the row's
+        assert _as(pid, lambda: H.set(pid, h, bad)) == H.BAD, bad
+    assert _get(pid, h, "value") == H.BAD
+    assert _open(pid, "pins") == H.BUSY                       # one handle a process
+    other = L.spawn("t.other")
+    o = _open(other, "pins")
+    assert _as(other, lambda: H.set(other, o, "gpio6=1")) == H.BUSY      # pid holds it
+    assert _as(pid, lambda: H.close(pid, h)) == 0
+    assert [N.pin_state(p) for p in (5, 6, 20)] == [N.PIN_SAFE] * 3
+    assert _as(other, lambda: H.set(other, o, "gpio6=1")) == 0 and N.sim_get(6) == 1
+    moybyte.end(other)
+    assert N.pin_state(6) == N.PIN_SAFE and N.held() == 0
+
+
+def test_a_pins_handle_needs_the_permission_and_pins_and_keeps_nothing_refused():
+    pid = L.spawn("t.pins")
+    leases.LEASES.grants = lambda p: ()                       # no lease:gpio: pins is enough
+    devices.grants = lambda p: ("pins",)
+    assert _open(pid, "pins", "gpio6=1") > 0
+    moybyte.end(pid)
+    devices.grants = lambda p: ("lease",)
+    assert _open(pid, "pins") == H.DENIED
+    devices.grants = None
+    assert _open(pid, "pins", "gpio6=1 gpio7=9") == H.BAD and N.held() == 0
+    leases.stand_in(None, None)
+    assert _open(pid, "pins") == H.ABSENT
