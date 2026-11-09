@@ -1100,6 +1100,9 @@ int moy_lora_open(uint32_t owner) {
 }
 
 int moy_lora_close(uint32_t owner) {
+    if (R == NULL) {
+        return -MOY_LORA_EBADF;         // never opened: no state is made to close it
+    }
     if (radio_lock() != 0) {
         return -MOY_LORA_ENOMEM;
     }
