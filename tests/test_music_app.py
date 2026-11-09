@@ -3,7 +3,7 @@ README.md): its identity cart registers it; a station plays through the
 media face and puts the app's status item in the bar, whose section's ids
 are the app's own; Add a station refuses an address that will not play and
 keeps the one that will; Back leaves (on the desk, minimises) and the stream
-plays on; a console with no media service shows the no-audio page; and the
+plays on; Now playing's keys and a tap on a file's bar seek it; a console with no media service shows the no-audio page; and the
 media face's place and length reach the card."""
 
 from pathlib import Path
@@ -25,6 +25,7 @@ class Face:
     def __init__(self):
         self.n = None
         self.played = []
+        self.seeks = []
 
     def now(self):
         return dict(self.n) if self.n else None
@@ -56,6 +57,11 @@ class Face:
         if v is not None:
             self.n["volume"] = v
         return self.n["volume"]
+
+    def seek(self, s):
+        self.seeks.append(s)
+        self.n["at"] = s
+        return True
 
 
 @pytest.fixture
@@ -279,6 +285,47 @@ def test_a_files_place_reaches_the_card():
                   ("list", "Road trip mix", "/m/r.m3u"))
     assert (c["at"], c["len"]) == (72, 221)
     assert M.lines(c) == ("Sunny day drive", "Road trip mix · 3 of 12")
+
+
+def test_left_and_right_seek_a_file_and_a_tap_on_its_bar_seeks_along_it(tmp_path, face,
+                                                                         monkeypatch):
+    ws = build_ws(tmp_path)
+    app = _app(ws)
+    ws.open_app(app)
+    M.STREAM.play("song", "Tone", str(TONE))
+    face.n.update(at=60, len=200)
+    M.STREAM.poll()
+    app._go("now")
+    drv = make_drv(ws)
+    bars = []
+    part = M.ui.part
+
+    def spy(id, w=0, h=0, o=None):  # noqa: A002 -- ui.part's name
+        r = part(id, w, h, o)
+        if id == "music.seek":
+            bars.append(r[:4])
+        return r
+
+    monkeypatch.setattr(M.ui, "part", spy)
+    _settle(ws)
+    drv.press("right")
+    drv.frame(1 / 30)
+    assert face.seeks == [60 + M.SEEK_STEP]
+    drv.press("left")
+    drv.frame(1 / 30)
+    assert face.seeks == [60 + M.SEEK_STEP, 60]
+    x, y, w, h = bars[-1]
+    drv.touch(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    tapped = face.seeks[-1]
+    assert len(face.seeks) == 3 and abs(tapped - 100) <= 1 and M.STREAM.card["at"] == tapped
+    M.STREAM.play("radio", GROOVE[0], GROOVE[2])    # a station has no place to seek
+    _settle(ws)
+    drv.press("right")
+    drv.frame(1 / 30)
+    assert len(face.seeks) == 3
 
 
 def test_a_station_that_blocks_browsers_says_so(tmp_path, face):

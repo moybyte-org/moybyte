@@ -16,7 +16,9 @@ docs/media/music_2026-11/README.md.
   * My music: the MP3s and the .m3u/.pls playlists in the music folder of
     the user files (`files/Music/` on the SD card);
   * Now playing: the media card at its full density, its keys the page's
-    own (Enter plays or pauses, Q E step, W S the volume, M the list);
+    own (Enter plays or pauses, Q E step, W S the volume, left and right
+    seek a file SEEK_STEP seconds, M the list), a file's bar a stop a tap
+    seeks along;
   * on the desk one window: the Library's two places beside the table, the
     media card in one row across its foot.
 
@@ -104,6 +106,7 @@ URL_MAX = 200
 NAME_MAX = 32
 POLL_MS = 250
 VOLUME_STEP = 10
+SEEK_STEP = 10              # seconds a key seeks a file
 ERR_ADDRESS = "This address won't play. Use one that starts with http://"
 HELP_ADDRESS = "An MP3 stream or playlist"
 FOLDER_MAX = 200
@@ -210,6 +213,21 @@ class Stream:
         else:
             m.pause()
         self.poll()
+
+    def seek(self, s):
+        """The file played from `s` seconds, held inside it; False for a
+        stream with no length (a station) or a seek the face refuses."""
+        self.stamp = None
+        m = self.media()
+        c = self.card
+        if m is None or c is None or not c["len"]:
+            return False
+        try:
+            ok = m.seek(max(0, min(c["len"] - 1, int(s))))
+        except OSError:
+            ok = False
+        self.poll()
+        return bool(ok)
 
     def stop(self):
         m = self.media()
@@ -479,6 +497,7 @@ class Card:
         self.cv, self.th, self.fs, self.desk = cv, th, fs, desk
         self.c = None
         self.acted = None           # the verb a stop activated this frame
+        self.to = 0                 # the second a tap on the file's bar seeks to
 
     def _main(self):
         c = self.c
@@ -637,6 +656,12 @@ class Card:
         t = "%s / %s" % (_clock(c["at"]), _clock(c["len"]))
         tw = ui.text_size(t)[0]
         bw = w - tw - 10 * fs
+        ui.at(x, y, bw, 18 * fs)
+        if ui.part("music.seek", 0, 0, _METER_PANEL)[4] & 2:
+            at = ui.part_at()
+            if at is not None:
+                self.to = c["len"] * max(0, min(bw, at[0])) // max(1, bw)
+                self.acted = "music.seek"
         cv.rrect(x, y + 8 * fs, bw, 4 * fs, 2 * fs, th["border"])
         done = bw * min(c["at"], c["len"]) // c["len"]
         if done > 0:
@@ -707,6 +732,8 @@ def act(card, stream):
         stream.volume(stream.volume() + VOLUME_STEP)
     elif a == "music.volume":
         stream.volume(card.level * 10)
+    elif a == "music.seek":
+        stream.seek(card.to)
     else:
         return False
     return True
@@ -1275,20 +1302,33 @@ class MusicAppLayer:
     def _now(self, page):
         """Now playing, the card's full density on a 12 px grid. Its keys
         are the page's own: Enter plays, pauses or tries again, Q E step,
-        W S the volume, M goes to the list, Back leaves."""
+        W S the volume, left and right seek a file, M goes to the list,
+        Back leaves."""
         fs, k = self.fs, self.k
         c = self.stream.card
         ui.bar("Now playing", (), (), True)
         verb = k._main()[1]
         skip = "Station" if c["kind"] == "radio" else "Song"
-        page = self._hints(page,
-                           ("confirm", verb, "tabs", skip, "scroll", "Volume", "more", "List",
-                            "back", "Back"),
-                           ("confirm", verb, "tabs", "Skip", "scroll", "Volume", "more", "List",
-                            "back", "Back"),
-                           ("confirm", verb, "tabs", skip, "scroll", "Volume", "back", "Back"),
-                           ("confirm", verb, "scroll", "Volume", "more", "List", "back", "Back"),
-                           ("confirm", verb, "scroll", "Volume", "back", "Back"))
+        if c["len"]:
+            page = self._hints(page,
+                               ("confirm", verb, "change", "Seek", "tabs", skip, "scroll",
+                                "Volume", "more", "List", "back", "Back"),
+                               ("confirm", verb, "change", "Seek", "tabs", "Skip", "scroll",
+                                "Volume", "back", "Back"),
+                               ("confirm", verb, "change", "Seek", "scroll", "Volume",
+                                "back", "Back"),
+                               ("confirm", verb, "change", "Seek", "back", "Back"))
+        else:
+            page = self._hints(page,
+                               ("confirm", verb, "tabs", skip, "scroll", "Volume", "more",
+                                "List", "back", "Back"),
+                               ("confirm", verb, "tabs", "Skip", "scroll", "Volume", "more",
+                                "List", "back", "Back"),
+                               ("confirm", verb, "tabs", skip, "scroll", "Volume", "back",
+                                "Back"),
+                               ("confirm", verb, "scroll", "Volume", "more", "List", "back",
+                                "Back"),
+                               ("confirm", verb, "scroll", "Volume", "back", "Back"))
         ui.focus(_NO_FOCUS)         # the page's keys are its own: no focus mark
         x, y, w, h = page
         g = 12 * fs
@@ -1516,6 +1556,10 @@ class MusicAppLayer:
             s.volume(s.volume() + VOLUME_STEP)
         elif i.pressed("down") or ch == "s":
             s.volume(s.volume() - VOLUME_STEP)
+        elif (i.pressed("left") or ch == "a") and s.card["len"]:
+            s.seek(s.card["at"] - SEEK_STEP)
+        elif (i.pressed("right") or ch == "d") and s.card["len"]:
+            s.seek(s.card["at"] + SEEK_STEP)
         elif ch == "m" or i.pressed("y"):
             self._go("list")
         else:

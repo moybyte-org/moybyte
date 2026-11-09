@@ -114,6 +114,11 @@ the tool draws whatever the toolkit does not do yet.
   - Enter plays, pauses or tries again.
   - Q E (L R on a pad) step the station or the song.
   - W S (up and down) set the volume.
+  - A D, left and right (the trackball's, a pad's d-pad) seek a file
+    `SEEK_STEP` seconds (`runtime/apps/music_app.py`); a station has none.
+    A tap on the file's bar seeks to where it lands. A file's strip names
+    Seek before the step's pair, which is the one dropped where the strip
+    does not fit (the T-Deck's).
   - Back leaves.
   - M (Y) is "Player" on the list and "List" on Now playing.
 
