@@ -91,7 +91,7 @@ int32_t moy_os_moy_clipboard_put_text(const char *text) {
     const moy_os_arg_t a[1] = {
         { text, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(94u, MOY_OS_HOP, a, 1, NULL, 0u);   // clipboard.put_text
+    return moy_os_call(94u, MOY_OS_HERE, a, 1, NULL, 0u);   // clipboard.put_text
 }
 
 int32_t moy_os_moy_clipboard_text(void *text, size_t text_cap) {

@@ -71,14 +71,27 @@ struct moy_app {
     moy_appabi_t *next;         // the states made and not freed
 };
 
-// The seqlock's writer half, around every write of the look and the clipboard.
+// The kernel's writer lock (native/moy_kernel/moy_lock.h): weak, for a build
+// of the layer alone, whose one task needs none.
+void moy_lock_take(void) __attribute__((weak));
+void moy_lock_give(void) __attribute__((weak));
+
+// The seqlock's writer half, around every write of the look and the
+// clipboard: one writer at a time under the kernel's writer lock, the shell's
+// on the VM's task and a compiled program's clipboard write on its own.
 static void seq_open(moy_appabi_t *a) {
+    if (moy_lock_take != NULL) {
+        moy_lock_take();
+    }
     __atomic_store_n(&a->seq, a->seq + 1u, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_RELEASE);
 }
 
 static void seq_close(moy_appabi_t *a) {
     __atomic_store_n(&a->seq, a->seq + 1u, __ATOMIC_RELEASE);
+    if (moy_lock_give != NULL) {
+        moy_lock_give();
+    }
 }
 
 uint32_t moy_app_seq_begin(const moy_appabi_t *a) {

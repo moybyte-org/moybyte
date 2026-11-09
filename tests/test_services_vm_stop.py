@@ -486,13 +486,15 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     served on each program's own task: with the VM down, an ELF service
     drives a gpio handle's pin and reads it back, and a WASI service reads
     the edges a pin made during the stop from its handle, whose reader the
-    stop kept; each lease the kernel took is no VM's, and a service's end
-    closes its handles."""
+    stop kept, and puts text on the clipboard (native/moy_kernel/moy_lock.h);
+    each lease the kernel took is no VM's, and a service's end closes its
+    handles."""
     from runtime import moy_input
     N = pins
     perms = ["full_access", "lease:gpio"]
     ws = _two_ws(tmp_path, ((elf_built, "elf_svc.moy", {"permissions": perms}),
-                            (wasi_built, "wasi_svc.moy", {"permissions": ["lease:gpio"]})))
+                            (wasi_built, "wasi_svc.moy",
+                             {"permissions": ["lease:gpio", "clipboard"]})))
     s = fresh
     since = L.next()
     elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
@@ -512,9 +514,10 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     N.sim_level(5, 0)
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["read"]')[0] == 1
     assert moy_evq.send(peer_e, "elf.svc", "pin", "[]")[0] == 1
+    assert moy_evq.send(peer_w, "wasi.svc", "wake", '["clip"]')[0] == 1
     got = []
     t0 = time.monotonic()
-    while not (got and "read" in "|".join(_texts(since, wasi))):
+    while not (got and "clip" in "|".join(_texts(since, wasi))):
         assert time.monotonic() - t0 < 5, (_texts(since, wasi), got)
         _during(10)
         m = moy_evq.take(peer_e)
@@ -522,6 +525,7 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
             got.append(m)
     assert got[0][2:] == ("pinned", "[1,1,0]"), got
     assert "read 2 1 0 errno 0" in _texts(since, wasi), _texts(since, wasi)
+    assert "clip 0 clipped errno 0" in _texts(since, wasi), _texts(since, wasi)
     assert N.held() == 1, "the WASI service's pin, the ELF one's closed"
     s2, _started = _back(ws, rec, door, monkeypatch)
     for p in (elf, wasi):

@@ -36,7 +36,8 @@
 // time; a "wake" carrying ["pass", app] sends that app a "ping" of its own,
 // printing how many took it; a "wake" carrying ["edges"] opens gpio5 as an
 // input and listens on both its edges, and one carrying ["read"] reads them
-// back, printing how many and each level; a "wake" carrying ["media", path]
+// back, printing how many and each level; a "wake" carrying ["clip"] puts
+// "clipped" on the clipboard and reads it back; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
 // reads back, and leaves it playing; a "wake" carrying
@@ -137,6 +138,13 @@ int main(void) {
                 printf(" %d", e[k + 4]);
             }
             printf(" errno %d\n", n < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"clip\"]") == 0) {
+            char b[16];
+            int r = moy_clipboard_put_text("clipped");
+            int n = moy_clipboard_text(b, sizeof b);
+            printf("clip %d %.*s errno %d\n", r, n > 0 ? n : 0, b, n < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "note") == 0) {
             int id = moy_notify("Service Wasi", m.b + sizeof m.ev);

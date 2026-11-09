@@ -173,7 +173,7 @@
     {"name": "wallpaper.save_copy", "server": "c"},
     {"name": "artwork.current", "server": "c"},
     {"name": "artwork.follow", "server": "c"},
-    {"name": "clipboard.put_text", "server": "c", "in": ["text:str"], "ret": "int", "how": "hop", "wasm": true, "elf": 73, "py": ["clipboard.put_text"], "lua": ["clipboard.put_text"], "wasi": true},
+    {"name": "clipboard.put_text", "server": "c", "in": ["text:str"], "ret": "int", "how": "here", "wasm": true, "elf": 73, "py": ["clipboard.put_text"], "lua": ["clipboard.put_text"], "wasi": true},
     {"name": "clipboard.text", "server": "c", "in": ["text:out"], "ret": "len", "how": "seq", "wasm": true, "elf": 74, "py": ["clipboard.text"], "lua": ["clipboard.text"], "wasi": true},
     {"name": "clipboard.kind", "server": "c", "in": [], "ret": "int", "how": "seq", "wasm": true, "elf": 75, "py": ["clipboard.kind"], "lua": ["clipboard.kind"], "wasi": true},
     {"name": "clipboard.seq", "server": "c", "in": [], "ret": "int", "how": "seq", "wasm": true, "elf": 76, "py": ["clipboard.seq"], "lua": ["clipboard.seq"], "wasi": true},

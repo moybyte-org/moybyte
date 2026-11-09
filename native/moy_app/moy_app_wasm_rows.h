@@ -176,7 +176,7 @@ static int32_t w_prefs_clear(void *e, const uint8_t *key, uint32_t key_n) {
 }
 static int32_t w_clipboard_put_text(void *e, const uint8_t *text, uint32_t text_n) {
     span_t f[1] = { { text, text_n } };
-    return run(e, HOP, MOY_T_CLIPBOARD_PUT_TEXT, f, 1, NULL, 0);
+    return run(e, HERE, MOY_T_CLIPBOARD_PUT_TEXT, f, 1, NULL, 0);
 }
 static int32_t w_clipboard_text(void *e, uint8_t *text, uint32_t text_cap) {
     return run(e, SEQ, MOY_T_CLIPBOARD_TEXT, NULL, 0, text, text_cap);

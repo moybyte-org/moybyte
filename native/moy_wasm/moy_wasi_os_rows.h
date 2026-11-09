@@ -162,7 +162,7 @@ static int32_t w_os_prefs_clear(wasm_exec_env_t e, const char *key, uint32_t key
 
 static int32_t w_os_clipboard_put_text(wasm_exec_env_t e, const char *text, uint32_t text_n) {
     const os_arg_t a[1] = { OS_O(text, text_n) };
-    return os_role(e, MOY_T_CLIPBOARD_PUT_TEXT, OS_HOP, a, 1, NULL, 0);
+    return os_role(e, MOY_T_CLIPBOARD_PUT_TEXT, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_clipboard_text(wasm_exec_env_t e, uint8_t *text, uint32_t text_cap) {

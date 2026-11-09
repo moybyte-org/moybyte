@@ -79,7 +79,9 @@ reached through the same door a compiled app's import is
 (`native/moy_app/moy_app.h`'s `moy_app_role`): its generated body packs its
 fields and calls `moy_os_call`, which runs it for the process's app run on the
 task that serves its session (the VM's), or reads what the look and the
-clipboard write where it is called, under the app ABI's seqlock. The run is a
+clipboard write where it is called, under the app ABI's seqlock, or runs a
+row `how` "here" names (the clipboard's write, the device handles) where it
+is called too, hopping only an answer of `MOY_APP_NEEDS_VM`. The run is a
 grant of the command's own, owned by its pid, over the roles its granted
 permissions name (`runtime/shell/sh_door.py`, as a service's is), handed to
 `moy_os_command`; the console calls answer as that pid, under its
