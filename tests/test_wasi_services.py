@@ -527,9 +527,10 @@ def test_a_wasi_service_scans_and_connects_by_a_ble_handle(svc, perms):
 @pytest.mark.parametrize("perms", [("media",), ()])
 def test_a_wasi_service_plays_a_file_by_a_media_handle_until_it_ends(svc, perms):
     """moybyte.os `dev_*` on a `media` handle: a file probed (its length and
-    its tag's title), played as the service's own stream, its source read
-    back with the now-playing text; the stream lasts until the service
-    ends, whose sweep stops it. Each refused ACCES without `media`. The
+    its tag's title), played by the media service with this service its
+    client, its source read back with the now-playing text; the stream is
+    the media service's and plays on after the WASI service ends. Each
+    refused ACCES without `media`. The
     file is in the service's own folder, the one a media handle plays
     from without a `files` permission."""
     from runtime import audio_binding, dev_media
@@ -551,20 +552,26 @@ def test_a_wasi_service_plays_a_file_by_a_media_handle_until_it_ends(svc, perms)
         assert got == ["media_open 1 errno 0", "media_probe 2:Tone errno 0",
                        "media_play 1 errno 0", "media_mine 1 errno 0",
                        "media_src same errno 0"], got
-        assert N.owner() == pid
+        run = N.pid()
+        assert run not in (0, pid) and dev_media.now()["client"] == pid
     else:
         assert got == ["media_open -1 errno 2", "media_probe -1: errno 44",
                        "media_play -1 errno 44", "media_mine -1 errno 44",
                        "media_src other errno 44"], got
     assert s.stop(pid)
-    assert _polled(s, lambda: not dev_media._s["pid"] or dev_media._s["stopping"])
+    if perms:
+        assert N.pid() == run, "the service's end leaves the stream playing"
+        was = L.current()
+        L.current(1)
+        try:
+            dev_media.stop()                 # the shell stops it
+        finally:
+            L.current(was)
     for _ in range(50):
-        if not dev_media._s["pid"]:
+        if not N.pid():
             break
         N.pump()
-        if dev_media._s["wake"] is not None:
-            dev_media._pump()
-    assert N.owner() == 0
+    assert N.pid() == 0
 
 
 def test_a_wasi_service_s_status_item_hears_its_panel_until_it_ends(svc):

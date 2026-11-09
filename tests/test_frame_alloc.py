@@ -503,7 +503,7 @@ class _Face:
         self.reads[0] += 1
         return 12345
 
-    def play(self, src):
+    def play(self, src, label=None):
         pass
 
     def stop(self):

@@ -60,6 +60,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import devices as _devices
 try:
+    import scheduler as _scheduler
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import scheduler as _scheduler
+try:
     from front import FRONT as _FRONT
 except ImportError:  # host: the runtime package
     from runtime.front import FRONT as _FRONT
@@ -474,20 +478,38 @@ class Notices:
         self._dirty = True
 
     def ask_stop_music(self, cart):
-        """A compiled game the VM must stop for while the music holds the
-        Wi-Fi (the Player's `_music_keeps_the_vm`): the running set's
+        """A compiled game that fits with the VM stopped only without the
+        music (the Player's `_music_keeps_the_vm`): the running set's
         dialog asks first, Cancel focused; Stop & play stops the stream as
-        the shell, then opens the game again, now free to stop the VM."""
+        the shell, then opens the game again once the media service has
+        given its memory back (its run ends on the frame's job), now free
+        to stop the VM."""
         title = str((cart or {}).get("title") or "this game")[:18]
 
         def then():
             media = _devices.api("media")
-            if media is not None:
-                media.stop()
-            self.open(cart)
+            if media is None:
+                self.open(cart)
+                return
+            media.stop()
+            self._open_when_quiet(media, cart)
         self.confirm.ask_close("Stop the music to play %s?" % title,
                                "%s needs the music's memory. You can start the music "
                                "again after." % title, then, _STOP_PLAY)
+
+    def _open_when_quiet(self, media, cart, waited=None):
+        """`cart` opened once the media service's run has ended (a frame or
+        two after its stop), STOP_QUIET_MS at most."""
+        if not media.running() or (waited is not None and waited[0] >= STOP_QUIET_MS):
+            if waited is not None:
+                _scheduler.SCHED.plain_cancel(waited[1])
+            self.open(cart)
+            return
+        if waited is None:
+            waited = [0, 0]
+            waited[1] = _scheduler.SCHED.plain_every(
+                STOP_POLL_MS, lambda: self._open_when_quiet(media, cart, waited))
+        waited[0] += STOP_POLL_MS
 
     def ask_first(self, cart, then):
         """A cart that is asked before its first run (`app_perms.asks_first`:
@@ -1153,6 +1175,8 @@ _STOP_WORDS = {"wrap": True, "lines": 4, "tone": "dim"}
 _STOP_ERROR = {"wrap": True, "lines": 4, "face": "mono", "sunk": True}
 _WRAP = {"wrap": True, "lines": 3}
 _STOP_PLAY = ("Cancel", "Stop & play")
+STOP_POLL_MS = 50               # how often Stop & play looks for the music's end
+STOP_QUIET_MS = 3000            # and how long it waits for it
 _OPEN = ("No", "Open")
 
 

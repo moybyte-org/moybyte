@@ -98,11 +98,13 @@ overlaps a game's. `tests/test_wm_content_freeze.py` pins the focused
 window's freeze with a throttled game beside it. No second mechanism.
 
 A service runs regardless, has no window, and shows itself through kernel
-chrome and the task manager (§6). Two owner calls stay intact: sound
-stops when its process exits (a media stream lives exactly as long as its
-process: closing the app ends it, minimising keeps it, owner 2026-11-03),
-and no app gains a way to come back after a VM stop (owner,
-2026-10-10).
+chrome and the task manager (§6). An app's own sound stops when its
+process exits, and no app gains a way to come back after a VM stop (owner,
+2026-10-10). The media stream is not an app's sound: it is the media
+service's, which every app with the permission is a client of, and plays on
+after its client ends until its list is over or a client stops it (owner,
+2026-11-09, replacing 2026-11-03's "a stream lives as long as its process";
+`hardware.md` §3).
 
 **Every process has a pid, a state and an exit code.** The pid is its
 process-table slot and generation; the states are `running`, `throttled`,

@@ -26,17 +26,21 @@ class Face:
         self.n = None
         self.played = []
         self.seeks = []
+        self.end = None             # last(): how the last run ended
 
     def now(self):
         return dict(self.n) if self.n else None
 
-    def play(self, src):
+    def last(self):
+        return self.end
+
+    def play(self, src, label=None):
         if src.startswith("https://"):
             raise OSError(93, "https is refused")
         self.played.append(src)
         self.n = {"state": "playing", "paused": False, "src": src, "station": "",
                   "title": "Boards of Canada - Dayvan Cowboy", "entry": 0, "entries": 1,
-                  "volume": 60}
+                  "volume": 60, "pid": 9, "label": label or "", "who": "jukebox"}
 
     def pause(self):
         self.n["paused"] = True
@@ -466,3 +470,27 @@ def test_the_keys_move_the_current_station_and_the_view_follows(tmp_path, face, 
         for _ in range(12):
             drv.frame(1 / 30)
     assert app.cur[0] == 0 and _offset(app, view) == 0
+
+
+def test_music_follows_what_another_client_or_a_vm_stop_left_playing(tmp_path, face):
+    """The card shows the service's stream whoever played it: Music's own
+    after a VM stop (a fresh Stream, its label read back), another client's
+    by its source, and a run that ended with nothing played as failed."""
+    ws = build_ws(tmp_path)
+    s = M.STREAM
+    face.play(GROOVE[2], label=M.label_of("radio", GROOVE[0]))
+    assert M.follow(ws) is True
+    assert s.what == ("radio", GROOVE[0], GROOVE[2]) and s.card["station"] == GROOVE[0]
+    it = ITEMS.at(0)
+    assert it is not None and it.app == "Music" and it.state == ON
+    face.n.update(src="/sd/files/Music/Song.mp3", label="", who="t.player", title="")
+    s.stamp = None
+    s.poll()
+    assert s.what == ("song", "t.player", "/sd/files/Music/Song.mp3")
+    face.n = None
+    face.end = {"state": "failed", "err": 5, "pid": 9, "client": 7}
+    s.poll()
+    assert s.card["state"] == M.FAILED and ITEMS.at(0).state == ERROR
+    face.end = None
+    s._end()
+    assert M.follow(ws) is False and ITEMS.at(0) is None

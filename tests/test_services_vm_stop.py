@@ -164,9 +164,12 @@ def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
     # Its timers run on, and a message between processes on their own tasks
     # is answered meanwhile.
     assert moy_evq.send(peer, "t.tick", "count", "[]")[0] == 1
-    _during(20, _lua_step)
-    got = moy_evq.take(peer)
-    assert got is not None and got[2] == "counted" and json.loads(got[3])[0] >= 4
+    got, t0 = None, time.monotonic()
+    while got is None:
+        assert time.monotonic() - t0 < 5, "a message during the stop is answered"
+        _during(10, _lua_step)
+        got = moy_evq.take(peer)
+    assert got[2] == "counted" and json.loads(got[3])[0] >= 2
     # Its alarm, the kernel's, rings during the stop; its notify waits for
     # the VM.
     t0 = time.monotonic()

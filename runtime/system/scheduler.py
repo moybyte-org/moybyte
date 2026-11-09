@@ -371,6 +371,8 @@ class Proc:
         self.held = 0           # PSRAM it holds beside the VM's heap (THE SHARES, below)
         self.rt = None          # a compiled service's runtime (ws.runtimes), None: none
         self.ctx = None         # a service's context: its run grant over its app's roles
+        self.kernel = False     # a kernel service's row (`adopt`): the kernel logs its
+                                # start and its end, and no policy restarts it
 
 
 def _end_grant(p):
@@ -1219,8 +1221,9 @@ class Scheduler:
         p.ns = None
         _end_grant(p)
         self.wakes.end(p.pid)
-        _log(INFO, p.pid, "exit %d" % code)
-        if asked or p.kind != SERVICE or not self._unasked(p, code):
+        if not p.kernel:
+            _log(INFO, p.pid, "exit %d" % code)
+        if asked or p.kind != SERVICE or p.kernel or not self._unasked(p, code):
             _let_go(p)
 
     # -- an app's own service ----------------------------------------------
@@ -1416,9 +1419,10 @@ class Scheduler:
         its cart and its Lua `native` handle or compiled runtime `rt`), or a
         kernel service with no cart (its runtime `rt`: `figures(pid)` while it
         lives, `reap()` its end, `stop(pid)`), which starts on its first
-        request and ends when its work is done. Its figures are read and its
-        end reaped at the poll as a started one's are; a kernel service has
-        no restart policy. Answers its Proc, or the live row it already has."""
+        request and ends when its work is done, and logs both itself. Its
+        figures are read and its end reaped at the poll as a started one's
+        are; a kernel service has no restart policy. Answers its Proc, or the
+        live row it already has."""
         p = self.procs.get(pid)
         if p is not None and p.state != EXITED:
             return p
@@ -1426,7 +1430,9 @@ class Scheduler:
         p.started = _ticks_ms()
         p.native = native
         p.rt = rt
-        _log(INFO, pid, "taken back" if cart is not None else "start", name)
+        p.kernel = cart is None
+        if cart is not None:
+            _log(INFO, pid, "taken back", name)
         self._polling()
         return p
 

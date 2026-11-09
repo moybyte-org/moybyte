@@ -496,7 +496,8 @@ class SpineVerbs:
         serves, ssh_service.py). A process's, held with its `pid`
         (`PROC_TAGS`): "cart" (a run with the "network" permission), "http"
         (its `moybyte.http` requests while one runs, dev_http.py), "media"
-        (its stream while a URL of its list may play, dev_media.py), "native"
+        (the media service's run, under the run's pid, while a URL of its
+        list may play, dev_media.py), "native"
         (a native process from its first socket to its end, elf_run.py),
         "net" (its radio link's ports, from the first open to the last
         close, dev_handles.py); its

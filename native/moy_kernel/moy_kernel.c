@@ -1835,19 +1835,15 @@ static void moy_kernel_pins_deinit(void) {
 // with no VM for the stop's run, then the first area again and a RETURN
 // start. Never returns without a first area: one that will not come back is
 // the recovery floor's, as at power-on.
-// The audio sessions the VM opened (moy_aud.h's moy_aud_close_vm) and its
-// processes' stream (moy_media.h's moy_media_close_vm): weak, for an image
-// without moy_audio or moy_media. The VM's leases (moy_lease.h's THE VM'S
-// END) are the kernel's own table.
+// The audio sessions the VM opened (moy_aud.h's moy_aud_close_vm): weak, for
+// an image without moy_audio. The media service is the system's and plays on
+// (moy_media.h, A RUN, ON DEMAND). The VM's
+// leases (moy_lease.h's THE VM'S END) are the kernel's own table.
 int moy_aud_close_vm(void) __attribute__((weak));
-int moy_media_close_vm(void) __attribute__((weak));
 
 static void moy_kernel_vm_down(void **heap) {
     // Whatever the VM opened in the mixer ends with it, before any walk of
     // what the stop gives back.
-    if (moy_media_close_vm != NULL) {
-        moy_media_close_vm();
-    }
     if (moy_aud_close_vm != NULL) {
         moy_aud_close_vm();
     }

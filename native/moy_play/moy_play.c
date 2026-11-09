@@ -369,7 +369,7 @@ typedef struct {
 } launch_ctx_t;
 
 static const char *const STOP_NAMES[MOY_PLAY_STOP_WHYS] = {
-    "stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big",
+    "stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big", "media",
 };
 
 const char *moy_play_stop_name(uint8_t why) {

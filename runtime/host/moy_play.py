@@ -162,7 +162,8 @@ def _lib(real="float"):
                 ("moy_share_held", [_U8], _U32),
                 ("moy_share_take", [_U8, _U32], ctypes.c_int),
                 ("moy_share_give", [_U8, _U32], None),
-                ("moy_share_kill_below", [_U32], _U32)):
+                ("moy_share_kill_below", [_U32], _U32),
+                ("moy_play_stop_fit", [ctypes.c_uint64] * 6 + [_B], _U8)):
             f = getattr(d, name)
             f.argtypes = args
             f.restype = res
@@ -261,6 +262,13 @@ def kill_below(procs_held):
     """The kill threshold with the running set holding `procs_held` of
     PROCS, or None with no line."""
     return _share(_lib().moy_share_kill_below(procs_held))
+
+
+def stop_fit(total, block, free, largest, held, media=0, force=False):
+    """The stop verdict's fit clauses (moy_play.h's moy_play_stop_fit): its
+    word in STOP_WHYS ("fits", "stops", "media" or "big")."""
+    return STOP_WHYS[_lib().moy_play_stop_fit(total, block, free, largest, held, media,
+                                              bool(force))]
 
 
 def share_use(board=None):
@@ -457,7 +465,7 @@ def _rc(rc):
 
 
 # The stop verdict's words (moy_play.h's MOY_PLAY_STOPS and KEEP_*), in order.
-STOP_WHYS = ("stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big")
+STOP_WHYS = ("stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big", "media")
 # launch()'s flags beyond `paced` (moy_play.h).
 HOME = 2
 UNSIGNED = 4

@@ -1,21 +1,22 @@
 """`moybyte.media`: the media service's face (docs/os_2026-11/hardware.md
 section 3) over its C (native/moy_media/moy_media.h, the module moy_media).
-One stream at a time, one process's.
+The service is the system's: one stream, which every app with the
+permission is a client of.
 
-  play(src, allow=None)
-                     play `src`, replacing what this process played: a file
-                     (an MP3, or an .m3u/.pls playlist) under `media`, an
-                     http:// URL (a stream, its ICY now-playing text read, or
-                     a playlist) under `media:url` and `http`. OSError: EPERM
-                     without them, EPROTONOSUPPORT for https where
-                     `tls()` is False (an https stream verifies the
-                     server's certificate as `http` does), EBUSY while
-                     another process's stream plays, ENOSPC where THE
-                     SHARES give no MEDIA row or it is full, ENOENT for a
-                     file that is not there. With `allow` (a function of
-                     a file's path, as `where` makes it), a file it refuses,
-                     the source or an entry its list names, is EPERM before
-                     anything plays, whether the file is there or not
+  play(src, allow=None, label=None)
+                     play `src` in place of what plays: a file (an MP3, or
+                     an .m3u/.pls playlist) under `media`, an http:// URL (a
+                     stream, its ICY now-playing text read, or a playlist)
+                     under `media:url` and `http`. OSError: EPERM without
+                     them, EPROTONOSUPPORT for https where `tls()` is False
+                     (an https stream verifies the server's certificate as
+                     `http` does), ENOSPC where THE SHARES give no MEDIA row
+                     or it is full, ENOENT for a file that is not there.
+                     With `allow` (a function of a file's path, as `where`
+                     makes it), a file it refuses, the source or an entry
+                     its list names, is EPERM before anything plays.
+                     `label` is the caller's own name for what it plays
+                     (Music's "kind<TAB>name"), read back as now()'s
   where(path) -> str the path the C plays `path` as (a URL as it is)
   tls() -> bool      whether an https:// URL plays here
   held(folder) -> ((name, size), ...)  the songs in `folder` that this
@@ -33,31 +34,49 @@ One stream at a time, one process's.
                      "idle"), paused, src, title (the station's now-playing
                      text, else the entry's own, else its file's tag's),
                      artist (its file's tag's), station, entry, entries,
-                     rate, channels, kbps, volume, err, pid, and a file's
-                     place and length heard, `at` and `len` in seconds
-                     (0 for a stream, and `len` 0 until a frame decodes)
+                     rate, channels, kbps, volume, err, pid (the service's
+                     run), client (the process whose play() set what plays),
+                     who (its name), label (its label), and a file's place
+                     and length heard, `at` and `len` in seconds (0 for a
+                     stream, and `len` 0 until a frame decodes)
   stamp() -> int | None  one small int that moves when what now() shows
                      does (its place by the second): a poll that finds it
                      still reads nothing else and allocates nothing
+  last() -> dict | None  how the last run ended: state ("idle" stopped,
+                     "ended", "failed"), err, pid, client
+  running() -> int   the run's pid, 0 for none
 
-A stream lives as long as its process (owner, 2026-11-03): the process's end
-stops it (`sweep`), and the shell (pid 1) may stop it from anywhere. While a
-URL may play the stream holds the radio lease under "media" and its
-process's pid (`Workstation.wifi_hold`), let go when it stops, its list
-ends or its process does.
+THE RUN is the service's, on demand (owner, 2026-11-09): a client's first
+play() starts it (moy_media_open: a pid of its own, "media", its lease, its
+MEDIA row, its task), and it ends by itself when its work is done -- a
+stop, its list over, nothing of it played -- giving everything back. While
+it runs it is nobody's process: a client's end, Music closing, an S3's VM
+stop and a soft reset leave it playing. Its row in the task manager is the
+scheduler's kernel-service row (`scheduler.adopt`, `_RT`), and this face
+follows the run whatever started it (`_live`): a console that comes back
+after a VM stop finds it playing and shows it.
+
+THE CLIENTS. Every process the permissions let in is a client, and the last
+command wins: a play() replaces what plays whoever played it (the service
+names its new client, `moy_media_take`), and the other commands act on what
+plays from any client. A play() that takes over a list another process's
+play() started, still playing, posts a notification saying so, so the
+person learns why their music changed. The shell (pid 1) is a client too.
+
+THE RADIO. While a URL of the list may play, the run holds the radio's
+"media" tag under its own pid (`Workstation.wifi_hold`); its end lets it go
+in C (moy_media.c's reap), and this face settles the radio after it.
 
 WHAT RUNS IN C. play() is the C's (moy_media_play: the list, a playlist file
 read, the first entry begun), and a file plays with no Python at all: the
 console's frame runs the service's job, which reads the file through the
 store's volume seam and, where there is no task (the host, the browser),
-decodes. This face checks the permissions, holds the radio lease, and keeps
-the stream's process.
+decodes, and ends the run when its work is done.
 
 The face's wake (`_pump`, every PUMP_MS) runs only while there is Python
-work: the page's bytes to feed (the browser), the radio lease to let go
-when a URL's list ends (WATCH_MS), or a stopped service the C has not yet
-let go of. A stream the C closed from outside (its lease ended) is noticed
-at the face's next call.
+work: the page's bytes to feed (the browser), or, while the run holds the
+radio, its end to notice (WATCH_MS) so the radio settles. A file's run ends
+with no Python, and the face's next call lets go of it.
 
 IN THE BROWSER the C has no HTTP client and the VFS keeps no song, so the
 bytes of a URL, and of a song the page holds (its OPFS store's, or a serving
@@ -94,23 +113,25 @@ except ImportError:  # pragma: no cover - an image without the kernel
     except ImportError:
         _L = None
 
-EPERM, ENOENT, EIO, EBADF, EBUSY, EINVAL, ENOSPC = 1, 2, 5, 9, 16, 22, 28
+EPERM, ENOENT, EIO, EBADF, EINVAL, ENOSPC = 1, 2, 5, 9, 22, 28
 EPROTONOSUPPORT = 93
 TAG = "media"
+NAME = "media"                  # the run's row in the task manager
 PUMP_MS = 50
 WATCH_MS = 500
 FEED_MAX = 8192
 STATES = ("idle", "opening", "playing", "ended", "failed")
 _HOST = _N is not None and hasattr(_N, "PART")
 _STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the C's job runs the loop
-(_STATE, _PAUSED, _OWNER, _GEN, _ENTRY, _ENTRIES, _KIND, _ARMED, _RATE, _CH, _KBPS,
+(_STATE, _PAUSED, _PID, _GEN, _ENTRY, _ENTRIES, _KIND, _ARMED, _RATE, _CH, _KBPS,
  _VOL, _INB, _INR, _PCM, _DEC, _PLAYED, _STARVED, _ERR, _TGEN, _IDLE, _AT_MS,
- _LEN_MS, _FEED_AT) = range(24)
+ _LEN_MS, _FEED_AT, _CLIENT) = range(25)
 
-# The stream's process and what the face's wake holds for it.
+# The run the face follows and what the face's wake holds for it.
 _s = {"pid": 0, "wake": None, "every": 0, "file": None, "gen": 0, "eof": False,
-      "stopping": False, "sized": False, "radio": 0}
+      "sized": False, "radio": 0}
 _buf = [None]
+_HEARD = []                     # fn() told when the face finds a run (`listen`)
 
 
 def _shares_media():
@@ -204,9 +225,44 @@ def _rate():
     return a.rate() if a is not None else 22050
 
 
+def _sched():
+    try:
+        import scheduler
+    except ImportError:  # host: the runtime package
+        from runtime import scheduler
+    return scheduler.SCHED
+
+
+class _Run:
+    """The run's row's runtime (scheduler.adopt): its figures while it
+    lives, its end once the C has given everything back, and a stop."""
+
+    def figures(self, pid):
+        if _N.pid() != pid:
+            return None
+        return _N.share(), 0
+
+    def reap(self):
+        """[(pid, exit status)] of the runs that ended: 0, or 1 for a list
+        of which nothing played."""
+        runs, pid, _client, state, _err = _N.last()
+        if not pid or pid == _N.pid():
+            return []
+        return [(pid, 1 if state == _N.FAILED else 0)]
+
+    def stop(self, pid):
+        if _N.pid() == pid:
+            _N.stop()
+            _settle()
+        return 0
+
+
+_RT = _Run()
+
+
 def _holds(ws, pid):
-    """Whether process `pid`'s stream holds the radio: the lease table's
-    radio rows say (a console with no radio has none)."""
+    """Whether run `pid` holds the radio: the lease table's radio rows say
+    (a console with no radio has none)."""
     leases = getattr(ws, "leases", None)
     return _s["radio"] == pid and leases is not None and leases.held(TAG)
 
@@ -220,13 +276,6 @@ def _hold():
     dial = getattr(getattr(ws, "cart_net", None), "dial", None)
     if dial is not None:
         dial()                     # never waited: the worker's task waits for the link
-
-
-def _let_go():
-    ws, pid = _D.console, _s["radio"]
-    _s["radio"] = 0
-    if ws is not None and pid:
-        ws.wifi_release(TAG, pid)
 
 
 def _close_file():
@@ -266,64 +315,119 @@ def _wake(ms):
 
 
 def _watch():
-    """The wake this stream needs: the page's bytes to feed, a stop the C
-    has not let go of, the radio to let go of at its list's end, or none."""
-    if _s["stopping"] or (_s["pid"] and _net() is not None):
+    """The face's wake while a run needs Python: the page's bytes to feed
+    every PUMP_MS, else, while it holds the radio, its end to notice every
+    WATCH_MS so the radio settles. A file plays with none: its run's end is
+    the face's next call's to notice."""
+    if not _s["pid"]:
+        _wake(0)
+    elif _net() is not None:
         _wake(PUMP_MS)
-    elif _s["pid"] and _holds(_D.console, _s["pid"]):
+    elif _s["radio"]:
         _wake(WATCH_MS)
     else:
         _wake(0)
 
 
+def _follow(pid):
+    """Run `pid`, whoever started it, followed: its row, the host's mix, the
+    page's reader, its radio as the lease table holds it, the face's wake."""
+    _s["pid"] = pid
+    _D.MEDIA[0] = pid
+    _sched().adopt(pid, NAME, rt=_RT)
+    if _HOST:
+        a = _audio()
+        if a is not None:
+            _N.attach(a, True)
+    if _net() is not None:
+        _N.page(True)
+    leases = getattr(_D.console, "leases", None)
+    _s["radio"] = pid if leases is not None and leases.held(TAG) else 0
+    _watch()
+
+
 def _end():
-    """The service closed: the wake, the radio and the page's reader let go."""
+    """The run ended (in C, which gave back what it held): the face lets go
+    -- its wake, the host's mix, the page's reader -- and the radio settles."""
     _s["pid"] = 0
-    _s["stopping"] = False
+    _s["radio"] = 0
     _wake(0)
     if _HOST:
         a = _audio()
         if a is not None:
             _N.attach(a, False)
     _close_file()
-    _let_go()
     _D.MEDIA[0] = 0
+    ws = _D.console
+    settle = getattr(ws, "wifi_settle", None)
+    if settle is not None:
+        settle()
 
 
-def _gone():
-    """The C closed the stream from outside (its lease ended): the face lets
-    go too. True when it did."""
-    if _s["pid"] and not _s["stopping"] and _N.owner() != _s["pid"]:
+def _live():
+    """The run's pid, 0 for none: the face follows the C's run, and lets go
+    of one that ended."""
+    if _N is None:
+        return 0
+    pid = _N.pid()
+    if _s["pid"] and _s["pid"] != pid:
         _end()
-        return True
-    return False
+    if pid and not _s["pid"]:
+        _follow(pid)
+    return pid
 
 
-def _try_close():
+def _settle():
+    """A stop's end: where there is no task the C's job runs now, so a stop
+    that let go ends the run at once."""
     if _STEP:
-        _N.run()
-    rc = _N.close(_s["pid"])
-    if rc == 0 or rc == -EBADF:
-        _end()
-        return True
-    return False
+        _N.pump()
+    _live()
 
 
-def _ended(p, gen, err=0):
+def listen(fn):
+    """`fn()` told each time the face finds a run: a client's play() that
+    started one, or the run a VM stop left playing (`attach`). The
+    console's: Music's card and status item follow it (music_app.follow)."""
+    if fn not in _HEARD:
+        _HEARD.append(fn)
+
+
+def _tell():
+    for fn in _HEARD:
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 -- a listener never stops the music
+            print("Moybyte media: %s" % (exc,))
+
+
+def attach():
+    """The run a VM stop left playing, followed by the console after it."""
+    pid = _live()
+    if pid:
+        _tell()
+    return pid
+
+
+def running():
+    """The run's pid while one plays, else 0."""
+    return _live()
+
+
+def _ended(gen, err=0):
     _s["eof"] = True
     f = _s["file"]
     _s["file"] = None
     if err:
-        _N.feed_fail(p, gen, err)
+        _N.feed_fail(gen, err)
     else:
-        _N.feed_end(p, gen)
+        _N.feed_end(gen)
     if f is not None:
         f.close()
 
 
 def _feed(gen, room, at):
     """The page's bytes for entry generation `gen`, from byte `at`."""
-    p = _s["pid"]
     if _s["gen"] != gen:
         _close_file()
         _s["gen"] = gen
@@ -333,7 +437,7 @@ def _feed(gen, room, at):
         src = _N.text(_N.T_SRC)
         if net is None or not (_is_url(src) or net.holds(src)):
             _s["eof"] = True
-            _N.feed_fail(p, gen, ENOENT)
+            _N.feed_fail(gen, ENOENT)
             return
         _s["file"] = net.open(src, at) if at else net.open(src)
     if _s["eof"] or _s["file"] is None:
@@ -349,17 +453,17 @@ def _feed(gen, room, at):
         try:
             n = f.readinto(mv[:want])
         except OSError as e:
-            _ended(p, gen, (e.args[0] if e.args and isinstance(e.args[0], int) else 0) or EIO)
+            _ended(gen, (e.args[0] if e.args and isinstance(e.args[0], int) else 0) or EIO)
             return
         if not _s["sized"] and getattr(f, "size", None) is not None:
             _s["sized"] = True
-            _N.feed_size(p, gen, f.size)
+            _N.feed_size(gen, f.size)
         if n is None:                  # the page's reader: nothing yet
             return
         if not n:
-            _ended(p, gen)
+            _ended(gen)
             return
-        k = _N.feed(p, gen, mv[:n])
+        k = _N.feed(gen, mv[:n])
         room -= max(k, 0)
         if k < n:
             if k >= 0 and hasattr(f, "seek"):
@@ -368,40 +472,50 @@ def _feed(gen, room, at):
 
 
 def _pump():
-    if _s["pid"] == 0:
-        _end()
-        return
-    if _s["stopping"]:
-        _try_close()
-        return
-    if _gone():
+    if not _live():
         return
     st = _N.status()
     if st is None:
-        _end()
         return
     if st[_ARMED]:
         _feed(st[_GEN], st[_INR], st[_FEED_AT])
         if _STEP:
             _N.pump()
     if st[_STATE] in (_N.ENDED, _N.FAILED):
-        _let_go()
         _close_file()
-    _watch()
 
 
-def _owned():
-    """The stream's owner, when the caller is it or the shell; else EPERM.
-    None when no stream is open."""
+def _client():
+    """The caller, a client of a running service: a process with `media` or
+    the shell. None while nothing runs."""
     p = _D.pid()
-    if not _s["pid"] or _s["stopping"] or _gone():
+    if not _live():
         return None
-    if p != _s["pid"] and p != _D.SHELL:
-        raise OSError(EPERM, "another process's stream")
-    return _s["pid"]
+    if p != _D.SHELL and not _D.may(p, "media"):
+        raise OSError(EPERM, 'needs "media"')
+    return p
 
 
-def play(src, allow=None):
+def _who(p):
+    name = _L.name(p) if _L is not None else None
+    return name or ("pid %d" % p)
+
+
+def _took(was, p, label):
+    """Process `p`'s play() replaced what process `was` played: the person
+    is told, as the system."""
+    if not was or was == p:
+        return
+    name = (label or "").split("\t")[-1] or _N.text(_N.T_SRC).rsplit("/", 1)[-1]
+    try:
+        from notifications import NOTES
+    except ImportError:  # host: the runtime package
+        from runtime.notifications import NOTES
+    NOTES.post(_D.SHELL, "%s took over the music" % _who(p),
+               "%s now plays in place of what %s played." % (name, _who(was)))
+
+
+def play(src, allow=None, label=None):
     src = str(src)
     url = _is_url(src)
     p = _need(("media:url", "http") if url else ("media",))
@@ -409,74 +523,62 @@ def play(src, allow=None):
         raise OSError(EPERM, "not one of its folders")
     if url and src[:8].lower() == "https://" and not tls():
         raise OSError(EPROTONOSUPPORT, "https is refused")
-    if _s["stopping"]:
-        _try_close()
-    _gone()
-    if _s["pid"] and _s["pid"] != p:
-        raise OSError(EBUSY, "another process's stream plays")
     net = _net()
-    if not _s["pid"]:
-        _D.check(_N.open(p, _rate()))
-        _s["pid"] = p
-        _D.MEDIA[0] = p
-        if _HOST:
-            a = _audio()
-            if a is not None:
-                _N.attach(a, True)
-        if net is not None:
-            _N.page(p, True)
+    new = not _live()
+    if new:
+        _D.check(_N.open(_rate()))
+        _live()
     _close_file()
     src = _abs(src)
-    n = _N.play(p, src, net is not None and not url and net.holds(src))
+    n = _N.play(src, net is not None and not url and net.holds(src))
     if n < 0:
-        stop()
+        _N.stop()
+        _settle()
         raise OSError(-n, "an empty playlist" if n == -EINVAL else src)
     if allow is not None:
         for i in range(n):
             e = _N.entry(i)[0]
             if not _is_url(e) and not allow(e):
-                stop()
+                _N.stop()
+                _settle()
                 raise OSError(EPERM, "its list names a file outside its folders")
+    was = _N.take(p, _who(p), label)
     if any(_is_url(_N.entry(i)[0]) for i in range(n)):
         _hold()
     if _STEP:
         _N.run()
+    _took(was, p, label)
     _watch()
+    if new:
+        _tell()
 
 
 def stop():
-    p = _owned()
-    if p is None:
+    if _client() is None:
         return
-    _N.stop(p)
-    _s["stopping"] = True
+    _N.stop()
     _close_file()
-    _let_go()
-    _try_close()
-    _watch()
+    _settle()
 
 
 def pause():
-    p = _owned()
-    if p is not None:
-        _N.pause(p, True)
+    if _client() is not None:
+        _N.pause(True)
 
 
 def resume():
-    p = _owned()
-    if p is not None:
-        _N.pause(p, False)
+    if _client() is not None:
+        _N.pause(False)
 
 
 def _move(by):
-    p = _owned()
-    if p is None:
+    if _client() is None:
         return False
     st = _N.status()
     i = st[_ENTRY] + by
     if i < 0 or i >= st[_ENTRIES]:
         return False
-    _D.check(_N.go(p, i))
+    _D.check(_N.go(i))
     if _is_url(_N.entry(i)[0]):
         _hold()
         _watch()
@@ -492,10 +594,9 @@ def prev():
 
 
 def seek(seconds):
-    p = _owned()
-    if p is None:
+    if _client() is None:
         return False
-    if _N.seek(p, int(float(seconds) * 1000)) != 0:
+    if _N.seek(int(float(seconds) * 1000)) != 0:
         return False
     if _STEP:
         _N.run()
@@ -503,22 +604,21 @@ def seek(seconds):
 
 
 def volume(v=None):
-    p = _owned()
-    if p is None:
+    if _client() is None:
         return None
     if v is not None:
-        _N.volume(p, int(v))
+        _N.volume(int(v))
     return _N.status()[_VOL]
 
 
 def stamp():
-    if not _s["pid"] or _s["stopping"] or _gone():
+    if not _live():
         return None
     return _N.stamp()
 
 
 def now():
-    if not _s["pid"] or _s["stopping"] or _gone():
+    if not _live():
         return None
     st = _N.status()
     if st is None:
@@ -531,18 +631,22 @@ def now():
         "station": _N.text(_N.T_STATION),
         "entry": st[_ENTRY], "entries": st[_ENTRIES], "rate": st[_RATE],
         "channels": st[_CH], "kbps": st[_KBPS], "volume": st[_VOL],
-        "err": st[_ERR], "pid": _s["pid"],
+        "err": st[_ERR], "pid": st[_PID], "client": st[_CLIENT],
+        "who": _N.text(_N.T_WHO), "label": _N.text(_N.T_LABEL),
         "at": st[_AT_MS] // 1000 if fed else 0, "len": st[_LEN_MS] // 1000 if fed else 0,
     }
 
 
+def last():
+    """How the last run ended, None before any: state ("idle" for a stop,
+    "ended", "failed"), err (the last entry's errno), pid and client."""
+    if _N is None:
+        return None
+    runs, pid, client, state, err = _N.last()
+    if not runs:
+        return None
+    return {"state": STATES[state], "err": err, "pid": pid, "client": client}
+
+
 def sweep(pid):
-    """Process `pid` ended: its stream stopped, the service closed once the C
-    has let go."""
-    if _s["pid"] and _s["pid"] == pid:
-        _N.stop(pid)
-        _s["stopping"] = True
-        _close_file()
-        _let_go()
-        _try_close()
-        _watch()
+    """Process `pid` ended: the run is the system's, and plays on."""

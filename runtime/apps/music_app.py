@@ -22,11 +22,13 @@ docs/media/music_2026-11/README.md.
   * on the desk one window: the Library's two places beside the table, the
     media card in one row across its foot.
 
-What plays is the shell's stream (the app is a system process of the
-shell's): leaving the app keeps it playing, and Back on the desk minimises
-the window. While a stream is open the app's status item is in the bar
-(`moybyte.status`); its section, the compact card, is where it is paused
-and stopped from anywhere (the desk's menu, a handheld's control center).
+What plays is the media service's stream, the system's (the app is one of
+its clients): leaving the app keeps it playing, and Back on the desk
+minimises the window. While the service runs the app's status item is in
+the bar (`moybyte.status`); its section, the compact card, is where it is
+paused and stopped from anywhere (the desk's menu, a handheld's control
+center). What another client plays, and what a VM stop left playing, the
+card shows as well (`Stream.follow`, from the label each play() names).
 A console with no media service (the Guition S3) shows the no-audio page.
 """
 
@@ -166,6 +168,7 @@ class Stream:
         self.on_change = None       # fn() the app sets: a frame owed
         self.stations = STATIONS    # the radio's list, the app's own after
         self.songs = ()             # the music folder's songs, for a song's step
+        self.run = 0                # the service's run the card shows
 
     def media(self):
         """The media face: a stand-in's where one is set (False: none, a
@@ -187,7 +190,7 @@ class Stream:
             return False
         self.what = (kind, name, src)
         try:
-            m.play(src)
+            m.play(src, label=label_of(kind, name))
         except OSError:
             self.card = card_of(None, self.what, FAILED)
             self._changed()
@@ -277,6 +280,20 @@ class Stream:
         c = self.card
         return c["volume"] if c is not None else 0
 
+    def follow(self):
+        """The service's stream shown, whoever played it: Music's own after
+        a VM stop, or another client's (its label says what, else its
+        source). False where nothing plays."""
+        m = self.media()
+        n = m.now() if m is not None else None
+        if n is None:
+            return False
+        self.what = what_of(n)
+        self.stamp = None
+        self._start()
+        self.poll()
+        return True
+
     # -- the wake ----------------------------------------------------------------
 
     def _start(self):
@@ -316,13 +333,15 @@ class Stream:
                 n = m.now()
             except OSError:
                 n = None
+        if n is None and self.what is not None and self._failed(m):
+            return
         if n is None or self.what is None:
-            if self.card is not None and self.card["state"] == FAILED and n is None \
-                    and self.what is not None and m is not None and m.now() is None:
-                self._item(FAILED)
-                return
             self._end()
             return
+        lab = n.get("label")
+        if lab is not None and lab != label_of(*self.what[:2]):
+            self.what = what_of(n)           # another client's play: what it named
+        self.run = n.get("pid", 0)
         if n["state"] == "ended":
             self.stop()
             return
@@ -337,6 +356,23 @@ class Stream:
             self.sig = sig
             self._item(c["state"] if not c["paused"] else PAUSED_, item_moved)
             self._changed()
+
+    def _failed(self, m):
+        """The card failed: the run it showed ended with nothing played (the
+        service's own end), or a play the face refused. True while it shows
+        that."""
+        c = self.card
+        if c is not None and c["state"] == FAILED:
+            self._item(FAILED)
+            return True
+        e = m.last() if m is not None and self.run and hasattr(m, "last") else None
+        if e is None or e["pid"] != self.run or e["state"] != "failed":
+            return False
+        self.run = 0
+        self.card = card_of(None, self.what, FAILED)
+        self._item(FAILED)
+        self._changed()
+        return True
 
     def _item(self, state, moved=True):
         it = self.item
@@ -362,6 +398,40 @@ class Stream:
 
 
 STREAM = Stream()
+
+
+def label_of(kind, name):
+    """What Music names a play() it makes (the face's `label`)."""
+    return "%s\t%s" % (kind, name)
+
+
+def what_of(n):
+    """(kind, name, src) of what the face's now() plays: Music's own label's,
+    else the source's (a list, a station or a song) and its client's name."""
+    kind, _, name = (n.get("label") or "").partition("\t")
+    src = n.get("src") or ""
+    if kind in ("radio", "song", "list") and name:
+        return kind, name, src
+    if (n.get("entries") or 1) > 1:
+        kind = "list"
+    else:
+        kind = "radio" if _is_url(src) else "song"
+    return kind, n.get("title") or n.get("who") or _stem(src), src
+
+
+def follow(ws=None):
+    """A run of the media service the face found (dev_media.listen: any
+    client's play that started one, or the run a VM stop left playing)
+    shown in the bar, its section opening the app."""
+    s = STREAM
+    if s.section is None and ws is not None:
+        nav = None
+        try:
+            nav = ws.app_context(MusicAppLayer.id, ("nav",)).nav
+        except Exception:  # noqa: BLE001 -- a section with no head still shows the card
+            nav = None
+        s.section = MusicSection(s, nav)
+    return s.follow()
 
 
 def card_of(n, what, state=None):
@@ -887,6 +957,8 @@ class MusicAppLayer:
         if s.section is None:
             s.section = MusicSection(s, ctx.nav)
         self.stream = s
+        if s.what is None:
+            s.follow()
         self.page = "list"          # "list", "now", "add"
         self.tab = 0
         self.cur = [-1, -1]         # each tab's current row

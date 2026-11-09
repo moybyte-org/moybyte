@@ -1639,22 +1639,21 @@ class Player(PlayerDiag):
             return 0
 
     def _music_keeps_the_vm(self, run, cart):
-        """True when the kernel would stop the VM for the run but the media
-        stream's radio lease kept it (the verdict's `lease`, the lease the
-        media service's): the launch ends unrun and the shell asks first,
-        "Stop the music to play <game>?", whose Stop & play stops the stream
-        and opens the cart again (`Workstation.ask_stop_music`). The Player
-        stays where it was: `declined` tells the opener not to run it, and
-        the run's process ends, so the shell is current again for the
-        dialog's answer (the stream is the shell's to stop)."""
+        """True when the kernel would stop the VM for the run and it fits
+        with the VM stopped only without the music (the verdict's `media`,
+        moy_play.h's KEEP_MEDIA: the media service plays on through a stop,
+        so what it holds is not given back), a file's or a station's alike:
+        the launch ends unrun and the shell asks first, "Stop the music to
+        play <game>?", whose Stop & play stops the stream and opens the cart
+        again once the service has given its memory back
+        (`Workstation.ask_stop_music`). The Player stays where it was:
+        `declined` tells the opener not to run it, and the run's process
+        ends, so the shell is current again for the dialog's answer."""
         info_of = getattr(_moy_play, "info", None)
         info = info_of(run) if info_of is not None else None
-        if info is None or len(info) < 13 or info[11] != "lease":
+        if info is None or len(info) < 13 or info[11] != "media":
             return False
         ws = self.ws
-        leases = getattr(ws, "leases", None)
-        if leases is None or not leases.held("media"):
-            return False
         try:
             _moy_play.end(run)
         except RuntimeError:

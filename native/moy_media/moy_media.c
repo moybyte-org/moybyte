@@ -9,6 +9,7 @@
 
 #include "minimp3.h"
 #include "moy_input.h"
+#include "moy_log.h"
 #include "moy_play.h"
 #include "moy_vol.h"
 
@@ -70,7 +71,7 @@ _Static_assert((MOY_MEDIA_IN_BYTES & IN_MASK) == 0, "the stream buffer is a powe
 _Static_assert((MOY_MEDIA_PCM_FRAMES & OUT_MASK) == 0, "the decoded ring is a power of two");
 
 typedef struct {
-    uint32_t owner;
+    uint32_t pid;                   // the service's own, spawned at its start
     int out_rate, out_ch;
     uint32_t out_need;              // the decoded ring's room one frame may take
     uint32_t share;                 // what the open took from the MEDIA row
@@ -96,6 +97,14 @@ typedef struct {
     uint32_t armed_at;              // the byte the armed generation starts at
     uint32_t seek_req, seek_dec;    // a seek's byte and frames, NO_SEEK for none
     char song[MOY_MEDIA_TEXT_MAX], artist[MOY_MEDIA_TEXT_MAX];
+    uint32_t client;                // the pid whose command set what plays, 0 none
+    char who[MOY_MEDIA_TEXT_MAX];   // its name, as the face gave it
+    char label[MOY_MEDIA_SRC_MAX];  // the client's own words for what plays
+
+    // the end: the frame's job's
+    int ending;                     // the list is over: the tail plays out
+    int end_state, end_err;         // how it ended, for moy_media_last
+    uint32_t end_pulled;            // the pull's count when the tail was last read
 
     // the task's
     uint32_t seen;                  // the generation it works on
@@ -170,6 +179,9 @@ typedef struct {
 } media_t;
 
 static media_t *s_m;
+static moy_media_end_t s_end;           // the last run's end
+
+static int copy_text(const char *s, char *out, size_t cap);
 static moy_input_t *s_keys_t;           // the table the media keys come on; NULL the kernel's
 
 #ifdef MEDIA_BOARD
@@ -244,14 +256,13 @@ int moy_media_present(void) {
 #endif
 }
 
-// The holder is the lease table's (moy_lease.h, MOY_LEASE_MEDIA); m->owner
-// is the service's copy, MOY_MEDIA_ORPHAN once the VM that held it is gone.
-uint32_t moy_media_owner(void) {
-    return moy_lease_holder(MOY_LEASE_MEDIA);
+uint32_t moy_media_pid(void) {
+    media_t *m = s_m;
+    return m != NULL ? m->pid : 0u;
 }
 
-static media_t *mine(uint32_t owner) {
-    return s_m != NULL && owner != 0u && s_m->owner == owner ? s_m : NULL;
+void moy_media_last(moy_media_end_t *out) {
+    *out = s_end;
 }
 
 // -- text ------------------------------------------------------------------------
@@ -748,8 +759,24 @@ static void clear_locked(media_t *m) {
     m->list_played = 0;
 }
 
-int moy_media_clear(uint32_t owner) {
-    media_t *m = mine(owner);
+uint32_t moy_media_take(uint32_t client, const char *who, const char *label) {
+    media_t *m = s_m;
+    if (m == NULL || client == 0u) {
+        return 0;
+    }
+    LOCK(m);
+    uint32_t was = m->client;
+    int live = !m->stop && (m->state == MOY_MEDIA_OPENING || m->state == MOY_MEDIA_PLAYING);
+    m->client = client;
+    copy_text(who != NULL ? who : "", m->who, sizeof(m->who));
+    copy_text(label != NULL ? label : "", m->label, sizeof(m->label));
+    m->text_gen++;
+    UNLOCK(m);
+    return live && was != 0u && was != client ? was : 0u;
+}
+
+int moy_media_clear(void) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -760,8 +787,8 @@ int moy_media_clear(uint32_t owner) {
     return 0;
 }
 
-int moy_media_add(uint32_t owner, const char *src, const char *title) {
-    media_t *m = mine(owner);
+int moy_media_add(const char *src, const char *title) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -771,8 +798,8 @@ int moy_media_add(uint32_t owner, const char *src, const char *title) {
     return rc;
 }
 
-int moy_media_playlist(uint32_t owner, const char *text, size_t n, const char *base) {
-    media_t *m = mine(owner);
+int moy_media_playlist(const char *text, size_t n, const char *base) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -782,8 +809,8 @@ int moy_media_playlist(uint32_t owner, const char *text, size_t n, const char *b
     return rc;
 }
 
-int moy_media_go(uint32_t owner, int i) {
-    media_t *m = mine(owner);
+int moy_media_go(int i) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -805,8 +832,8 @@ int moy_media_go(uint32_t owner, int i) {
     return 0;
 }
 
-int moy_media_stop(uint32_t owner) {
-    media_t *m = mine(owner);
+int moy_media_stop(void) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -819,8 +846,8 @@ int moy_media_stop(uint32_t owner) {
     return 0;
 }
 
-int moy_media_pause(uint32_t owner, int on) {
-    media_t *m = mine(owner);
+int moy_media_pause(int on) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -829,8 +856,8 @@ int moy_media_pause(uint32_t owner, int on) {
     return 0;
 }
 
-int moy_media_volume(uint32_t owner, int v) {
-    media_t *m = mine(owner);
+int moy_media_volume(int v) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -899,8 +926,8 @@ static int vol_read_at(const char *path, uint32_t at, uint8_t *buf, size_t cap, 
     return rc != 0 ? rc : rc2;
 }
 
-int moy_media_play(uint32_t owner, const char *src, int held) {
-    media_t *m = mine(owner);
+int moy_media_play(const char *src, int held) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -958,12 +985,12 @@ int moy_media_play(uint32_t owner, const char *src, int held) {
         return rc;
     }
     int n = m->n;
-    rc = moy_media_go(owner, 0);
+    rc = moy_media_go(0);
     return rc < 0 ? rc : n;
 }
 
-int moy_media_page(uint32_t owner, int on) {
-    media_t *m = mine(owner);
+int moy_media_page(int on) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -973,8 +1000,8 @@ int moy_media_page(uint32_t owner, int on) {
     return 0;
 }
 
-int moy_media_seek(uint32_t owner, uint32_t ms) {
-    media_t *m = mine(owner);
+int moy_media_seek(uint32_t ms) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -1026,8 +1053,8 @@ static void in_put(media_t *m, const uint8_t *p, uint32_t n) {
     STORE(&m->in_w, w + n);
 }
 
-int moy_media_feed(uint32_t owner, uint32_t gen, const void *buf, size_t n) {
-    media_t *m = mine(owner);
+int moy_media_feed(uint32_t gen, const void *buf, size_t n) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -1047,8 +1074,8 @@ int moy_media_feed(uint32_t owner, uint32_t gen, const void *buf, size_t n) {
     return (int)k;
 }
 
-int moy_media_feed_fail(uint32_t owner, uint32_t gen, int err) {
-    media_t *m = mine(owner);
+int moy_media_feed_fail(uint32_t gen, int err) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -1062,12 +1089,12 @@ int moy_media_feed_fail(uint32_t owner, uint32_t gen, int err) {
     return 0;
 }
 
-int moy_media_feed_end(uint32_t owner, uint32_t gen) {
-    return moy_media_feed_fail(owner, gen, 0);
+int moy_media_feed_end(uint32_t gen) {
+    return moy_media_feed_fail(gen, 0);
 }
 
-int moy_media_feed_size(uint32_t owner, uint32_t gen, uint32_t size) {
-    media_t *m = mine(owner);
+int moy_media_feed_size(uint32_t gen, uint32_t size) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
@@ -1088,7 +1115,8 @@ int moy_media_status(moy_media_status_t *st) {
     LOCK(m);
     st->state = m->state;
     st->paused = m->paused;
-    st->owner = m->owner;
+    st->pid = m->pid;
+    st->client = m->client;
     st->gen = m->seen;
     st->entry = m->cur;
     st->entries = m->n;
@@ -1157,6 +1185,10 @@ int moy_media_text(int which, char *out, size_t cap) {
         n = copy_text(m->song, out, cap);
     } else if (which == MOY_MEDIA_T_ARTIST) {
         n = copy_text(m->artist, out, cap);
+    } else if (which == MOY_MEDIA_T_WHO) {
+        n = copy_text(m->who, out, cap);
+    } else if (which == MOY_MEDIA_T_LABEL) {
+        n = copy_text(m->label, out, cap);
     } else if (i >= 0 && i < m->n) {
         if (which == MOY_MEDIA_T_SRC) {
             n = copy_text(m->pool + m->e_src[i], out, cap);
@@ -1833,7 +1865,6 @@ static void file_pump(media_t *m) {
     }
 }
 
-// Under the life gate: false when there is no service.
 // -- the media keys -------------------------------------------------------------------
 
 static void keys_open(media_t *m);
@@ -1854,31 +1885,30 @@ void moy_media_keys_on(struct moy_input *t) {
 
 int moy_media_key(uint16_t usage) {
     media_t *m = s_m;
-    if (m == NULL || m->owner == 0u || m->owner == MOY_MEDIA_ORPHAN || m->stop) {
+    if (m == NULL || m->stop) {
         return 0;
     }
-    uint32_t o = m->owner;
     moy_media_status_t st;
     moy_media_status(&st);
     switch (usage) {
         case MOY_MEDIA_KEY_PLAY_PAUSE:
-            return moy_media_pause(o, !st.paused) == 0;
+            return moy_media_pause(!st.paused) == 0;
         case MOY_MEDIA_KEY_PLAY:
-            return moy_media_pause(o, 0) == 0;
+            return moy_media_pause(0) == 0;
         case MOY_MEDIA_KEY_PAUSE:
-            return moy_media_pause(o, 1) == 0;
+            return moy_media_pause(1) == 0;
         case MOY_MEDIA_KEY_NEXT:
         case MOY_MEDIA_KEY_PREV: {
-            // While the list plays: past its end the face has let its radio go.
+            // While the list plays: past its end the service is ending.
             if (st.state != MOY_MEDIA_OPENING && st.state != MOY_MEDIA_PLAYING) {
                 return 0;
             }
             int i = st.entry + (usage == MOY_MEDIA_KEY_NEXT ? 1 : -1);
-            return i >= 0 && i < st.entries && moy_media_go(o, i) == 0;
+            return i >= 0 && i < st.entries && moy_media_go(i) == 0;
         }
         case MOY_MEDIA_KEY_VOL_UP:
         case MOY_MEDIA_KEY_VOL_DOWN:
-            return moy_media_volume(o, st.volume + (usage == MOY_MEDIA_KEY_VOL_UP
+            return moy_media_volume(st.volume + (usage == MOY_MEDIA_KEY_VOL_UP
                                                      ? MOY_MEDIA_KEY_STEP
                                                      : -MOY_MEDIA_KEY_STEP)) == 0;
         default:
@@ -1917,6 +1947,9 @@ static void keys_answer(media_t *m) {
     }
 }
 
+static bool end_check(media_t *m);
+
+// Under the life gate: false when there is no service, or it ended now.
 static bool pump_gated(void) {
     media_t *m = s_m;
     if (m == NULL) {
@@ -1929,7 +1962,7 @@ static bool pump_gated(void) {
         file_pump(m);
     }
 #endif
-    return true;
+    return !end_check(m);
 }
 
 void moy_media_pump(void) {
@@ -2029,30 +2062,27 @@ static void task(void *arg) {
 
 // -- open and close ---------------------------------------------------------------------
 
-static int media_open(uint32_t owner, int rate, int channels);
+static int media_open(uint32_t pid, int rate, int channels);
 
-int moy_media_open(uint32_t owner, int rate, int channels) {
-    if (owner == 0u) {
-        return -MOY_MEDIA_EINVAL;
-    }
-    if (s_m != NULL && s_m->owner == MOY_MEDIA_ORPHAN) {
-        moy_media_close_vm();
-    }
+int moy_media_open(int rate, int channels) {
     if (s_m != NULL) {
-        return s_m->owner == owner ? 0 : -MOY_MEDIA_EBUSY;
+        return 0;
     }
-    int lr = moy_lease_hold(owner, MOY_LEASE_MEDIA);
+    uint32_t pid = moy_log_spawn("media");
+    int lr = moy_lease_hold(pid, MOY_LEASE_MEDIA);
     if (lr != MOY_LEASE_OK) {
         return lr == MOY_LEASE_BUSY ? -MOY_MEDIA_EBUSY : -MOY_MEDIA_ENOMEM;
     }
-    int rc = media_open(owner, rate, channels);
+    int rc = media_open(pid, rate, channels);
     if (rc != 0) {
-        moy_lease_let(owner, MOY_LEASE_MEDIA);
+        moy_lease_let(pid, MOY_LEASE_MEDIA);
+        return rc;
     }
-    return rc;
+    moy_log_say(MOY_LOG_INFO, pid, "start");
+    return 0;
 }
 
-static int media_open(uint32_t owner, int rate, int channels) {
+static int media_open(uint32_t pid, int rate, int channels) {
 #if MOY_MEDIA_MIX
     moy_aud_out_start();
     rate = moy_aud_out_rate();
@@ -2073,7 +2103,7 @@ static int media_open(uint32_t owner, int rate, int channels) {
         moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
     }
-    m->owner = owner;
+    m->pid = pid;
     m->share = share;
     m->out = (int16_t *)(m + 1);
     m->out_rate = rate;
@@ -2140,6 +2170,9 @@ static void task_end(media_t *m) {
 }
 #endif
 
+// Everything the run held given back: the task, the pull, the buffers, the
+// MEDIA row, the lease and the radio's "media" row. The station itself is
+// powered down by the console at its next release (moy_lease.h, THE RADIO).
 static void reap(media_t *m) {
 #ifdef MEDIA_BOARD
     task_end(m);                        // idle: it waits on its notification and holds nothing
@@ -2155,84 +2188,98 @@ static void reap(media_t *m) {
 #ifdef MEDIA_BOARD
     vSemaphoreDelete(m->mtx);
 #endif
-    uint32_t share = m->share;
+    uint32_t share = m->share, pid = m->pid;
+    s_end.runs++;
+    s_end.pid = pid;
+    s_end.client = m->client;
+    s_end.state = m->ending ? m->end_state : MOY_MEDIA_IDLE;
+    s_end.err = m->ending ? m->end_err : 0;
     keys_close(m);
     conn_close(m);
     file_close(m, 0);
     block_free(m);
     moy_share_give(MOY_SHARE_MEDIA, share);
+    moy_lease_let(pid, MOY_LEASE_MEDIA);    // STALE where the row's drop ended the run
+    uint32_t mask;
+    moy_lease_wifi_release(pid, "media", 5, &mask);
+    moy_log_say(MOY_LOG_INFO, pid, "exit");
 }
 
-static int close_gated(uint32_t owner) {
-    media_t *m = mine(owner);
+static int close_gated(void) {
+    media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
     if (!m->stop) {
-        moy_media_stop(owner);
+        moy_media_stop();
     }
     if (!m->idle) {
         return -MOY_MEDIA_EAGAIN;
     }
     reap(m);
-    moy_lease_let(owner, MOY_LEASE_MEDIA);
     return 0;
 }
 
-int moy_media_close(uint32_t owner) {
+int moy_media_close(void) {
     LIFE_LOCK();
-    int rc = close_gated(owner);
+    int rc = close_gated();
     LIFE_UNLOCK();
     return rc;
 }
 
-// Its holder gone, the stream stops and the service is the ORPHAN's, closed
-// by the next open or the VM's end.
-static void orphan(media_t *m) {
-    if (m->owner != MOY_MEDIA_ORPHAN) {
-        uint32_t was = m->owner;
-        moy_media_stop(was);
-        m->owner = MOY_MEDIA_ORPHAN;
-        moy_lease_let(was, MOY_LEASE_MEDIA);
-    }
-}
-
+// The lease's row dropped from outside (moy_lease_drop): the run stops, and
+// ends now or at the frame's job once the task has let go.
 void moy_media_lease_end(uint32_t owner) {
     LIFE_LOCK();
-    media_t *m = mine(owner);
-    if (m != NULL && close_gated(owner) != 0) {
-        orphan(m);
+    media_t *m = s_m;
+    if (m != NULL && m->pid == owner) {
+        close_gated();
     }
     LIFE_UNLOCK();
 }
 
-static int close_vm_gated(void) {
-    media_t *m = s_m;
-    if (m == NULL) {
-        return 0;
+// The run's end, the frame's job's (under the life gate): a stop the task has
+// let go of, or a list that is over -- ENDED, FAILED, or nothing to play, the
+// task caught up with the last command -- once its tail has played out: the
+// pull emptied the ring, or took nothing since the last frame (paused, or no
+// output pulling). True when it ended and gave everything back.
+static bool end_check(media_t *m) {
+    if (!m->stop) {
+        LOCK(m);
+        int st = m->state;
+        int over = m->gen == m->seen
+                   && (st == MOY_MEDIA_ENDED || st == MOY_MEDIA_FAILED
+                       || (st == MOY_MEDIA_IDLE && m->cur < 0));
+        int err = m->err;
+        UNLOCK(m);
+        if (!over) {
+            m->ending = 0;
+            return false;
+        }
+        uint32_t pulled = m->pulled;
+        bool drained = LOAD(&m->out_r) == LOAD(&m->out_w)
+                       || (m->ending && pulled == m->end_pulled);
+        if (!m->ending) {
+            m->ending = 1;
+            m->end_state = st;
+            m->end_err = err;
+        }
+        m->end_pulled = pulled;
+        if (!drained) {
+            return false;
+        }
+        moy_media_stop();
     }
-    orphan(m);
-    file_close(m, 0);
-    m->f_gen = 0;
-#ifdef MEDIA_BOARD
-    for (int i = 0; i < 200 && !m->idle; i++) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+#ifndef MEDIA_BOARD
+    if (!m->idle) {
+        moy_media_run();
     }
-#else
-    moy_media_run();
 #endif
     if (!m->idle) {
-        return -MOY_MEDIA_EAGAIN;
+        return false;
     }
     reap(m);
-    return 0;
-}
-
-int moy_media_close_vm(void) {
-    LIFE_LOCK();
-    int rc = close_vm_gated();
-    LIFE_UNLOCK();
-    return rc;
+    return true;
 }
 
 // -- the pull ------------------------------------------------------------------------------

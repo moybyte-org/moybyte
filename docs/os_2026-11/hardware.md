@@ -418,8 +418,9 @@ A KEY's `b` is the console key event; TEXT is its own record.
 
 An **OS service** in C (`native/moy_media/moy_media.h`, the module
 `moy_media`; its face `runtime/system/dev_media.py`, `moybyte.media`, and a
-compiled program's `media` handle, §4): one background stream for one
-process, from an HTTP stream or a file. MP3 is
+compiled program's `media` handle, §4): one background stream, the
+system's, from an HTTP stream or a file, which every app with the permission
+is a client of. MP3 is
 decoded by minimp3 (vendored, `native/moy_media/UPSTREAM.md`) and resampled
 once to the output's rate and channels (below: on a P4 a 44.1 kHz stereo
 stream is copied as it is, its channels kept; on the T-Deck it is mixed down
@@ -439,8 +440,8 @@ Python runs while a file plays. The shell's `media play SRC` names a file
 by the session's folder: the C shell makes it the store's path
 (`moy_sh_resolve`) before it crosses the door, a URL crossing as it is. The
 host has no task; the same job runs one
-pass of its loop. The job and a teardown (close, the lease's end, the VM's
-end) take turns at the service's life gate, so a teardown from any task
+pass of its loop. The job and a teardown (close, the lease's end) take turns
+at the service's life gate, so a teardown from any task
 frees nothing the job is reading, and the job, finding no service, is dropped
 by the loop on its own task. Decode cost is the stream's (internet radio is 44.1 kHz
 stereo), not the output's. On the T-Deck that cost reaches a heavy cart on
@@ -455,9 +456,37 @@ stage cost a heavy cart frames whether a stream played or not (A/B'd
 is no longer lazy (the open starts the output), its I²S DMA ring is permanent
 internal SRAM (6 KiB on the T-Deck, 24 KiB on a P4: 12 × 512 stereo
 frames), and a
-stream whose list holds a URL holds the WiFi lease under `media` and its
-process's pid, whose
+run whose list holds a URL holds the WiFi lease under `media` and the run's
+own pid (released by the run's end in C), whose
 internal cost never comes back (#158).
+
+**A run, on demand (owner, 2026-11-09).** The service holds nothing until a
+client's first command: `play` starts a run (`moy_media_open`: a pid of its
+own, named `media`, the `MEDIA` lease under it, the MEDIA row, the task),
+and the run ends by itself when its work is done -- a stop, its list over,
+nothing of it played -- once its tail has played out, giving every one of
+those back (`moy_media_last` says how it ended); the next `play` is a new
+run. While it runs it is nobody's process: a client's end, Music closing, an
+S3's VM stop and a soft reset leave it playing (nothing in
+`moy_kernel_vm_down` touches it; the kernel's net stop leaves the media
+client's slot, `MOY_HTTPC_MEDIA`, open). Its row in the task manager is the
+scheduler's kernel-service row (`scheduler.adopt`), and the face follows the
+run whoever started it, so the console after a VM stop shows it (Music's
+status item and card). It is the model a background service of an app
+follows: started by a request, ended by its own work, its row the kernel's.
+
+**The clients (owner, 2026-11-09: any client with the permission, the last
+command wins).** Music, its status item, the shell's `media`, a compiled
+program's `media` handle and any app holding `media` (`media:url` for a URL)
+send commands -- play a list, go, pause, skip, seek, volume, stop -- and read
+the state. A `play` replaces what plays whoever played it, and names its
+client (`moy_media_take`: its pid, its name and its label for what it plays);
+a `play` that takes over a list another process's play started, still
+playing, posts a notification, so the person learns why the music changed.
+The other commands act on what plays from any client. A client's media keys
+and its own commands are the same commands: no client holds the stream
+against another, because the stream is the person's, and the person is the
+one at whatever app is in front.
 
 **Its memory** is THE SHARES' MEDIA row (`native/moy_play/moy_play.h`): the
 open takes `moy_media.share()` from it (156,680 bytes on the T-Deck,
@@ -465,7 +494,7 @@ open takes `moy_media.share()` from it (156,680 bytes on the T-Deck,
 decoder window, the decoder, a decoded ring of 16,384 frames, 32 KiB mono or
 64 KiB stereo, the list, and the open file's path and tag, one PSRAM
 block; the task's stack; the
-URL client's buffers) and the close gives it back. Where the row is absent
+URL client's buffers) and the run's end gives it back. Where the row is absent
 the open is refused (ENOSPC) and `moybyte.media` is `None`: the T-Deck has a
 MEDIA row of 192 KiB, the Guition S3 none (owner, 2026-11-04: the one
 running thing tier for media; it has no speaker, and its image denies the
@@ -501,23 +530,26 @@ as `http` does, and `moybyte.media.tls()` says whether one plays here.
 consumer-page usage, `b` 1 down and 0 up) the service answers when no focused
 app takes them (owner, 2026-11-03). No app or cart reads them today (no wake
 source names the kind, and no cart verb does), so they are the console's as
-Super is: while a stream is open the frame's C job (`moy_media.h`, MEDIA KEYS)
+Super is: while a run plays the frame's C job (`moy_media.h`, MEDIA KEYS)
 answers each one going down from whatever is in front, a game the kernel runs
 included: Play/Pause, Play and Pause, Scan Next and Previous while the list
-plays, Volume Increment and Decrement by 10. A BLE keyboard's two-byte
+plays, Volume Increment and Decrement by 10; with no run a key does nothing and starts
+none. A BLE keyboard's two-byte
 Consumer Control report posts them (`native/moy_input/moy_hid.h`), and so do
 the host simulator's media keys; the T-Deck's keyboard, the P4s' USB host
 (a process's `usb` device, not console input) and the browser post none.
 **Permissions:** `media` for a file or the console's own library;
 `media:url` and `http` for a URL (a `play(url)` without `http` would be a
-fetch of any URL by an app that never asked for the network). **A stream lives as long as its process (owner, 2026-11-03)**:
-closing the app ends it (its end sweeps it), minimising keeps it
-(`processes.md` §1). No stream plays with the VM down, so the kernel's own
-chrome draws no control for one: the VM's end stops its processes' stream
-before an S3's stopped run loads (`moy_kernel_vm_down`, `moy_media_close_vm`),
-and a run in the kernel's front with the VM up hands Super to the shell's
-pause menu, from which Music's status item is reached
-(`docs/theme_and_shell_2026-11.md` §1.5). A Python app making
+fetch of any URL by an app that never asked for the network). **Through an
+S3's VM stop** the run plays on, and the media keys answer it from the game:
+the stop's fit counts what the run holds as not given back
+(`moy_play_stop_fit`'s `media`), so a compiled game that fits with the music
+playing stops the VM and keeps it, and one that fits only without it is
+`KEEP_MEDIA`: the console asks first, "Stop the music to play <game>?", for a
+file's stream and a station's alike (the Player's `_music_keeps_the_vm`). The
+kernel's own chrome draws no control for the stream; a run in the kernel's
+front with the VM up hands Super to the shell's pause menu, from which
+Music's status item is reached (`docs/theme_and_shell_2026-11.md` §1.5). A Python app making
 its own sound renders ahead from a thread or its loop (`processes.md` §3), at
 a depth greater than a GC pause.
 
@@ -612,8 +644,8 @@ or a serial line carried. Each is under the permission Python's face needs
 holder rules across the tiers, a process opens a radio, the USB host, the
 camera or the media service once, and its end closes the handle,
 which drops the connection, the beacon and the radio, lets the USB host
-go, closes the MIDI port (and its UART's lease) or stops the stream, as
-Python's face sweep does.
+go or closes the MIDI port (and its UART's lease), as Python's face sweep
+does; a media handle's end leaves the stream playing, the service's (§3).
 
 In C (`native/moy_kernel/moy_lease.h`): `moy_lease_take(owner, cls, unit,
 pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,

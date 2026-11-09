@@ -199,6 +199,9 @@ def test_stop_and_play_stops_the_stream_then_opens_the_game(tmp_path, monkeypatc
         def stop(self):
             stopped.append(moy_log.current())
 
+        def running(self):
+            return 0                    # the run given back at once
+
     monkeypatch.setattr(devices, "api", lambda name: Media() if name == "media" else None)
     monkeypatch.setattr(ws, "open", lambda cart: opened.append(cart))
     cart = {"title": "Doom"}
@@ -212,24 +215,14 @@ def test_stop_and_play_stops_the_stream_then_opens_the_game(tmp_path, monkeypatc
     assert stopped and opened == [cart]
 
 
-def test_a_vm_stop_kept_by_the_music_asks_first(tmp_path, monkeypatch):
+def test_a_game_that_fits_only_without_the_music_asks_first(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     from runtime import player as P
 
-    class Leases:
-        media = True
-
-        def held(self, tag):
-            return self.media and tag == "media"
-
-        def mask(self):
-            return int(self.media)
-
+    why = ["media"]
     ended = []
-    monkeypatch.setattr(P._moy_play, "info", lambda run: (0,) * 11 + ("lease", 0), raising=False)
+    monkeypatch.setattr(P._moy_play, "info", lambda run: (0,) * 11 + (why[0], 0), raising=False)
     monkeypatch.setattr(P._moy_play, "end", lambda run, *a: ended.append(run), raising=False)
-    leases = Leases()
-    monkeypatch.setattr(ws, "leases", leases, raising=False)
     asked = []
     monkeypatch.setattr(ws, "ask_stop_music", lambda cart: asked.append(cart))
     cart = {"title": "Doom", "runtime": "wasm"}
@@ -240,8 +233,8 @@ def test_a_vm_stop_kept_by_the_music_asks_first(tmp_path, monkeypatch):
     # the declined run's process is over: the dialog's answer, which stops
     # the shell's stream, runs as the shell
     assert moy_log.current() == moy_log.SHELL and ws.run.player.pid is None
-    leases.media = False
-    assert not ws.run.player._music_keeps_the_vm(5, cart), "no music: the verdict stands"
+    why[0] = "lease"
+    assert not ws.run.player._music_keeps_the_vm(5, cart), "another hold: the verdict stands"
 
 
 # -- a compiled program's item: the panel it describes ---------------------------

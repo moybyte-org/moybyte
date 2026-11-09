@@ -912,10 +912,12 @@ its last. A `camera` handle's `dev_read` is the latest frame, whole
 (`dev_get(h, "w")` by `"h"` RGB565 pixels, big-endian), nothing before the
 first.
 
-A `media` handle is the media service's one stream, the process's own:
-`dev_write` plays the source its bytes name (a file or a playlist under
-`media`, an `http://` or `https://` URL under `media:url` and `http`; BUSY
-while another process's stream plays). A file plays only from the cart's
+A `media` handle makes the process a client of the media service's one
+stream, the system's (`docs/os_2026-11/hardware.md` §3): `dev_write` plays
+the source its bytes name in place of what plays, whoever played it (a file
+or a playlist under `media`, an `http://` or `https://` URL under
+`media:url` and `http`), and the person is told when it takes over another
+app's list. A file plays only from the cart's
 own folder and the folder its `files` permission names (owner,
 2026-11-09): any other, or a playlist naming one, is DENIED whether it is
 there or not, so a refusal tells nothing of what a folder holds, and
@@ -923,10 +925,12 @@ there or not, so a refusal tells nothing of what a folder holds, and
 (`"volume=60"`, `"pause=1"`, `"pause=0"`, `"seek=30"`, `"skip=next"`,
 `"skip=prev"`, `"stop=1"`), `dev_get` reads its numbers (`"state"`,
 `"paused"`, `"at"`, `"len"`, `"volume"`, `"stamp"`, which moves when they
-do, `"mine"`, ...), `dev_read` its now-playing text as four lines (title,
-artist, station, source) and `dev_xfer` probes a file without playing it
-(its length in seconds as 4 bytes, then its title and artist on two
-lines). Closing the handle, or the process's end, stops the stream.
+do, `"mine"`, 1 where this process's write set what plays, ...), `dev_read`
+its now-playing text as four lines (title, artist, station, source) and
+`dev_xfer` probes a file without playing it (its length in seconds as 4
+bytes, then its title and artist on two lines). Closing the handle, or the
+process's end, leaves the stream playing: it ends with its list, or a
+client's `"stop=1"`.
 
 A `pins` handle is Python's `pin_write` and `pin_read`: `dev_set(h,
 "gpio6=1 gpio20=0")` drives each pin it names, `dev_get(h, "gpio5")` reads

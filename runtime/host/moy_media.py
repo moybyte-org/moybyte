@@ -32,22 +32,26 @@ PART = native_build.Part("media", ("moy_media.h", "moy_media.c", "moy_mp3.c", "m
 IDLE, OPENING, PLAYING, ENDED, FAILED = range(5)
 TASK = 0                                # no task: the frame's job runs the loop
 URL, FEED, FILE = 1, 2, 3
-T_SRC, T_TITLE, T_STATION, T_ENTRY, T_SONG, T_ARTIST = range(6)
-FIELDS = ("state", "paused", "owner", "gen", "entry", "entries", "kind", "armed", "rate",
+T_SRC, T_TITLE, T_STATION, T_ENTRY, T_SONG, T_ARTIST, T_WHO, T_LABEL = range(8)
+FIELDS = ("state", "paused", "pid", "gen", "entry", "entries", "kind", "armed", "rate",
           "channels", "kbps", "volume", "in_bytes", "in_room", "pcm_frames", "decoded",
-          "played", "starved", "err", "text_gen", "idle", "at_ms", "len_ms", "feed_at")
+          "played", "starved", "err", "text_gen", "idle", "at_ms", "len_ms", "feed_at", "client")
 
 _U32, _I, _P, _SZ = ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t
 
 
 class _St(ctypes.Structure):
-    _fields_ = [("state", _I), ("paused", _I), ("owner", _U32), ("gen", _U32),
+    _fields_ = [("state", _I), ("paused", _I), ("pid", _U32), ("client", _U32), ("gen", _U32),
                 ("entry", _I), ("entries", _I), ("kind", _I), ("armed", _I),
                 ("rate", _I), ("channels", _I), ("kbps", _I), ("volume", _I),
                 ("in_bytes", _U32), ("in_room", _U32), ("pcm_frames", _U32),
                 ("decoded", _U32), ("played", _U32), ("starved", _U32),
                 ("err", _I), ("text_gen", _U32), ("idle", _I), ("at_ms", _U32),
                 ("len_ms", _U32), ("feed_at", _U32)]
+
+
+class _End(ctypes.Structure):
+    _fields_ = [("runs", _U32), ("pid", _U32), ("client", _U32), ("state", _I), ("err", _I)]
 
 
 class _Probe(ctypes.Structure):
@@ -58,30 +62,31 @@ class _Probe(ctypes.Structure):
 _SIGS = (
     ("moy_media_share", [], _U32),
     ("moy_media_present", [], _I),
-    ("moy_media_open", [_U32, _I, _I], _I),
-    ("moy_media_close", [_U32], _I),
-    ("moy_media_owner", [], _U32),
-    ("moy_media_play", [_U32, ctypes.c_char_p, _I], _I),
-    ("moy_media_page", [_U32, _I], _I),
-    ("moy_media_seek", [_U32, _U32], _I),
+    ("moy_media_open", [_I, _I], _I),
+    ("moy_media_close", [], _I),
+    ("moy_media_pid", [], _U32),
+    ("moy_media_last", [ctypes.POINTER(_End)], None),
+    ("moy_media_take", [_U32, ctypes.c_char_p, ctypes.c_char_p], _U32),
+    ("moy_media_play", [ctypes.c_char_p, _I], _I),
+    ("moy_media_page", [_I], _I),
+    ("moy_media_seek", [_U32], _I),
     ("moy_media_pump", [], None),
     ("moy_media_probe", [ctypes.c_char_p, ctypes.POINTER(_Probe)], _I),
-    ("moy_media_clear", [_U32], _I),
-    ("moy_media_add", [_U32, ctypes.c_char_p, ctypes.c_char_p], _I),
-    ("moy_media_playlist", [_U32, ctypes.c_char_p, _SZ, ctypes.c_char_p], _I),
-    ("moy_media_go", [_U32, _I], _I),
-    ("moy_media_stop", [_U32], _I),
-    ("moy_media_pause", [_U32, _I], _I),
-    ("moy_media_volume", [_U32, _I], _I),
-    ("moy_media_feed", [_U32, _U32, _P, _SZ], _I),
-    ("moy_media_feed_end", [_U32, _U32], _I),
-    ("moy_media_feed_fail", [_U32, _U32, _I], _I),
-    ("moy_media_feed_size", [_U32, _U32, _U32], _I),
+    ("moy_media_clear", [], _I),
+    ("moy_media_add", [ctypes.c_char_p, ctypes.c_char_p], _I),
+    ("moy_media_playlist", [ctypes.c_char_p, _SZ, ctypes.c_char_p], _I),
+    ("moy_media_go", [_I], _I),
+    ("moy_media_stop", [], _I),
+    ("moy_media_pause", [_I], _I),
+    ("moy_media_volume", [_I], _I),
+    ("moy_media_feed", [_U32, _P, _SZ], _I),
+    ("moy_media_feed_end", [_U32], _I),
+    ("moy_media_feed_fail", [_U32, _I], _I),
+    ("moy_media_feed_size", [_U32, _U32], _I),
     ("moy_media_status", [ctypes.POINTER(_St)], _I),
     ("moy_media_text", [_I, ctypes.c_char_p, _SZ], _I),
     ("moy_media_entry", [_I, ctypes.c_char_p, _SZ, ctypes.c_char_p, _SZ], _I),
     ("moy_media_run", [], _I),
-    ("moy_media_close_vm", [], _I),
     ("moy_media_key", [ctypes.c_uint16], _I),
     ("moy_media_keys_on", [_P], None),
     ("moy_media_icy_title", [ctypes.c_char_p, _SZ, ctypes.c_char_p, _SZ], _I),
@@ -117,28 +122,39 @@ def share():
     return _lib().moy_media_share()
 
 
-def open(owner, rate, channels=1):  # noqa: A001 -- the board module's name
-    return _lib().moy_media_open(owner, rate, channels)
+def open(rate, channels=1):  # noqa: A001 -- the board module's name
+    return _lib().moy_media_open(rate, channels)
 
 
-def close(owner):
-    return _lib().moy_media_close(owner)
+def close():
+    return _lib().moy_media_close()
 
 
-def owner():
-    return _lib().moy_media_owner()
+def pid():
+    return _lib().moy_media_pid()
 
 
-def play(owner, src, held=False):
-    return _lib().moy_media_play(owner, _b(src), 1 if held else 0)
+def last():
+    """How the last run ended: (runs, pid, client, state, err)."""
+    e = _End()
+    _lib().moy_media_last(ctypes.byref(e))
+    return e.runs, e.pid, e.client, e.state, e.err
 
 
-def page(owner, on):
-    return _lib().moy_media_page(owner, 1 if on else 0)
+def take(client, who=None, label=None):
+    return _lib().moy_media_take(client, _b(who), _b(label))
 
 
-def seek(owner, ms):
-    return _lib().moy_media_seek(owner, max(0, int(ms)))
+def play(src, held=False):
+    return _lib().moy_media_play(_b(src), 1 if held else 0)
+
+
+def page(on):
+    return _lib().moy_media_page(1 if on else 0)
+
+
+def seek(ms):
+    return _lib().moy_media_seek(max(0, int(ms)))
 
 
 def pump():
@@ -154,56 +170,56 @@ def probe(path):
     return p.seconds, p.title.decode(errors="replace"), p.artist.decode(errors="replace")
 
 
-def clear(owner):
-    return _lib().moy_media_clear(owner)
+def clear():
+    return _lib().moy_media_clear()
 
 
-def add(owner, src, title=None):
-    return _lib().moy_media_add(owner, _b(src), _b(title))
+def add(src, title=None):
+    return _lib().moy_media_add(_b(src), _b(title))
 
 
-def playlist(owner, text, base=None):
+def playlist(text, base=None):
     t = _b(text)
-    return _lib().moy_media_playlist(owner, t, len(t), _b(base))
+    return _lib().moy_media_playlist(t, len(t), _b(base))
 
 
-def go(owner, i):
-    return _lib().moy_media_go(owner, i)
+def go(i):
+    return _lib().moy_media_go(i)
 
 
-def stop(owner):
-    return _lib().moy_media_stop(owner)
+def stop():
+    return _lib().moy_media_stop()
 
 
-def pause(owner, on):
-    return _lib().moy_media_pause(owner, 1 if on else 0)
+def pause(on):
+    return _lib().moy_media_pause(1 if on else 0)
 
 
-def volume(owner, v):
-    return _lib().moy_media_volume(owner, v)
+def volume(v):
+    return _lib().moy_media_volume(v)
 
 
-def feed(owner, gen, buf):
+def feed(gen, buf):
     mv = memoryview(buf).cast("B")
     if not len(mv):
         return 0
     if mv.readonly:
         b = bytes(mv)
-        return _lib().moy_media_feed(owner, gen, b, len(b))
+        return _lib().moy_media_feed(gen, b, len(b))
     c = (ctypes.c_char * len(mv)).from_buffer(mv)
-    return _lib().moy_media_feed(owner, gen, ctypes.cast(c, _P), len(mv))
+    return _lib().moy_media_feed(gen, ctypes.cast(c, _P), len(mv))
 
 
-def feed_end(owner, gen):
-    return _lib().moy_media_feed_end(owner, gen)
+def feed_end(gen):
+    return _lib().moy_media_feed_end(gen)
 
 
-def feed_fail(owner, gen, err):
-    return _lib().moy_media_feed_fail(owner, gen, err)
+def feed_fail(gen, err):
+    return _lib().moy_media_feed_fail(gen, err)
 
 
-def feed_size(owner, gen, size):
-    return _lib().moy_media_feed_size(owner, gen, size)
+def feed_size(gen, size):
+    return _lib().moy_media_feed_size(gen, size)
 
 
 def status():
@@ -240,11 +256,6 @@ def entry(i):
 
 def run():
     return bool(_lib().moy_media_run())
-
-
-def close_vm():
-    """The kernel's call when a VM ends: the stream stopped and closed."""
-    return _lib().moy_media_close_vm()
 
 
 def key(usage):

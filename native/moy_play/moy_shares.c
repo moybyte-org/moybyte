@@ -122,3 +122,18 @@ uint32_t moy_share_kill_below(uint32_t procs_held) {
     }
     return sum;
 }
+
+uint8_t moy_play_stop_fit(uint64_t total, uint64_t block, uint64_t free_, uint64_t largest,
+                          uint64_t held, uint64_t media, bool force) {
+    if (!force && total <= free_ && block <= largest) {
+        return MOY_PLAY_KEEP_FITS;
+    }
+    if (total <= free_ + held && block <= largest + held) {
+        return MOY_PLAY_STOPS;
+    }
+    uint64_t more = held + media;
+    if (media > 0 && total <= free_ + more && block <= largest + more) {
+        return MOY_PLAY_KEEP_MEDIA;
+    }
+    return MOY_PLAY_KEEP_BIG;
+}

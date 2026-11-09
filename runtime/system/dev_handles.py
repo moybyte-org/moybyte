@@ -129,11 +129,11 @@ answers:
   camera    read: the latest frame, w * h RGB565 pixels big-endian (the
             glass's byte order), whole (FULL where `into` cannot hold it),
             0 bytes before the first; get w, h
-  media     the media service's one stream (docs/os_2026-11/hardware.md
-            section 3), this process's: write: play the source the bytes
-            name (UTF-8): a file, an .m3u or .pls playlist (`media`) or an
-            http(s):// URL (`media:url` and `http`), replacing what this
-            process played, BUSY while another process's plays, DENIED
+  media     a client of the media service's one stream, the system's
+            (docs/os_2026-11/hardware.md section 3): write: play the source
+            the bytes name (UTF-8): a file, an .m3u or .pls playlist
+            (`media`) or an http(s):// URL (`media:url` and `http`), in
+            place of what plays, whoever played it, DENIED
             for a file outside its cart's folder and the folder its
             `files` permission names (or a playlist naming one), there or
             not, ABSENT for a file not there, BAD for https where nothing
@@ -141,18 +141,18 @@ answers:
             set volume=0..100, pause=1|0, seek=<seconds>, skip=next|prev,
             stop=1, applied in that order (ABSENT with no stream, a seek a
             stream or an unknown length cannot take, a skip past the list's
-            end; DENIED for another process's stream); get state (0 idle,
+            end); get state (0 idle,
             1 opening, 2 playing, 3 ended, 4 failed), paused, entry,
             entries, rate, channels, kbps, volume, err, at and len (seconds
             heard and long, a file's), stamp (moves when what these show
-            does), mine (1 where the stream is this process's), tls (1
+            does), mine (1 where this process's write set what plays), tls (1
             where an https URL plays); read: the now-playing text, four
             UTF-8 lines -- title, artist, station, src -- whole (FULL where
             it does not fit), 0 bytes with no stream; xfer: a file's probe,
             its path in, its length in seconds (u32) then its title and
             artist on two lines out, DENIED where it may not play the file,
-            ABSENT where it reads none. Its close
-            and its process's end stop the stream
+            ABSENT where it reads none. Its close and its process's end
+            leave the stream playing
   pins      the `pins` permission's digital pins (Python's pin_write and
             pin_read), each a pin of the board's gpio row taken for the
             process at its first use: set gpio<n>=0|1 (several words, several
@@ -1201,7 +1201,7 @@ class _Media(_Handle):
                 import devices
             except ImportError:  # host: the runtime package
                 from runtime import devices
-            return int(n is not None and n["pid"] == devices.pid())
+            return int(n is not None and n["client"] == devices.pid())
         if what in _MEDIA_NOW:
             return 0 if n is None else int(n[what])
         raise OSError(EINVAL, "no %s" % what)
@@ -1226,7 +1226,7 @@ class _Media(_Handle):
         return FULL if len(out) > cap else out
 
     def close(self, pid):
-        self.f.sweep(pid)
+        """The handle's end: the stream is the service's and plays on."""
 
 
 def _pin_of(key):

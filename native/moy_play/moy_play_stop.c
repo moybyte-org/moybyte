@@ -10,15 +10,18 @@
 //
 // THE VERDICT (moy_play_stop_verdict, at the launch, the VM up): a VM-free
 // game stops the VM only when every clause of moy_play.h's verdict lets it -- its
-// route is HOME, no Python owner holds a WiFi lease (the link and a cart's
-// run are the kernel's own holders), no update is being written, the kernel's
-// present shows its canvas -- and, the policy being `need`, its fit check
-// FAILS with the VM up: a compiled cart's footprint (moy_wasm_footprint.h,
-// the module this console would load) against free PSRAM and its largest
-// block, and with what the stop gives back (the VM's heap and the serial
-// shell's idle session) it must then fit. `vmstop force` (the dev channel's,
-// never a kid's) makes the fit read as failing, so a board where the cart
-// fits can still be made to stop.
+// route is HOME, no Python owner holds a WiFi lease (the link, a cart's run
+// and the media service's run are the kernel's own holders), no update is
+// being written, the kernel's present shows its canvas -- and, the policy
+// being `need`, its fit check FAILS with the VM up: a compiled cart's
+// footprint (moy_wasm_footprint.h, the module this console would load)
+// against free PSRAM and its largest block, and with what the stop gives
+// back (the VM's heap and the serial shell's idle session) it must then fit
+// (moy_play_stop_fit). The media service plays on through the stop, so what
+// its run holds is not given back: a cart that would fit only with it too is
+// KEEP_MEDIA, which the console asks about first. `vmstop force` (the dev
+// channel's, never a kid's) makes the fit read as failing, so a board where
+// the cart fits can still be made to stop.
 //
 // THE RUN (moy_play_stopped_run), on the VM service task after the stop's
 // mp_deinit (native/moy_kernel's moy_kernel_vm_down): the serial shell's idle
@@ -100,6 +103,8 @@ const struct moy_app_run *moy_app_stopped(void) __attribute__((weak));
 // run's room), weak: an image without native/moy_sh has none.
 size_t moy_sh_board_idle_bytes(void) __attribute__((weak));
 bool moy_sh_board_release(char *cwd, size_t cap) __attribute__((weak));
+// The media service's run (moy_media.h): weak, for an image without it.
+uint32_t moy_media_pid(void) __attribute__((weak));
 bool moy_sh_board_restore(const char *cwd) __attribute__((weak));
 void moy_kernel_say(const char *line);
 void moy_kernel_feed(void);
@@ -220,7 +225,8 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     if (!(flags & MOY_PLAY_HOME)) {
         return MOY_PLAY_KEEP_PLACE;
     }
-    uint32_t kernel_holders = moy_lease_wifi_bit("link", 4) | moy_lease_wifi_bit("cart", 4);
+    uint32_t kernel_holders = moy_lease_wifi_bit("link", 4) | moy_lease_wifi_bit("cart", 4)
+                              | moy_lease_wifi_bit("media", 5);
     if (moy_lease_wifi_mask() & ~kernel_holders) {
         return MOY_PLAY_KEEP_LEASE;
     }
@@ -253,15 +259,10 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     fit[2] = (uint32_t)free_;
     fit[3] = (uint32_t)largest;
     fit[4] = (uint32_t)held;
-    if (!s_force && total <= free_ && block <= largest) {
-        return MOY_PLAY_KEEP_FITS;
-    }
-    // What the stop gives back is at most that: a cart that would not fit
-    // even with all of it is the fit notice, with the VM up.
-    if (total > free_ + held || block > largest + held) {
-        return MOY_PLAY_KEEP_BIG;
-    }
-    return MOY_PLAY_STOPS;
+    return moy_play_stop_fit(total, block, free_, largest, held,
+                             moy_media_pid != NULL && moy_media_pid() != 0u
+                                 ? moy_share_held(MOY_SHARE_MEDIA) : 0u,
+                             s_force);
 }
 
 // -- the load ----------------------------------------------------------------------

@@ -223,7 +223,10 @@ uint32_t moy_share_kill_below(uint32_t procs_held);
 // with the VM up. Only a launcher launch may stop it (KEEP_PLACE): a return
 // start rebuilds the launcher alone, and no other surface comes back after a
 // stop (owner, 2026-10-10; native/moy_app/README.md). A Python owner's WiFi
-// lease refuses a stop; the kernel's own holders (the link, the run) do not.
+// lease refuses a stop; the kernel's own holders (the link, the run, the media
+// service's run) do not. The media service plays on through a stop, so its
+// MEDIA row is not what a stop gives back: a cart that fits only with it too
+// is KEEP_MEDIA, and the console asks before it stops the music.
 enum {
     MOY_PLAY_STOPS = 0,         // the VM stops; the load follows the stop
     MOY_PLAY_KEEP_RULE = 1,     // the cart fails the VM-free rule
@@ -235,9 +238,20 @@ enum {
     MOY_PLAY_KEEP_FRONT = 7,    // the board's kernel present cannot show its canvas
     MOY_PLAY_KEEP_BIG = 8,      // it would not fit with the VM stopped either: the
                                 // fit notice, with the VM up
-    MOY_PLAY_STOP_WHYS = 9,
+    MOY_PLAY_KEEP_MEDIA = 9,    // it fits with the VM stopped only with the media
+                                // service's memory too: the console asks first
+    MOY_PLAY_STOP_WHYS = 10,
 };
 const char *moy_play_stop_name(uint8_t why);
+// THE STOP'S FIT, the verdict's last clauses (pure, so the host tests them):
+// a compiled cart needing `total` bytes, `block` of them in one piece,
+// against PSRAM `free_` and its `largest` block with the VM up; `held` is
+// what a stop gives back (the VM's heap, the shell's idle session), `media`
+// what the media service's run holds (moy_share_held of its row, 0 with no
+// run). KEEP_FITS as it stands (never with `force`), STOPS with the stop's
+// bytes, KEEP_MEDIA with the music's too, else KEEP_BIG.
+uint8_t moy_play_stop_fit(uint64_t total, uint64_t block, uint64_t free_, uint64_t largest,
+                          uint64_t held, uint64_t media, bool force);
 // The board's half of the verdict (native/moy_play/moy_play_stop.c, a board
 // with the stop): every clause but the rule's. Weak: an image without it
 // keeps the VM (KEEP_LEVER). `fit` gets the fit check's reading with the VM

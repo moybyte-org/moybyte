@@ -160,30 +160,31 @@ def p4_line():
 def test_a_stereo_stream_keeps_its_channels_on_a_stereo_output(aud, p4_line):
     from runtime import moy_media as N
     mp = p4_line
-    owner = 4242
     mono = N.share()
-    assert N.open(owner, OUT_RATE, 2) == 0
+    assert N.open(OUT_RATE, 2) == 0
     try:
         # The decoded ring holds its frames in two channels: twice a mono
         # one's bytes, and the P4's MEDIA row is ample for it.
         held = mp.share_held(mp.SHARE_MEDIA)
         assert held == mono + 16384 * 2 <= mp.shares("p4")[mp.SHARE_MEDIA] // 4
-        N.volume(owner, 100)
-        assert N.play(owner, str(STEREO)) == 1
+        N.volume(100)
+        assert N.play(str(STEREO)) == 1
         mix = N._lib().moy_media_mix
         mix.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
         buf = (ctypes.c_int16 * (2 * 1024))()
         left, right = [], []
+        st = None
         for _ in range(2000):
             N.pump()                                     # the frame's job: the file read, decoded
             ctypes.memset(buf, 0, ctypes.sizeof(buf))
             mix(buf, 1024, 7, 0)
             left.extend(buf[0::2])
             right.extend(buf[1::2])
-            if N.status()[0] in (N.ENDED, N.FAILED):
+            now = N.status()
+            if now is None:                              # its list over and played out: the run ended
                 break
-        st = N.status()
-        assert st[0] == N.ENDED and st[8] == 44100 and st[9] == 2
+            st = now
+        assert N.last()[3] == N.ENDED and st[8] == 44100 and st[9] == 2
         assert st[17] == 0                               # never starved
         body = slice(OUT_RATE // 5, OUT_RATE * 4 // 5)
         lb, rb = [v for v in left if v][body], [v for v in right if v][body]
@@ -195,21 +196,17 @@ def test_a_stereo_stream_keeps_its_channels_on_a_stereo_output(aud, p4_line):
         assert _db(_goertzel(lb, 2500, OUT_RATE), la) < -40
         assert _db(_goertzel(rb, 1000, OUT_RATE), ra) < -40
     finally:
-        N.stop(owner)
-        for _ in range(50):
-            if N.close(owner) == 0:
-                break
-            N.run()
-    assert N.owner() == 0
+        _close_media(N)
+    assert N.pid() == 0
     assert mp.share_held(mp.SHARE_MEDIA) == 0
 
 
-def _media_playing(N, owner):
+def _media_playing(N):
     """The stereo fixture opened on a stereo output and decoded far enough
     that the pull has frames to give."""
-    assert N.open(owner, OUT_RATE, 2) == 0
-    N.volume(owner, 100)
-    assert N.play(owner, str(STEREO)) == 1
+    assert N.open(OUT_RATE, 2) == 0
+    N.volume(100)
+    assert N.play(str(STEREO)) == 1
     for _ in range(200):
         N.pump()
         if N.status()[14] > 4096:
@@ -217,12 +214,12 @@ def _media_playing(N, owner):
     raise AssertionError("the fixture never decoded")
 
 
-def _close_media(N, owner):
-    N.stop(owner)
+def _close_media(N):
+    N.stop()
     for _ in range(50):
-        if N.close(owner) == 0:
+        if not N.pid():
             break
-        N.run()
+        N.pump()
 
 
 def test_the_stereo_block_is_silent_at_volume_0_and_on_an_empty_mix(aud, p4_line):
@@ -236,14 +233,13 @@ def test_the_stereo_block_is_silent_at_volume_0_and_on_an_empty_mix(aud, p4_line
     for _ in range(4):                          # the upsampler's history drains
         aud._d.moy_aud_render_st(buf, n)
     assert not any(buf)                         # the empty mix
-    owner = 4343
     h = aud.open(9102)
     try:
         aud.focus(h)
         aud.beep(h, 440.0, 5.0)
         assert aud.snd_open(4096) == 1
         aud.snd(array("h", [12000] * 2048))
-        _media_playing(N, owner)
+        _media_playing(N)
         aud.bg(ctypes.cast(N._lib().moy_media_mix, ctypes.c_void_p).value)
         aud.volume(0)
         for _ in range(8):
@@ -257,7 +253,7 @@ def test_the_stereo_block_is_silent_at_volume_0_and_on_an_empty_mix(aud, p4_line
         aud.bg(None)
         aud.focus(0)
         aud.close(h)
-        _close_media(N, owner)
+        _close_media(N)
     for _ in range(4):
         aud._d.moy_aud_render_st(buf, n)
     assert not any(buf)                         # nothing left playing

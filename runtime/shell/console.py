@@ -3400,14 +3400,29 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def boot_services(self):
         """The services that start with the console: every service cart
         holding `autostart`, those a VM stop paused (scheduler.boot), and the
-        SSH server where a password is set (ssh_service.boot) and the
-        crontab's lines (cron.boot)."""
+        SSH server where a password is set (ssh_service.boot), the
+        crontab's lines (cron.boot), and Music's card in the bar for every run
+        of the media service, the one a VM stop left playing first
+        (dev_media.listen, music_app.follow)."""
         try:
             _scheduler.boot(self)
         except Exception as exc:  # noqa: BLE001 -- a service never stops the desk
             print("Moybyte services: %s" % (exc,))
         _ssh.boot(self)
         _cron.boot(self)
+        media = _devices.api("media")
+        if media is not None:
+            media.listen(self._music_follows)
+            media.attach()
+
+    def _music_follows(self):
+        """A run of the media service found, whoever played it: Music's card
+        and its status item follow it (music_app.follow)."""
+        try:
+            import music_app
+        except ImportError:  # host: the runtime package
+            from runtime import music_app
+        music_app.follow(self)
 
     def frame(self, dt):
         # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK

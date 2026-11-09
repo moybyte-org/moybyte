@@ -4,12 +4,13 @@
 // raises. `rate` in open() is the host's: a board decodes to its output's rate
 // and channels (moy_aud_out_rate and _channels).
 //
-//   present() share() open(owner, rate) close(owner) owner()
-//   play(owner, src, held) -> entries  page(owner, on)  seek(owner, ms)
-//   clear(owner) add(owner, src, title) playlist(owner, text, base)
-//   go(owner, i) stop(owner) pause(owner, on) volume(owner, v)
-//   feed(owner, gen, buf) -> n  feed_end(owner, gen)  feed_fail(owner, gen, err)
-//   feed_size(owner, gen, size)
+//   present() share() open(rate) close() pid()
+//   last() -> (runs, pid, client, state, err)
+//   take(client, who, label) -> the client taken over from, 0 none
+//   play(src, held) -> entries  page(on)  seek(ms)
+//   clear() add(src, title) playlist(text, base)
+//   go(i) stop() pause(on) volume(v)
+//   feed(gen, buf) -> n  feed_end(gen)  feed_fail(gen, err)  feed_size(gen, size)
 //   status() -> tuple (FIELDS' order) | None   text(which) -> str
 //   entry(i) -> (src, title) | None   run() -> bool   pump()
 //   probe(path) -> (seconds, title, artist) | None
@@ -58,36 +59,53 @@ static mp_obj_t media_share(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_share_obj, media_share);
 
-static mp_obj_t media_open(mp_obj_t owner, mp_obj_t rate) {
-    return rc(moy_media_open(u32(owner), mp_obj_get_int(rate), 1));
+static mp_obj_t media_open(mp_obj_t rate) {
+    return rc(moy_media_open(mp_obj_get_int(rate), 1));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(media_open_obj, media_open);
+static MP_DEFINE_CONST_FUN_OBJ_1(media_open_obj, media_open);
 
-static mp_obj_t media_close(mp_obj_t owner) {
-    return rc(moy_media_close(u32(owner)));
+static mp_obj_t media_close(void) {
+    return rc(moy_media_close());
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(media_close_obj, media_close);
+static MP_DEFINE_CONST_FUN_OBJ_0(media_close_obj, media_close);
 
-static mp_obj_t media_owner(void) {
-    return mp_obj_new_int_from_uint(moy_media_owner());
+static mp_obj_t media_pid(void) {
+    return mp_obj_new_int_from_uint(moy_media_pid());
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(media_owner_obj, media_owner);
+static MP_DEFINE_CONST_FUN_OBJ_0(media_pid_obj, media_pid);
 
-static mp_obj_t media_play(mp_obj_t owner, mp_obj_t src, mp_obj_t held) {
-    return rc(moy_media_play(u32(owner), mp_obj_str_get_str(src), mp_obj_is_true(held)));
+static mp_obj_t media_last(void) {
+    moy_media_end_t e;
+    moy_media_last(&e);
+    mp_obj_t t[5] = { mp_obj_new_int_from_uint(e.runs), mp_obj_new_int_from_uint(e.pid),
+                      mp_obj_new_int_from_uint(e.client), MP_OBJ_NEW_SMALL_INT(e.state),
+                      MP_OBJ_NEW_SMALL_INT(e.err) };
+    return mp_obj_new_tuple(5, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(media_play_obj, media_play);
+static MP_DEFINE_CONST_FUN_OBJ_0(media_last_obj, media_last);
 
-static mp_obj_t media_page(mp_obj_t owner, mp_obj_t on) {
-    return rc(moy_media_page(u32(owner), mp_obj_is_true(on)));
+static mp_obj_t media_take(mp_obj_t client, mp_obj_t who, mp_obj_t label) {
+    size_t n;
+    const char *w = opt_str(who, &n), *l = opt_str(label, &n);
+    return mp_obj_new_int_from_uint(moy_media_take(u32(client), w, l));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(media_page_obj, media_page);
+static MP_DEFINE_CONST_FUN_OBJ_3(media_take_obj, media_take);
 
-static mp_obj_t media_seek(mp_obj_t owner, mp_obj_t ms) {
+static mp_obj_t media_play(mp_obj_t src, mp_obj_t held) {
+    return rc(moy_media_play(mp_obj_str_get_str(src), mp_obj_is_true(held)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(media_play_obj, media_play);
+
+static mp_obj_t media_page(mp_obj_t on) {
+    return rc(moy_media_page(mp_obj_is_true(on)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(media_page_obj, media_page);
+
+static mp_obj_t media_seek(mp_obj_t ms) {
     mp_int_t v = mp_obj_get_int(ms);
-    return rc(moy_media_seek(u32(owner), v < 0 ? 0u : (uint32_t)v));
+    return rc(moy_media_seek(v < 0 ? 0u : (uint32_t)v));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(media_seek_obj, media_seek);
+static MP_DEFINE_CONST_FUN_OBJ_1(media_seek_obj, media_seek);
 
 static mp_obj_t media_pump(void) {
     moy_media_pump();
@@ -106,77 +124,77 @@ static mp_obj_t media_probe(mp_obj_t path) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(media_probe_obj, media_probe);
 
-static mp_obj_t media_clear(mp_obj_t owner) {
-    return rc(moy_media_clear(u32(owner)));
+static mp_obj_t media_clear(void) {
+    return rc(moy_media_clear());
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(media_clear_obj, media_clear);
+static MP_DEFINE_CONST_FUN_OBJ_0(media_clear_obj, media_clear);
 
-static mp_obj_t media_add(mp_obj_t owner, mp_obj_t src, mp_obj_t title) {
+static mp_obj_t media_add(mp_obj_t src, mp_obj_t title) {
     size_t n;
     const char *t = opt_str(title, &n);
-    return rc(moy_media_add(u32(owner), mp_obj_str_get_str(src), t));
+    return rc(moy_media_add(mp_obj_str_get_str(src), t));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(media_add_obj, media_add);
+static MP_DEFINE_CONST_FUN_OBJ_2(media_add_obj, media_add);
 
-static mp_obj_t media_playlist(mp_obj_t owner, mp_obj_t text, mp_obj_t base) {
+static mp_obj_t media_playlist(mp_obj_t text, mp_obj_t base) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
     size_t n;
     const char *bs = opt_str(base, &n);
-    return rc(moy_media_playlist(u32(owner), b.buf, b.len, bs));
+    return rc(moy_media_playlist(b.buf, b.len, bs));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(media_playlist_obj, media_playlist);
+static MP_DEFINE_CONST_FUN_OBJ_2(media_playlist_obj, media_playlist);
 
-static mp_obj_t media_go(mp_obj_t owner, mp_obj_t i) {
-    return rc(moy_media_go(u32(owner), mp_obj_get_int(i)));
+static mp_obj_t media_go(mp_obj_t i) {
+    return rc(moy_media_go(mp_obj_get_int(i)));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(media_go_obj, media_go);
+static MP_DEFINE_CONST_FUN_OBJ_1(media_go_obj, media_go);
 
-static mp_obj_t media_stop(mp_obj_t owner) {
-    return rc(moy_media_stop(u32(owner)));
+static mp_obj_t media_stop(void) {
+    return rc(moy_media_stop());
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(media_stop_obj, media_stop);
+static MP_DEFINE_CONST_FUN_OBJ_0(media_stop_obj, media_stop);
 
-static mp_obj_t media_pause(mp_obj_t owner, mp_obj_t on) {
-    return rc(moy_media_pause(u32(owner), mp_obj_is_true(on)));
+static mp_obj_t media_pause(mp_obj_t on) {
+    return rc(moy_media_pause(mp_obj_is_true(on)));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(media_pause_obj, media_pause);
+static MP_DEFINE_CONST_FUN_OBJ_1(media_pause_obj, media_pause);
 
-static mp_obj_t media_volume(mp_obj_t owner, mp_obj_t v) {
-    return rc(moy_media_volume(u32(owner), mp_obj_get_int(v)));
+static mp_obj_t media_volume(mp_obj_t v) {
+    return rc(moy_media_volume(mp_obj_get_int(v)));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(media_volume_obj, media_volume);
+static MP_DEFINE_CONST_FUN_OBJ_1(media_volume_obj, media_volume);
 
-static mp_obj_t media_feed(mp_obj_t owner, mp_obj_t gen, mp_obj_t buf) {
+static mp_obj_t media_feed(mp_obj_t gen, mp_obj_t buf) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(buf, &b, MP_BUFFER_READ);
-    return rc(moy_media_feed(u32(owner), u32(gen), b.buf, b.len));
+    return rc(moy_media_feed(u32(gen), b.buf, b.len));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(media_feed_obj, media_feed);
+static MP_DEFINE_CONST_FUN_OBJ_2(media_feed_obj, media_feed);
 
-static mp_obj_t media_feed_end(mp_obj_t owner, mp_obj_t gen) {
-    return rc(moy_media_feed_end(u32(owner), u32(gen)));
+static mp_obj_t media_feed_end(mp_obj_t gen) {
+    return rc(moy_media_feed_end(u32(gen)));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(media_feed_end_obj, media_feed_end);
+static MP_DEFINE_CONST_FUN_OBJ_1(media_feed_end_obj, media_feed_end);
 
-static mp_obj_t media_feed_fail(mp_obj_t owner, mp_obj_t gen, mp_obj_t err) {
-    return rc(moy_media_feed_fail(u32(owner), u32(gen), mp_obj_get_int(err)));
+static mp_obj_t media_feed_fail(mp_obj_t gen, mp_obj_t err) {
+    return rc(moy_media_feed_fail(u32(gen), mp_obj_get_int(err)));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(media_feed_fail_obj, media_feed_fail);
+static MP_DEFINE_CONST_FUN_OBJ_2(media_feed_fail_obj, media_feed_fail);
 
-static mp_obj_t media_feed_size(mp_obj_t owner, mp_obj_t gen, mp_obj_t size) {
-    return rc(moy_media_feed_size(u32(owner), u32(gen), u32(size)));
+static mp_obj_t media_feed_size(mp_obj_t gen, mp_obj_t size) {
+    return rc(moy_media_feed_size(u32(gen), u32(size)));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(media_feed_size_obj, media_feed_size);
+static MP_DEFINE_CONST_FUN_OBJ_2(media_feed_size_obj, media_feed_size);
 
 static mp_obj_t media_status(void) {
     moy_media_status_t s;
     if (!moy_media_status(&s)) {
         return mp_const_none;
     }
-    mp_obj_t t[24] = {
+    mp_obj_t t[25] = {
         MP_OBJ_NEW_SMALL_INT(s.state), MP_OBJ_NEW_SMALL_INT(s.paused),
-        mp_obj_new_int_from_uint(s.owner), mp_obj_new_int_from_uint(s.gen),
+        mp_obj_new_int_from_uint(s.pid), mp_obj_new_int_from_uint(s.gen),
         MP_OBJ_NEW_SMALL_INT(s.entry), MP_OBJ_NEW_SMALL_INT(s.entries),
         MP_OBJ_NEW_SMALL_INT(s.kind), MP_OBJ_NEW_SMALL_INT(s.armed),
         MP_OBJ_NEW_SMALL_INT(s.rate), MP_OBJ_NEW_SMALL_INT(s.channels),
@@ -187,8 +205,9 @@ static mp_obj_t media_status(void) {
         MP_OBJ_NEW_SMALL_INT(s.err), mp_obj_new_int_from_uint(s.text_gen),
         MP_OBJ_NEW_SMALL_INT(s.idle), mp_obj_new_int_from_uint(s.at_ms),
         mp_obj_new_int_from_uint(s.len_ms), mp_obj_new_int_from_uint(s.feed_at),
+        mp_obj_new_int_from_uint(s.client),
     };
-    return mp_obj_new_tuple(24, t);
+    return mp_obj_new_tuple(25, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_status_obj, media_status);
 
@@ -270,7 +289,9 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_share), MP_ROM_PTR(&media_share_obj) },
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&media_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&media_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_owner), MP_ROM_PTR(&media_owner_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pid), MP_ROM_PTR(&media_pid_obj) },
+    { MP_ROM_QSTR(MP_QSTR_last), MP_ROM_PTR(&media_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&media_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_play), MP_ROM_PTR(&media_play_obj) },
     { MP_ROM_QSTR(MP_QSTR_page), MP_ROM_PTR(&media_page_obj) },
     { MP_ROM_QSTR(MP_QSTR_seek), MP_ROM_PTR(&media_seek_obj) },
@@ -309,6 +330,8 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_T_ENTRY), MP_ROM_INT(MOY_MEDIA_T_ENTRY) },
     { MP_ROM_QSTR(MP_QSTR_T_SONG), MP_ROM_INT(MOY_MEDIA_T_SONG) },
     { MP_ROM_QSTR(MP_QSTR_T_ARTIST), MP_ROM_INT(MOY_MEDIA_T_ARTIST) },
+    { MP_ROM_QSTR(MP_QSTR_T_WHO), MP_ROM_INT(MOY_MEDIA_T_WHO) },
+    { MP_ROM_QSTR(MP_QSTR_T_LABEL), MP_ROM_INT(MOY_MEDIA_T_LABEL) },
     { MP_ROM_QSTR(MP_QSTR_TASK), MP_ROM_INT(MEDIA_TASK) },
 };
 static MP_DEFINE_CONST_DICT(media_globals, media_globals_table);

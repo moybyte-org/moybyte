@@ -728,14 +728,24 @@ def media():
     yield dev_media
     for pid in list(H.HANDLES):
         moybyte.end(pid)
+    devices.grants = None
+    _shell_stops(dev_media)
+    assert moy_media.pid() == 0
+
+
+def _shell_stops(dev_media):
+    """The stream stopped as the shell, the run given back."""
+    from runtime import moy_media
+    was = L.current()
+    L.current(devices.SHELL)
+    try:
+        dev_media.stop()
+    finally:
+        L.current(was)
     for _ in range(50):
-        if not dev_media._s["pid"]:
+        if not moy_media.pid():
             break
         moy_media.pump()
-        if dev_media._s["wake"] is not None:
-            dev_media._pump()
-    devices.grants = None
-    assert moy_media.owner() == 0
 
 
 def test_a_media_handle_plays_a_file_and_reads_what_plays(media):
@@ -751,9 +761,9 @@ def test_a_media_handle_plays_a_file_and_reads_what_plays(media):
     assert _as(pid, lambda: H.xfer(pid, h, str(TONE).encode(), 6)) == H.FULL
     assert _as(pid, lambda: H.xfer(pid, h, b"/no/such.mp3", 64)) == H.ABSENT
     assert _as(pid, lambda: H.write(pid, h, b"/no/such.mp3")) == H.ABSENT
-    assert moy_media.owner() == 0
+    assert moy_media.pid() == 0
     assert _as(pid, lambda: H.write(pid, h, str(TONE).encode())) == len(str(TONE))
-    assert moy_media.owner() == pid and _get(pid, h, "mine") == 1
+    assert moy_media.pid() not in (0, pid) and _get(pid, h, "mine") == 1
     assert _get(pid, h, "state") in (1, 2) and _get(pid, h, "entries") == 1
     assert _as(pid, lambda: H.set(pid, h, "volume=40 pause=1")) == 0
     assert _get(pid, h, "paused") == 1 and _get(pid, h, "volume") <= 40
@@ -766,16 +776,21 @@ def test_a_media_handle_plays_a_file_and_reads_what_plays(media):
         assert _as(pid, lambda: H.set(pid, h, bad)) == H.BAD, bad
     other = L.spawn("t.other")
     o = _open(other, "media")
-    assert _as(other, lambda: H.write(other, o, str(TONE).encode())) == H.BUSY
     assert _get(other, o, "mine") == 0
-    assert _as(other, lambda: H.set(other, o, "pause=1")) == H.DENIED  # not its stream
+    assert _as(other, lambda: H.set(other, o, "pause=1")) == 0         # a client acts on it
+    assert _get(pid, h, "paused") == 1
+    assert _as(other, lambda: H.write(other, o, str(TONE).encode())) > 0   # the last command wins
+    assert _get(other, o, "mine") == 1 and _get(pid, h, "mine") == 0
     assert _open(pid, "media") == H.BUSY                               # one handle a process
-    assert _as(pid, lambda: H.close(pid, h)) == 0                      # its close stops it
-    assert media._s["stopping"] or not media._s["pid"]
+    run = moy_media.pid()
+    assert _as(pid, lambda: H.close(pid, h)) == 0                      # its close leaves it playing
+    assert moy_media.pid() == run
+    assert _as(other, lambda: H.set(other, o, "stop=1")) == 0
+    assert moy_media.pid() == 0
 
 
-def test_a_media_handle_needs_either_permission_and_its_end_stops_the_stream(media,
-                                                                             monkeypatch):
+def test_a_media_handle_needs_either_permission_and_its_end_leaves_the_stream(media,
+                                                                              monkeypatch):
     from runtime import moy_media
     a, b = L.spawn("t.a"), L.spawn("t.b")
     devices.grants = lambda p: {a: {"media"}, b: {"media:url"}}.get(p, set())
@@ -787,9 +802,10 @@ def test_a_media_handle_needs_either_permission_and_its_end_stops_the_stream(med
     assert _as(b, lambda: H.write(b, hb, b"http://127.0.0.1:1/x")) == H.DENIED  # and http's
     ha = _open(a, "media")
     assert _as(a, lambda: H.write(a, ha, str(TONE).encode())) > 0
-    assert moy_media.owner() == a
+    run = moy_media.pid()
+    assert run and media.now()["client"] == a
     moybyte.end(a)
-    assert a not in H.HANDLES and (media._s["stopping"] or not media._s["pid"])
+    assert a not in H.HANDLES and moy_media.pid() == run       # the system's: it plays on
 
 
 # -- the pins ----------------------------------------------------------------------------
@@ -864,7 +880,10 @@ def test_a_media_handle_plays_only_from_its_own_folders(media, tmp_path, monkeyp
         assert _as(pid, lambda: H.write(pid, h, str(path).encode())) == H.DENIED, path
         assert _as(pid, lambda: H.xfer(pid, h, str(path).encode(), 64)) == H.DENIED, path
     assert _as(pid, lambda: H.write(pid, h, str(own / "list.m3u").encode())) == H.DENIED
-    assert not media._s["pid"] or media._s["stopping"]
+    from runtime import moy_media
+    for _ in range(4):
+        moy_media.pump()
+    assert not moy_media.pid()                                  # the refused list left nothing
     assert _as(pid, lambda: H.write(pid, h, str(own / "missing.mp3").encode())) == H.ABSENT
     assert _as(pid, lambda: H.xfer(pid, h, str(music / "song.mp3").encode(), 64)) \
         == struct.pack("<I", 2) + b"Tone\n"

@@ -23,7 +23,7 @@ import pytest
 from runtime import audio_binding, dev_media, devices, moybyte
 from runtime import moy_log as L
 from runtime import moy_input as mi
-from runtime import moy_lease, moy_loop
+from runtime import moy_evq, moy_lease, moy_loop
 from runtime import moy_media as N
 from runtime import moy_play as mp
 
@@ -121,7 +121,7 @@ def media():
             _frame()
     devices.grants = None
     mp.share_use(None)
-    assert N.owner() == 0
+    assert N.pid() == 0
 
 
 def _as(pid, fn):
@@ -139,6 +139,20 @@ def _frame():
     N.pump()
     if dev_media._s["wake"] is not None:
         dev_media._pump()
+
+
+def _media_leases():
+    """The owners of the MEDIA lease's rows (moy_lease.h's MOY_LEASE_MEDIA)."""
+    return [moy_lease.get(h)[0] for h in moy_lease.leases() if moy_lease.get(h)[1] == 7]
+
+
+def _state():
+    """What plays, or how the run that played ended (the run ends itself)."""
+    n = moybyte.media.now()
+    if n is not None:
+        return n["state"]
+    e = moybyte.media.last()
+    return e["state"] if e is not None else None
 
 
 def _drive(until, frames=2048, rounds=3000, out=None):
@@ -173,11 +187,12 @@ def test_an_icy_streams_now_playing_text_and_its_station(media, server):
     assert ("/radio", "1") in _H.seen                   # the client asked for the metadata
     assert _drive(lambda: (moybyte.media.now() or {}).get("title") == TITLES[0])
     now = moybyte.media.now()
-    assert now["station"] == "Moy FM" and now["state"] == "playing" and now["pid"] == pid
+    assert now["station"] == "Moy FM" and now["state"] == "playing" and now["client"] == pid
+    assert now["who"] == "t.radio" and now["pid"] == N.pid() != pid
     assert now["rate"] == 44100 and now["channels"] == 2 and now["kbps"] == 128
     pcm = array("h")
     assert _drive(lambda: moybyte.media.now()["title"] == TITLES[1], out=pcm)
-    assert _drive(lambda: moybyte.media.now()["state"] == "ended", out=pcm)
+    assert _drive(lambda: _state() == "ended", out=pcm)
     # The metadata never reached the decoder: what the mix played is the tone.
     assert abs(_freq(pcm, AUDIO.rate()) - 1000) < 20
 
@@ -209,7 +224,7 @@ def test_a_file_playlist_moves_to_its_next_entry_by_itself(media, tmp_path):
     assert moybyte.media.now()["src"] == str(tmp_path / "one.mp3")
     assert _drive(lambda: moybyte.media.now()["entry"] == 1)
     assert moybyte.media.now()["title"] == "Tone Two"
-    assert _drive(lambda: moybyte.media.now()["state"] == "ended")
+    assert _drive(lambda: _state() == "ended")
     rate = AUDIO.rate()
     # Both files decoded whole: 2 s each at the mix's rate, less the encoder's padding.
     assert abs(N.status()[15] - 4 * rate) < rate // 5
@@ -222,7 +237,7 @@ def test_a_file_decodes_into_the_mix_and_reads_back_as_its_tone(media):
     _as(pid, lambda: moybyte.media.play(str(TONE)))
     _as(pid, lambda: moybyte.media.volume(100))
     pcm = array("h")
-    assert _drive(lambda: moybyte.media.now()["state"] == "ended", out=pcm)
+    assert _drive(lambda: _state() == "ended", out=pcm)
     rate = AUDIO.rate()
     body = pcm[rate // 5:rate + rate // 2]
     assert abs(_freq(body, rate) - 1000) < 10
@@ -253,24 +268,24 @@ def test_a_file_plays_on_the_frames_job_alone(media):
 
 
 def test_a_teardown_on_another_task_frees_nothing_the_frames_job_reads(media):
-    """The lease's end (a sweep, as a kill's) and the VM's end on a thread not
-    the frame's, while the frame's job reads and decodes the file: the two
-    take turns, the service is freed whole, and the job's slot goes on the
-    loop's own thread."""
+    """The run's lease dropped from outside (a sweep, as a kill's) and a
+    close() on a thread not the frame's, while the frame's job reads and
+    decodes the file: the two take turns, the service is freed whole, and
+    the job's slot goes on the loop's own thread."""
     rng = random.Random(7)
     for i in range(60):
-        pid = L.spawn("t.race")
-        assert N.open(pid, AUDIO.rate()) == 0
-        assert N.play(pid, str(TONE)) >= 0
+        assert N.open(AUDIO.rate()) == 0
+        run = N.pid()
+        assert N.play(str(TONE)) >= 0
         if i % 3 == 1:
-            N.stop(pid)                                  # idle soon: the sweep frees it
+            N.stop()                                     # idle soon: the close frees it
         done = threading.Event()
         pause = rng.random() * 0.003
 
-        def revoke(pid=pid, pause=pause, done=done):
+        def revoke(run=run, pause=pause, done=done):
             time.sleep(pause)
-            moy_lease.sweep(pid)
-            N.close_vm()
+            moy_lease.sweep(run)
+            N.close()
             done.set()
 
         t = threading.Thread(target=revoke)
@@ -278,8 +293,9 @@ def test_a_teardown_on_another_task_frees_nothing_the_frames_job_reads(media):
         while not done.is_set():
             moy_loop.jobs()
         t.join()
-        moy_loop.jobs()
-        assert N.owner() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0 and N.status() is None
+        for _ in range(8):
+            moy_loop.jobs()
+        assert N.pid() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0 and N.status() is None
 
 
 def test_a_files_tag_and_probe(media, tmp_path):
@@ -334,7 +350,7 @@ def test_a_file_seeks_and_a_stream_does_not(media, server, tmp_path):
     n = moybyte.media.now()
     assert 6 <= n["at"] <= 7 and n["len"] == 10 and n["title"] == "Tone"
     pcm = array("h")
-    assert _drive(lambda: moybyte.media.now()["state"] == "ended", out=pcm)
+    assert _drive(lambda: _state() == "ended", out=pcm)
     rate = AUDIO.rate()
     assert len(pcm) < 5 * rate                            # three seconds left, not ten
     _as(pid, lambda: moybyte.media.play(server + "/radio"))
@@ -385,15 +401,21 @@ def test_the_media_row_is_taken_given_back_and_absent_on_the_guition_s3(media):
     _as(pid, lambda: moybyte.media.play(str(TONE)))
     assert mp.share_held(mp.SHARE_MEDIA) == N.share() <= mp.shares("tdeck")[mp.SHARE_MEDIA]
     _as(pid, moybyte.media.stop)
-    assert N.owner() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0
+    assert N.pid() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0
     mp.share_use("guition_s3")
     assert moybyte.media is None                         # absent, never 0
-    assert N.open(pid, 22050) == -errno.ENOSPC          # the C declines it too
-    assert N.owner() == 0
+    assert N.open(22050) == -errno.ENOSPC               # the C declines it too
+    assert N.pid() == 0
 
 
-def test_permissions_one_owner_https_and_the_end_of_the_process(media, tmp_path):
-    a, b = L.spawn("t.a"), L.spawn("t.b")
+def test_permissions_the_last_command_wins_and_a_clients_end_leaves_it_playing(media, tmp_path):
+    """Every process the permissions let in is a client: a play() replaces
+    what plays whoever played it, a notification telling the person whose
+    list it took over, and any client pauses or stops what plays. The run is
+    nobody's process: its clients' ends leave it playing, and the shell is a
+    client too."""
+    from runtime.notifications import NOTES
+    a, b, c = L.spawn("t.a"), L.spawn("t.b"), L.spawn("t.c")
     devices.grants = lambda p: {a: {"media"}, b: {"media", "media:url"}}.get(p, set())
     with pytest.raises(OSError) as e:
         _as(a, lambda: moybyte.media.play("http://127.0.0.1:1/x"))
@@ -401,26 +423,37 @@ def test_permissions_one_owner_https_and_the_end_of_the_process(media, tmp_path)
     with pytest.raises(OSError) as e:
         _as(b, lambda: moybyte.media.play("http://127.0.0.1:1/x"))
     assert e.value.errno == errno.EPERM and '"http"' in str(e.value)
-    devices.grants = None
-    with pytest.raises(OSError) as e:
-        _as(b, lambda: moybyte.media.play("https://example.com/x.mp3"))
-    assert e.value.errno == errno.EPROTONOSUPPORT
+    devices.grants = lambda p: {a: {"media"}, b: {"media"}}.get(p, set())
     with pytest.raises(OSError) as e:
         _as(a, lambda: moybyte.media.play(str(tmp_path / "nope.mp3")))
-    assert e.value.errno == errno.ENOENT and N.owner() == 0
-    _as(a, lambda: moybyte.media.play(str(TONE)))
-    with pytest.raises(OSError) as e:
-        _as(b, lambda: moybyte.media.play(str(TONE)))
-    assert e.value.errno == errno.EBUSY
+    assert e.value.errno == errno.ENOENT and N.pid() == 0     # nothing left running
+    _as(a, lambda: moybyte.media.play(str(TONE), label="song\tTone"))
+    run = N.pid()
+    assert run not in (0, a) and L.name(run) == "media"
+    assert _drive(lambda: moybyte.media.now()["state"] == "playing")
+    seen = len(NOTES.list)
+    _as(b, lambda: moybyte.media.play(str(TONE), label="song\tAgain"))
+    assert N.pid() == run, "one run: the last command wins"
+    now = moybyte.media.now()
+    assert now["client"] == b and now["who"] == "t.b" and now["label"] == "song\tAgain"
+    note = NOTES.list[seen:]
+    assert [(n.summary, n.body) for n in note] == [
+        ("t.b took over the music", "Again now plays in place of what t.a played.")]
+    _as(b, lambda: moybyte.media.play(str(TONE)))
+    assert len(NOTES.list) == seen + 1, "its own list again: no one to tell"
     with pytest.raises(OSError):
-        _as(b, moybyte.media.pause)                      # not b's stream
-    _as(devices.SHELL, moybyte.media.pause)              # the shell's stop control may
+        _as(c, moybyte.media.pause)                      # not a client
+    _as(a, moybyte.media.pause)                          # any client acts on what plays
     assert moybyte.media.now()["paused"] is True
-    assert devices.MEDIA[0] == a
-    moybyte.end(a)                                       # its process ends: the stream stops
-    for _ in range(10):
+    moybyte.end(a)
+    moybyte.end(b)                                       # its clients end: it plays on
+    for _ in range(4):
         _frame()
-    assert N.owner() == 0 and devices.MEDIA[0] == 0 and moybyte.media.now() is None
+    assert N.pid() == run and moybyte.media.now()["paused"] is True
+    _as(devices.SHELL, moybyte.media.stop)               # the shell is a client
+    assert N.pid() == 0 and devices.MEDIA[0] == 0 and moybyte.media.now() is None
+    assert moybyte.media.last()["pid"] == run and moybyte.media.last()["client"] == b
+    devices.grants = None
 
 
 def test_an_https_stream_is_refused_at_play_only_where_nothing_verifies(media, monkeypatch):
@@ -428,12 +461,12 @@ def test_an_https_stream_is_refused_at_play_only_where_nothing_verifies(media, m
     assert moybyte.media.tls() is False                  # the host: plain TCP
     with pytest.raises(OSError) as e:
         _as(pid, lambda: moybyte.media.play("https://127.0.0.1:1/x.mp3"))
-    assert e.value.errno == errno.EPROTONOSUPPORT and N.owner() == 0
+    assert e.value.errno == errno.EPROTONOSUPPORT and N.pid() == 0
     # A console that verifies plays it through the client, which is where the
     # host's refusal then lands: the stream fails, it is not refused.
     monkeypatch.setattr(dev_media, "tls", lambda: True)
     _as(pid, lambda: moybyte.media.play("https://127.0.0.1:1/x.mp3"))
-    assert _drive(lambda: moybyte.media.now()["state"] == "failed")
+    assert _drive(lambda: _state() == "failed")
 
 
 def test_the_radio_is_held_while_a_url_may_play(media, server, tmp_path):
@@ -442,9 +475,10 @@ def test_the_radio_is_held_while_a_url_may_play(media, server, tmp_path):
     devices.grants = None
     pid = L.spawn("t.lease")
     _as(pid, lambda: moybyte.media.play(server + "/a.mp3"))
-    assert ws.leases.held("media")
-    assert _drive(lambda: moybyte.media.now()["state"] == "ended")
-    assert not ws.leases.held("media")            # the list ended
+    run = N.pid()
+    assert ws.leases.held("media") and "media:%d" % run in ws.leases.holders()
+    assert _drive(lambda: N.pid() == 0) and moybyte.media.last()["state"] == "ended"
+    assert not ws.leases.held("media")            # the list ended: the run let it go
     _as(pid, lambda: moybyte.media.play(server + "/a.mp3"))
     assert ws.leases.held("media")
     _as(pid, moybyte.media.stop)
@@ -507,7 +541,7 @@ def test_the_media_keys_answer_the_stream_from_a_game_that_owns_the_keys(media, 
 
 
 def test_a_media_key_with_no_stream_is_answered_by_nothing(media):
-    assert N.owner() == 0
+    assert N.pid() == 0
     assert N.key(0xCD) is False and N.key(0xE9) is False
 
 
@@ -524,19 +558,47 @@ def test_the_parsers():
     assert os.path.getsize(TONE) == len(MP3)
 
 
-def test_the_vms_end_closes_its_processes_stream(media):
-    """The kernel's moy_media_close_vm (a soft reset or a VM stop): the stream
-    of a process the VM held ends with it and its row comes back, though the
-    face's own state went with the heap."""
+def test_the_run_is_on_demand_and_plays_on_through_a_vm_stop(media, tmp_path):
+    """The service holds nothing before a client's first command, plays on
+    while the VM is down (the face's state gone with the heap, the frame's
+    job reading and decoding), is followed again by the console after it
+    (its row and its state), gives everything back at its end, and the next
+    play is a new run."""
+    from runtime import scheduler as S
     mp.share_use("tdeck")
+    assert N.pid() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0 and N.status() is None
+    assert _media_leases() == []
     pid = L.spawn("t.vm")
-    _as(pid, lambda: moybyte.media.play(str(TONE)))
+    _as(pid, lambda: moybyte.media.play(str(TONE), label="song\tTone"))
+    run = N.pid()
+    assert S.SCHED.procs[run].name == "media" and S.SCHED.procs[run].kernel
+    assert mp.share_held(mp.SHARE_MEDIA) == N.share()
+    assert _media_leases() == [run]
     assert _drive(lambda: N.status()[0] == N.PLAYING)
-    assert N.close_vm() == 0
-    assert N.owner() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0
-    assert N.close_vm() == 0                             # nothing left: nothing to do
-    dev_media._end()
-
+    # The VM stops: the face's state and the scheduler's rows go with its heap.
+    dev_media._s.update(pid=0, wake=None, every=0, radio=0)
+    devices.MEDIA[0] = 0
+    moy_evq.vm(False)
+    try:
+        played = N.status()[16]
+        for _ in range(20):
+            moy_loop.jobs()
+            AUDIO.render(bytearray(4096), 2048)
+        assert N.pid() == run and N.status()[16] > played, "it plays on with no VM"
+    finally:
+        moy_evq.vm(True)
+    S.SCHED.procs.pop(run, None)
+    assert dev_media.attach() == run                     # the console after the stop follows it
+    assert S.SCHED.procs[run].name == "media" and devices.MEDIA[0] == run
+    now = moybyte.media.now()
+    assert now["pid"] == run and now["client"] == pid and now["label"] == "song\tTone"
+    _as(pid, moybyte.media.stop)
+    assert N.pid() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0 and N.status() is None
+    assert _media_leases() == []
+    S.SCHED.poll()
+    assert S.SCHED.procs[run].state == S.EXITED, "its row reaped"
+    _as(pid, lambda: moybyte.media.play(str(TONE)))
+    assert N.pid() not in (0, run), "a second play is a new run"
 
 
 class _Reader:
@@ -604,7 +666,7 @@ def test_a_song_the_page_reads_plays_where_the_console_does_not_keep_it(media, p
     assert dev_media.held("/moy/files/other") == ()
     _as(pid, lambda: moybyte.media.play(path))
     pcm = array("h")
-    assert _drive(lambda: moybyte.media.now()["state"] == "ended", out=pcm)
+    assert _drive(lambda: _state() == "ended", out=pcm)
     rate = AUDIO.rate()
     start = next(i for i, v in enumerate(pcm) if v)  # past the page's two empty reads
     assert abs(_freq(pcm[start + rate // 5:start + rate + rate // 2], rate) - 1000) < 10
@@ -624,7 +686,7 @@ def test_a_song_the_page_reads_seeks_from_the_byte_the_c_asks_for(media, page):
     src, _r, at = page.media_net.opened[1]
     total = len(page.media_net.songs[path])
     assert src == path and abs(at - total // 2) < total // 20      # half-way in, by its bytes
-    assert _drive(lambda: moybyte.media.now()["state"] == "ended")
+    assert _drive(lambda: _state() == "ended")
 
 
 def test_a_reader_that_refuses_fails_the_entry_with_its_errno(media, page):
@@ -632,6 +694,89 @@ def test_a_reader_that_refuses_fails_the_entry_with_its_errno(media, page):
     page.media_net = _Net({path: MP3}, err=errno.EACCES)
     pid = L.spawn("t.refused")
     _as(pid, lambda: moybyte.media.play(path))
-    assert _drive(lambda: moybyte.media.now()["state"] == "failed")
-    assert moybyte.media.now()["err"] == errno.EACCES
+    assert _drive(lambda: _state() == "failed")
+    assert (moybyte.media.now() or moybyte.media.last())["err"] == errno.EACCES
     assert dev_media.tls()                           # the page's fetch verifies https
+
+
+def test_the_stop_verdict_counts_the_music_and_asks_only_when_it_must():
+    """The media service plays on through a VM stop, so the stop's fit counts
+    what its run holds as not given back: a game that fits with the music
+    playing stops the VM and keeps it, one that fits only without it is
+    KEEP_MEDIA (the console asks first, a file's or a station's alike), and
+    one that fits with neither is too big."""
+    mb = 1 << 20
+    assert mp.stop_fit(10 * mb, mb, 20 * mb, 8 * mb, 4 * mb, 2 * mb) == "fits"
+    assert mp.stop_fit(10 * mb, mb, 7 * mb, 8 * mb, 4 * mb, 2 * mb) == "stops"
+    assert mp.stop_fit(12 * mb, mb, 7 * mb, 8 * mb, 4 * mb, 2 * mb) == "media"
+    assert mp.stop_fit(12 * mb, mb, 7 * mb, 8 * mb, 4 * mb, 0) == "big"      # no music: no question
+    assert mp.stop_fit(14 * mb, mb, 7 * mb, 8 * mb, 4 * mb, 2 * mb) == "big"
+
+
+def test_a_game_that_fits_only_without_the_music_is_asked_first(media, monkeypatch, tmp_path):
+    """The Player reads the verdict's `media` and the shell asks "Stop the
+    music to play?"; Stop & play stops the stream and opens the game once the
+    service has given everything back."""
+    from runtime import player as P
+    from runtime import scheduler as S
+    from ws_helpers import build_ws
+    ws = build_ws(tmp_path)
+    devices.grants = None
+    pl = ws.run.player
+    asked, opened = [], []
+    monkeypatch.setattr(ws, "ask_stop_music", lambda cart: asked.append(cart))
+    info = [0] * 13
+    monkeypatch.setattr(P._moy_play, "info", lambda run: info)
+    monkeypatch.setattr(P._moy_play, "end", lambda run: None)
+    cart = {"title": "Doom"}
+    info[11] = "stops"
+    assert pl._music_keeps_the_vm(1, cart) is False
+    info[11] = "media"
+    pl.pid = L.spawn("t.doom")
+    assert pl._music_keeps_the_vm(1, cart) is True and asked == [cart] and pl.declined
+    # Stop & play: the open waits for the run's end, a frame of the C's job.
+    pid = L.spawn("t.music")
+    _as(pid, lambda: moybyte.media.play(str(TONE)))
+    monkeypatch.setattr(ws, "open", lambda c: opened.append(c))
+    monkeypatch.setattr(dev_media, "_STEP", False)       # a board: the job ends the run later
+    _as(devices.SHELL, moybyte.media.stop)
+    assert N.pid() != 0
+    type(ws)._open_when_quiet(ws, moybyte.media, cart)
+    assert opened == []
+    N.pump()                                             # the frame's job: the run ends
+    S.SCHED._n = S.SCHED._i = 0
+    S.SCHED.tick(1_000_000)
+    assert N.pid() == 0 and opened == []                 # its wake has not come yet
+    time.sleep(0.06)
+    S.SCHED._n = S.SCHED._i = 0
+    S.SCHED.tick(1_000_000)
+    assert opened == [cart]
+    devices.console = None
+
+
+def test_musics_status_item_shows_while_any_clients_run_plays(media, tmp_path, monkeypatch):
+    """The console listens on the face (dev_media.listen): a run another
+    client started puts Music's card and status item in the bar, and the
+    run's end takes them out."""
+    from runtime import music_app as M
+    from runtime.status_items import ITEMS
+    from ws_helpers import build_ws
+    ws = build_ws(tmp_path)
+    devices.grants = None
+    monkeypatch.setattr(dev_media, "_HEARD", [])
+    dev_media.listen(ws._music_follows)
+    s = M.STREAM
+    try:
+        pid = L.spawn("t.player")
+        _as(pid, lambda: moybyte.media.play(str(TONE)))
+        assert s.what[0] == "song" and s.what[2] == str(TONE)
+        it = [i for i in ITEMS.slots if i.pid and i.app == "Music"]
+        assert len(it) == 1
+        _as(pid, moybyte.media.stop)
+        s.poll()
+        assert not [i for i in ITEMS.slots if i.pid and i.app == "Music"]
+        assert s.what is None and s.card is None
+    finally:
+        s._end()
+        s.section = None
+        devices.console = None
