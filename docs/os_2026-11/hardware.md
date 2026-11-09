@@ -174,13 +174,14 @@ and a VM stop keeps the rows; the station's address coming and going is a NET re
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
-on. A compiled program holds `http`, `lora`, `mic` and `ble` by handle
+on. A compiled program holds `http`, `lora`, `mic`, `ble` and `usb` by handle
 through the same rows as its leases (above): an `http` handle a GET whose
 body it reads in chunks (`cfg` `url=... cap=N`, or `window=N` for a body of
 any length), a `lora` handle the radio's raw packets and LoRaWAN's join,
 uplinks and downlinks, a `mic` handle PCM16 samples, a `ble` handle the
-face's verbs and its events as records (§4). USB, MIDI, the camera and the
-media service are Python's alone.
+face's verbs and its events as records, a `usb` handle the USB host's
+devices, their reports and serial lines, as records (§4). MIDI, the camera
+and the media service are Python's alone.
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
@@ -530,7 +531,7 @@ moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s
 Leases (Python gets them as `machine` objects, §1:
 `moybyte.lease(name, **cfg)` and `moybyte.pins()`; `pins` is the digital
 subset every tier may hold), and on the compiled tiers leases and the
-`http`, `lora`, `mic` and `ble` devices by handle (`runtime/system/dev_handles.py`;
+`http`, `lora`, `mic`, `ble` and `usb` devices by handle (`runtime/system/dev_handles.py`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
 ```
@@ -555,15 +556,21 @@ ble   scan=<ms>  connect=<addr>|off  find=<uuid>  read=<h>  subscribe=<h>  unsub
 lora  join=otaa dev_eui=<hex> join_eui=<hex> app_key=<hex> [dr]
       send=<port>|raw [confirmed=0|1 dr]: what dev_write sends, an uplink or a packet
       dev_read: the next packet or downlink; dev_get: port, joined, fcnt, busy
+usb   serial=<addr> [baud=<n>]  write=<addr>: where dev_write goes
+      dev_read: the USB face's events, whole records with ble's head (a the address):
+                ATTACH (one for each device plugged in at the open) its class,
+                kind, vid, pid and name; REPORT the report; DATA the bytes
+                sent; DETACH and SENT none
 ```
 
-A `ble` handle reads the BLE ring through a reader of its own (only the
-`gatt` source), as an edge handle reads its pin's; the records are the ones
-`dev_ble.on` wakes Python on, each with the bytes a read or a notification
-carried. Each is under the permission Python's face needs (`ble`, `lora`);
-one holder rules across the tiers, a process opens a radio once, and its
+A `ble` or a `usb` handle reads its driver's ring through a reader of its
+own (only that source), as an edge handle reads its pin's; the records are
+the ones the face's `on` wakes Python on, each with the bytes a read, a
+notification, a report or a serial line carried. Each is under the
+permission Python's face needs (`ble`, `lora`, `usb`); one holder rules
+across the tiers, a process opens a radio or the USB host once, and its
 end closes the handle, which drops the connection, the beacon and the
-radio as Python's face sweep does.
+radio, or lets the USB host go, as Python's face sweep does.
 
 In C (`native/moy_kernel/moy_lease.h`): `moy_lease_take(owner, cls, unit,
 pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,

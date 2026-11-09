@@ -13,7 +13,8 @@
       "lease:gpio",
       "lease:uart1",
       "lease:spi2",
-      "ble"
+      "ble",
+      "usb"
     ],
     "achievements": [
       {

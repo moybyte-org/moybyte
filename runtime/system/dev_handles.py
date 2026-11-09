@@ -7,7 +7,7 @@ WASI program, an ELF module) holds where a Python program holds an object
   open(name, cfg) -> h      a lease of row `name` (leases.py's names:
                             "gpio<n>", "uart<n>", "spi<n>", "pwm<n>",
                             "adc<n>", "i2c") or a device API ("http", "lora",
-                            "mic", "ble"), configured by `cfg`
+                            "mic", "ble", "usb"), configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
   write(h, bytes) -> n      what was sent
@@ -68,12 +68,27 @@ answers:
             bytes -- ADV's the address (6 bytes, as printed) and the name
             (a the device's index, b its RSSI), READ's the value read,
             NOTIFY's the notification's (a its handle, b its length)
+  usb       the USB host's devices (a device is its bus address, 1..127):
+            set serial=<addr> (baud=<n>, 115200 by default) opens a CDC-ACM
+            device's line, write=<addr> names where a write goes (a serial
+            or a USB-MIDI device); write: to it; read: the USB face's
+            events, whole records as ble's are (FULL where the next does
+            not fit): the event (moy_usb.h's MOY_USB_EV_*: 1 ATTACH, 2
+            DETACH, 3 REPORT, 4 DATA, 5 SENT), n, a the device's address
+            and b the driver's value (ATTACH's its class, 1 HID, 2 CDC, 3
+            MIDI, 0 OTHER; REPORT's the report's length; DATA's the bytes
+            that waited; SENT's 0 or -errno), then n bytes -- ATTACH's the
+            class and the kind (u8 each: a HID boot keyboard 1, mouse 2),
+            vid and pid (u16) and the name, REPORT's the HID report,
+            DATA's the bytes the device sent. The open reads as an ATTACH
+            for each device already plugged in
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
 name needs (leases.perm_of's `lease:<row>`, a device's own), BUSY where
 another process holds the lease or the device (a Python program's object, or
-another compiled program's handle; a process opens lora, mic and ble once),
+another compiled program's handle; a process opens lora, mic, ble and usb
+once),
 BAD for a name, a key or a value this console does not take, ABSENT for a
 handle not open, a device this console lacks and a radio verb that needs a
 connection or a join, FULL where `into` cannot hold one record, IO where the
@@ -632,7 +647,75 @@ class _Mic(_Handle):
         self.f.sweep(pid)
 
 
-BLE_HEAD = 12               # a ble record's head: event, n (u16), a, b (i32)
+HEAD = 12                   # a record's head: event, n (u16), a, b (i32)
+BLE_HEAD = HEAD
+
+
+def _record(ev, a, b, body=b""):
+    return (ev.to_bytes(2, "little") + len(body).to_bytes(2, "little") + _u32(a) + _u32(b)
+            + body)
+
+
+class _Ring(_Handle):
+    """A handle reading its driver's ring through a reader of its own (only
+    its source, only its KIND), whole records only: what `_body` makes of
+    each event waits in `pend` until a read has room for it."""
+
+    KIND = 0
+    reader = -1
+
+    def _reader(self, src):
+        t = _moybyte.WAKES.table
+        if t is None:
+            raise OSError(ENODEV, "no input table")
+        self.reader = t.reader(1 << self.KIND, src)
+        self.buf = _array("i", [0] * (_moybyte.EV_FIELDS * _BATCH))
+        self.pend = []
+
+    def _free(self):
+        t = _moybyte.WAKES.table
+        if t is not None and self.reader >= 0:
+            t.reader_free(self.reader)
+        self.reader = -1
+
+    def _body(self, ev, a, b):
+        return b""
+
+    def _rec(self, ev, a, b):
+        """The record event (ev, a, b) reads as, None for none."""
+        return _record(ev, a, b, self._body(ev, a, b))
+
+    def _pull(self):
+        t = _moybyte.WAKES.table
+        n = t.events(self.buf, self.reader) if t is not None and self.reader >= 0 else 0
+        F, K, ID, A, B = (_moybyte.EV_FIELDS, _moybyte.EV_KIND, _moybyte.EV_ID, _moybyte.EV_A,
+                          _moybyte.EV_B)
+        for i in range(n):
+            k = i * F
+            if self.buf[k + K] != self.KIND:
+                continue
+            r = self._rec(self.buf[k + ID], self.buf[k + A], self.buf[k + B])
+            if r is not None:
+                self.pend.append(r)
+        return n
+
+    def read(self, cap):
+        out = bytearray()
+        while True:
+            if not self.pend:
+                if not self._pull():
+                    break
+                continue
+            r = self.pend[0]
+            if len(out) + len(r) > cap:
+                break
+            out += r
+            self.pend.pop(0)
+        if not out and self.pend:
+            return FULL
+        return bytes(out)
+
+
 _BLE_ACTS = ("scan", "connect", "find", "read", "subscribe", "unsubscribe", "advertise")
 
 
@@ -641,7 +724,7 @@ def _gatt(v):
 
 
 def _addr(v):
-    parts = v.split(":")
+    parts = v.split(":") if isinstance(v, str) else ()
     if len(parts) != 6 or not all(len(p) == 2 for p in parts):
         raise OSError(EINVAL, "an address is aa:bb:cc:dd:ee:ff")
     _hex("".join(parts))
@@ -656,28 +739,27 @@ def _uuid(v):
     return s
 
 
-class _Ble(_Handle):
+class _Ble(_Ring):
+    KIND = _moybyte.BLE
+
     def __init__(self, cfg):
         f = _face("ble")
-        t = _moybyte.WAKES.table
-        if t is None:
+        if _moybyte.WAKES.table is None:
             raise OSError(ENODEV, "no input table")
         f.open()
         try:
-            self.reader = t.reader(1 << _moybyte.BLE, f.source())
+            self._reader(f.source())
         except BaseException:
             f.close()
             raise
         self.f = f
-        self.buf = _array("i", [0] * (_moybyte.EV_FIELDS * _BATCH))
-        self.pend = []
         self.target = None
         self.response = True
         if cfg:
             try:
                 self.set(cfg)
             except BaseException:
-                t.reader_free(self.reader)
+                self._free()
                 f.close()
                 raise
 
@@ -743,47 +825,87 @@ class _Ble(_Handle):
             return bytes(into[:got[0]]) if got else b""
         return b""
 
-    def _pull(self):
-        t = _moybyte.WAKES.table
-        n = t.events(self.buf, self.reader) if t is not None else 0
-        F, K, ID, A, B = (_moybyte.EV_FIELDS, _moybyte.EV_KIND, _moybyte.EV_ID, _moybyte.EV_A,
-                          _moybyte.EV_B)
-        for i in range(n):
-            k = i * F
-            if self.buf[k + K] != _moybyte.BLE:
-                continue
-            ev, a, b = self.buf[k + ID], self.buf[k + A], self.buf[k + B]
-            body = self._body(ev, a, b)
-            self.pend.append(ev.to_bytes(2, "little") + len(body).to_bytes(2, "little")
-                             + _u32(a) + _u32(b) + body)
-        return n
-
-    def read(self, cap):
-        out = bytearray()
-        while True:
-            if not self.pend:
-                if not self._pull():
-                    break
-                continue
-            r = self.pend[0]
-            if len(out) + len(r) > cap:
-                break
-            out += r
-            self.pend.pop(0)
-        if not out and self.pend:
-            return FULL
-        return bytes(out)
-
     def close(self, pid):
-        t = _moybyte.WAKES.table
-        if t is not None:
-            t.reader_free(self.reader)
+        self._free()
         self.f.sweep(pid)
 
 
-_DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble}
+USB_RX = 1024               # MOY_USB_RX: a device's bytes kept
+USB_REPORT = 64             # MOY_USB_REPORT
+
+
+class _Usb(_Ring):
+    KIND = _moybyte.USB
+
+    def __init__(self, cfg):
+        f = _face("usb")
+        if _moybyte.WAKES.table is None:
+            raise OSError(ENODEV, "no input table")
+        f.open()
+        try:
+            self._reader(f.source())
+            self.f = f
+            self.target = None
+            for d in f.devices():
+                self.pend.append(_record(f.EV_ATTACH, d[0], d[1], self._about(d)))
+            if cfg:
+                self.set(cfg)
+        except BaseException:
+            self._free()
+            f.close()
+            raise
+
+    @staticmethod
+    def _about(d):
+        addr, cls, kind, vid, pid, name = d
+        return bytes((cls, kind)) + vid.to_bytes(2, "little") + pid.to_bytes(2, "little") + \
+            name.encode()
+
+    def set(self, cfg):
+        _only(cfg, ("serial", "baud", "write"))
+        if "baud" in cfg and "serial" not in cfg:
+            raise OSError(EINVAL, "baud is serial's")
+        if "write" in cfg:
+            self.target = _int(cfg["write"], 1, 127, "write")
+        if "serial" in cfg:
+            self.f.serial(_int(cfg["serial"], 1, 127, "serial"),
+                          _int(cfg.get("baud", 115200), 1, 4000000, "baud"))
+        return 0
+
+    def write(self, data):
+        if self.target is None:
+            raise OSError(EINVAL, "set write=<addr> first")
+        self.f.write(self.target, data)
+        return len(data)
+
+    def _rec(self, ev, a, b):
+        f = self.f
+        body = b""
+        try:
+            if ev == f.EV_ATTACH:
+                for d in f.devices():
+                    if d[0] == a:
+                        body = self._about(d)
+            elif ev == f.EV_REPORT:
+                into = bytearray(USB_REPORT)
+                body = bytes(into[:f.report(a, into)])
+            elif ev == f.EV_DATA:
+                into = bytearray(USB_RX)
+                body = bytes(into[:f.read(a, into)])
+                if not body:
+                    return None             # an earlier record carried them
+        except OSError:                     # gone before its record was read
+            pass
+        return _record(ev, a, b, body)
+
+    def close(self, pid):
+        self._free()
+        self.f.sweep(pid)
+
+
+_DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb}
 # A device with one holder: a process opens it once.
-_ONE = ("lora", "mic", "ble")
+_ONE = ("lora", "mic", "ble", "usb")
 
 
 def _need(pid, perm):

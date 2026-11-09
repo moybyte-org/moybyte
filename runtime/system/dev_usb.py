@@ -7,6 +7,8 @@ taken at its first verb and let go at its end.
 A device is its bus address. Every verb answers at once; what changes
 arrives as an event, to `on(fn)`: fn(event, addr, value).
 
+  open()               the API held before its first verb
+  source()             the ring source its events ride (a reader's)
   devices() -> [(addr, cls, kind, vid, pid, name)]
                        what is plugged in: cls HID, CDC, MIDI or OTHER; a
                        HID boot keyboard's or mouse's kind KEYBOARD or MOUSE
@@ -59,6 +61,14 @@ def _take():
     if _N.owner() != p:
         _D.check(_N.open(p))
     return p
+
+
+def open():  # noqa: A001 -- the verb's name
+    _take()
+
+
+def source():
+    return _N.source()
 
 
 def devices():

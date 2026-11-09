@@ -284,6 +284,38 @@ def test_a_native_command_drives_ble_by_handle_and_its_end_drops_the_link(term):
         gatt_sim.remove()
 
 
+def test_a_native_command_drives_the_usb_host_by_handle_and_its_end_lets_it_go(term):
+    """`moy_dev_*` on a `usb` handle (elf_app.moy's `app usb`, the host's
+    stand-in bus): the devices already plugged in read as ATTACH records, a
+    serial device's line opened and written, the write's SENT record read
+    back; a keyboard's line EINVAL, a second handle EBUSY. Its end lets the
+    USB host go. The drivers' rings are the kernel table's, the one a
+    board's console binds."""
+    from runtime import devices, moybyte
+    from runtime import moy_input as mi
+    from runtime import moy_usb as N
+    from runtime.host import usb_sim
+    _ws, app = term
+    devices.grants = None
+    usb_sim.install()
+    was = moybyte.WAKES.table
+    moybyte.bind(mi.kernel())
+    try:
+        usb_sim.plug(1, N.HID, N.KEYBOARD, 0x046d, 0xc31c, "Keys")
+        usb_sim.plug(2, N.CDC, 0, 0x2341, 0x0043, "Uno")
+        assert out(app, "elf.app/app usb; echo status $?") == [
+            "dev_open.usb 1", "plugged 1:1:1:Keys 1:2:2:Uno", "dev_set.serial 0",
+            "dev_write 4", "sent 5:2:0", "dev_set.keyboard -1 EINVAL",
+            "dev_open.again -1 EBUSY", "status 0"]
+        assert usb_sim.sent(2) == (b"ping", 9600)
+        assert N.owner() == 0
+    finally:
+        moybyte.WAKES.table = None
+        if was is not None:
+            moybyte.bind(was)
+        usb_sim.remove()
+
+
 def test_the_crypto_rows_answer_a_native_command(term):
     """The crypto rows from C (tests/fixtures/elf/elf_crypto.moy): the known
     answers, and each length refused an errno, never a crash."""

@@ -114,7 +114,7 @@ costs are #227's.
   system's message `moy_open` (handle, type, mode, name; a cancel's handle 0)
   on the event descriptor, as a compiled app hears it, and the device
   handles `moy_dev_open` to `moy_dev_get` (leases and the `http`, `lora`
-  (with LoRaWAN), `mic` and `ble` devices, `hardware.md` §1 and §4). Each is
+  (with LoRaWAN), `mic`, `ble` and `usb` devices, `hardware.md` §1 and §4). Each is
   its role table row run through the ROLE door for the process's app run: a
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and
@@ -309,8 +309,8 @@ item to any process with a queue, a native command's and a service's too, and
 `_compiled_events`). **Its leases and devices are handles it polls too
 (2026-11-09)**: the `dev_*` rows on all three compiled tiers
 (`hardware.md` §1, `runtime/system/dev_handles.py`), whose `dev_read`
-takes a ring's records (a pin's edges, a packet, samples, the BLE face's
-events with their bytes) from the handle, a reader of the ring per handle.
+takes a ring's records (a pin's edges, a packet, samples, the BLE and USB
+faces' events with their bytes) from the handle, a reader of the ring per handle.
 The other way, a message from "system" a record, was refused: the queue
 carries text, a device's records are binary and come at a rate (a
 microphone's thousands a second) the queue's per-process depth is not

@@ -17,6 +17,11 @@
 // as the system's message carrying its id, then asks for minute-long timers
 // until the console answers FULL and cancels all but the first, which it
 // keeps for its end to sweep.
+// `app usb` drives the USB host by handle: the devices plugged in read as
+// ATTACH records (each event, address and value, a device's name), a serial
+// device's line opened and written, the write's SENT record read back, a
+// keyboard's line refused and a second handle refused; it ends holding the
+// host, for its end to let go.
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -188,6 +193,39 @@ static int ble(void) {
     return 0;
 }
 
+// Each record a usb handle's read holds: the event, the address and the
+// value, then an ATTACH's name or the bytes of any other.
+static void usb_records(const char *what, const uint8_t *r, int32_t n) {
+    printf("%s", what);
+    for (int32_t k = 0; k + 12 <= n;) {
+        uint16_t ev = (uint16_t)(r[k] | r[k + 1] << 8), len = (uint16_t)(r[k + 2] | r[k + 3] << 8);
+        int32_t a, b;
+        memcpy(&a, r + k + 4, 4);
+        memcpy(&b, r + k + 8, 4);
+        printf(" %u:%d:%d", ev, (int)a, (int)b);
+        if (ev == 1 && len > 6) {
+            printf(":%.*s", (int)len - 6, (const char *)r + k + 18);
+        } else if (len > 0) {
+            printf(":%.*s", (int)len, (const char *)r + k + 12);
+        }
+        k += 12 + len;
+    }
+    printf("\n");
+}
+
+static int usb(void) {
+    uint8_t buf[256];
+    int32_t h = moy_dev_open("usb", NULL);
+    said("dev_open.usb", h > 0 ? 1 : h, NULL);
+    usb_records("plugged", buf, moy_dev_read(h, buf, sizeof buf));
+    said("dev_set.serial", moy_dev_set(h, "serial=2 baud=9600 write=2"), NULL);
+    said("dev_write", moy_dev_write(h, "ping", 4), NULL);
+    usb_records("sent", buf, moy_dev_read(h, buf, sizeof buf));
+    said("dev_set.keyboard", moy_dev_set(h, "serial=1"), NULL);
+    said("dev_open.again", moy_dev_open("usb", NULL), NULL);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "pick") == 0) {
         return pick();
@@ -200,6 +238,9 @@ int main(int argc, char **argv) {
     }
     if (argc > 1 && strcmp(argv[1], "timer") == 0) {
         return timer();
+    }
+    if (argc > 1 && strcmp(argv[1], "usb") == 0) {
+        return usb();
     }
     char buf[256];
     int32_t r = moy_prefs_set("level", "42");
