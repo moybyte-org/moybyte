@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -361,17 +362,19 @@ static void log_line(moy_os_proc_t *p, int level, const char *text) {
 // after the row's check, and a read past the region could run off the end of
 // PSRAM. `cap` or more: no NUL inside both.
 static size_t text_len(thr_t *t, const char *p, size_t cap) {
+    size_t bound = cap < PTRDIFF_MAX ? cap : PTRDIFF_MAX;
 #ifdef MOY_OS_UMODE
     if (t != NULL && t->u != NULL) {
         size_t room = moy_u_room(t->u, p);
-        if (room < cap) {
+        if (room < bound) {
             size_t n = strnlen(p, room);
             return n < room ? n : cap;
         }
     }
 #endif
     (void)t;
-    return strnlen(p, cap);
+    size_t n = strnlen(p, bound);
+    return n < bound ? n : cap;
 }
 
 // Which task is which thread: static, so a lookup never reads a record
