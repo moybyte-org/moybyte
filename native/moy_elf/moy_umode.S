@@ -346,13 +346,17 @@ moy_u_bail:
     j     u_leave
 
 /* int moy_u_enter(const moy_u_go_t *go): the module's code at go->entry in
- * U-mode on go->sp, returning when it returns to go->ret. */
+ * U-mode on go->sp, returning when it returns to go->ret. sp drops past the
+ * uctx and the frame before either is written: an interrupt taken here saves
+ * IDF's context below sp, over anything kept there. */
     .global moy_u_enter
     .type moy_u_enter, @function
 moy_u_enter:
-    addi  t0, sp, -UCTX
+    mv    t1, sp
+    addi  sp, sp, -(UCTX + FRAME)
+    addi  t0, sp, FRAME
     sw    ra, UC_RA(t0)
-    sw    sp, UC_SP(t0)
+    sw    t1, UC_SP(t0)
     sw    s0, UC_S0+0(t0)
     sw    s1, UC_S0+4(t0)
     sw    s2, UC_S0+8(t0)
@@ -372,7 +376,6 @@ moy_u_enter:
     sw    t1, UC_GLO(t0)
     lw    t1, GO_GHI(a0)
     sw    t1, UC_GHI(t0)
-    addi  sp, t0, -FRAME
     mv    t1, sp
     li    t2, 36
 1:  sw    zero, 0(t1)
