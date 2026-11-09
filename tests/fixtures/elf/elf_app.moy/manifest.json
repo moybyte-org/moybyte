@@ -9,6 +9,7 @@
       "clipboard",
       "files:documents",
       "notifications",
+      "alarms",
       "lease:gpio",
       "lease:uart1",
       "lease:spi2",

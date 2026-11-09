@@ -12,6 +12,11 @@
 // name after its address), a connection to the first device heard, a
 // characteristic found and read, a write to it, a second handle refused and
 // two actions in one set refused; it ends connected, for its end to drop.
+// `app timer` hears a timer that goes off once, one that repeats (cancelled
+// at its first tick) and an alarm already due on its event descriptor, each
+// as the system's message carrying its id, then asks for minute-long timers
+// until the console answers FULL and cancels all but the first, which it
+// keeps for its end to sweep.
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -68,6 +73,53 @@ static int pick(void) {
     said("pick.again", moy_pick("text/markdown", "r"), NULL);
     printf("cancelled %s\n", opened(args, sizeof args) == 0 ? args : "no");
     said("item_read.none", moy_item_read(0, buf, sizeof buf), NULL);
+    return 0;
+}
+
+// 1 where the process hears message `name` carrying `id` within ten
+// seconds, else 0.
+static int heard(const char *name, int32_t id) {
+    static union {
+        moy_evq_ev_t ev;
+        char b[sizeof(moy_evq_ev_t) + 64];
+    } m;
+    for (int waits = 0; waits < 100; waits++) {
+        struct pollfd p = { MOY_EVQ_FD, POLLIN, 0 };
+        if (poll(&p, 1, 100) <= 0) {
+            continue;
+        }
+        ssize_t got = read(MOY_EVQ_FD, &m, sizeof m);
+        if (got > 0 && strcmp(m.ev.name, name) == 0
+            && strtol(m.b + sizeof m.ev + 1, NULL, 10) == id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int timer(void) {
+    int32_t once = moy_after(10);
+    said("after", once > 0 ? 1 : once, NULL);
+    said("heard.after", heard("moybyte.timer", once), NULL);
+    int32_t every = moy_every(10);
+    said("every", every > 0 ? 1 : every, NULL);
+    said("heard.every", heard("moybyte.timer", every), NULL);
+    said("cancel.every", moy_cancel(every), NULL);
+    int32_t at = moy_at(1);
+    said("at", at > 0 ? 1 : at, NULL);
+    said("heard.at", heard("moybyte.at", at), NULL);
+    static int32_t held[64];
+    int32_t t = 0, r = 0;
+    while (t < 64 && (r = moy_after(60000)) > 0) {
+        held[t++] = r;
+    }
+    printf("timers %d\n", (int)t);
+    said("timers.full", r, NULL);
+    int32_t undone = 0;
+    for (int32_t i = 1; i < t; i++) {
+        undone += moy_cancel(held[i]);
+    }
+    said("uncap", undone, NULL);
     return 0;
 }
 
@@ -145,6 +197,9 @@ int main(int argc, char **argv) {
     }
     if (argc > 1 && strcmp(argv[1], "ble") == 0) {
         return ble();
+    }
+    if (argc > 1 && strcmp(argv[1], "timer") == 0) {
+        return timer();
     }
     char buf[256];
     int32_t r = moy_prefs_set("level", "42");

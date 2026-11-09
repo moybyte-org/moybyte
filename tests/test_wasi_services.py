@@ -264,7 +264,8 @@ def test_a_wasi_service_s_timers_and_alarm_are_the_system_s_messages(svc, perms)
     """moybyte.os `after`, `every` and `at` are console calls answered with
     the wake's id, each heard on the event descriptor as the system's message
     carrying it (a timer's "moybyte.timer", the alarm's "moybyte.at"); `cancel` ends its own timer; `at` needs
-    `alarms`."""
+    `alarms`. Past TIMERS_MAX a timer is RANGE (the door's FULL); the one it
+    keeps goes with its end."""
     ws, s, cart, peer = svc
     since = L.next()
     pid = S.start_cart(ws, _granted(ws, cart, perms), s)
@@ -287,7 +288,16 @@ def test_a_wasi_service_s_timers_and_alarm_are_the_system_s_messages(svc, perms)
                        and "moybyte.at from system [%d]" % wid in _texts(since, pid))
     else:
         assert at == ["at -1 errno 2"], at                         # WASI's ACCES
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["timers"]')[0] == 1)
+    assert _polled(s, lambda: s.tick() >= 0
+                   and any(t.startswith("uncap ") for t in _texts(since, pid))), _texts(since, pid)
+    texts = _texts(since, pid)
+    assert "timers %d -1 errno 68" % moybyte.TIMERS_MAX in texts, texts   # WASI's RANGE
+    assert "uncap %d" % (moybyte.TIMERS_MAX - 1) in texts, texts
+    assert [w[3] for w in moybyte.WAKES.list if w[1] == pid] == [60000]
     assert s.stop(pid)
+    assert _polled(s, lambda: not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail
+                                   if w[1] == pid])
 
 
 @pytest.mark.parametrize("perms", [("prefs", "clipboard"), ()])

@@ -595,7 +595,11 @@ id, and hears each time it goes off as the system's message
 or 0 where it has none of that id. The program listens on those two names
 for itself at its first wake (`runtime/system/moybyte.py`, `_wake_message`),
 two of the eight names a process may listen on (`moy_evq.h`,
-`MOY_EVQ_LISTEN`); a tick its queue cannot take is dropped.
+`MOY_EVQ_LISTEN`); a tick its queue cannot take is dropped. A compiled
+program holds 16 timers and alarms at once (`moybyte.TIMERS_MAX`, a Lua
+service's alarms counted the same): one more answers FULL (`-2` to a wasm
+app, `ERANGE` to a WASI or C program, as a short buffer reads). Each is its
+process's, and the process's end cancels what it left.
 
 ```python
 import moybyte, time

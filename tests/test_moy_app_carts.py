@@ -52,10 +52,8 @@ LISTED = {
     # head.c's fopen reaches open through the SDK's C library, which a scan of
     # the source does not follow (a built module's rows show it).
     "tests/fixtures/elf/elf_head.moy": (r'^"files" is declared and nothing',),
-    # tests/test_elf_commands.py pins both refused: "at -1 EACCES",
-    # "nav.open_app -1 EACCES".
-    "tests/fixtures/elf/elf_app.moy": (r"^main uses moy_at, which needs \"alarms\"",
-                                       r"^main uses moy_nav_open_app, which needs \"launch\""),
+    # tests/test_elf_commands.py pins it refused: "nav.open_app -1 EACCES".
+    "tests/fixtures/elf/elf_app.moy": (r"^main uses moy_nav_open_app, which needs \"launch\"",),
     # tests/test_wasi_commands.py sets this service's permissions per test and
     # pins the calls they refuse.
     "tests/fixtures/wasm/wasi_svc.moy": (r"^main uses moybyte\.os\.",),

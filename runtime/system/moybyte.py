@@ -164,7 +164,10 @@ it refuses (a key, a secret, a count) raises ValueError.
 on/every/after/at answer the wake's id. A timer means "no earlier than": a wake is
 served in the shell loop's slack, so up to a frame late, and a late `every`
 keeps its period from the deadline, never bursting to catch up. Precise timing
-is C's (hardware.md section 2).
+is C's (hardware.md section 2). A process whose callbacks are not the VM's (a
+compiled program; a Lua service for its alarms) asks through the message
+halves (`every_message`, `after_message`, `at_message`), which hold it to
+TIMERS_MAX timers and alarms at once and answer FULL past them.
 
 THE REGISTRY (`WAKES`) is what the cooperative scheduler drives: once a frame
 it asks `due(now_ms, out)` for the wakes due (allocation-free, into a
@@ -679,6 +682,7 @@ def at(t, fn):
 # system, each carrying the wake's id: an alarm's AT, a timer's (`every`,
 # `after`) TIMER, two names of the MOY_EVQ_LISTEN a process listens on.
 AT, TIMER = "moybyte.at", "moybyte.timer"
+TIMERS_MAX = 16             # the timers and alarms a message half lets one process hold
 
 
 def _ear(pid, name):
@@ -690,8 +694,20 @@ def _ear(pid, name):
         raise OSError(EMFILE, "process %d hears no %s" % (pid, name))
 
 
+def _timers(pid):
+    n = 0
+    for w in WAKES.list:
+        if w[_OWNER] == pid and (w[_HOW] == _EVERY or w[_HOW] == _AFTER or w[_HOW] == _ALARM):
+            n += 1
+    return n
+
+
 def _wake_message(name, make, v):
+    """Wake `make(v, fn)` posting process `pid` message `name` with its id,
+    which it answers; FULL where the process holds TIMERS_MAX already."""
     pid = _pid()
+    if _timers(pid) >= TIMERS_MAX:
+        return FULL
     _ear(pid, name)
     w = [0]
     w[0] = make(v, lambda: WAKES.post(pid, name, (w[0],)))

@@ -10,7 +10,9 @@
 // (a pin it drives high and keeps until its run ends, a UART it writes and
 // reads back through its peer and closes) and the LoRa radio by handle,
 // starting an OTAA join it keeps running (an uplink before it is accepted
-// refused, the radio busy while it runs). Every _update reads the messages queued for it, one record
+// refused, the radio busy while it runs), then asks for minute-long timers
+// until the console answers FULL and cancels all but the first, which it keeps
+// for its run's end to sweep. Every _update reads the messages queued for it, one record
 // each (moy_evq_ev_t, sdk/include/moybyte/os.h, its arguments a JSON array
 // after it), and logs what it heard: a timer is the system's message
 // "moybyte.timer" carrying its id, and the repeating one's first tick
@@ -163,6 +165,23 @@ EXPORT(_init) void init(void) {
     say();
     put(S("lora_uplink "));
     put_int(moybyte_dev_write(lora, S("early")));
+    say();
+    static int32_t held[64];
+    int32_t t = 0, r = 0;
+    while (t < 64 && (r = moybyte_after(60000)) > 0) {
+        held[t++] = r;
+    }
+    put(S("timers "));
+    put_int(t);
+    put(S(" "));
+    put_int(r);
+    say();
+    int32_t undone = 0;
+    for (int32_t i = 1; i < t; i++) {
+        undone += moybyte_cancel(held[i]);
+    }
+    put(S("uncap "));
+    put_int(undone);
     say();
 }
 

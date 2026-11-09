@@ -226,7 +226,9 @@ def test_a_compiled_app_talks_to_a_service_notifies_awards_and_hears_its_alarm(t
 def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(talk):
     """moybyte_after and moybyte_every answer their timer's id and go off as
     the system's message "moybyte.timer" carrying it; moybyte_cancel ends a
-    timer of the app's own and no other process's."""
+    timer of the app's own and no other process's. Past TIMERS_MAX (its
+    alarm, its two timers and the minute-long ones) a timer answers FULL;
+    the one it keeps goes with its run."""
     from runtime import moybyte
     ws, pid, lines = talk()
     once = [ln for ln in lines if ln.startswith("after ")]
@@ -249,6 +251,11 @@ def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(ta
     finally:
         L.current(was)
         moybyte.WAKES.cancel(shell)
+    assert "timers %d -2" % (moybyte.TIMERS_MAX - 3) in lines, lines
+    assert "uncap %d" % (moybyte.TIMERS_MAX - 4) in lines, lines
+    assert [w[3] for w in moybyte.WAKES.list if w[1] == pid] == [60000]
+    ws.exit()
+    assert not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail if w[1] == pid]
 
 
 def test_a_compiled_app_hears_an_item_handed_to_it_and_reads_it(talk):

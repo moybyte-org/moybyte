@@ -16,7 +16,10 @@
 // answer printed with its errno; a "wake" carrying ["ble"] opens the BLE
 // face by handle with a scan, prints the scan's records (each event and an
 // advertisement's name), connects to the first device heard and keeps the
-// connection until the service ends; a "bye" ends it, a "quit" returns
+// connection until the service ends; a "wake" carrying ["timers"] asks for
+// minute-long timers until the console answers FULL, printing how many it
+// got and that answer's errno, then cancels all but the first, which it keeps
+// until the service ends; a "bye" ends it, a "quit" returns
 // 7 and a "spin" runs on without polling again, sleeping in slices. Its stop is the
 // descriptor's end of file. The calls are the ones an ELF service makes
 // (moybyte/os.h), here its moybyte.os imports. The terminal's test runs it
@@ -125,6 +128,20 @@ int main(void) {
             printf("ble_connect %d errno %d\n", c, c < 0 ? errno : 0);
             c = (int)moy_dev_get(h, "connected");
             printf("ble_connected %d errno %d\n", c, c < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"timers\"]") == 0) {
+            static int held[64];
+            int t = 0, r = 0;
+            while (t < 64 && (r = (int)moy_after(60000)) > 0) {
+                held[t++] = r;
+            }
+            printf("timers %d %d errno %d\n", t, r, r < 0 ? errno : 0);
+            int undone = 0;
+            for (int i = 1; i < t; i++) {
+                undone += (int)moy_cancel(held[i]);
+            }
+            printf("uncap %d\n", undone);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0) {
             printf("after %d\n", (int)moy_after(0));

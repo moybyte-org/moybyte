@@ -109,9 +109,10 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     ERANGE, a folder it was not granted and a role it lacks EACCES; award and
     progress reach the achievements process, which finds the badge it
     declares; a timer it makes is its own to cancel, once, and an alarm needs
-    "alarms"."""
+    "alarms" (turned off in Settings here)."""
     from runtime.notifications import NOTES
     _ws, app = term
+    _ws.consent.turn("elf.app", "alarms", False)
     assert out(app, "elf.app/app; echo status $?") == [
         "prefs.set 0", "prefs.get 42", "clipboard.put_text 0", "clipboard.text from C",
         "clipboard.short -1 ERANGE", "files.save note", "files.load # hi", "",
@@ -166,6 +167,46 @@ def test_a_native_command_picks_an_item_and_hears_it_as_a_message(term):
         "item_read.again # kept", "", "pick.again 1",
         "cancelled [0, null, null, null]", "item_read.none -1 ENOENT", "status 0"]
     assert ws.carts_store.load_file("docs", "picked", ws.carts_root) == "# kept\n"
+
+
+def test_a_native_command_hears_its_timers_and_alarm_and_its_end_sweeps_them(term):
+    """`moy_after`, `moy_every` and `moy_at` from C (elf_app.moy's `app
+    timer`) answer the wake's id and go off as the system's message on the
+    command's event descriptor, a timer's "moybyte.timer", the alarm's
+    "moybyte.at", each carrying it; `moy_cancel` ends the repeating one at its
+    first tick. Past TIMERS_MAX a timer is ERANGE (the door's FULL), and the
+    timer it keeps goes with its end."""
+    from runtime import moy_sh, moybyte
+    from runtime import scheduler as S
+    _ws, app = term
+    app.face.take()
+    before = app.face.lines()
+    app.face.set_line("elf.app/app timer; echo status $?")
+    app.face.submit()
+    ends = []
+
+    def end(pid):
+        ends.append((pid, [w[3] for w in moybyte.WAKES.list if w[1] == pid]))
+    moybyte.ENDS.append(end)
+    try:
+        t0 = time.monotonic()
+        while app.face.busy() and time.monotonic() - t0 < 20:
+            moy_sh.jobs()
+            S.SCHED.tick(0)
+            time.sleep(0.002)
+    finally:
+        moybyte.ENDS.remove(end)
+    app.face.take()
+    lines = [re.sub("\x1b\\[[0-9;]*m", "", ln) for ln in app.face.lines()][len(before):]
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("after "))
+    assert lines[at:] == [
+        "after 1", "heard.after 1", "every 1", "heard.every 1", "cancel.every 1", "at 1",
+        "heard.at 1", "timers %d" % moybyte.TIMERS_MAX, "timers.full -1 ERANGE",
+        "uncap %d" % (moybyte.TIMERS_MAX - 1), "status 0"]
+    pid = [p for p, held in ends if held == [60000]]
+    assert len(pid) == 1, ends
+    pid = pid[0]
+    assert not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail if w[1] == pid]
 
 
 def test_a_native_command_holds_leases_by_handle_and_its_end_sweeps_them(term):
