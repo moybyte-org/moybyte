@@ -50,7 +50,7 @@ def built(tmp_path_factory):
         pytest.skip("no wasi-sdk: %s" % exc)
     out = tmp_path_factory.mktemp("wasi")
     got = {}
-    for name in ("wasi_cat", "wasi_probe", "wasi_hello", "wasi_svc"):
+    for name in ("wasi_cat", "wasi_probe", "wasi_hello", "wasi_svc", "wasi_crypto"):
         if name == "wasi_hello" and not wasm_cart.rust_wasip1():
             continue
         dst = str(out / (name + ".moy"))
@@ -118,7 +118,8 @@ def out(app, text):
 
 def test_the_commands_are_on_the_path(term, built):
     _ws, app = term
-    want = ["bare", "cat"] + (["hello"] if "wasi_hello" in built else []) + ["probe", "svc"]
+    want = ["bare", "cat", "crypto"] + (["hello"] if "wasi_hello" in built else []) + [
+        "probe", "svc"]
     assert " ".join(out(app, "ls /bin")).split() == want
 
 
@@ -191,6 +192,15 @@ def test_clocks_random_and_the_terminal_s_size(term):
     assert out(app, "wasi.probe/probe random") == ["random yes"]
     cols, rows = app.face.size()
     assert out(app, "wasi.probe/probe term") == ["0 %d %d" % (cols, rows)]
+
+
+def test_the_crypto_rows_answer_a_wasi_command_with_no_permission(term):
+    """The native fixture's program built for WASI (tests/fixtures/wasm/
+    wasi_crypto.moy): its moybyte.os imports answer what the ELF tier's rows
+    answer, errno for errno."""
+    import crypto_vectors
+    _ws, app = term
+    assert out(app, "wasi.crypto/crypto; echo status $?") == crypto_vectors.PROGRAM + ["status 0"]
 
 
 def test_ctrl_c_stops_a_command_at_its_next_import(term):

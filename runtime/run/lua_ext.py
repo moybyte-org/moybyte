@@ -720,7 +720,10 @@ do
       for i = 1, n do out[i] = enc((select(i, ...)), 0) end
       return "[" .. concat(out, ", ") .. "]"
     end
-    local m = {ERR = 3, WARNING = 4, INFO = 6}
+    -- the table the run's role binding opened its C rows into (random,
+    -- sha256, ...: native/moy_app/moy_app_lua.c), kept
+    local m = type(moybyte) == "table" and moybyte or {}
+    m.ERR, m.WARNING, m.INFO = 3, 4, 6
     for _, v in ipairs({@RUN_CALLS@}) do
       m[v] = function(...) return call(v, args(...)) end
     end

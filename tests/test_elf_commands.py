@@ -23,7 +23,7 @@ if native_build.cc() is None:
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures", "elf")
 NAMES = ("elf_hello", "elf_cat", "elf_probe", "elf_svc", "elf_nc", "elf_head", "elf_libc",
-         "elf_app")
+         "elf_app", "elf_crypto")
 
 
 @pytest.fixture(scope="module")
@@ -125,6 +125,14 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     ws.frame(1 / 30)
     assert ws.ach.has("elf.app", "first"), "a badge it declares, awarded from C"
     assert not ws.ach.has("elf.app", "far")
+
+
+def test_the_crypto_rows_answer_a_native_command(term):
+    """The crypto rows from C (tests/fixtures/elf/elf_crypto.moy): the known
+    answers, and each length refused an errno, never a crash."""
+    import crypto_vectors
+    _ws, app = term
+    assert out(app, "elf.crypto/crypto; echo status $?") == crypto_vectors.PROGRAM + ["status 0"]
 
 
 def test_hello_runs_and_takes_its_args(term):

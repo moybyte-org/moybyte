@@ -28,6 +28,12 @@ The role table is data, and every verb has one of four servers:
 - **`c`**: the state is the kernel's and resident (the settings rows, the
   glass, the lease table, the engine's sizing, the user-files layer). Each verb
   is its own C function taking the grant; there is no by-name dispatcher.
+  The `moybyte` role's C rows, the crypto (`random`, `sha256`, `hmac_sha256`,
+  `aes_gcm_seal`, `aes_gcm_open`, `x25519`), keep no state at all: the door
+  runs `native/moy_net/moy_crypto.h`'s body in place (`how` "seq"); every
+  Lua state holds them in its `moybyte` table, calling the body directly, a
+  service with no grant too (`moy_app_lua_open_crypto`); and the module's
+  functions of the same names are Python's (`runtime/system/moybyte.py`).
 - **`shell`**: the state is the Python console's (the routes' surfaces, the
   look and its caches, the wallpaper cart's namespace, the shelf's live list,
   Get Carts' transport). There is no resident C catalogue,

@@ -168,5 +168,11 @@ int32_t moy_os_moy_at(int32_t t);
 int32_t moy_os_moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap);
 int32_t moy_os_moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap);
 int32_t moy_os_moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap);
+int32_t moy_os_moy_random(int32_t n, void *data, size_t data_cap);
+int32_t moy_os_moy_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap);
+int32_t moy_os_moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap);
+int32_t moy_os_moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap);
+int32_t moy_os_moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap);
+int32_t moy_os_moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap);
 
 #endif // MOY_OS_ROWS_H

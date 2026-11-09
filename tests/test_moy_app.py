@@ -317,6 +317,54 @@ def run(sp, ap, say, mi, root):
                        (None, "Caf\u00e9 9-b_c")):
         say("id", cid, title, ap.id_for(cid, title))
     say("perms", list(ap.perms()), list(ap.kinds()), list(ap.roles()))
+
+    # -- the crypto rows (native/moy_net/moy_crypto.h): FIPS 180-2's "abc",
+    # RFC 4231's cases 1, 2 and 6, the GCM spec's test cases 3 and 15 (no
+    # AAD, the nonce first), RFC 7748 section 6.1's two keys; and the lengths
+    # each refuses
+    import binascii
+    h = binascii.unhexlify
+
+    def x(b):
+        return b if b is None else binascii.hexlify(b).decode()
+
+    say("sha256", x(ap.sha256(b"abc")), x(ap.sha256("")), x(ap.sha256(bytearray(b"abc"))))
+    say("hmac", x(ap.hmac_sha256(b"\x0b" * 20, b"Hi There")),
+        x(ap.hmac_sha256("Jefe", "what do ya want for nothing?")),
+        x(ap.hmac_sha256(b"\xaa" * 131, b"Test Using Larger Than Block-Size Key - Hash Key First")))
+    iv = h("cafebabefacedbaddecaf888")
+    plain = h("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72"
+              "1c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255")
+    k128, k256 = h("feffe9928665731c6d6a8f9467308308"), h("feffe9928665731c6d6a8f9467308308" * 2)
+    c3 = iv + h("42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e"
+                "21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f5985"
+                "4d5c2af327cd64a62cf35abd2ba6fab4")
+    c15 = iv + h("522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa"
+                 "8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662898015ad"
+                 "b094dac5d93471bdec1a502270e3cc6c")
+    say("gcm open", ap.aes_gcm_open(k128, c3) == plain, ap.aes_gcm_open(k256, c15) == plain,
+        ap.aes_gcm_open(k256, c3), ap.aes_gcm_open(k128, c3[:-1] + b"\x00"),
+        ap.aes_gcm_open(k128, b"short"))
+    sealed = ap.aes_gcm_seal(k128, b"moybyte")
+    say("gcm seal", len(sealed), ap.aes_gcm_open(k128, sealed), ap.aes_gcm_open(k128, ap.aes_gcm_seal(k128, b"")),
+        sealed[:12] != ap.aes_gcm_seal(k128, b"moybyte")[:12])
+    alice = h("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
+    bob = h("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb")
+    say("x25519", x(ap.x25519(alice)), x(ap.x25519(bob, None)),
+        x(ap.x25519(alice, ap.x25519(bob))), ap.x25519(bob, ap.x25519(alice)) == ap.x25519(alice, ap.x25519(bob)))
+    r = ap.random(16)
+    say("random", len(r), len(ap.random(0)), len(ap.random(4096)), r != ap.random(16))
+    for what, fn, args in (("random 4097", ap.random, (4097,)), ("random -1", ap.random, (-1,)),
+                           ("seal key", ap.aes_gcm_seal, (b"short", b"")),
+                           ("open key", ap.aes_gcm_open, (b"", c3)),
+                           ("x25519 secret", ap.x25519, (b"x",)),
+                           ("x25519 peer", ap.x25519, (alice, b"y")),
+                           ("x25519 small", ap.x25519, (alice, bytes(32)))):
+        try:
+            fn(*args)
+            say(what, "answered")
+        except ValueError as e:
+            say(what, str(e))
 '''
 
 VM_MAIN = r'''

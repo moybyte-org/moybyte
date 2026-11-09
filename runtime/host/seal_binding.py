@@ -1,6 +1,7 @@
-"""The sign-in's crypto (native/moy_net/moy_seal.c) for the host's one library.
+"""The sign-in's crypto (native/moy_net/moy_seal.c) and the apps' crypto rows'
+body (native/moy_net/moy_crypto.c) for the host's one library.
 
-moy_seal.c compiles against mbedTLS: a board's is the ESP-IDF's, the host's
+Both compile against mbedTLS: a board's is the ESP-IDF's, the host's
 the vendored copy of the same release (native/moy_net/mbedtls/README.md).
 Its headers keep their folder (`mbedtls/aes.h`), so it is a static archive of
 its own, as the shell's is (runtime/host/moy_sh.py), which the one library
@@ -31,8 +32,9 @@ FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w", "-I", NET, "-I", os.path.join(MBEDT
 
 
 def sources():
-    """The translation units: moy_seal.c and the vendored library."""
-    return [os.path.join(NET, "moy_seal.c")] + sorted(
+    """The translation units: moy_seal.c, moy_crypto.c (the crypto rows'
+    body, native/moy_net/moy_crypto.h) and the vendored library."""
+    return [os.path.join(NET, "moy_seal.c"), os.path.join(NET, "moy_crypto.c")] + sorted(
         glob.glob(os.path.join(MBEDTLS, "library", "*.c")))
 
 
@@ -44,7 +46,8 @@ def archive(cflags=(), verbose=False):
     flags = FLAGS + list(cflags)
     h = hashlib.sha256(" ".join(flags).encode())
     paths = sources() + sorted(glob.glob(os.path.join(MBEDTLS, "**", "*.h"), recursive=True))
-    paths += [os.path.join(NET, "moy_seal.h"), os.path.join(NET, "moy_seal_mbedtls.h")]
+    paths += [os.path.join(NET, "moy_seal.h"), os.path.join(NET, "moy_crypto.h"),
+              os.path.join(NET, "moy_seal_mbedtls.h")]
     for path in paths:
         h.update(path[len(native_build.ROOT):].encode())
         with open(path, "rb") as f:

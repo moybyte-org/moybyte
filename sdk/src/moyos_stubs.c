@@ -936,3 +936,63 @@ int32_t moy_files_new_name(const char *kind, const char *title, void *name, size
     return ((moy_os_fn_moy_files_new_name *)__moy_os->fn[90])(kind, title, name, name_cap);
 }
 #endif
+
+#if MOY_OS_ROW(91)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_random(int32_t n, void *data, size_t data_cap);
+MOY_OS_USED(91);
+int32_t moy_random(int32_t n, void *data, size_t data_cap)
+{
+    return ((moy_os_fn_moy_random *)__moy_os->fn[91])(n, data, data_cap);
+}
+#endif
+
+#if MOY_OS_ROW(92)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap);
+MOY_OS_USED(92);
+int32_t moy_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap)
+{
+    return ((moy_os_fn_moy_sha256 *)__moy_os->fn[92])(data, data_len, digest, digest_cap);
+}
+#endif
+
+#if MOY_OS_ROW(93)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap);
+MOY_OS_USED(93);
+int32_t moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap)
+{
+    return ((moy_os_fn_moy_hmac_sha256 *)__moy_os->fn[93])(key, key_len, data, data_len, mac, mac_cap);
+}
+#endif
+
+#if MOY_OS_ROW(94)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap);
+MOY_OS_USED(94);
+int32_t moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap)
+{
+    return ((moy_os_fn_moy_aes_gcm_seal *)__moy_os->fn[94])(key, key_len, plain, plain_len, sealed, sealed_cap);
+}
+#endif
+
+#if MOY_OS_ROW(95)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap);
+MOY_OS_USED(95);
+int32_t moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap)
+{
+    return ((moy_os_fn_moy_aes_gcm_open *)__moy_os->fn[95])(key, key_len, sealed, sealed_len, plain, plain_cap);
+}
+#endif
+
+#if MOY_OS_ROW(96)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap);
+MOY_OS_USED(96);
+int32_t moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap)
+{
+    return ((moy_os_fn_moy_x25519 *)__moy_os->fn[96])(secret, secret_len, peer, peer_len, shared, shared_cap);
+}
+#endif

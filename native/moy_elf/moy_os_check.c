@@ -426,6 +426,51 @@ static int u_check_90(const moy_u_space_t *u, const char *kind, const char *titl
         && U_BUF(name, u_n((size_t)name_cap, 1), MOY_U_W);
 }
 
+// 91 moy_random
+_Static_assert(U_REGS(int32_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_random's registers");
+static int u_check_91(const moy_u_space_t *u, int32_t n, void *data, size_t data_cap) {
+    return U_BUF(data, u_n((size_t)data_cap, 1), MOY_U_W);
+}
+
+// 92 moy_sha256
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_sha256's registers");
+static int u_check_92(const moy_u_space_t *u, const void *data, size_t data_len, void *digest, size_t digest_cap) {
+    return U_BUF(data, u_n((size_t)data_len, 1), MOY_U_R)
+        && U_BUF(digest, u_n((size_t)digest_cap, 1), MOY_U_W);
+}
+
+// 93 moy_hmac_sha256
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_hmac_sha256's registers");
+static int u_check_93(const moy_u_space_t *u, const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap) {
+    return U_BUF(key, u_n((size_t)key_len, 1), MOY_U_R)
+        && U_BUF(data, u_n((size_t)data_len, 1), MOY_U_R)
+        && U_BUF(mac, u_n((size_t)mac_cap, 1), MOY_U_W);
+}
+
+// 94 moy_aes_gcm_seal
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_aes_gcm_seal's registers");
+static int u_check_94(const moy_u_space_t *u, const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap) {
+    return U_BUF(key, u_n((size_t)key_len, 1), MOY_U_R)
+        && U_BUF(plain, u_n((size_t)plain_len, 1), MOY_U_R)
+        && U_BUF(sealed, u_n((size_t)sealed_cap, 1), MOY_U_W);
+}
+
+// 95 moy_aes_gcm_open
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_aes_gcm_open's registers");
+static int u_check_95(const moy_u_space_t *u, const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap) {
+    return U_BUF(key, u_n((size_t)key_len, 1), MOY_U_R)
+        && U_BUF(sealed, u_n((size_t)sealed_len, 1), MOY_U_R)
+        && U_BUF(plain, u_n((size_t)plain_cap, 1), MOY_U_W);
+}
+
+// 96 moy_x25519
+_Static_assert(U_REGS(const void *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_x25519's registers");
+static int u_check_96(const moy_u_space_t *u, const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap) {
+    return U_BUF(secret, u_n((size_t)secret_len, 1), MOY_U_R)
+        && U_BUF(peer, u_n((size_t)peer_len, 1), MOY_U_R)
+        && U_BUF(shared, u_n((size_t)shared_cap, 1), MOY_U_W);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -489,6 +534,12 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 88: fn = (u_check_fn *)(void *)u_check_88; break;
     case 89: fn = (u_check_fn *)(void *)u_check_89; break;
     case 90: fn = (u_check_fn *)(void *)u_check_90; break;
+    case 91: fn = (u_check_fn *)(void *)u_check_91; break;
+    case 92: fn = (u_check_fn *)(void *)u_check_92; break;
+    case 93: fn = (u_check_fn *)(void *)u_check_93; break;
+    case 94: fn = (u_check_fn *)(void *)u_check_94; break;
+    case 95: fn = (u_check_fn *)(void *)u_check_95; break;
+    case 96: fn = (u_check_fn *)(void *)u_check_96; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

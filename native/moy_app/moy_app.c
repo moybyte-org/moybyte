@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "moy_app.h"
+#include "moy_crypto.h"
 #include "moy_route.h"
 
 struct moy_app {
@@ -1593,6 +1594,17 @@ static int32_t ans_name(int rc, const char *name, uint8_t *ans, size_t cap) {
     return rc == MOY_APP_OK ? ans_put(ans, cap, name, strlen(name)) : -rc;
 }
 
+// A crypto row's answer (moy_crypto.h): its length, or its code as the ABI's.
+static int32_t ans_crypto(int32_t r) {
+    switch (r) {
+        case MOY_CRYPTO_EFULL: return -MOY_APP_FULL;
+        case MOY_CRYPTO_EFORGED: return -MOY_APP_FORGED;
+        case MOY_CRYPTO_EABSENT: return -MOY_APP_ABSENT;
+        case MOY_CRYPTO_ENOMEM: return -MOY_APP_NOMEM;
+        default: return r < 0 ? -MOY_APP_BAD : r;
+    }
+}
+
 static void le32(uint8_t *q, uint32_t v) {
     q[0] = (uint8_t)v;
     q[1] = (uint8_t)(v >> 8);
@@ -1612,6 +1624,9 @@ static int no_args(int row) {
         case MOY_ROW_PREFS_GET: case MOY_ROW_PREFS_SET: case MOY_ROW_PREFS_CLEAR:
         case MOY_ROW_WALLPAPER_SAVE_COPY: case MOY_ROW_ARTWORK_FOLLOW:
         case MOY_ROW_CLIPBOARD_PUT_TEXT:
+        case MOY_ROW_MOYBYTE_RANDOM: case MOY_ROW_MOYBYTE_SHA256:
+        case MOY_ROW_MOYBYTE_HMAC_SHA256: case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
+        case MOY_ROW_MOYBYTE_AES_GCM_OPEN: case MOY_ROW_MOYBYTE_X25519:
             return 0;
         default:
             return 1;
@@ -1854,6 +1869,35 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return moy_app_clip_kind(a, g);
         case MOY_ROW_CLIPBOARD_SEQ:
             return moy_app_clip_seq(a, g);
+        case MOY_ROW_MOYBYTE_RANDOM: {
+            int32_t want = arg_int(f);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(moy_crypto_random(want, ans, cap));
+        }
+        case MOY_ROW_MOYBYTE_SHA256:
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(moy_crypto_sha256(d, dn, ans, cap));
+        case MOY_ROW_MOYBYTE_HMAC_SHA256:
+        case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
+        case MOY_ROW_MOYBYTE_AES_GCM_OPEN:
+        case MOY_ROW_MOYBYTE_X25519:
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(row == MOY_ROW_MOYBYTE_HMAC_SHA256
+                              ? moy_crypto_hmac_sha256(d, dn, e, en, ans, cap)
+                              : row == MOY_ROW_MOYBYTE_AES_GCM_SEAL
+                              ? moy_crypto_aes_gcm_seal(d, dn, e, en, ans, cap)
+                              : row == MOY_ROW_MOYBYTE_AES_GCM_OPEN
+                              ? moy_crypto_aes_gcm_open(d, dn, e, en, ans, cap)
+                              : moy_crypto_x25519(d, dn, e, en, ans, cap));
         default:
             // An object the Python binding hands out, or a codec over pixels.
             return -MOY_APP_BAD;

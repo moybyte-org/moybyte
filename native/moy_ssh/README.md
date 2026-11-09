@@ -32,8 +32,9 @@ a shell does, counts as the one face (`native/moy_tty/README.md`), and
 
 Dropbear brings its own: curve25519 key exchange, an ed25519 host key and
 client keys, chacha20-poly1305, SHA-2, from its bundled libtomcrypt. The
-image's mbedTLS has none of curve25519, chacha20 or ed25519, so the server
-uses none of it.
+image's mbedTLS has neither chacha20 nor ed25519, so the server uses none of
+it (the mbedTLS Curve25519 a console image carries is the apps'
+`moybyte.x25519`, `native/moy_net/moy_crypto.h`).
 
 ## What runs where
 

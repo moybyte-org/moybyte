@@ -1,6 +1,7 @@
 # Map (grep -n a name to jump there):
 #   _Buf             moy_fs.h's buffer: an answer the user-files layer allocated
 #   _raise           the ABI's codes as the exceptions the roles raise
+#   _crypto          the crypto rows (native/moy_net/moy_crypto.h)
 #   binding          the module: App, kernel, the role types, the policy
 #   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
@@ -41,7 +42,7 @@ _PU32 = c.POINTER(c.c_uint32)
 _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
-OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
+OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM, FORGED = range(11)
 KINDS_N, TOKENS_N = 4, 38
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
@@ -239,6 +240,91 @@ def _scalar(v):
     if v < 0:
         _raise(-v)
     return v
+
+
+# The crypto rows' C (native/moy_net/moy_crypto.h), its codes and sizes.
+_C_BAD, _C_FULL, _C_FORGED, _C_POINT, _C_ABSENT, _C_NOMEM = -1, -2, -3, -4, -5, -6
+_C_HASH, _C_SEAL_OVER, _C_KEY25519, _C_RANDOM_MAX = 32, 28, 32, 4096
+_SPAN = [c.c_void_p, c.c_size_t]
+_CRYPTO_SIGS = (
+    ("moy_crypto_random", [c.c_int32, c.c_void_p, c.c_size_t]),
+    ("moy_crypto_sha256", _SPAN + _SPAN),
+    ("moy_crypto_hmac_sha256", _SPAN * 3),
+    ("moy_crypto_aes_gcm_seal", _SPAN * 3),
+    ("moy_crypto_aes_gcm_open", _SPAN * 3),
+    ("moy_crypto_x25519", _SPAN * 3),
+)
+
+
+def _bytes_of(o):
+    if isinstance(o, str):
+        return o.encode("utf-8", "surrogateescape")
+    return bytes(memoryview(o))
+
+
+def _crypto(lib):
+    """{name: function} of a Python program's crypto rows over `lib`, as the
+    native module's: bytes in (a str's UTF-8), bytes out, None where sealed
+    bytes do not open."""
+    for name, args in _CRYPTO_SIGS:
+        fn = getattr(lib, name)
+        fn.argtypes = args
+        fn.restype = c.c_int32
+
+    def answer(buf, r):
+        if r >= 0:
+            return buf.raw[:r]
+        if r == _C_FORGED:
+            return None
+        if r == _C_POINT:
+            raise ValueError("a peer key of small order")
+        if r == _C_ABSENT:
+            raise NotImplementedError("a build without it")
+        if r == _C_NOMEM:
+            raise MemoryError("moy_crypto")
+        raise ValueError("a length the call refuses")
+
+    def spans(*objs):
+        out = []
+        for o in objs:
+            b = _bytes_of(o)
+            out += [b, len(b)]
+        return out
+
+    def random(n):
+        n = int(n)
+        if not 0 <= n <= _C_RANDOM_MAX:
+            raise ValueError("a length the call refuses")
+        buf = c.create_string_buffer(n)
+        return answer(buf, lib.moy_crypto_random(n, buf, n))
+
+    def sha256(data):
+        buf = c.create_string_buffer(_C_HASH)
+        return answer(buf, lib.moy_crypto_sha256(*spans(data), buf, _C_HASH))
+
+    def hmac_sha256(key, data):
+        buf = c.create_string_buffer(_C_HASH)
+        return answer(buf, lib.moy_crypto_hmac_sha256(*spans(key, data), buf, _C_HASH))
+
+    def aes_gcm_seal(key, plain):
+        a = spans(key, plain)
+        cap = a[3] + _C_SEAL_OVER
+        buf = c.create_string_buffer(cap)
+        return answer(buf, lib.moy_crypto_aes_gcm_seal(*a, buf, cap))
+
+    def aes_gcm_open(key, sealed):
+        a = spans(key, sealed)
+        cap = max(a[3] - _C_SEAL_OVER, 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_gcm_open(*a, buf, cap))
+
+    def x25519(secret, peer=None):
+        a = spans(secret) + (spans(peer) if peer is not None else [None, 0])
+        buf = c.create_string_buffer(_C_KEY25519)
+        return answer(buf, lib.moy_crypto_x25519(*a, buf, _C_KEY25519))
+
+    return dict(random=random, sha256=sha256, hmac_sha256=hmac_sha256,
+                aes_gcm_seal=aes_gcm_seal, aes_gcm_open=aes_gcm_open, x25519=x25519)
 
 
 def _canvas_handle(cv):
@@ -1011,7 +1097,7 @@ def binding(sanitize=False):
         table=lambda: table_names, door_bind=door_bind, wasm_rows=wasm_rows,
         wasm_hops=wasm_hops, _lib=lib,
         kinds=lambda: kind_names, tokens=lambda: token_names,
-        CLIP_MAX=CLIP_MAX, SLOTS=SLOTS)
+        CLIP_MAX=CLIP_MAX, SLOTS=SLOTS, **_crypto(lib))
     return m
 
 

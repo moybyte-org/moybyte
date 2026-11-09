@@ -271,8 +271,9 @@ laptop, `scp`/`sftp` into the files tree, mDNS for the hostname (the IDF's
 `runtime/system/ssh_service.py`), the server Dropbear (MIT-style,
 small, built for embedded; owner, 2026-11-03; libssh is LGPL and awkward in a
 statically linked FSL image, wolfSSH is GPL) with its own crypto: the image's
-mbedTLS has no curve25519, chacha20 or ed25519 (the spike, e5b4dcd9e), so
-Dropbear's bundled libtomcrypt carries them (`native/moy_ssh/README.md`).
+mbedTLS has no chacha20 or ed25519 (the spike, e5b4dcd9e; its Curve25519 is
+the apps' `moybyte.x25519`, `between_apps.md` §5), so Dropbear's bundled
+libtomcrypt carries them (`native/moy_ssh/README.md`).
 **Sign-in (owner,
 2026-11-03)**: password login by default, the password set by the user at
 setup (on the Zero, on its webhost page), never a shared default; keys in

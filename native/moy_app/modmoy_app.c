@@ -67,6 +67,7 @@
 
 #include "moy_app.h"
 #include "moy_app_wasm.h"
+#include "moy_crypto.h"
 
 // native/moy_spine's binding: the allocator kernel state takes, the C rows a
 // Settings holds, and what its saver raised.
@@ -2056,6 +2057,104 @@ static mp_obj_t mod_kinds(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_kinds_obj, mod_kinds);
 
+// -- the crypto rows (native/moy_net/moy_crypto.h) ------------------------------------
+//
+// A Python program's moybyte.random, sha256, hmac_sha256, aes_gcm_seal,
+// aes_gcm_open and x25519 (runtime/system/moybyte.py): the C body every tier
+// reaches, over a str's UTF-8 or any buffer, answered as bytes.
+
+static const uint8_t *bytes_of(mp_obj_t o, size_t *n) {
+    if (mp_obj_is_str(o)) {
+        return (const uint8_t *)mp_obj_str_get_data(o, n);
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
+    *n = b.len;
+    return b.buf;
+}
+
+// `cap` bytes made, then the body's answer: bytes, None where sealed bytes
+// do not open, or its code raised.
+static mp_obj_t crypto_answer(vstr_t *v, int32_t r) {
+    if (r >= 0) {
+        v->len = (size_t)r;
+        return mp_obj_new_bytes_from_vstr(v);
+    }
+    vstr_clear(v);
+    switch (r) {
+        case MOY_CRYPTO_EFORGED:
+            return mp_const_none;
+        case MOY_CRYPTO_EPOINT:
+            mp_raise_ValueError(MP_ERROR_TEXT("a peer key of small order"));
+        case MOY_CRYPTO_EABSENT:
+            mp_raise_NotImplementedError(MP_ERROR_TEXT("a build without it"));
+        case MOY_CRYPTO_ENOMEM:
+            mp_raise_type(&mp_type_MemoryError);
+        default:
+            mp_raise_ValueError(MP_ERROR_TEXT("a length the call refuses"));
+    }
+}
+
+static mp_obj_t mod_random(mp_obj_t n_in) {
+    mp_int_t n = mp_obj_get_int(n_in);
+    if (n < 0 || n > MOY_CRYPTO_RANDOM_MAX) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a length the call refuses"));
+    }
+    vstr_t v;
+    vstr_init_len(&v, (size_t)n);
+    return crypto_answer(&v, moy_crypto_random((int32_t)n, v.buf, (size_t)n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_random_obj, mod_random);
+
+static mp_obj_t mod_sha256(mp_obj_t data) {
+    size_t n;
+    const uint8_t *p = bytes_of(data, &n);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_HASH);
+    return crypto_answer(&v, moy_crypto_sha256(p, n, v.buf, MOY_CRYPTO_HASH));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sha256_obj, mod_sha256);
+
+static mp_obj_t mod_hmac_sha256(mp_obj_t key, mp_obj_t data) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(data, &n);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_HASH);
+    return crypto_answer(&v, moy_crypto_hmac_sha256(k, kn, p, n, v.buf, MOY_CRYPTO_HASH));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_hmac_sha256_obj, mod_hmac_sha256);
+
+static mp_obj_t mod_aes_gcm_seal(mp_obj_t key, mp_obj_t plain) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(plain, &n);
+    vstr_t v;
+    vstr_init_len(&v, n + MOY_CRYPTO_SEAL_OVER);
+    return crypto_answer(&v, moy_crypto_aes_gcm_seal(k, kn, p, n, v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_aes_gcm_seal_obj, mod_aes_gcm_seal);
+
+static mp_obj_t mod_aes_gcm_open(mp_obj_t key, mp_obj_t sealed) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(sealed, &n);
+    vstr_t v;
+    vstr_init_len(&v, n > MOY_CRYPTO_SEAL_OVER ? n - MOY_CRYPTO_SEAL_OVER : 0u);
+    return crypto_answer(&v, moy_crypto_aes_gcm_open(k, kn, p, n, v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_aes_gcm_open_obj, mod_aes_gcm_open);
+
+static mp_obj_t mod_x25519(size_t n_args, const mp_obj_t *args) {
+    size_t sn, pn = 0;
+    const uint8_t *sec = bytes_of(args[0], &sn), *peer = NULL;
+    if (n_args > 1 && args[1] != mp_const_none) {
+        peer = bytes_of(args[1], &pn);
+    }
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_KEY25519);
+    return crypto_answer(&v, moy_crypto_x25519(sec, sn, peer, pn, v.buf,
+                                               MOY_CRYPTO_KEY25519));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_x25519_obj, 1, 2, mod_x25519);
+
 // -- the module ----------------------------------------------------------------------------
 
 static const mp_rom_map_elem_t moy_app_globals_table[] = {
@@ -2086,6 +2185,12 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_perms), MP_ROM_PTR(&mod_perms_obj) },
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&mod_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&mod_tokens_obj) },
+    { MP_ROM_QSTR(MP_QSTR_random), MP_ROM_PTR(&mod_random_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sha256), MP_ROM_PTR(&mod_sha256_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hmac_sha256), MP_ROM_PTR(&mod_hmac_sha256_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_gcm_seal), MP_ROM_PTR(&mod_aes_gcm_seal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_gcm_open), MP_ROM_PTR(&mod_aes_gcm_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_x25519), MP_ROM_PTR(&mod_x25519_obj) },
     { MP_ROM_QSTR(MP_QSTR_CLIP_MAX), MP_ROM_INT(MOY_APP_CLIP_MAX) },
     { MP_ROM_QSTR(MP_QSTR_SLOTS), MP_ROM_INT(MOY_GRANT_SLOTS) },
 };

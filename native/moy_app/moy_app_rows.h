@@ -48,7 +48,9 @@ enum {
     MOY_ROW_UI_RULE, MOY_ROW_UI_TEXT_VIEW, MOY_ROW_UI_TABLE_PART, MOY_ROW_UI_PART_AT,
     MOY_ROW_UI_SPLIT, MOY_ROW_UI_TABLE_DIST, MOY_ROW_UI_TABLE_FLOOR, MOY_ROW_UI_HELD,
     MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
-    MOY_ROW_UI_HELD_ALL, MOY_ROW_N,
+    MOY_ROW_UI_HELD_ALL, MOY_ROW_MOYBYTE_RANDOM, MOY_ROW_MOYBYTE_SHA256,
+    MOY_ROW_MOYBYTE_HMAC_SHA256, MOY_ROW_MOYBYTE_AES_GCM_SEAL, MOY_ROW_MOYBYTE_AES_GCM_OPEN,
+    MOY_ROW_MOYBYTE_X25519, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
     "damage.all", "damage.again", "surface.canvas", "surface.size", "surface.font_scale", \
@@ -70,6 +72,8 @@ enum {
     "ui.popover", "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", \
     "ui.table_part", "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", \
     "ui.held", "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last", "ui.held_all", \
+    "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256", "moybyte.aes_gcm_seal", \
+    "moybyte.aes_gcm_open", "moybyte.x25519", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -117,9 +121,11 @@ enum {
     MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
     MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY, MOY_T_MOYBYTE_AFTER,
     MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG, MOY_T_MOYBYTE_RECV,
-    MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
+    MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT, MOY_T_MOYBYTE_RANDOM,
+    MOY_T_MOYBYTE_SHA256, MOY_T_MOYBYTE_HMAC_SHA256, MOY_T_MOYBYTE_AES_GCM_SEAL,
+    MOY_T_MOYBYTE_AES_GCM_OPEN, MOY_T_MOYBYTE_X25519,
 };
-#define MOY_APP_TABLE_N 177u
+#define MOY_APP_TABLE_N 183u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -300,6 +306,12 @@ enum {
     { "moybyte.item_read", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.item_write", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.at", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.random", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_RANDOM }, \
+    { "moybyte.sha256", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_SHA256 }, \
+    { "moybyte.hmac_sha256", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_HMAC_SHA256 }, \
+    { "moybyte.aes_gcm_seal", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AES_GCM_SEAL }, \
+    { "moybyte.aes_gcm_open", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AES_GCM_OPEN }, \
+    { "moybyte.x25519", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_X25519 }, \
 }
 
 // The permission each role is granted by: a role absent here is never

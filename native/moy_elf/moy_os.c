@@ -838,6 +838,7 @@ static int role_errno(int32_t r) {
         case MOY_APP_NOSTORE: return ENODEV;
         case MOY_APP_IO: return EIO;
         case MOY_APP_NEEDS_VM: return EAGAIN;
+        case MOY_APP_FORGED: return EBADMSG;
         default: return EINVAL;
     }
 }

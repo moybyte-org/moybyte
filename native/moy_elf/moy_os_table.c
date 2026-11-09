@@ -198,6 +198,52 @@ int32_t moy_os_moy_files_new_name(const char *kind, const char *title, void *nam
     return moy_os_call(35u, MOY_OS_HOP, a, 2, name, name_cap);   // files.new_name
 }
 
+int32_t moy_os_moy_random(int32_t n, void *data, size_t data_cap) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, n, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(177u, MOY_OS_SEQ, a, 1, data, data_cap);   // moybyte.random
+}
+
+int32_t moy_os_moy_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap) {
+    const moy_os_arg_t a[1] = {
+        { data, data_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(178u, MOY_OS_SEQ, a, 1, digest, digest_cap);   // moybyte.sha256
+}
+
+int32_t moy_os_moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap) {
+    const moy_os_arg_t a[2] = {
+        { key, key_len, 0, MOY_OS_ARG_BYTES },
+        { data, data_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(179u, MOY_OS_SEQ, a, 2, mac, mac_cap);   // moybyte.hmac_sha256
+}
+
+int32_t moy_os_moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap) {
+    const moy_os_arg_t a[2] = {
+        { key, key_len, 0, MOY_OS_ARG_BYTES },
+        { plain, plain_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(180u, MOY_OS_SEQ, a, 2, sealed, sealed_cap);   // moybyte.aes_gcm_seal
+}
+
+int32_t moy_os_moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap) {
+    const moy_os_arg_t a[2] = {
+        { key, key_len, 0, MOY_OS_ARG_BYTES },
+        { sealed, sealed_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(181u, MOY_OS_SEQ, a, 2, plain, plain_cap);   // moybyte.aes_gcm_open
+}
+
+int32_t moy_os_moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap) {
+    const moy_os_arg_t a[2] = {
+        { secret, secret_len, 0, MOY_OS_ARG_BYTES },
+        { peer, peer_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(182u, MOY_OS_SEQ, a, 2, shared, shared_cap);   // moybyte.x25519
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -312,6 +358,12 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_files_duplicate,
         (void *)moy_os_moy_files_rename,
         (void *)moy_os_moy_files_new_name,
+        (void *)moy_os_moy_random,
+        (void *)moy_os_moy_sha256,
+        (void *)moy_os_moy_hmac_sha256,
+        (void *)moy_os_moy_aes_gcm_seal,
+        (void *)moy_os_moy_aes_gcm_open,
+        (void *)moy_os_moy_x25519,
     },
 };
 
@@ -407,4 +459,10 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_files_duplicate",
     "moy_files_rename",
     "moy_files_new_name",
+    "moy_random",
+    "moy_sha256",
+    "moy_hmac_sha256",
+    "moy_aes_gcm_seal",
+    "moy_aes_gcm_open",
+    "moy_x25519",
 };

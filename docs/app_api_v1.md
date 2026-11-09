@@ -658,6 +658,12 @@ The calls a program reaches on more than one tier, each by its name there
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |
 | `moybyte.at` | `alarms` | `moybyte.at` | `moybyte.at` | `moybyte_at`, `moybyte.os.at` | `moy_at` |
+| `moybyte.random` | none | `moybyte.random` | `moybyte.random` | `moybyte_random`, `moybyte.os.random` | `moy_random` |
+| `moybyte.sha256` | none | `moybyte.sha256` | `moybyte.sha256` | `moybyte_sha256`, `moybyte.os.sha256` | `moy_sha256` |
+| `moybyte.hmac_sha256` | none | `moybyte.hmac_sha256` | `moybyte.hmac_sha256` | `moybyte_hmac_sha256`, `moybyte.os.hmac_sha256` | `moy_hmac_sha256` |
+| `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
+| `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
+| `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -681,6 +687,18 @@ app reads where a Python or a Lua one is called back: its messages (§8) and
 an item handed to it. Standard names come first on every tier: Python's
 `open`, `os`, `time`, `socket`, `requests`, `asyncio` and `logging`; POSIX
 in C; WASI preview1 in wasm; Lua's `io` and `os`.
+
+**Crypto** (`docs/os_2026-11/between_apps.md` §5): `moybyte.random(n)`,
+`sha256(data)`, `hmac_sha256(key, data)`, `aes_gcm_seal(key, plain)`,
+`aes_gcm_open(key, sealed)` and `x25519(secret, peer)` are every program's,
+with no permission, one C body on every tier (`native/moy_net/moy_crypto.h`).
+Bytes in and bytes out (a Python `str` is its UTF-8). A seal is a fresh
+nonce, the ciphertext and the tag, 28 bytes longer than what it sealed, under
+a 16-, 24- or 32-byte key; an open that does not authenticate answers `None`
+in Python, `nil` in Lua, FORGED (10) negated to a compiled app and `EBADMSG`
+to a native or WASI program. `x25519` with no peer answers the secret's
+public key, with one the shared secret. A buffer too small is FULL
+(`ERANGE`), a length refused BAD (`EINVAL`; a `ValueError` in Python).
 
 **A compiled app (#224)** is `"runtime": "wasm"` with `"extensions":
 ["moybyte.app"]`. It reaches its roles through imports from module

@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 91
+#define MOY_OS_VERSION 97
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -259,6 +259,72 @@ static inline int32_t moy_at(int32_t t) {
     return (int)r;
 }
 
+int32_t __moy_os_random(int32_t n, void *data, size_t data_cap)
+    __attribute__((import_module("moybyte.os"), import_name("random")));
+static inline int32_t moy_random(int32_t n, void *data, size_t data_cap) {
+    int32_t r = __moy_os_random(n, data, data_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap)
+    __attribute__((import_module("moybyte.os"), import_name("sha256")));
+static inline int32_t moy_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap) {
+    int32_t r = __moy_os_sha256(data, data_len, digest, digest_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap)
+    __attribute__((import_module("moybyte.os"), import_name("hmac_sha256")));
+static inline int32_t moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap) {
+    int32_t r = __moy_os_hmac_sha256(key, key_len, data, data_len, mac, mac_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap)
+    __attribute__((import_module("moybyte.os"), import_name("aes_gcm_seal")));
+static inline int32_t moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap) {
+    int32_t r = __moy_os_aes_gcm_seal(key, key_len, plain, plain_len, sealed, sealed_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap)
+    __attribute__((import_module("moybyte.os"), import_name("aes_gcm_open")));
+static inline int32_t moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap) {
+    int32_t r = __moy_os_aes_gcm_open(key, key_len, sealed, sealed_len, plain, plain_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
+int32_t __moy_os_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap)
+    __attribute__((import_module("moybyte.os"), import_name("x25519")));
+static inline int32_t moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap) {
+    int32_t r = __moy_os_x25519(secret, secret_len, peer, peer_len, shared, shared_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 #else
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
@@ -307,6 +373,12 @@ int32_t moy_at(int32_t t);   // moybyte.at
 int32_t moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap);   // files.duplicate
 int32_t moy_files_rename(const char *kind, const char *name, const char *title, void *renamed, size_t renamed_cap);   // files.rename
 int32_t moy_files_new_name(const char *kind, const char *title, void *name, size_t name_cap);   // files.new_name
+int32_t moy_random(int32_t n, void *data, size_t data_cap);   // moybyte.random
+int32_t moy_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap);   // moybyte.sha256
+int32_t moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap);   // moybyte.hmac_sha256
+int32_t moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap);   // moybyte.aes_gcm_seal
+int32_t moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap);   // moybyte.aes_gcm_open
+int32_t moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap);   // moybyte.x25519
 
 #endif // __wasm__
 

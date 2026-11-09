@@ -7,6 +7,7 @@
 #   notify                   a notification (status: a status-bar item)
 #   send                     a message to an app (open_with, share, pick)
 #   log                      a line of the OS log
+#   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519)
 #   __getattr__              the device APIs (http, ble, camera, ...) by name
 """moybyte: what a Python app asks the OS for that has no standard name
 (docs/os_2026-11/processes.md sections 1 and 3). The clock is the standard
@@ -126,6 +127,28 @@ one, `time.ticks_us()`.
   clock_synced()     whether the wall clock holds real time: NTP has answered
                      on a board since power-on (runtime/system/wallclock.py);
                      until then `time.time()` counts from power-on
+
+THE CRYPTO (native/moy_net/moy_crypto.h, the one C body every tier calls;
+docs/app_api_v1.md section 10). Pure computation over what it is handed: no
+permission, nothing kept. Bytes in (a str is its UTF-8), bytes out; a length
+it refuses (a key, a secret, a count) raises ValueError.
+
+  random(n)          n bytes of the hardware RNG, n at most 4096
+  sha256(data)       the SHA-256 digest, 32 bytes
+  hmac_sha256(key, data)
+                     HMAC-SHA256 under a key of any length, 32 bytes
+  aes_gcm_seal(key, plain)
+                     AES-GCM under a 16-, 24- or 32-byte key: a fresh random
+                     12-byte nonce, the ciphertext and the 16-byte tag, 28
+                     bytes longer than `plain`
+  aes_gcm_open(key, sealed)
+                     what aes_gcm_seal made, back; None where it does not
+                     open (the wrong key, or a byte changed)
+  x25519(secret, peer=None)
+                     RFC 7748's X25519 of a 32-byte secret and the peer's
+                     32-byte public key: the shared secret; with no peer the
+                     secret's own public key. A peer key of small order raises
+                     ValueError, a build without the curve NotImplementedError
 
 on/every/after/at answer the wake's id. A timer means "no earlier than": a wake is
 served in the shell loop's slack, so up to a frame late, and a late `every`
@@ -1011,6 +1034,43 @@ ENDS.append(_items_end)
 def log(level, text):
     if _L is not None:
         _L.write(max(0, min(7, int(level))), _pid(), str(text))
+
+
+_A = []
+
+
+def _app():
+    if not _A:
+        try:
+            import moy_app
+        except ImportError:  # host: the runtime package
+            from runtime import moy_app
+        _A.append(moy_app)
+    return _A[0]
+
+
+def random(n):
+    return _app().random(n)
+
+
+def sha256(data):
+    return _app().sha256(data)
+
+
+def hmac_sha256(key, data):
+    return _app().hmac_sha256(key, data)
+
+
+def aes_gcm_seal(key, plain):
+    return _app().aes_gcm_seal(key, plain)
+
+
+def aes_gcm_open(key, sealed):
+    return _app().aes_gcm_open(key, sealed)
+
+
+def x25519(secret, peer=None):
+    return _app().x25519(secret, peer)
 
 
 def clock_synced():

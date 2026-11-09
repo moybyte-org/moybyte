@@ -211,14 +211,15 @@ def wasi_rows(src):
 
 def wasi_call(r):
     """Whether a "wasi" row is a console call: posted on the VM's queue and
-    answered by the scheduler's `_CALLS`, not served by the kernel."""
-    return "c" not in r and role_of(r) == "moybyte"
+    answered by the scheduler's `_CALLS`, not served by the kernel or in C."""
+    return "c" not in r and role_of(r) == "moybyte" and r.get("server") != "c"
 
 
 def wasi_role(r):
     """Whether a "wasi" row is an app row: its role table row run for the
-    program's app run through the ROLE door, as a C program's is."""
-    return "c" not in r and role_of(r) != "moybyte"
+    program's app run through the ROLE door, as a C program's is: any role's
+    row but a console call (a moybyte row served in C is an app row)."""
+    return "c" not in r and (role_of(r) != "moybyte" or r.get("server") == "c")
 
 
 def wasi_name(r):
@@ -1214,11 +1215,12 @@ def gen_ui_h(src):
 def lua_names(src):
     """[(role, table or None, name, C function, row, read)] of the names a Lua
     run's role binding holds, in the source's order; `read` where the row is
-    a read under the seqlock, held where the run's grant holds its role."""
+    a read under the seqlock, held where the run's grant holds its role. A
+    moybyte row served in C is a function of the run's `moybyte` table."""
     out = []
     for r in door_rows(src):
         role = role_of(r)
-        if role == "moybyte":
+        if role == "moybyte" and r.get("server") != "c":
             continue
         for n in r.get("lua") or ():
             tbl, _, fn = n.rpartition(".")
@@ -1244,10 +1246,13 @@ def lua_own(src):
     """The moybyte.<verb> names every Lua program holds that are no console
     call: its wakes and the log, each a service's own C
     (native/moycore/moycore_svc.c) and an app run's prelude over the moybyte
-    module (runtime/run/lua_ext.py)."""
+    module (runtime/run/lua_ext.py). A row served in C is the run's role
+    binding's (lua_names)."""
     calls = set(lua_calls(src))
     out = []
     for r in src["rows"]:
+        if r.get("server") == "c":
+            continue
         for n in r.get("lua") or ():
             if n.startswith("moybyte.") and n[8:] not in calls and n[8:] not in out:
                 out.append(n[8:])
@@ -1353,7 +1358,7 @@ def gen_lua_ext(src):
     heads = []
     for _role, tbl, fn, _c, _row, _read in lua_names(src):
         h = tbl or fn
-        if h not in heads:
+        if h not in heads and h != "moybyte":     # the run's moybyte table: PRELUDE_MOYBYTE
             heads.append(h)
     return _splice(LUA_EXT, "LUA_ROLE_NAMES = %s\nLUA_RUN_CALLS = %s\nLUA_OWN = %s\n"
                    % (_tup(heads), _tup(lua_run_calls(src)), _tup(lua_own(src))))

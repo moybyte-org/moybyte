@@ -95,6 +95,9 @@ NATIVE = os.path.join(ROOT, "native", "moy_index")
 NATIVE_SPINE = os.path.join(ROOT, "native", "moy_spine")
 NATIVE_APP = os.path.join(ROOT, "native", "moy_app")
 NATIVE_INPUT = os.path.join(ROOT, "native", "moy_input")
+# The crypto rows' C (moy_crypto.h): the door calls it; it compiles with
+# moy_seal.c over mbedTLS (runtime/host/seal_binding.py).
+NATIVE_NET = os.path.join(ROOT, "native", "moy_net")
 CACHE = os.path.join(ROOT, ".build", "host_index")
 OUT = os.path.join(ROOT, ".build", "moy_index_spike")
 WEB_DIR = os.path.join(ROOT, "firmware", "web_runner")
@@ -159,11 +162,11 @@ INDEX = Component(
 # part: only its headers are read here.
 NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = Component(
-    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE], "moy_spine_host.c",
+    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE, NATIVE_NET], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
      "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c",
      "moy_json.h", "moy_json.c", "moy_app.h", "moy_app_rows.h", "moy_app_wasm_rows.h", "moy_app_lua_rows.h", "moy_app.c", "moy_app_run.h", "moy_app_wasm.h",
-     "moy_app_wasm.c", "moy_app_lua.h", "moy_app_lua.c", "moy_input.h",
+     "moy_app_wasm.c", "moy_app_lua.h", "moy_app_lua.c", "moy_input.h", "moy_crypto.h",
      "moy_ufiles.h", "moy_fs.h", "moy_vol.h"],
     ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c",
                       "moy_ledger.c", "moy_json.c"]),

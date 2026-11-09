@@ -72,6 +72,16 @@ def test_a_lua_service_runs_its_timers_and_ends_with_its_code(sched):
     assert not sched._poll                      # the poll went with the last service
 
 
+CRYPTO = """
+moybyte.after(1, function()
+    local d = moybyte.sha256("abc"):sub(1, 4)
+    print("sha256 " .. d:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+    print("random " .. #moybyte.random(8) .. " " .. type(moybyte.every))
+    moybyte.exit(0)
+end)
+"""
+
+
 def test_a_service_with_no_timer_after_its_start_has_exited(sched):
     pid = sched.start(_cart("x = 1"))
     assert pid is None
@@ -314,6 +324,17 @@ def _frames(drv, ms):
     while (time.monotonic() - t0) * 1000 < ms:
         time.sleep(0.002)
         drv.frame(_DT)
+
+
+def test_a_lua_service_holds_the_crypto_rows_beside_its_own_names(desk):
+    """A service's `moybyte` table is its own C's (every, log, exit) and the
+    crypto rows (native/moy_app/moy_app_lua.c) at once: with no permission it
+    has no run grant, and the rows need none."""
+    ws, drv = desk
+    since = L.next()
+    pid = S.SCHED.start(_cart(CRYPTO), ws=ws)
+    _frames(drv, 40)
+    assert _texts(since, pid)[1:3] == ["sha256 ba7816bf", "random 8 function"]
 
 
 def test_a_service_runs_on_through_an_app_switch(desk):

@@ -389,8 +389,9 @@ vendor-elf-loader:
 vendor-dropbear:
 	$(PYTHON) tools/vendor_dropbear.py
 
-# Re-vendor mbedTLS's crypto subset -- the sign-in's AES, GCM, SHA-256 and
-# P-256 for the host's library and the wasm (a board links ESP-IDF's own) --
+# Re-vendor mbedTLS's crypto subset -- the sign-in's and the apps' AES, GCM,
+# SHA-256, P-256 and Curve25519 for the host's library and the wasm (a board
+# links ESP-IDF's own) --
 # from the boards' ESP-IDF tree, or SRC=/path, into native/moy_net/mbedtls with
 # the stamp native/moy_net/mbedtls_vendor.json; tests/test_mbedtls_vendor.py
 # holds the copy to it.

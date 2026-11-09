@@ -49,7 +49,7 @@
 #include "moy_app_run.h"
 
 // Open run `run`'s names in `L`: 1 for a live run, else 0 and none (`run`
-// NULL: a game).
+// NULL: a game) but the crypto rows, which every state holds.
 int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
 
 // A hop: fn(arg) run on the VM's task while the caller waits, 0; or -1 where
@@ -58,6 +58,12 @@ typedef int (*moy_app_lua_hop_fn)(lua_State *L, void (*fn)(void *arg), void *arg
 // moy_app_lua_open for a state whose calls take `hop` (NULL: in place).
 int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
                          moy_app_lua_hop_fn hop);
+
+// The crypto rows (native/moy_net/moy_crypto.h: moybyte.random, sha256,
+// hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519) put into `L`'s global
+// `moybyte` table, made where it has none: they need no grant, so a Lua
+// service with none holds them too (native/moycore/moycore_svc.c). 1.
+int moy_app_lua_open_crypto(lua_State *L);
 
 // The JSON the prefs names read and write, for another binding's state (a
 // Lua service's messages and console calls, native/moycore/moycore_svc.h):

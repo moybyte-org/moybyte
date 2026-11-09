@@ -53,7 +53,10 @@ _ROWS = ("damage.all", "damage.again",
          "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part",
          "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", "ui.held",
          "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last",
-         "ui.held_all")
+         "ui.held_all",
+         # the crypto rows: native/moy_net/moy_crypto.h's, counted by nothing here
+         "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256",
+         "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",
@@ -90,6 +93,72 @@ def kinds():
 
 def perms():
     return _PERMS
+
+
+# The crypto rows, as native/moy_net/moy_crypto.h answers them: CPython's
+# hashlib, hmac and pyca's cryptography the oracle, imported where called.
+_RANDOM_MAX = 4096
+
+
+def _bytes(o):
+    return o.encode("utf-8", "surrogateescape") if isinstance(o, str) else bytes(o)
+
+
+def random(n):
+    if not 0 <= n <= _RANDOM_MAX:
+        raise ValueError("a length the call refuses")
+    import os
+    return os.urandom(n)
+
+
+def sha256(data):
+    import hashlib
+    return hashlib.sha256(_bytes(data)).digest()
+
+
+def hmac_sha256(key, data):
+    import hmac
+    return hmac.new(_bytes(key), _bytes(data), "sha256").digest()
+
+
+def _gcm(key):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = _bytes(key)
+    if len(key) not in (16, 24, 32):
+        raise ValueError("a length the call refuses")
+    return AESGCM(key)
+
+
+def aes_gcm_seal(key, plain):
+    import os
+    nonce = os.urandom(12)
+    return nonce + _gcm(key).encrypt(nonce, _bytes(plain), None)
+
+
+def aes_gcm_open(key, sealed):
+    from cryptography.exceptions import InvalidTag
+    g, sealed = _gcm(key), _bytes(sealed)
+    if len(sealed) < 28:
+        return None
+    try:
+        return g.decrypt(sealed[:12], sealed[12:], None)
+    except InvalidTag:
+        return None
+
+
+def x25519(secret, peer=None):
+    from cryptography.hazmat.primitives import serialization as ser
+    from cryptography.hazmat.primitives.asymmetric import x25519 as cx
+    secret = _bytes(secret)
+    if len(secret) != 32 or (peer is not None and len(_bytes(peer)) not in (0, 32)):
+        raise ValueError("a length the call refuses")
+    k = cx.X25519PrivateKey.from_private_bytes(secret)
+    if not peer:
+        return k.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw)
+    try:
+        return k.exchange(cx.X25519PublicKey.from_public_bytes(_bytes(peer)))
+    except ValueError:
+        raise ValueError("a peer key of small order")
 
 
 def tokens():

@@ -21,6 +21,7 @@
 
 #include "moy_app.h"
 #include "moy_app_lua.h"
+#include "moy_crypto.h"
 #include "moy_app_lua_rows.h"
 #include "moy_json.h"
 
@@ -733,6 +734,117 @@ static int l_clipboard_seq(lua_State *L) {
     return 1;
 }
 
+// -- crypto (native/moy_net/moy_crypto.h) -------------------------------------------
+
+// The crypto rows keep no state and need no grant, so each calls the C body
+// in place, as the door does: a service with no permission holds them too
+// (moy_app_lua_open_crypto).
+
+static const char *crypto_arg(lua_State *L, int i, size_t *n, int opt) {
+    if (opt && lua_isnoneornil(L, i)) {
+        *n = 0;
+        return NULL;
+    }
+    return luaL_checklstring(L, i, n);
+}
+
+// The body's answer `r` over the `cap` bytes at the stack's top: a string,
+// nil where sealed bytes do not open, or the error.
+static int crypto_answer(lua_State *L, int32_t r) {
+    const uint8_t *p = lua_touserdata(L, -1);
+    switch (r) {
+        case MOY_CRYPTO_EFORGED:
+            lua_pushnil(L);
+            return 1;
+        case MOY_CRYPTO_EPOINT:
+            return luaL_error(L, "a peer key of small order");
+        case MOY_CRYPTO_EABSENT:
+            return luaL_error(L, "a build without it");
+        case MOY_CRYPTO_ENOMEM:
+            return luaL_error(L, "not enough memory");
+        default:
+            if (r < 0) {
+                return luaL_error(L, "a length the call refuses");
+            }
+    }
+    lua_pushlstring(L, (const char *)p, (size_t)r);
+    return 1;
+}
+
+static void *crypto_out(lua_State *L, size_t cap) {
+    return lua_newuserdatauv(L, cap ? cap : 1u, 0);
+}
+
+// moybyte.random(n): n bytes of the hardware RNG.
+static int l_moybyte_random(lua_State *L) {
+    lua_Integer n = luaL_checkinteger(L, 1);
+    if (n < 0 || n > MOY_CRYPTO_RANDOM_MAX) {
+        return luaL_error(L, "a length the call refuses");
+    }
+    void *o = crypto_out(L, (size_t)n);
+    return crypto_answer(L, moy_crypto_random((int32_t)n, o, (size_t)n));
+}
+
+static int l_moybyte_sha256(lua_State *L) {
+    size_t n;
+    const char *p = crypto_arg(L, 1, &n, 0);
+    void *o = crypto_out(L, MOY_CRYPTO_HASH);
+    return crypto_answer(L, moy_crypto_sha256(p, n, o, MOY_CRYPTO_HASH));
+}
+
+static int l_moybyte_hmac_sha256(lua_State *L) {
+    size_t kn, n;
+    const char *k = crypto_arg(L, 1, &kn, 0), *p = crypto_arg(L, 2, &n, 0);
+    void *o = crypto_out(L, MOY_CRYPTO_HASH);
+    return crypto_answer(L, moy_crypto_hmac_sha256(k, kn, p, n, o, MOY_CRYPTO_HASH));
+}
+
+static int l_moybyte_aes_gcm_seal(lua_State *L) {
+    size_t kn, n;
+    const char *k = crypto_arg(L, 1, &kn, 0), *p = crypto_arg(L, 2, &n, 0);
+    if (n > 0x7fffffffu - MOY_CRYPTO_SEAL_OVER) {
+        return luaL_error(L, "a length the call refuses");
+    }
+    size_t cap = n + MOY_CRYPTO_SEAL_OVER;
+    void *o = crypto_out(L, cap);
+    return crypto_answer(L, moy_crypto_aes_gcm_seal(k, kn, p, n, o, cap));
+}
+
+// moybyte.aes_gcm_open(key, sealed): the plaintext, or nil where it does not open.
+static int l_moybyte_aes_gcm_open(lua_State *L) {
+    size_t kn, n;
+    const char *k = crypto_arg(L, 1, &kn, 0), *p = crypto_arg(L, 2, &n, 0);
+    size_t cap = n > MOY_CRYPTO_SEAL_OVER ? n - MOY_CRYPTO_SEAL_OVER : 0u;
+    void *o = crypto_out(L, cap);
+    return crypto_answer(L, moy_crypto_aes_gcm_open(k, kn, p, n, o, cap));
+}
+
+// moybyte.x25519(secret, peer): the shared secret, or with no peer the secret's public key.
+static int l_moybyte_x25519(lua_State *L) {
+    size_t sn, pn;
+    const char *sec = crypto_arg(L, 1, &sn, 0), *peer = crypto_arg(L, 2, &pn, 1);
+    void *o = crypto_out(L, MOY_CRYPTO_KEY25519);
+    return crypto_answer(L, moy_crypto_x25519(sec, sn, peer, pn, o, MOY_CRYPTO_KEY25519));
+}
+
+int moy_app_lua_open_crypto(lua_State *L) {
+    static const luaL_Reg fns[] = {
+        { "random", l_moybyte_random }, { "sha256", l_moybyte_sha256 },
+        { "hmac_sha256", l_moybyte_hmac_sha256 }, { "aes_gcm_seal", l_moybyte_aes_gcm_seal },
+        { "aes_gcm_open", l_moybyte_aes_gcm_open }, { "x25519", l_moybyte_x25519 },
+        { NULL, NULL },
+    };
+    if (lua_getglobal(L, "moybyte") != LUA_TTABLE) {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setglobal(L, "moybyte");
+    }
+    luaL_setfuncs(L, fns, 0);
+    lua_pop(L, 1);
+    return 1;
+}
+
 // -- io and os over the grant's kind ---------------------------------------------------
 
 #define FILE_MT "moybyte.file"
@@ -1282,6 +1394,7 @@ static const lname_t NAMES[] = {
 int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
                          moy_app_lua_hop_fn hop) {
     open_t o = { run, 0, 0u, { 0 } };
+    moy_app_lua_open_crypto(L);
     if (run == NULL || on_vm(L, hop, open_read, &o) != 0 || !o.live) {
         return 0;
     }

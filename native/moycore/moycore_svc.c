@@ -65,6 +65,8 @@ enum { LOG_ERR = 3, LOG_WARNING = 4, LOG_INFO = 6 };
 // the app ABI: a message's arguments, the console's names and its answers.
 int moy_app_lua_json_push(lua_State *L, const char *text, size_t n) __attribute__((weak));
 const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n) __attribute__((weak));
+// The crypto rows (moy_app_lua.h), which need no grant.
+int moy_app_lua_open_crypto(lua_State *L) __attribute__((weak));
 
 // The role names of its app's run (moy_app_lua.h), where the image has the
 // app ABI.
@@ -587,6 +589,9 @@ static void open_names(lua_State *L) {
     CALL("at")                          // the alarm's console half (ALARMS)
 #undef CALL
     lua_setglobal(L, "moybyte");
+    if (moy_app_lua_open_crypto != NULL) {
+        moy_app_lua_open_crypto(L);     // its run's role binding's, held with no grant
+    }
 }
 
 // `moybyte.at(t, fn)`, an alarm, over its console half: the console's wake

@@ -47,7 +47,7 @@ _Static_assert(MOY_EVQ_FD >= 3 && MOY_EVQ_FD < MOY_WASI_FDS, "the event descript
 // -- WASI's numbers (preview1's witx) ---------------------------------------------
 
 enum {
-    W_OK = 0, W_2BIG = 1, W_ACCES = 2, W_AGAIN = 6, W_BADF = 8, W_BUSY = 10, W_EXIST = 20,
+    W_OK = 0, W_2BIG = 1, W_ACCES = 2, W_AGAIN = 6, W_BADF = 8, W_BADMSG = 9, W_BUSY = 10, W_EXIST = 20,
     W_FAULT = 21, W_FBIG = 22, W_INTR = 27, W_INVAL = 28, W_IO = 29, W_ISDIR = 31,
     W_LOOP = 32, W_MFILE = 33, W_MSGSIZE = 35, W_NAMETOOLONG = 37, W_NOENT = 44, W_NOMEM = 48,
     W_NODEV = 43, W_NOSPC = 51, W_NOSYS = 52, W_NOTDIR = 54, W_NOTEMPTY = 55, W_NOTSOCK = 57,
@@ -909,6 +909,7 @@ static int32_t role_errno(int32_t r) {
         case MOY_APP_NOSTORE: return W_NODEV;
         case MOY_APP_IO: return W_IO;
         case MOY_APP_NEEDS_VM: return W_AGAIN;
+        case MOY_APP_FORGED: return W_BADMSG;
         default: return W_INVAL;
     }
 }
@@ -922,16 +923,25 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, bool seq, const os_arg_t
     if (!moy_app_run_live(&w->run)) {
         return -(int32_t)W_ACCES;
     }
-    uint8_t buf[CALL_ARGS];
-    size_t k = 0;
+    uint8_t stack[CALL_ARGS];
+    uint64_t need = 0;
     for (int i = 0; i < n; i++) {
         uint32_t len = a[i].kind == 'i' ? 4u : a[i].n;
         if (len && a[i].kind != 'i' && a[i].p == NULL) {
             return -(int32_t)W_FAULT;
         }
-        if (k + 4u + len > sizeof buf) {
-            return -(int32_t)W_2BIG;
-        }
+        need += 4u + (uint64_t)len;
+    }
+    if (need > INT32_MAX) {
+        return -(int32_t)W_2BIG;
+    }
+    uint8_t *buf = need <= sizeof stack ? stack : w_alloc((size_t)need);
+    if (buf == NULL) {
+        return -(int32_t)W_NOMEM;
+    }
+    size_t k = 0;
+    for (int i = 0; i < n; i++) {
+        uint32_t len = a[i].kind == 'i' ? 4u : a[i].n;
         le32(buf + k, len);
         if (a[i].kind == 'i') {
             le32(buf + k + 4, (uint32_t)a[i].v);
@@ -963,6 +973,9 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, bool seq, const os_arg_t
             c.r = -MOY_APP_NEEDS_VM;
         }
         w->hopped_us += waited;
+    }
+    if (buf != stack) {
+        w_free(buf);
     }
     return c.r < 0 ? -role_errno(c.r) : c.r;
 }

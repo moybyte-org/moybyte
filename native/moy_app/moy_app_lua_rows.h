@@ -36,6 +36,12 @@
     X(MOY_ROLE_CLIPBOARD, "clipboard", "text", l_clipboard_text, MOY_T_CLIPBOARD_TEXT, 1) \
     X(MOY_ROLE_CLIPBOARD, "clipboard", "kind", l_clipboard_kind, MOY_T_CLIPBOARD_KIND, 1) \
     X(MOY_ROLE_CLIPBOARD, "clipboard", "seq", l_clipboard_seq, MOY_T_CLIPBOARD_SEQ, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "random", l_moybyte_random, MOY_T_MOYBYTE_RANDOM, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "sha256", l_moybyte_sha256, MOY_T_MOYBYTE_SHA256, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "hmac_sha256", l_moybyte_hmac_sha256, MOY_T_MOYBYTE_HMAC_SHA256, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "aes_gcm_seal", l_moybyte_aes_gcm_seal, MOY_T_MOYBYTE_AES_GCM_SEAL, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "aes_gcm_open", l_moybyte_aes_gcm_open, MOY_T_MOYBYTE_AES_GCM_OPEN, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "x25519", l_moybyte_x25519, MOY_T_MOYBYTE_X25519, 1) \
 
 #define MOY_APP_LUA_CALLS(X) \
     X("notify") \

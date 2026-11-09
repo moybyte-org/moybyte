@@ -27,6 +27,12 @@
     X(cancel, "(i)i") \
     X(log, "(i*~)i") \
     X(at, "(i)i") \
+    X(random, "(i*~)i") \
+    X(sha256, "(*~*~)i") \
+    X(hmac_sha256, "(*~*~*~)i") \
+    X(aes_gcm_seal, "(*~*~*~)i") \
+    X(aes_gcm_open, "(*~*~*~)i") \
+    X(x25519, "(*~*~*~)i") \
 
 #endif // MOY_WASI_OS_ROWS_H
 
@@ -112,6 +118,45 @@ static int32_t w_os_cancel(wasm_exec_env_t e, int32_t id) {
 static int32_t w_os_at(wasm_exec_env_t e, int32_t t) {
     const os_arg_t a[1] = { OS_I(t) };
     return os_call(e, "moybyte.at", a, 1);
+}
+
+static int32_t w_os_random(wasm_exec_env_t e, int32_t n, uint8_t *data, uint32_t data_cap) {
+    const os_arg_t a[1] = { OS_I(n) };
+    return os_role(e, MOY_T_MOYBYTE_RANDOM, true, a, 1, data, data_cap);
+}
+
+static int32_t w_os_sha256(wasm_exec_env_t e, const uint8_t *data, uint32_t data_n,
+                           uint8_t *digest, uint32_t digest_cap) {
+    const os_arg_t a[1] = { OS_O((const char *)data, data_n) };
+    return os_role(e, MOY_T_MOYBYTE_SHA256, true, a, 1, digest, digest_cap);
+}
+
+static int32_t w_os_hmac_sha256(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
+                                const uint8_t *data, uint32_t data_n, uint8_t *mac,
+                                uint32_t mac_cap) {
+    const os_arg_t a[2] = { OS_O((const char *)key, key_n), OS_O((const char *)data, data_n) };
+    return os_role(e, MOY_T_MOYBYTE_HMAC_SHA256, true, a, 2, mac, mac_cap);
+}
+
+static int32_t w_os_aes_gcm_seal(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
+                                 const uint8_t *plain, uint32_t plain_n, uint8_t *sealed,
+                                 uint32_t sealed_cap) {
+    const os_arg_t a[2] = { OS_O((const char *)key, key_n), OS_O((const char *)plain, plain_n) };
+    return os_role(e, MOY_T_MOYBYTE_AES_GCM_SEAL, true, a, 2, sealed, sealed_cap);
+}
+
+static int32_t w_os_aes_gcm_open(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
+                                 const uint8_t *sealed, uint32_t sealed_n, uint8_t *plain,
+                                 uint32_t plain_cap) {
+    const os_arg_t a[2] = { OS_O((const char *)key, key_n), OS_O((const char *)sealed, sealed_n) };
+    return os_role(e, MOY_T_MOYBYTE_AES_GCM_OPEN, true, a, 2, plain, plain_cap);
+}
+
+static int32_t w_os_x25519(wasm_exec_env_t e, const uint8_t *secret, uint32_t secret_n,
+                           const uint8_t *peer, uint32_t peer_n, uint8_t *shared,
+                           uint32_t shared_cap) {
+    const os_arg_t a[2] = { OS_O((const char *)secret, secret_n), OS_O((const char *)peer, peer_n) };
+    return os_role(e, MOY_T_MOYBYTE_X25519, true, a, 2, shared, shared_cap);
 }
 
 #endif // MOY_WASI_OS_BODIES

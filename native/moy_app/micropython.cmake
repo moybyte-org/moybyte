@@ -5,7 +5,8 @@
 # module (the Zero) carries none of. The layer reads covers with native/moy_png
 # and writes pictures with the port's `deflate` compressor. A Lua app's role
 # names (moy_app_lua.c) build against native/moy_lua's headers, and to nothing
-# in an image without them.
+# in an image without them. The crypto rows' body is native/moy_net's
+# (moy_crypto.h), which every image that takes this module takes.
 # THIS FILE AND micropython.mk ARE TWINS.
 
 add_library(usermod_moy_app INTERFACE)
@@ -22,5 +23,6 @@ target_include_directories(usermod_moy_app INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/../moy_input
     ${CMAKE_CURRENT_LIST_DIR}/../moy_store
     ${CMAKE_CURRENT_LIST_DIR}/../moy_png
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_net
     ${CMAKE_CURRENT_LIST_DIR}/../moy_lua/lua)
 target_link_libraries(usermod INTERFACE usermod_moy_app)

@@ -52,6 +52,7 @@ enum {
     MOY_APP_BAD = 7,        // a refused argument: an unknown kind or token, a name too long
     MOY_APP_ABSENT = 8,     // no such cart, app, key or document, or a build without it
     MOY_APP_NEEDS_VM = 9,   // a shell-served verb while no VM runs
+    MOY_APP_FORGED = 10,    // sealed bytes that do not open (moy_crypto.h's aes_gcm_open)
 };
 
 // The roles (MOY_ROLE_*, a grant's mask 1 << role), the rows served in C
