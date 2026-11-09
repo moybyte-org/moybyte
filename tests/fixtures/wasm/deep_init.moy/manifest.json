@@ -1,7 +1,6 @@
 {
   "format": "moy-1",
   "title": "Deep Init",
-  "type": "game",
   "runtime": "wasm",
   "main": "main.wasm",
   "memory": 1,
