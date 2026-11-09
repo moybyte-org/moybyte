@@ -305,7 +305,7 @@ typedef struct {
 // which begin installs before the pass (moy_ui_theme_put; theme_puts counts
 // them), so a change reaches the copy's frames at its next begin. The
 // cart-text boundary is the sink's (moy_ui.h).
-typedef struct moy_ui_inst {
+struct moy_ui_inst {               // moy_ui_inst_t (moy_ui_text.h)
     struct mua_kept_mem *kept;      // the kept rings and the faces' record
     uint32_t fc_owner, fc_ids;      // the context holding the faces' ticket, the last given
     struct moy_ui_text_mem *text;   // the text views' rows, breaks and records
@@ -324,7 +324,7 @@ typedef struct moy_ui_inst {
     // at the next install.
     uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap);
     uint32_t font_from[MOY_UI_THEME_FONTS], font_local[MOY_UI_THEME_FONTS];
-} moy_ui_inst_t;
+};
 
 // The main instance; an instance's size, for a face that owns it as bytes; a
 // fresh one over `I` (no blocks taken); and its blocks given back, every
