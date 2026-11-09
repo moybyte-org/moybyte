@@ -69,6 +69,10 @@
 #define LOG_COMMANDS 0
 #define UNAUTH_CLOSE_DELAY 0
 #define MAX_AUTH_TRIES 5
+// The server serves one connection at a time (moy_ssh_serve_one), so one
+// that never signs in holds SSH for this long: 30 s from the connect, enough
+// to accept the host key and type the password.
+#define AUTH_TIMEOUT 30
 
 #define DROPBEAR_DEFPORT "22"
 // The host key is never read from a file: setup takes its bytes (moy_ssh.h).

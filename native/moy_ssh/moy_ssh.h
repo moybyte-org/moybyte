@@ -2,7 +2,8 @@
 // Dropbear inside the kernel's process (README.md).
 //
 // THE SERVER is one task: it listens, takes one connection at a time and runs
-// Dropbear's session for it to the end. Dropbear ends a session by exiting
+// Dropbear's session for it to the end; one that has not signed in ends at
+// AUTH_TIMEOUT (port/localoptions.h). Dropbear ends a session by exiting
 // its process; here that exit is a jump back to the accept loop
 // (moy_ssh_exit_jump), and every allocation the session made goes with it
 // (Dropbear's tracking allocator, the epoch the session ran in).

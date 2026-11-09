@@ -39,7 +39,9 @@ it (the mbedTLS Curve25519 a console image carries is the apps'
 ## What runs where
 
 - **the server** (`moy_ssh`, priority 1, core 0, a 16 KB PSRAM stack) owns
-  the network and the crypto, one connection at a time; it reads a
+  the network and the crypto, one connection at a time (one that has not
+  signed in is closed 30 s after it connects, `AUTH_TIMEOUT` in
+  `port/localoptions.h`); it reads a
   connection's sign-in files through the hop to the console's task;
 - **the face** is `native/moy_tty`'s task, which the server holds while it
   serves: the session's shell, the hops and the gathered output are that

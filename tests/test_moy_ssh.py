@@ -43,6 +43,22 @@ pytestmark = pytest.mark.skipif(
     reason="needs a C compiler and OpenSSH's client")
 
 
+def _cflags():
+    """The flags the board's build gives Dropbear and the face."""
+    native = os.path.join(ROOT, "native")
+    return ["-Os", "-ffunction-sections", "-fdata-sections", "-w", "-g",
+            "-include", os.path.join(MOD, "port", "moy_ssh_names.h"),
+            "-I" + os.path.join(MOD, "port"), "-I" + MOD,
+            "-I" + os.path.join(DB, "src"),
+            "-I" + os.path.join(DB, "libtomcrypt", "src", "headers"),
+            "-I" + os.path.join(DB, "libtommath"),
+            "-I" + TTY, "-I" + os.path.join(native, "moy_net"),
+            "-I" + os.path.join(native, "moy_sh"), "-I" + os.path.join(native, "moy_store"),
+            "-I" + os.path.join(native, "moy_kernel"),
+            "-DDROPBEAR_SERVER", "-DLOCALOPTIONS_H_EXISTS", "-DLTC_SOURCE",
+            "-D_GNU_SOURCE", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"]
+
+
 def _build(out):
     cc = shutil.which("cc")
     shell = [o for o in SH._objects(cc, str(out))
@@ -52,18 +68,7 @@ def _build(out):
             for f in files if f.endswith(".c")]
     srcs += [os.path.join(MOD, f) for f in ("moy_ssh.c", "moy_ssh_run.c", "host/ssh_main.c")]
     srcs += [os.path.join(TTY, f) for f in TTY_SOURCES]
-    native = os.path.join(ROOT, "native")
-    flags = ["-Os", "-ffunction-sections", "-fdata-sections", "-w", "-g",
-             "-include", os.path.join(MOD, "port", "moy_ssh_names.h"),
-             "-I" + os.path.join(MOD, "port"), "-I" + MOD,
-             "-I" + os.path.join(DB, "src"),
-             "-I" + os.path.join(DB, "libtomcrypt", "src", "headers"),
-             "-I" + os.path.join(DB, "libtommath"),
-             "-I" + TTY, "-I" + os.path.join(native, "moy_net"),
-             "-I" + os.path.join(native, "moy_sh"), "-I" + os.path.join(native, "moy_store"),
-             "-I" + os.path.join(native, "moy_kernel"),
-             "-DDROPBEAR_SERVER", "-DLOCALOPTIONS_H_EXISTS", "-DLTC_SOURCE",
-             "-D_GNU_SOURCE", "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"]
+    flags = _cflags()
     objs, procs = [], []
     for i, src in enumerate(srcs):
         obj = str(out / ("ssh%d.o" % i))
@@ -191,6 +196,21 @@ def test_a_session_that_does_not_sign_in_is_refused(harness):
     r = ssh(harness, "not-it", "moy@127.0.0.1", "ls")
     assert r.returncode == 255
     assert b"Permission denied" in r.stderr
+
+
+def test_a_connection_that_does_not_sign_in_is_closed_within_thirty_seconds(tmp_path):
+    """The server serves one connection at a time, so one that never signs in
+    holds SSH until Dropbear's AUTH_TIMEOUT; the port's options set it, and
+    Dropbear's own default (300 s) must not win."""
+    src = tmp_path / "t.c"
+    src.write_text('#include "includes.h"\n')
+    flags = [f for f in _cflags() if f != "-DLTC_SOURCE"]
+    r = subprocess.run([shutil.which("cc")] + flags + ["-E", "-dM", str(src)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = [ln.split()[2] for ln in r.stdout.splitlines()
+           if ln.startswith("#define AUTH_TIMEOUT ")]
+    assert got and 0 < int(got[0]) <= 30
 
 
 def test_with_no_password_set_there_is_no_ssh(harness):
