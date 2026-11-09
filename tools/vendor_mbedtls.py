@@ -8,7 +8,7 @@
 A board links the ESP-IDF's own mbedTLS (its AES, SHA and, on a P4, ECC in
 hardware); the host's library and the browser's wasm have none, so they
 compile this copy of the same release: what native/moy_net/moy_seal.c calls
-(AES, GCM, SHA-256, HMAC, the bignum and P-256), under the config
+(AES, GCM, SHA-256, HMAC, HMAC_DRBG, the bignum and P-256), under the config
 native/moy_net/moy_seal_mbedtls.h. The hash of every copied file goes to
 native/moy_net/mbedtls_vendor.json, which tests/test_mbedtls_vendor.py holds
 the copy to.
@@ -31,10 +31,10 @@ IDF_SRC = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b", ".build"
 VERSION = "3.6.4"
 
 LIBRARY = ["aes", "block_cipher", "bignum", "bignum_core", "constant_time", "ecp",
-           "ecp_curves", "gcm", "md", "platform_util", "sha256"]
+           "ecp_curves", "gcm", "hmac_drbg", "md", "platform_util", "sha256"]
 HEADERS = ["aes", "bignum", "block_cipher", "build_info", "check_config", "cipher",
            "config_adjust_legacy_crypto", "config_adjust_ssl", "config_adjust_x509",
-           "constant_time", "ecp", "error", "gcm", "md", "md5", "platform",
+           "constant_time", "ecp", "error", "gcm", "hmac_drbg", "md", "md5", "platform",
            "platform_util", "private_access", "ripemd160", "sha1", "sha256", "sha3",
            "sha512", "threading"]
 INTERNAL = ["alignment", "bignum_core", "bignum_internal", "bignum_mod",

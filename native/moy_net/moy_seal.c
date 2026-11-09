@@ -1,6 +1,10 @@
 // moy_seal: moy_seal.h is the authority (the protocol, its labels and nonces).
 
-#if !defined(ESP_PLATFORM) && !defined(_DEFAULT_SOURCE)
+// A board is told by the header it has: ESP_PLATFORM is not defined for a
+// usermod's sources on the esp32 port (moy_net.h's MOY_NET_CLOCK_EPOCH).
+#if defined(ESP_PLATFORM) || __has_include("esp_random.h")
+#define SEAL_BOARD 1
+#elif !defined(_DEFAULT_SOURCE)
 #define _DEFAULT_SOURCE                 // getentropy
 #endif
 
@@ -9,14 +13,19 @@
 
 #include "moy_seal.h"
 
-#ifdef ESP_PLATFORM
+#ifdef SEAL_BOARD
+#include <sys/lock.h>
+#include "bootloader_random.h"
 #include "esp_random.h"
+#include "esp_rom_sys.h"
 #else
+#include <pthread.h>
 #include <unistd.h>
 #endif
 
 #include "mbedtls/ecp.h"
 #include "mbedtls/gcm.h"
+#include "mbedtls/hmac_drbg.h"
 #include "mbedtls/md.h"
 #include "mbedtls/sha256.h"
 
@@ -38,13 +47,14 @@ static const uint8_t SPAKE_N[MOY_SEAL_POINT] = {
 
 #define PW_ROUNDS 4096
 
-// -- the primitives --------------------------------------------------------------------
+// -- the random source (moy_seal.h) ----------------------------------------------------
 
-void moy_seal_random(void *p, size_t n) {
-    #ifdef ESP_PLATFORM
-    esp_fill_random(p, n);
+// The hardware's bytes: a board's RNG register, the host's and the browser's
+// getentropy.
+static void hw_random(uint8_t *b, size_t n) {
+    #ifdef SEAL_BOARD
+    esp_fill_random(b, n);
     #else
-    uint8_t *b = p;
     while (n > 0) {
         size_t k = n < 256 ? n : 256;
         if (getentropy(b, k) != 0) {
@@ -55,6 +65,73 @@ void moy_seal_random(void *p, size_t n) {
     }
     #endif
 }
+
+static int hw_entropy(void *ctx, unsigned char *p, size_t n) {
+    (void)ctx;
+    hw_random(p, n);
+    return 0;
+}
+
+#define SEED_WORDS 64                   // the boot's draw: 256 bytes
+#define SEED_GAP_US 40                  // a word every 40 us, many ADC samples apart
+#define ADD_BYTES 16                    // the hardware's bytes mixed into every draw
+
+static uint8_t s_seed[SEED_WORDS * 4];
+static mbedtls_hmac_drbg_context s_drbg;
+static int s_drbg_on;
+
+#ifdef SEAL_BOARD
+// Before app_main, so before anything starts the radio or an ADC unit: the
+// SAR ADC's noise mixed into the RNG while the boot's seed is read, then the
+// ADC handed back as the bootloader hands it over.
+__attribute__((constructor)) static void boot_seed(void) {
+    bootloader_random_enable();
+    for (int i = 0; i < SEED_WORDS; i++) {
+        esp_rom_delay_us(SEED_GAP_US);
+        uint32_t w = esp_random();
+        memcpy(s_seed + 4 * i, &w, 4);
+    }
+    bootloader_random_disable();
+}
+
+static _lock_t s_lock;
+#define RNG_LOCK() _lock_acquire(&s_lock)
+#define RNG_UNLOCK() _lock_release(&s_lock)
+#else
+static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
+#define RNG_LOCK() pthread_mutex_lock(&s_lock)
+#define RNG_UNLOCK() pthread_mutex_unlock(&s_lock)
+#endif
+
+void moy_seal_random(void *p, size_t n) {
+    uint8_t *b = p, add[ADD_BYTES];
+    RNG_LOCK();
+    if (!s_drbg_on) {
+        #ifndef SEAL_BOARD
+        hw_random(s_seed, sizeof s_seed);
+        #endif
+        mbedtls_hmac_drbg_init(&s_drbg);
+        if (mbedtls_hmac_drbg_seed(&s_drbg, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),
+                                   hw_entropy, NULL, s_seed, sizeof s_seed) != 0) {
+            abort();                    // never a key from nothing
+        }
+        moy_seal_wipe(s_seed, sizeof s_seed);
+        s_drbg_on = 1;
+    }
+    while (n > 0) {
+        size_t k = n < MBEDTLS_HMAC_DRBG_MAX_REQUEST ? n : MBEDTLS_HMAC_DRBG_MAX_REQUEST;
+        hw_random(add, sizeof add);
+        if (mbedtls_hmac_drbg_random_with_add(&s_drbg, b, k, add, sizeof add) != 0) {
+            abort();
+        }
+        b += k;
+        n -= k;
+    }
+    RNG_UNLOCK();
+    moy_seal_wipe(add, sizeof add);
+}
+
+// -- the primitives --------------------------------------------------------------------
 
 static int rng(void *ctx, unsigned char *p, size_t n) {
     (void)ctx;

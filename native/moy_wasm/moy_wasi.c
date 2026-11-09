@@ -36,8 +36,8 @@ _Static_assert(MOY_EVQ_FD >= 3 && MOY_EVQ_FD < MOY_WASI_FDS, "the event descript
 #ifdef MOY_WASI_BOARD
 #include <sys/time.h>
 #include "esp_heap_caps.h"
-#include "esp_random.h"
 #include "esp_timer.h"
+#include "moy_seal.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #else
@@ -164,7 +164,7 @@ static uint64_t real_ns(void) {
 
 static void fill_random(uint8_t *p, size_t n) {
 #ifdef MOY_WASI_BOARD
-    esp_fill_random(p, n);
+    moy_seal_random(p, n);
 #else
     while (n > 0) {
         ssize_t got = getrandom(p, n, 0);

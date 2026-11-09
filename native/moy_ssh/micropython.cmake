@@ -5,7 +5,8 @@
 #
 # Built into every image that stages it: a board takes or denies native/moy_ssh
 # in its board.toml (README.md, Boards), and one that takes it takes the face
-# it opens, native/moy_tty.
+# it opens, native/moy_tty, and native/moy_net, whose moy_seal.c is its random
+# source and reads the password's record.
 
 set(MOY_SSH ${CMAKE_CURRENT_LIST_DIR})
 file(GLOB MOY_SSH_DB_SRCS ${MOY_SSH}/dropbear/src/*.c ${MOY_SSH}/dropbear/libtommath/*.c)
@@ -31,6 +32,7 @@ target_include_directories(moy_ssh_core PRIVATE
     ${MOY_SSH}/dropbear/libtommath
     ${MOY_SSH}/../moy_tty
     ${MOY_SSH}/../moy_store
+    ${MOY_SSH}/../moy_net
     ${_moy_ssh_cfg}
     "${_moy_ssh_inc}")
 target_compile_definitions(moy_ssh_core PRIVATE "${_moy_ssh_defs}"

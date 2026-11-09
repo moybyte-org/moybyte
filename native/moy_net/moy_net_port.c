@@ -379,10 +379,10 @@ int moy_gpio_sense(int pin) {
 #include "esp_image_format.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
-#include "esp_random.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/platform_time.h"
 #include "mbedtls/ssl.h"
+#include "moy_seal.h"
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3) || defined(MBEDTLS_USE_PSA_CRYPTO)
 #include "psa/crypto.h"
 #endif
@@ -421,7 +421,7 @@ typedef struct {
 
 static int rng(void *ctx, unsigned char *out, size_t n) {
     (void)ctx;
-    esp_fill_random(out, n);
+    moy_seal_random(out, n);
     return 0;
 }
 

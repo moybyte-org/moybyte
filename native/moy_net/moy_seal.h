@@ -80,6 +80,17 @@ typedef struct {
     uint8_t board;
 } moy_seal_spake_t;
 
+// THE RANDOM SOURCE every key, nonce and token the console makes draws from:
+// the sign-in's, the SSH server's (moy_ssh_entropy), the TLS client's, a WASI
+// program's random_get, LoRaWAN's and the crypto rows' (moy_crypto.h). It is
+// an HMAC-DRBG (SHA-256, mbedTLS's) seeded at its first draw from 256 bytes a
+// board reads at boot, before app_main, with the SAR ADC's noise mixed into
+// its RNG (bootloader_random_enable, disabled again before anything starts an
+// ADC unit or the radio): ESP-IDF counts the RNG as true random only while that
+// source or the chip's own radio runs, and a P4's radio is the C6. Every draw
+// mixes in 16 more bytes of the RNG as additional input, and a reseed (every
+// 10,000 draws) takes 32. The host and the browser seed it from getentropy.
+// Thread-safe.
 void moy_seal_random(void *p, size_t n);
 void moy_seal_sha256(const void *p, size_t n, uint8_t out[32]);
 void moy_seal_hmac(const uint8_t *key, size_t kn, const void *p, size_t n, uint8_t out[32]);

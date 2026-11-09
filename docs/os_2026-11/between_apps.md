@@ -218,8 +218,9 @@ tier. Decisions (2026-11-09):
 
 - **One C body, over the image's mbedTLS.** `native/moy_net/moy_crypto.c`,
   beside the sign-in's `moy_seal.c`, whose random source it shares
-  (`esp_fill_random` on a board, `getentropy` on the host and in the
-  browser). A board compiles it against the ESP-IDF's mbedTLS 3.6.4 (AES and
+  (`moy_seal_random`: an HMAC-DRBG a board seeds at boot with the SAR ADC's
+  noise mixed into its RNG, the host and the browser from `getentropy`;
+  `moy_seal.h`, THE RANDOM SOURCE). A board compiles it against the ESP-IDF's mbedTLS 3.6.4 (AES and
   SHA in hardware), the host's library and the browser's wasm against the
   vendored copy of the same release (`native/moy_net/mbedtls/README.md`), so
   every tier runs the same code; Python reaches it through the module

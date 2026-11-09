@@ -185,3 +185,33 @@ def test_a_compiled_app_s_imports_answer_the_known_answers(tmp_path):
         "x25519.public " + V.X25519_ALICE_PUB, "x25519.shared " + V.X25519_SHARED,
         "x25519.small -7",
     ], lines
+
+
+def test_random_draws_past_one_drbg_request_and_never_repeat():
+    """moy_seal_random's HMAC-DRBG answers a draw longer than one of its
+    requests (1024 bytes) whole, and no two draws agree."""
+    a, b = moybyte.random(4096), moybyte.random(4096)
+    assert len(a) == len(b) == 4096
+    assert a != b and a[1024:2048] != a[:1024]
+    assert len(set(moybyte.random(16) for _ in range(64))) == 64
+
+
+# The one source (moy_seal.h, THE RANDOM SOURCE) and the one other reader of
+# the chip's RNG: the U-mode seal, a canary no U-mode code can read.
+RNG_READERS = {"native/moy_net/moy_seal.c", "native/moy_elf/moy_umode.c"}
+VENDORED = ("/dropbear/", "/mbedtls/", "/libmoy/", "/wamr", "/elf_loader", "/dash/")
+
+
+def test_only_the_random_source_reads_the_chip_s_rng():
+    found = set()
+    for top, _dirs, files in os.walk(os.path.join(ROOT, "native")):
+        for f in files:
+            path = os.path.join(top, f)
+            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+            if not f.endswith((".c", ".h")) or any(v in "/" + rel for v in VENDORED):
+                continue
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+            if "esp_fill_random(" in text or "esp_random(" in text:
+                found.add(rel)
+    assert found == RNG_READERS

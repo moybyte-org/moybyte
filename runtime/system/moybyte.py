@@ -144,7 +144,7 @@ docs/app_api_v1.md section 10). Pure computation over what it is handed: no
 permission, nothing kept. Bytes in (a str is its UTF-8), bytes out; a length
 it refuses (a key, a secret, a count) raises ValueError.
 
-  random(n)          n bytes of the hardware RNG, n at most 4096
+  random(n)          n bytes of the console's random source, n at most 4096
   sha256(data)       the SHA-256 digest, 32 bytes
   hmac_sha256(key, data)
                      HMAC-SHA256 under a key of any length, 32 bytes

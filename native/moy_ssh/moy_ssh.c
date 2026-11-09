@@ -12,6 +12,7 @@
 #include "gened25519.h"
 #include "dbmalloc.h"
 
+#include "moy_seal.h"
 #include "moy_ssh.h"
 #include "moy_tty.h"
 #include "moy_fs.h"
@@ -21,11 +22,8 @@
 #include <time.h>
 
 #include "esp_heap_caps.h"
-#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#else
-#include <sys/random.h>
 #endif
 
 #define SYS_PATH 192u
@@ -327,13 +325,7 @@ char *dirname(char *path) {
 #endif
 
 void moy_ssh_entropy(void *buf, size_t n) {
-#ifdef ESP_PLATFORM
-    esp_fill_random(buf, n);
-#else
-    if (getrandom(buf, n, 0) != (ssize_t)n) {
-        dropbear_exit("no entropy");
-    }
-#endif
+    moy_seal_random(buf, n);
 }
 
 void moy_ssh_log(int priority, const char *msg) {

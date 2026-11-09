@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "moy_lorawan.h"
+#include "moy_seal.h"
 #include "moy_lease.h"
 
 #if defined(__has_include)
@@ -25,7 +26,6 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
-#include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -172,7 +172,9 @@ static void enqueue(uint8_t kind, uint8_t port, const uint8_t *d, size_t n, int1
 
 static uint32_t rnd(void) {
     #ifdef LORA_BOARD
-    return esp_random();
+    uint32_t r;
+    moy_seal_random(&r, sizeof r);
+    return r;
     #else
     static uint32_t s_seed = 0x6d6f79u;
     s_seed = s_seed * 1103515245u + 12345u;

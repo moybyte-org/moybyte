@@ -12,8 +12,8 @@
 // but into the buffer the caller handed, and every call answers the length
 // it wrote or a code below, never more than `cap` bytes written.
 //
-//   random       n bytes of the hardware RNG (esp_fill_random; the host's
-//                and the browser's getentropy), n at most RANDOM_MAX.
+//   random       n bytes of the console's random source (moy_seal_random,
+//                moy_seal.h), n at most RANDOM_MAX.
 //   sha256       the digest, 32 bytes.
 //   hmac_sha256  HMAC-SHA256 (RFC 2104) under a key of any length, 32 bytes.
 //   aes_gcm_seal AES-GCM under a 16-, 24- or 32-byte key: a fresh random

@@ -775,7 +775,7 @@ static void *crypto_out(lua_State *L, size_t cap) {
     return lua_newuserdatauv(L, cap ? cap : 1u, 0);
 }
 
-// moybyte.random(n): n bytes of the hardware RNG.
+// moybyte.random(n): n bytes of the console's random source (moy_seal.h).
 static int l_moybyte_random(lua_State *L) {
     lua_Integer n = luaL_checkinteger(L, 1);
     if (n < 0 || n > MOY_CRYPTO_RANDOM_MAX) {
