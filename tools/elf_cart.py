@@ -20,6 +20,12 @@ it by ordinal; sdk/libc/: the SDK's C library), the toolchain's PURE C
 library members and its libm and libgcc, every symbol hidden. The host's
 chip links the host's C library dynamically behind the SDK's own.
 
+An app's own service (`"moybyte": {"entries": {"service": "<stem>.elf"}}`,
+docs/app_api_v1.md section 7) is built the same way from `src/<stem>/*.c`
+into `<stem>.<chip>.elf`, signed alike. A cart with no `src/*.c` of its own
+(a Python or Lua app) gets the service's modules alone, and no `native`
+field: that names the chips of the cart's own main.
+
 EVERY MODULE IS SIGNED, as a compiled cart's AOT module is (tools/wasm_module.py,
 the OTA signing key), over the text native/moy_elf/moy_elf.h's
 MOY_ELF_SIG_SCHEME names; `--unsigned` leaves it off. The host's chip is never
@@ -286,11 +292,25 @@ def finish(out, chip, signed=True, sign_with=None):
     return out
 
 
+def service_entry(man):
+    """The stem of the `.elf` service entry the manifest declares, or None."""
+    got = (man.get("moybyte") or {}).get("entries")
+    f = got.get("service") if isinstance(got, dict) else None
+    ok = isinstance(f, str) and f.endswith(".elf") and "/" not in f and "." not in f[:-4]
+    return f[:-4] if ok else None
+
+
 def build(src, dst, chips, signed=True, sign_with=None):
     """Copy cart folder `src` to `dst` and build its module for each of
-    `chips` from src/*.c. Returns {chip: module path}."""
+    `chips` from src/*.c, and its service entry's from src/<stem>/*.c.
+    Returns {chip: module path, "service." + chip: module path}."""
+    with open(os.path.join(src, "manifest.json")) as f:
+        stem = service_entry(json.load(f))
     sources = sorted(glob.glob(os.path.join(src, "src", "*.c")))
-    if not sources:
+    svc = sorted(glob.glob(os.path.join(src, "src", stem, "*.c"))) if stem else []
+    if stem and not svc:
+        raise ToolError("%s has no src/%s/*.c for its service" % (src, stem))
+    if not sources and not svc:
         raise ToolError("%s has no src/*.c" % src)
     if os.path.abspath(src) != os.path.abspath(dst):
         if os.path.exists(dst):
@@ -298,8 +318,15 @@ def build(src, dst, chips, signed=True, sign_with=None):
         shutil.copytree(src, dst)
     out = {}
     for chip in chips:
-        out[chip] = build_module(sources, chip, os.path.join(dst, module_name(chip)),
-                                 signed=signed, sign_with=sign_with)
+        if sources:
+            out[chip] = build_module(sources, chip, os.path.join(dst, module_name(chip)),
+                                     signed=signed, sign_with=sign_with)
+        if svc:
+            out["service." + chip] = build_module(
+                svc, chip, os.path.join(dst, "%s.%s.elf" % (stem, chip)),
+                signed=signed, sign_with=sign_with)
+    if not sources:
+        return out
     man_path = os.path.join(dst, "manifest.json")
     with open(man_path) as f:
         man = json.load(f)

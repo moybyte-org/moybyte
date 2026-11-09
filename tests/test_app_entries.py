@@ -462,3 +462,93 @@ def test_an_elf_entry_is_a_module_a_chip(tmp_path):
     native = {"path": str(root), "native": ["esp32p4"], "main": "main.esp32p4.elf"}
     (root / "main.esp32p4.elf").write_text("")
     assert rt.module(native) == "%s/main.esp32p4.elf" % root
+
+
+# -- the tools build a service entry beside main -----------------------------------
+
+WAT_SVC = '(module (func (export "_start")))\n'
+
+
+def test_wasm_cart_builds_and_signs_a_service_entry_beside_a_python_main(tmp_path,
+                                                                        monkeypatch):
+    from tools import wasm_cart, wasm_module
+    src = _cart(tmp_path, "svc.wasm", None)
+    (src / "src").mkdir()
+    (src / "src" / "svc.wat").write_text(WAT_SVC)
+    made = []
+    monkeypatch.setattr(wasm_module, "build",
+                        lambda blob, chip, out, signed=True: made.append(
+                            (blob[:4], chip, os.path.basename(out), signed)))
+    dst = str(tmp_path / "out" / "both.moy")
+    out = wasm_cart.build(str(src), dst, ["esp32s3", "esp32p4"])
+    assert sorted(out) == ["service", "service.esp32p4", "service.esp32s3"]
+    with open(out["service"], "rb") as f:
+        assert f.read(4) == b"\0asm"
+    assert open(os.path.join(dst, "main.py")).read() == APP_SRC     # main as it was
+    assert made == [(b"\0asm", c, wasm_cart.aot_name("svc.wasm", c), True)
+                    for c in ("esp32s3", "esp32p4")]
+
+
+def test_elf_cart_signs_a_service_entry_and_writes_no_native_for_a_script_app(
+        tmp_path, monkeypatch):
+    from tools import elf_cart
+    src = _cart(tmp_path, "svc.elf", None)
+    (src / "src" / "svc").mkdir(parents=True)
+    (src / "src" / "svc" / "main.c").write_text("int main(void) { return 0; }\n")
+    made = []
+    monkeypatch.setattr(elf_cart, "build_module", lambda sources, chip, out, signed=True,
+                        sign_with=None: made.append(
+                            ([os.path.basename(s) for s in sources], chip,
+                             os.path.basename(out), signed)) or out)
+    dst = str(tmp_path / "out" / "both.moy")
+    out = elf_cart.build(str(src), dst, ["esp32s3", "esp32p4"])
+    assert sorted(out) == ["service.esp32p4", "service.esp32s3"]
+    assert made == [(["main.c"], c, "svc.%s.elf" % c, True) for c in ("esp32s3", "esp32p4")]
+    man = json.load(open(os.path.join(dst, "manifest.json")))
+    assert "native" not in man["moybyte"]           # its main is the Python one
+
+
+def test_a_python_app_runs_its_elf_service_entry(tmp_path):
+    """The ELF service fixture built as an app's entry for the host's chip:
+    started from the app's ask, it answers the app's ping under the app's id
+    and its own `moy_service_running` through the ELF door is its pid."""
+    from runtime import native_build
+    from tools import elf_cart
+    if native_build.cc() is None:
+        pytest.skip("no C compiler")
+    src = _cart(tmp_path / "src", "svc.elf", None)
+    (src / "src" / "svc").mkdir(parents=True)
+    shutil.copy(os.path.join(ROOT, "tests", "fixtures", "elf", "elf_svc.moy", "src", "main.c"),
+                str(src / "src" / "svc" / "main.c"))
+    man = json.loads((src / "manifest.json").read_text())
+    man["moybyte"]["permissions"] = ["notifications", "full_access"]     # a native module asks
+    (src / "manifest.json").write_text(json.dumps(man))
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    elf_cart.build(str(src), str(carts / "both.moy"), ["host"], signed=False)
+    ws = build_ws(tmp_path)
+    assert "elf" in ws.runtimes
+    cart = _shelf(ws)
+    app = L.spawn("both-app")
+    _claim(ws, {app: cart})
+    try:
+        assert _as(app, moybyte.service_start) == 0
+        _ticks(1)
+        p = S.SCHED.find(APP)
+        assert p is not None and p.rt is ws.runtimes["elf"], [
+            t for _s, _t, _l, _q, t in os_log.records(0, 400)][-8:]
+        assert moy_evq.open(app, APP, "", True) == moy_evq.OK
+        for name in ("pong", "noted", "owned"):
+            assert moy_evq.listen(app, name, True) == moy_evq.OK
+        assert _polled(lambda: moy_evq.send(app, APP, "ping", "[5]")[0] == 1)
+        assert _polled(lambda: moy_evq.queued(app) == 1)
+        assert moy_evq.take(app) == (p.pid, APP, "pong", "[5]")
+        assert _polled(lambda: moy_evq.send(app, APP, "note", "[]")[0] == 1)
+        assert _polled(lambda: moy_evq.queued(app) == 2)
+        assert moy_evq.take(app)[2] == "noted"
+        assert moy_evq.take(app) == (p.pid, APP, "owned", '["running"]')
+        assert _as(app, moybyte.service_stop) == 1
+        _ticks(1)
+        assert p.state == S.EXITED
+    finally:
+        moy_evq.close(app)

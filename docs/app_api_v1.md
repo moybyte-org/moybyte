@@ -446,7 +446,10 @@ it does a cart's `main.wasm`), `.elf` a native module, which a board runs
 as `<stem>.<chip>.elf`, the chips those the folder carries. The app's own
 entry is `main`. An entry that does not read (another key, an absolute or
 `..` path, another extension) is absent. A `"type": "service"` cart is still
-a service of its own, with its own id.
+a service of its own, with its own id. `tools/wasm_cart.py` builds a `.wasm`
+entry from `src/<stem>.wat`, `.c` or `.rs`, and `tools/elf_cart.py` an `.elf`
+one from `src/<stem>/*.c`, each with its per-chip modules signed as a main's
+are; a native entry asks for `full_access`, as a native cart does.
 
 From any process of the app, on every tier (the call table, §10):
 

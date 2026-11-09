@@ -37,6 +37,12 @@ running engine's own chip and format, `_moy_wasm.CHIP`/`_moy_wasm.FORMAT`) and
 this console's engine has moved past is simply the wrong file name -- it is
 never opened, never refused, and the cart runs on the interpreter instead
 (native/moy_wasm/README.md, "A cart survives its firmware").
+
+An app's own service (`"moybyte": {"entries": {"service": "<stem>.wasm"}}`,
+docs/app_api_v1.md section 7) is a WASI command built the same way from
+`src/<stem>.wat`, `.c` or `.rs` into `<stem>.wasm`, with its per-chip modules
+`aot_name(<stem>.wasm, chip)` beside it, signed alike; the cart's own `main`
+may be a Python or Lua script, which is copied as it is.
 """
 
 import argparse
@@ -51,7 +57,11 @@ if ROOT not in sys.path:
 
 from tools import wat  # noqa: E402
 
-SOURCE = os.path.join("src", "main.wat")
+def service_entry(man):
+    """The `.wasm` service entry the manifest declares, or None."""
+    got = (man.get("moybyte") or {}).get("entries")
+    f = got.get("service") if isinstance(got, dict) else None
+    return f if isinstance(f, str) and f.endswith(".wasm") and "/" not in f else None
 
 
 def aot_name(main, chip, format=None):
@@ -74,7 +84,7 @@ class ToolchainMissing(RuntimeError):
     """The cart's source needs a compiler this machine lacks."""
 
 
-def assemble(src):
+def assemble(src, stem="main"):
     """The module the cart at `src` builds from its source: `src/main.wat`
     by the vendored assembler; a WASI command's `src/main.c` by wasi-sdk's
     clang (`tools/jet_cart.py` finds or fetches it) or `src/main.rs` by
@@ -85,15 +95,16 @@ def assemble(src):
     service), clang's reactor model, so the exports it names (`_init`,
     `_update`, `_draw`) are its loop and no `_start` or `main` is linked,
     and its memory fixed at the manifest's `memory` pages, as a cart's is;
-    its DWARF stripped (`strip_debug`)."""
-    wat_src = os.path.join(src, SOURCE)
+    its DWARF stripped (`strip_debug`). A `stem` other than main is an app's
+    service entry, `src/<stem>.*`, always a WASI command."""
+    wat_src = os.path.join(src, "src", stem + ".wat")
     if os.path.isfile(wat_src):
         with open(wat_src, encoding="utf-8") as f:
             return wat.assemble(f.read())
     import subprocess
     import tempfile
-    c_src = os.path.join(src, "src", "main.c")
-    rs_src = os.path.join(src, "src", "main.rs")
+    c_src = os.path.join(src, "src", stem + ".c")
+    rs_src = os.path.join(src, "src", stem + ".rs")
     with tempfile.TemporaryDirectory() as tmp:
         out = os.path.join(tmp, "main.wasm")
         if os.path.isfile(c_src):
@@ -105,7 +116,8 @@ def assemble(src):
                    "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"), "-O2",
                    "-I", os.path.join(ROOT, "sdk", "include"), "-o", out, c_src]
             man = manifest(src)
-            if (man.get("moybyte") or {}).get("type") not in ("command", "service"):
+            if stem == "main" and (man.get("moybyte") or {}).get("type") \
+                    not in ("command", "service"):
                 mem = "%d" % (int(man.get("memory") or 1) * 65536)
                 cmd[-3:-3] = ["-mexec-model=reactor", "-Wl,--initial-memory=" + mem,
                               "-Wl,--max-memory=" + mem]
@@ -116,7 +128,7 @@ def assemble(src):
             cmd = [rustc, "--target", "wasm32-wasip1", "-O", "--edition", "2021",
                    "-o", out, rs_src]
         else:
-            raise FileNotFoundError("%s has no src/main.wat, main.c or main.rs" % src)
+            raise FileNotFoundError("%s has no src/%s.wat, .c or .rs" % (src, stem))
         # a sanitizer the caller's process preloads (tools/asan_pytest.sh) is not the compiler's
         env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
         subprocess.run(cmd, check=True, capture_output=True, env=env)
@@ -163,26 +175,35 @@ def rust_wasip1():
 
 
 def build(src, dst, chips=(), signed=True):
-    """Copy the cart at `src` to `dst`, assemble its source into its `main`,
-    and compile a module per chip, signed unless `signed` is False. Returns
-    {"main": path, chip: path, ...}."""
+    """Copy the cart at `src` to `dst`, assemble its source into its `main`
+    and its service entry's, and compile a module of each per chip, signed
+    unless `signed` is False. Returns {"main": path, chip: path, "service":
+    path, "service." + chip: path, ...}, the main's where it is compiled."""
     man = manifest(src)
-    if man.get("runtime") != "wasm":
-        raise ValueError("%s is not a compiled cart (runtime %r)"
+    entry = service_entry(man)
+    if man.get("runtime") != "wasm" and entry is None:
+        raise ValueError("%s is not a compiled cart (runtime %r) and has no wasm service"
                          % (src, man.get("runtime")))
-    main = man.get("main", "main.wasm")
     if os.path.isdir(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
-    blob = assemble(src)
-    out = {"main": os.path.join(dst, main)}
-    with open(out["main"], "wb") as f:
-        f.write(blob)
-    if chips:
-        from tools import wasm_module
-        for chip in chips:
-            out[chip] = os.path.join(dst, aot_name(main, chip))
-            wasm_module.build(blob, chip, out[chip], signed=signed)
+    jobs = []
+    if man.get("runtime") == "wasm":
+        jobs.append(("main", "main", man.get("main", "main.wasm")))
+    if entry is not None:
+        jobs.append(("service", entry[:-5], entry))
+    out = {}
+    for key, stem, name in jobs:
+        blob = assemble(src, stem)
+        out[key] = os.path.join(dst, name)
+        with open(out[key], "wb") as f:
+            f.write(blob)
+        if chips:
+            from tools import wasm_module
+            for chip in chips:
+                k = chip if key == "main" else key + "." + chip
+                out[k] = os.path.join(dst, aot_name(name, chip))
+                wasm_module.build(blob, chip, out[k], signed=signed)
     return out
 
 
