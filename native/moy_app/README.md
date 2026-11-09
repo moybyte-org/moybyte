@@ -43,6 +43,20 @@ The role table is data, and every verb has one of four servers:
   is hopped as a "hop" row is. Lua's `send`, `log` and wakes are its own
   forms of them (`lua_own`: a Lua service's C, a Lua app's prelude over the
   `moybyte` module).
+  The store's rows (`files.*`, `prefs.*`) and the clipboard's write are C
+  too, and hop: each is run on the VM's task, the kernel's frame serving it
+  while no VM runs. A store row reaches the volume through
+  `native/moy_store/moy_vol.h`, which resolves a path through MicroPython's
+  mount table (`moy_vol_at`: `mp_vfs_lookup_path`, a type check that can
+  raise) and then works the FATFS or `lfs2_t` instance VfsFat and VfsLfs2
+  work too, with no lock between them (oofatfs is built `FF_FS_REENTRANT`
+  0, littlefs without `LFS2_THREADSAFE`; a scan moves the FAT's working
+  folder, `moy_vol_enter`), over the store's one scratch list
+  (`moy_store_alloc`) and the card's bus gate (`moy_vol_set_gate`, the
+  T-Deck's panel drain); `prefs.set` saves `system/settings` through the
+  same store, its rows a table Python writes too. The clipboard's write is
+  the seqlock's writer, as the shell's writes of the look and the clipboard
+  are, and the seqlock takes one writer at a time.
 - **`shell`**: the state is the Python console's (the routes' surfaces, the
   look and its caches, the wallpaper cart's namespace, the shelf's live list,
   Get Carts' transport). There is no resident C catalogue,
