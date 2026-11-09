@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 15,
+  "version": 16,
   "title": "Sakura Lua",
   "id": "moybyte.sakura_lua",
   "runtime": "lua",
@@ -20,7 +20,6 @@
       "graphics",
       "input"
     ],
-    "age_mode": "cards",
     "config": {
       "petal_count": 120,
       "fall_speed": 30,

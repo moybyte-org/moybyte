@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 11,
+  "version": 12,
   "title": "Bullet Storm",
   "id": "moybyte.bullet_storm",
   "runtime": "lua",
@@ -23,7 +23,6 @@
       "input",
       "audio"
     ],
-    "age_mode": "cards",
     "config": {
       "storm": 5,
       "ship_speed": 160,

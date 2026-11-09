@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Open Machine",
   "id": "moybyte.open_machine",
   "runtime": "python",
@@ -14,7 +14,6 @@
       "graphics",
       "input"
     ],
-    "age_mode": "cards",
     "config": {
       "grid": 8,
       "field": "black",
