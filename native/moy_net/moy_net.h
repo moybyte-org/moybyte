@@ -128,13 +128,25 @@ int moy_clock_state(int64_t *at);
 // The server the next sync asks: NULL or "" for MOY_CLOCK_SERVER. 0, or -1
 // for a name longer than MOY_CLOCK_SERVER_MAX.
 int moy_clock_server(const char *name);
-// What a certificate's dates are read against: the clock once it is synced;
-// before that the clock raised to `floor` (the image's build day), and a
-// not-yet-valid date counts only while the clock is at or past `floor`.
-int64_t moy_clock_cert_time(int64_t now, int64_t floor, int synced);
-int moy_clock_future_counts(int64_t now, int64_t floor, int synced);
+// What a certificate's dates are read against (moy_net_port.c). `floor` is
+// the newest of the image's build day and the newest start date of a
+// certificate this board has seen verify, which a board keeps across power-off;
+// `answer` is the Unix time NTP last answered, 0 for none. Nothing
+// authenticates NTP, so an answer is trusted only from the floor to
+// MOY_CLOCK_LEAP_MAX past it:
+//   trusted     the clock as it reads, and a not-yet-valid date counts;
+//   no answer   the clock raised to the floor, and a not-yet-valid date counts
+//               once the clock is at or past the floor (a clock set by hand);
+//   distrusted  the floor, and a not-yet-valid date never counts.
+// The clock never reads before the floor, so a certificate that expired before
+// it is refused whatever NTP says.
+#define MOY_CLOCK_LEAP_MAX (400LL * 86400)
+int64_t moy_clock_cert_time(int64_t now, int64_t floor, int64_t answer);
+int moy_clock_future_counts(int64_t now, int64_t floor, int64_t answer);
 // The Unix time of 00:00 UTC on the day this file was compiled.
 int64_t moy_clock_build_day(void);
+// The Unix time of a UTC date and time, the month 1 to 12.
+int64_t moy_clock_civil(int year, int month, int day, int hour, int min, int sec);
 
 // The reason phrase a response's status line carries ("OK" for a status the
 // table does not name).

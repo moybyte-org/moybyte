@@ -121,12 +121,29 @@ uint32_t moy_net_ms(void) {
     return (uint32_t)moy_net_ms64();
 }
 
-int64_t moy_clock_cert_time(int64_t now, int64_t floor, int synced) {
-    return synced || now >= floor ? now : floor;
+static int trusted(int64_t floor, int64_t answer) {
+    return answer != 0 && answer >= floor && answer - floor <= MOY_CLOCK_LEAP_MAX;
 }
 
-int moy_clock_future_counts(int64_t now, int64_t floor, int synced) {
-    return synced || now >= floor;
+int64_t moy_clock_cert_time(int64_t now, int64_t floor, int64_t answer) {
+    if (trusted(floor, answer)) {
+        return now >= floor ? now : floor;
+    }
+    return answer == 0 && now >= floor ? now : floor;
+}
+
+int moy_clock_future_counts(int64_t now, int64_t floor, int64_t answer) {
+    return trusted(floor, answer) || (answer == 0 && now >= floor);
+}
+
+int64_t moy_clock_civil(int year, int month, int day, int hour, int min, int sec) {
+    // Days from 1970-01-01 (the civil-from-days inverse).
+    int m = month - 1;
+    int yy = year - (m < 2), era = (yy >= 0 ? yy : yy - 399) / 400, yoe = yy - era * 400;
+    int doy = (153 * (m + (m < 2 ? 10 : -2)) + 2) / 5 + day - 1;
+    int64_t days = (int64_t)era * 146097 + (int64_t)yoe * 365 + yoe / 4 - yoe / 100 + doy
+                   - 719468;
+    return days * 86400 + (int64_t)hour * 3600 + (int64_t)min * 60 + sec;
 }
 
 int64_t moy_clock_build_day(void) {
@@ -137,12 +154,7 @@ int64_t moy_clock_build_day(void) {
         m++;
     }
     int day = (d[4] == ' ' ? 0 : d[4] - '0') * 10 + (d[5] - '0');
-    int y = atoi(d + 7);
-    // Days from 1970-01-01 to y-(m+1)-day (the civil-from-days inverse).
-    int yy = y - (m < 2), era = yy / 400, yoe = yy - era * 400;
-    int doy = (153 * (m + (m < 2 ? 10 : -2)) + 2) / 5 + day - 1;
-    long days = (long)era * 146097 + (long)yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
-    return (int64_t)days * 86400;
+    return moy_clock_civil(atoi(d + 7), m + 1, day, 0, 0, 0);
 }
 #endif
 
@@ -383,6 +395,7 @@ int moy_gpio_sense(int pin) {
 #include "mbedtls/platform_time.h"
 #include "mbedtls/ssl.h"
 #include "moy_seal.h"
+#include "nvs.h"
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3) || defined(MBEDTLS_USE_PSA_CRYPTO)
 #include "psa/crypto.h"
 #endif
@@ -417,6 +430,7 @@ typedef struct {
     int tls;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
+    int64_t seen;                   // the verified leaf's start date, Unix time
 } conn_t;
 
 static int rng(void *ctx, unsigned char *out, size_t n) {
@@ -434,22 +448,62 @@ int moy_conn_verifies(void) {
 }
 
 #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
-// A certificate's dates read the clock (moy_clock_cert_time): the real time
-// once NTP has answered (moy_clock_state); before that a board's clock is the
-// uptime, so it is read raised to the day this image was built. A certificate
-// that expired before the build is refused on every board, one that expired
-// after it once the clock is set past that, and while the clock is behind the
-// build a not-yet-valid date is not held against a certificate (one issued
-// after the build is the usual case for 90-day certificates).
+// A certificate's dates read the clock by moy_net.h's rule
+// (moy_clock_cert_time): NTP's answer while it sits between the floor and
+// MOY_CLOCK_LEAP_MAX past it, else the floor. Before NTP answers a board's
+// clock is the uptime, so it reads as the floor: a certificate that expired
+// before the floor is refused, and one issued after it is not held to its
+// start date (the usual case for 90-day certificates).
+//
+// THE FLOOR is the newest of the day this image was built and SEEN: the
+// newest start date of a leaf certificate whose handshake verified, kept in
+// NVS. A CA signed that date, so the time was past it when the board saw it,
+// and the floor follows the real time to within a certificate's age; NVS is
+// written only when SEEN rises by a day or more.
 extern int moy_clock_state(int64_t *at) __attribute__((weak));
 
 #define CLOCK_WAIT_MS 3000          // a first answer a handshake waits for
+#define SEEN_NS "moy_net"
+#define SEEN_KEY "cert_seen"
+#define SEEN_STEP 86400
 
 static mbedtls_time_t (*s_clock)(mbedtls_time_t *);
-static mbedtls_time_t s_floor;
+static int64_t s_floor, s_seen_kept;
 
-static int synced(void) {
-    return moy_clock_state != NULL && moy_clock_state(NULL) == MOY_CLOCK_SYNCED;
+static int64_t answer(void) {
+    int64_t at = 0;
+    if (moy_clock_state == NULL || moy_clock_state(&at) != MOY_CLOCK_SYNCED) {
+        return 0;
+    }
+    return at;
+}
+
+static void seen_load(void) {
+    nvs_handle_t h;
+    int64_t t = 0;
+    if (nvs_open(SEEN_NS, NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_i64(h, SEEN_KEY, &t) != ESP_OK) {
+            t = 0;
+        }
+        nvs_close(h);
+    }
+    s_seen_kept = t;
+    int64_t b = moy_clock_build_day();
+    s_floor = t > b ? t : b;
+}
+
+static void seen_raise(int64_t t) {
+    if (t <= s_floor) {
+        return;
+    }
+    s_floor = t;
+    nvs_handle_t h;
+    if (t - s_seen_kept >= SEEN_STEP && nvs_open(SEEN_NS, NVS_READWRITE, &h) == ESP_OK) {
+        if (nvs_set_i64(h, SEEN_KEY, t) == ESP_OK && nvs_commit(h) == ESP_OK) {
+            s_seen_kept = t;
+        }
+        nvs_close(h);
+    }
 }
 
 // The station is up for this handshake, so a request NTP has out is waited
@@ -467,33 +521,41 @@ static void await_clock(void) {
 
 static mbedtls_time_t tls_now(mbedtls_time_t *t) {
     mbedtls_time_t n = s_clock != NULL ? s_clock(NULL) : 0;
-    n = (mbedtls_time_t)moy_clock_cert_time(n, s_floor, synced());
+    n = (mbedtls_time_t)moy_clock_cert_time(n, s_floor, answer());
     if (t != NULL) {
         *t = n;
     }
     return n;
 }
 
+// Each certificate of the chain, the leaf last (depth 0): a leaf that checks
+// leaves its start date for the handshake's end to raise the floor by.
 static int verify(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
+    conn_t *c = ctx;
     mbedtls_time_t n = s_clock != NULL ? s_clock(NULL) : 0;
-    if (!moy_clock_future_counts(n, s_floor, synced())) {
+    if (!moy_clock_future_counts(n, s_floor, answer())) {
         *flags &= ~(uint32_t)MBEDTLS_X509_BADCERT_FUTURE;
     }
-    return esp_crt_verify_callback(ctx, crt, depth, flags);
+    int r = esp_crt_verify_callback(NULL, crt, depth, flags);
+    if (depth == 0 && r == 0 && *flags == 0) {
+        const mbedtls_x509_time *f = &crt->valid_from;
+        c->seen = moy_clock_civil(f->year, f->mon, f->day, f->hour, f->min, f->sec);
+    }
+    return r;
 }
 
-static int verify_setup(mbedtls_ssl_config *conf) {
+static int verify_setup(conn_t *c) {
     await_clock();
     if (mbedtls_time != tls_now) {
-        s_floor = (mbedtls_time_t)moy_clock_build_day();
+        seen_load();
         s_clock = mbedtls_time;
         mbedtls_platform_set_time(tls_now);
     }
-    if (esp_crt_bundle_attach(conf) != ESP_OK) {
+    if (esp_crt_bundle_attach(&c->conf) != ESP_OK) {
         return -1;
     }
-    mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-    mbedtls_ssl_conf_verify(conf, verify, NULL);
+    mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_verify(&c->conf, verify, c);
     return 0;
 }
 #endif
@@ -598,6 +660,7 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     psa_crypto_init();
     #endif
     c->tls = 1;
+    c->seen = 0;
     mbedtls_ssl_init(&c->ssl);
     mbedtls_ssl_config_init(&c->conf);
     rc = mbedtls_ssl_config_defaults(&c->conf, MBEDTLS_SSL_IS_CLIENT,
@@ -609,7 +672,7 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
             mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_NONE);
         }
         #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
-        else if (verify_setup(&c->conf) != 0) {
+        else if (verify_setup(c) != 0) {
             rc = -1;
         }
         #endif
@@ -638,6 +701,11 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
                    : -ECONNABORTED;
         }
     }
+    #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+    if (c->seen != 0 && mbedtls_ssl_get_verify_result(&c->ssl) == 0) {
+        seen_raise(c->seen);
+    }
+    #endif
     *out = c;
     return 0;
 }

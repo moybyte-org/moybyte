@@ -228,18 +228,45 @@ def test_an_app_asks_whether_the_clock_is_synced():
 
 # -- the time a certificate's dates are read against ----------------------------------
 
-def test_tls_reads_real_time_once_synced_and_the_build_day_floor_before():
+LEAP = 400 * 86400                                 # moy_net.h's MOY_CLOCK_LEAP_MAX
+DAY = 86400
+
+
+def test_tls_reads_the_floor_before_ntp_and_a_clock_set_past_it_as_set():
     from runtime.host import net_binding
     lib = net_binding._lib()
     floor = lib.moy_clock_build_day()
-    assert floor % 86400 == 0 and floor <= time.time() < floor + 2 * 86400 + 86400 * 400
+    assert floor % DAY == 0 and floor <= time.time() < floor + 2 * DAY + LEAP
     uptime = 120                                   # a board's clock before NTP
     assert lib.moy_clock_cert_time(uptime, floor, 0) == floor
     assert lib.moy_clock_future_counts(uptime, floor, 0) == 0
-    later = floor + 30 * 86400                     # a clock set past the build
+    later = floor + 30 * DAY                       # a clock set past the floor
     assert lib.moy_clock_cert_time(later, floor, 0) == later
     assert lib.moy_clock_future_counts(later, floor, 0) == 1
-    # synced: the clock as it is, a not-yet-valid date held against a
-    # certificate whatever the build day
-    assert lib.moy_clock_cert_time(floor - 86400, floor, 1) == floor - 86400
-    assert lib.moy_clock_future_counts(floor - 86400, floor, 1) == 1
+
+
+def test_an_ntp_answer_is_trusted_only_from_the_floor_to_the_leap_past_it():
+    from runtime.host import net_binding
+    lib = net_binding._lib()
+    floor = lib.moy_clock_build_day()
+    # trusted: the clock as it reads, a not-yet-valid date held against a
+    # certificate
+    for at in (floor, floor + 90 * DAY, floor + LEAP):
+        now = at + 3600
+        assert lib.moy_clock_cert_time(now, floor, at) == now
+        assert lib.moy_clock_future_counts(now, floor, at) == 1
+    # an answer before the floor (a clock moved back, to pass a certificate
+    # that expired) or past the leap: the floor, and no date in the future
+    # counts
+    for at in (floor - DAY, floor - 5 * 365 * DAY, floor + LEAP + 1, floor + 30 * 365 * DAY):
+        assert lib.moy_clock_cert_time(at + 60, floor, at) == floor
+        assert lib.moy_clock_future_counts(at + 60, floor, at) == 0
+
+
+def test_a_certificate_s_start_date_reads_as_unix_time():
+    from runtime.host import net_binding
+    lib = net_binding._lib()
+    import calendar
+    for t in ((1970, 1, 1, 0, 0, 0), (2000, 2, 29, 12, 30, 5), (2026, 11, 9, 23, 59, 59),
+              (2038, 1, 19, 3, 14, 8), (2100, 3, 1, 0, 0, 0)):
+        assert lib.moy_clock_civil(*t) == calendar.timegm(t + (0, 0, 0)), t

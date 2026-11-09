@@ -53,13 +53,18 @@ security model").
    (`esp_crt_bundle`, in each `sdkconfig.board`), the S3s' included: every
    https request but the updater's (`MOY_HTTPC_SIGNED`, `moy_ota.h`) checks
    the chain to a root of it, the host's name and the dates, `http`, media
-   streams, Get Carts and `pkg` alike. The dates are read against real time
-   once the clock is synced (below); until then a board's clock counts from
-   power-on, so it is read raised to the image's build day: a certificate
-   that expired before the build is refused everywhere, and a not-yet-valid
-   one is let pass while the clock is behind that day. A handshake in the
-   first 15 s of an unsynced client's asking waits up to 3 s for its answer
-   first (`moy_net_port.c`). **Network time (owner, 2026-11-06):**
+   streams, Get Carts and `pkg` alike. The dates are read against a floor:
+   the newest of the image's build day and the newest start date of a leaf
+   certificate the board has seen verify, kept in NVS (written when it rises
+   by a day). NTP's answer (below) is trusted from the floor to 400 days past
+   it (`MOY_CLOCK_LEAP_MAX`, `moy_net.h`), and the dates then read the clock;
+   an answer outside that window, or none yet (a board's clock counts from
+   power-on), reads as the floor, and a not-yet-valid certificate is let
+   pass. So a certificate that expired before the floor is refused whatever
+   NTP says, and a forged answer can move the dates neither back past the
+   floor nor more than 400 days ahead. A handshake in the first 15 s of an
+   unsynced client's asking waits up to 3 s for its answer first
+   (`moy_net_port.c`). **Network time (owner, 2026-11-06):**
    whenever the station holds an address, for whichever lease holder raised
    it, the WiFi driver runs ESP-IDF's SNTP client (`esp_netif_sntp`,
    `native/moy_net/moy_wifi.c`) against `pool.ntp.org`, or the

@@ -207,9 +207,10 @@ _SIGS = (
     ("moy_c6_version", [], _I),
     ("moy_clock_state", [ctypes.POINTER(ctypes.c_int64)], _I),
     ("moy_clock_server", [_P], _I),
-    ("moy_clock_cert_time", [ctypes.c_int64, ctypes.c_int64, _I], ctypes.c_int64),
-    ("moy_clock_future_counts", [ctypes.c_int64, ctypes.c_int64, _I], _I),
+    ("moy_clock_cert_time", [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64], ctypes.c_int64),
+    ("moy_clock_future_counts", [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64], _I),
     ("moy_clock_build_day", [], ctypes.c_int64),
+    ("moy_clock_civil", [_I, _I, _I, _I, _I, _I], ctypes.c_int64),
 )
 
 
