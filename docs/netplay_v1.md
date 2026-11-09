@@ -214,7 +214,17 @@ a datagram socket's rule, its holder judging the sender (radio input is
 untrusted: `docs/os_2026-11/threat_model.md` §5); a `from=match` port hears
 only the live match's peer and nothing outside a match. No port reaches the
 session: an input frame is `T_INPUT` and a `T_PORT` never is, whatever its
-bytes. The radio is up while the game holds it or any port is open
+bytes. A port sends while it is open and within its send budget (2026-11-09):
+token buckets in `moy_match_port_send`, the port's own (`MOY_MATCH_PORT_RATE`
+frames a second, a burst of a reader's queue) and the console's, which every
+port's send also spends, tighter while a match is live (`MOY_MATCH_LIVE_*`).
+A send past either answers BUSY (`MOY_MATCH_PORT_AGAIN`) and nothing goes on
+air; the handle's `sent` and `refused` count both. The numbers come from the
+link's cadence (`moy_match.h`, THE SEND BUDGET, has them and the
+arithmetic): lockstep sends at most one frame per `MOY_MATCH_LOCK_MS`, and
+the P4's transport clears one per ~10 ms in one queue with the inputs, so a
+live match lets at most one port frame sit ahead of an input. Port 0 has no
+budget. The radio is up while the game holds it or any port is open
 (`EspNowLink`'s two holders, the process's radio lease `net`); a game's end
 with a port open ends the match and leaves the radio beaconing the
 launcher's state, and the last port's close takes it down. A process holds

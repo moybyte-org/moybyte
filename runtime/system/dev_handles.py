@@ -1278,7 +1278,7 @@ class _Pins(_Handle):
 
 NET_HEAD = 10               # a net record's head: the sender (6 bytes), port, n (u16)
 NET_PORTS = 4               # the ports a process holds at once
-_NET_CODE = {-1: EINVAL, -2: ENOSPC, -3: EBUSY, -4: EBADF, -5: EIO}
+_NET_CODE = {-1: EINVAL, -2: ENOSPC, -3: EBUSY, -4: EBADF, -5: EIO, -6: EBUSY}
 
 
 def _link():
@@ -1350,6 +1350,10 @@ class _Net(_Handle):
             return self.port
         if what == "drops":
             return _net_rc(self.link.port_drops(self.port))
+        if what == "sent":
+            return _net_rc(self.link.port_sent(self.port))
+        if what == "refused":
+            return _net_rc(self.link.port_refused(self.port))
         if what == "peers":
             return len(self.link.peers)
         raise OSError(EINVAL, "no %s" % what)

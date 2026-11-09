@@ -82,6 +82,22 @@ def _hear(link):
     link.poll()
 
 
+def _match(clock, a, b):
+    """A and B in a live match on Brick Siege, A hosting: A's session."""
+    for lk in (a, b):
+        lk.start()
+        lk.announce("Brick Siege", 0)
+    clock.advance(10)
+    a.poll()
+    b.poll()
+    a.state = b.state = 1
+    wsa, wsb = _Ws(), _Ws()
+    a.offer(wsa, "Brick Siege")
+    b.poll(wsb)
+    assert wsa.netplay is not None and a.state == 2
+    return wsa.netplay
+
+
 def test_two_processes_on_two_ports_each_hear_only_their_own(two):
     _air, _clock, a, b = two
     h7, h9 = _open(41, "port=7"), _open(42, "port=9")
@@ -89,7 +105,7 @@ def test_two_processes_on_two_ports_each_hear_only_their_own(two):
     assert a.active and devices.console.holds == {("net", 41), ("net", 42)}
     assert b.open_port(7) == 0 and b.open_port(9) == 0
     assert b.port_send(7, b"seven") == 0 and b.port_send(9, b"nine") == 0
-    assert b.port_send(8, b"nobody's") == 0
+    assert b.open_port(8) == 0 and b.port_send(8, b"nobody's") == 0
     _hear(a)
     assert _records(H.read(41, h7, 512)) == [(B_MAC, 7, b"seven")]
     assert _records(H.read(42, h9, 512)) == [(B_MAC, 9, b"nine")]
@@ -159,11 +175,13 @@ def test_port_0_is_the_wire_net_send_always_spoke():
 
 
 def test_a_full_queue_drops_the_newest_and_a_short_read_is_full(two):
-    _air, _clock, a, b = two
+    _air, clock, a, b = two
     h = _open(41, "port=7")
     b.start()
+    assert b.open_port(7) == 0
     for i in range(6):
         assert b.port_send(7, bytes([65 + i]) * 20) == 0
+        clock.advance(1000 // P.PORT_RATE)
     _hear(a)
     assert H.get(41, h, "drops") == 2
     assert H.read(41, h, 29) == H.FULL, "a record is 10 + its bytes, whole"
@@ -190,7 +208,7 @@ def test_the_end_sweep_closes_its_ports_and_lets_the_radio_go(two):
     assert _open(41, "port=8") > 0
     assert _open(42, "port=9") > 0
     b.start()
-    b.port_send(7, b"left")
+    assert b.open_port(7) == 0 and b.port_send(7, b"left") == 0
     _hear(a)
     moybyte.end(41)
     assert H.HANDLES.get(41) is None and a.ports_open() == 1
@@ -222,24 +240,14 @@ def test_a_from_match_port_hears_only_the_match_s_peer(two):
     any_h, match_h = _open(41, "port=7"), _open(41, "port=8 from=match")
     for lk in (b, c):
         lk.start()
-    b.port_send(8, b"no match yet")
+        assert lk.open_port(7) == 0 and lk.open_port(8) == 0
+    assert b.port_send(8, b"no match yet") == 0
     _hear(a)
     assert H.read(41, match_h, 512) == b""
-    a.start()
-    for lk in (a, b):
-        lk.announce("Brick Siege", 0)
-    clock.advance(10)
-    a.poll()
-    b.poll()
-    a.state = b.state = 1
-    wsa, wsb = _Ws(), _Ws()
-    a.offer(wsa, "Brick Siege")
-    b.poll(wsb)
-    assert wsa.netplay is not None
-    b.port_send(8, b"peer")
-    c.port_send(8, b"stranger")
-    b.port_send(7, b"b")
-    c.port_send(7, b"c")
+    _match(clock, a, b)
+    assert b.port_send(8, b"peer") == 0 and c.port_send(8, b"stranger") == 0
+    clock.advance(1000 // P.LIVE_RATE)
+    assert b.port_send(7, b"b") == 0 and c.port_send(7, b"c") == 0
     _hear(a)
     assert _records(H.read(41, match_h, 512)) == [(B_MAC, 8, b"peer")]
     assert _records(H.read(41, any_h, 512)) == [(B_MAC, 7, b"b"), (C_MAC, 7, b"c")]
@@ -249,23 +257,93 @@ def test_no_port_reaches_the_match_s_inputs(two):
     """A frame on a port is never the session's: a T_PORT whose bytes read as
     an input packet is queued on its port and the match's input count stays."""
     air, clock, a, b = two
-    a.start()
-    b.start()
-    for lk in (a, b):
-        lk.announce("Brick Siege", 0)
-    clock.advance(10)
-    a.poll()
-    b.poll()
-    a.state = b.state = 1
-    wsa, wsb = _Ws(), _Ws()
-    a.offer(wsa, "Brick Siege")
-    b.poll(wsb)
-    s = wsa.netplay
+    s = _match(clock, a, b)
     h = _open(41, "port=%d" % (P.T_INPUT | (s.session << 8)))
     before = s.packets_in
     body = bytes([9, 0, 0xFF, 0] + [0x3F] * 10 + [255, 255, 0, 0, 0, 0, 0])
-    b.port_send(P.T_INPUT | (s.session << 8), body)
+    port = P.T_INPUT | (s.session << 8)
+    assert b.open_port(port) == 0 and b.port_send(port, body) == 0
     a.drain_input()
     _hear(a)
     assert s.packets_in == before
     assert _records(H.read(41, h, 512)) == [(B_MAC, P.T_INPUT | (s.session << 8), body)]
+
+
+def _writes(pid, h, n):
+    return [H.write(pid, h, b"x") for _ in range(n)]
+
+
+def test_the_budget_numbers_are_the_header_s():
+    import re
+    from pathlib import Path
+    head = (Path(__file__).resolve().parents[1] / "native" / "moy_play" / "moy_match.h").read_text()
+    got = dict(re.findall(r"#define MOY_MATCH_(\w+) (\d+)", head))
+    for name in ("PORT_RATE", "PORT_BURST", "PORTS_RATE", "PORTS_BURST", "LIVE_RATE",
+                 "LIVE_BURST"):
+        assert int(got[name]) == getattr(P, name), name
+    assert "MOY_MATCH_PORT_AGAIN = %d," % P.PORT_AGAIN in head
+
+
+def test_a_burst_past_the_budget_is_refused_and_nothing_extra_reaches_the_air(two):
+    """A port sends PORT_BURST frames at once; one more is BUSY, counted
+    refused, and never goes on air or reaches a listener."""
+    air, _clock, a, b = two
+    h = _open(41, "port=7")
+    b.start()
+    assert b.open_port(7) == 0
+    before = air.sent
+    assert _writes(41, h, P.PORT_BURST + 3) == [1] * P.PORT_BURST + [H.BUSY] * 3
+    assert air.sent - before == P.PORT_BURST
+    assert H.get(41, h, "sent") == P.PORT_BURST and H.get(41, h, "refused") == 3
+    b.poll()
+    heard = 0
+    while b.port_take(7) is not None:
+        heard += 1
+    assert heard == P.PORT_BURST
+
+
+def test_the_budget_refills_with_the_clock_and_holds_a_burst_at_most(two):
+    air, clock, _a, _b = two
+    h = _open(41, "port=7")
+    assert _writes(41, h, P.PORT_BURST + 1)[-1] == H.BUSY
+    clock.advance(1000 // P.PORT_RATE - 1)
+    assert H.write(41, h, b"x") == H.BUSY, "not a whole frame yet"
+    clock.advance(1)
+    assert _writes(41, h, 2) == [1, H.BUSY]
+    clock.advance(60_000)
+    before = air.sent
+    assert _writes(41, h, P.PORT_BURST + 1) == [1] * P.PORT_BURST + [H.BUSY]
+    assert air.sent - before == P.PORT_BURST
+
+
+def test_every_port_together_spends_the_console_s_budget(two):
+    """Each port's own budget is fair between holders; the console's bounds
+    them all: a port with its whole burst left is refused once the others
+    spent the console's."""
+    _air, _clock, a, _b = two
+    hs = [_open(41, "port=1"), _open(41, "port=2"), _open(42, "port=3")]
+    spent = 0
+    for h in hs[:-1]:
+        spent += _writes(41, h, P.PORT_BURST).count(1)
+    assert spent == P.PORTS_BURST == 2 * P.PORT_BURST
+    assert H.write(42, hs[2], b"x") == H.BUSY
+    assert H.get(42, hs[2], "refused") == 1 and H.get(42, hs[2], "sent") == 0
+
+
+def test_a_live_match_narrows_the_ports_and_never_the_game_s_net_send(two):
+    """While a match is live every port together sends LIVE_BURST frames and
+    then one each 1000 / LIVE_RATE ms; the game's net.send (port 0) has no
+    budget."""
+    air, clock, a, b = two
+    h = _open(41, "port=7")
+    _match(clock, a, b)
+    assert _writes(41, h, 3) == [1] * P.LIVE_BURST + [H.BUSY] * (3 - P.LIVE_BURST)
+    before = air.sent
+    for i in range(20):
+        assert a.net.send({"n": i}) is True
+    assert air.sent - before == 20, "port 0 has no budget"
+    clock.advance(1000 // P.LIVE_RATE)
+    assert _writes(41, h, 2) == [1, H.BUSY]
+    a.stop()
+    clock.advance(1000)
+    assert _writes(41, h, P.PORT_BURST + 1)[-1] == H.BUSY, "outside a match: the port's own"

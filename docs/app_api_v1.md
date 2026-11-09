@@ -941,7 +941,10 @@ input is untrusted, so the sender is in every record for the program to
 judge; `"from=match"` narrows a port to the live match's peer and hears
 nothing outside a match. A port keeps four messages unread (`dev_get(h,
 "drops")` counts what it dropped while full); a process holds four ports and
-the console eight, FULL past either. The radio stays up while any port is
+the console eight, FULL past either. A port's sends are budgeted so they
+cannot crowd a match's inputs off the air (`docs/netplay_v1.md`, Ports): a
+write past the budget is BUSY and sends nothing, and `"sent"` and
+`"refused"` count both. The radio stays up while any port is
 open, and a match's inputs never reach a port.
 
 Each name needs what Python's needs: `lease:<row>` (`lease:gpio` for

@@ -63,7 +63,9 @@
 // carries its number; a message for a port nobody opened is dropped, and
 // each open port keeps its own queue, PORT_DEPTH records deep, the newest
 // dropped and counted while it is full. A port never sees an INPUT frame,
-// and a port's frame never reaches the session or the game's inbox.
+// and a port's frame never reaches the session or the game's inbox. A port
+// sends only while it is open and within its SEND BUDGET (below); port 0 has
+// none, its sends being the game's.
 //
 // THE CONSOLE'S HALF. What the link cannot do itself -- open the cart a host
 // named, re-run the cart from frame zero -- it leaves as one ACTION the
@@ -155,6 +157,35 @@ enum {
 #define MOY_MATCH_PORTS 8               // ports open on this console at once
 #define MOY_MATCH_PORT_DEPTH 4          // records a port keeps unread
 #define MOY_MATCH_PORT_HDR 4
+// THE SEND BUDGET. A port's frame shares the air and the transport with the
+// match's inputs, and a late input stalls both consoles, so ports send from
+// token buckets refilled by the clock: each port's own (fair between
+// holders) and the console's, which every port's send also spends. A send
+// past either answers MOY_MATCH_PORT_AGAIN and nothing goes on air.
+//   Lockstep's cadence: a tick's input (30 or 60 Hz) and a stalled tick's
+// retries or the resend between ticks, together at most one per LOCK_MS:
+// 62.5 frames/s, about 45/s measured in a linked match; beacons 2.5/s.
+//   The tightest transport is the Waveshare P4's: one FIFO, 12 deep, whose
+// one consumer clears a frame per ~10 ms RPC (native/p4/moy_c6), about 100
+// frames/s, so every frame queued ahead of an input delays it ~10 ms (an
+// S3 sends in ~60 us).
+//   While a match is live the console's bucket is LIVE_RATE/s with a burst of
+// LIVE_BURST: one port frame per 100 ms, so an input waits behind at most one
+// (~10 ms on the P4, under a 60 Hz tick's 16.7 ms), and inputs, beacons and
+// ports together use at most 75 of the ~100 frames/s the P4 clears.
+//   Outside a match it is PORTS_RATE/s with a burst of PORTS_BURST, under
+// the P4 queue's 12 so a beacon or a START is never refused behind ports,
+// and kind to a match nearby: eight consoles in range at their cap add eight
+// frames a 30 Hz tick to its receive ring, which a drain takes DRAIN_MAX at
+// a time.
+//   A port's own bucket is PORT_RATE/s with a burst of PORT_BURST, the
+// receiving queue's PORT_DEPTH: a burst fills a reader's queue and no more.
+#define MOY_MATCH_PORT_RATE 10          // frames/s, each port
+#define MOY_MATCH_PORT_BURST 4
+#define MOY_MATCH_PORTS_RATE 30         // frames/s, every port together
+#define MOY_MATCH_PORTS_BURST 8
+#define MOY_MATCH_LIVE_RATE 10          // ...while a match is live
+#define MOY_MATCH_LIVE_BURST 1
 enum { MOY_MATCH_FROM_ANY = 0, MOY_MATCH_FROM_MATCH = 1 };
 // What the port calls answer where they fail.
 enum {
@@ -163,6 +194,7 @@ enum {
     MOY_MATCH_PORT_BUSY = -3,           // the port is open already
     MOY_MATCH_PORT_ABSENT = -4,         // the port is not open
     MOY_MATCH_PORT_DOWN = -5,           // the link is down or the radio refused the send
+    MOY_MATCH_PORT_AGAIN = -6,          // past the send budget: nothing sent, try later
 };
 
 // The transport. `recv` answers the payload's length, -1 when the ring is
@@ -191,12 +223,22 @@ typedef struct {
     bool pinned;                        // ...an associated station's, which it cannot leave
 } moy_match_peer_t;
 
+// A send budget: `credit` in thousandths of a frame, refilled from the ms
+// since `at` (none before `has_at`).
+typedef struct {
+    uint32_t credit;
+    uint32_t at;
+    bool has_at;
+} moy_match_budget_t;
+
 // One open port's queue, oldest first.
 typedef struct {
     uint16_t port;                      // 0: the slot is free
     uint8_t from;                       // MOY_MATCH_FROM_*
     uint8_t n, head;
     uint32_t drops;
+    uint32_t sent, refused;             // frames this port sent, sends its budget refused
+    moy_match_budget_t budget;
     uint8_t mac[MOY_MATCH_PORT_DEPTH][6];
     uint8_t len[MOY_MATCH_PORT_DEPTH];
     uint8_t data[MOY_MATCH_PORT_DEPTH][MOY_MATCH_MSG_MAX];
@@ -330,6 +372,7 @@ typedef struct {
     bool pinned;                        // ...an associated station's
     uint8_t probe;                      // beacon ticks since the last probe, and its place
     uint8_t probe_at;
+    moy_match_budget_t ports_budget;    // every port's sends together
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];
@@ -380,9 +423,11 @@ int moy_match_take_msg(moy_match_t *m, uint8_t *out, size_t cap);
 // what waits.
 int moy_match_port_open(moy_match_t *m, uint16_t port, int from);
 int moy_match_port_close(moy_match_t *m, uint16_t port);
-// One broadcast T_PORT carrying `body` on `port` (open or not): 0, or _BAD
-// (port 0, more than MOY_MATCH_MSG_MAX bytes), _DOWN.
-int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size_t n);
+// One broadcast T_PORT carrying `body` on open `port` at `now` (ms): 0, or
+// _BAD (port 0, more than MOY_MATCH_MSG_MAX bytes), _ABSENT (not open),
+// _DOWN, _AGAIN (past the send budget).
+int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size_t n,
+                        uint32_t now);
 // The oldest record waiting on `port`: its sender into `mac`, its bytes into
 // `out`, and its length; -1 with none waiting, _FULL where `cap` is short
 // of it (it waits on), _ABSENT where the port is not open.
@@ -391,6 +436,9 @@ int moy_match_port_take(moy_match_t *m, uint16_t port, uint8_t mac[6], uint8_t *
 // Records `port` dropped while its queue was full, and how many wait: -1
 // where it is not open.
 int32_t moy_match_port_drops(const moy_match_t *m, uint16_t port);
+// Frames `port` sent, and sends its budget refused: -1 where it is not open.
+int32_t moy_match_port_sent(const moy_match_t *m, uint16_t port);
+int32_t moy_match_port_refused(const moy_match_t *m, uint16_t port);
 int moy_match_port_waiting(const moy_match_t *m, uint16_t port);
 // How many ports are open.
 int moy_match_ports_open(const moy_match_t *m);

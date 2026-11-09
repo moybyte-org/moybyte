@@ -342,7 +342,11 @@ T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT = 1, 2, 3, 4, 5, 6, 7
 # A process's port (moy_match.h, PORTS): the sender rule it opens with, and
 # what the port calls answer where they fail.
 FROM_ANY, FROM_MATCH = 0, 1
-PORT_BAD, PORT_FULL, PORT_BUSY, PORT_ABSENT, PORT_DOWN = -1, -2, -3, -4, -5
+PORT_BAD, PORT_FULL, PORT_BUSY, PORT_ABSENT, PORT_DOWN, PORT_AGAIN = -1, -2, -3, -4, -5, -6
+# The ports' send budget (moy_match.h, THE SEND BUDGET): frames/s and burst.
+PORT_RATE, PORT_BURST = 10, 4
+PORTS_RATE, PORTS_BURST = 30, 8
+LIVE_RATE, LIVE_BURST = 10, 1
 PORT_MSG_MAX = 240                      # MOY_MATCH_MSG_MAX
 TICK_HZ = 30
 TICK_FAST = 60
@@ -896,9 +900,12 @@ class EspNowLink:
         return rc
 
     def port_send(self, port, body):
-        """One broadcast message on `port`: 0, PORT_BAD (more than
-        PORT_MSG_MAX bytes) or PORT_DOWN."""
-        return PORT_DOWN if self._m is None else self._m.port_send(port, body)
+        """One broadcast message on open `port`: 0, PORT_BAD (more than
+        PORT_MSG_MAX bytes), PORT_ABSENT (not open), PORT_DOWN, or PORT_AGAIN
+        (past the send budget: nothing sent)."""
+        if self._m is None:
+            return PORT_DOWN
+        return self._m.port_send(port, body, self._ticks_ms())
 
     def port_take(self, port, cap=PORT_MSG_MAX):
         """(sender's MAC, bytes) of the oldest message on `port`, None with
@@ -908,6 +915,12 @@ class EspNowLink:
 
     def port_drops(self, port):
         return -1 if self._m is None else self._m.port_drops(port)
+
+    def port_sent(self, port):
+        return -1 if self._m is None else self._m.port_sent(port)
+
+    def port_refused(self, port):
+        return -1 if self._m is None else self._m.port_refused(port)
 
     def port_waiting(self, port):
         return -1 if self._m is None else self._m.port_waiting(port)

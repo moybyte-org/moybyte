@@ -635,6 +635,7 @@ void moy_match_init(moy_match_t *m, const moy_match_io_t *io, const char *name,
     }
     copy_str(m->name, sizeof(m->name), name, strlen(name));
     copy_str(m->cfg, sizeof(m->cfg), "{}", 2);
+    m->ports_budget.credit = MOY_MATCH_PORTS_BURST * 1000u;
     m->rng = entropy ? entropy : 0x6D6F7962u;
     tape_clear(m->s.mine_f);
     tape_clear(m->s.theirs_f);
@@ -1296,7 +1297,9 @@ int moy_match_port_open(moy_match_t *m, uint16_t port, int from) {
             q->port = port;
             q->from = (uint8_t)from;
             q->n = q->head = 0;
-            q->drops = 0;
+            q->drops = q->sent = q->refused = 0;
+            q->budget.credit = MOY_MATCH_PORT_BURST * 1000u;
+            q->budget.has_at = false;
             return 0;
         }
     }
@@ -1313,12 +1316,45 @@ int moy_match_port_close(moy_match_t *m, uint16_t port) {
     return 0;
 }
 
-int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size_t n) {
+// `b` refilled to `now` at `rate` frames/s, held to `burst` frames: whether
+// it holds a whole frame.
+static bool budget_has(moy_match_budget_t *b, uint32_t now, uint32_t rate, uint32_t burst) {
+    uint32_t cap = burst * 1000u;
+    int32_t dt = (int32_t)(now - b->at);
+    if (b->has_at && dt > 0) {
+        uint64_t c = (uint64_t)b->credit + (uint64_t)dt * rate;
+        b->credit = c > cap ? cap : (uint32_t)c;
+    }
+    if (!b->has_at || dt > 0) {
+        b->at = now;
+        b->has_at = true;
+    }
+    if (b->credit > cap) {
+        b->credit = cap;
+    }
+    return b->credit >= 1000u;
+}
+
+int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size_t n,
+                        uint32_t now) {
     if (port == 0 || n > MOY_MATCH_MSG_MAX) {
         return MOY_MATCH_PORT_BAD;
     }
+    moy_match_port_t *q = port_of(m, port);
+    if (q == NULL) {
+        return MOY_MATCH_PORT_ABSENT;
+    }
     if (!m->active) {
         return MOY_MATCH_PORT_DOWN;
+    }
+    bool live = m->s.live;
+    bool mine = budget_has(&q->budget, now, MOY_MATCH_PORT_RATE, MOY_MATCH_PORT_BURST);
+    bool all = budget_has(&m->ports_budget, now,
+                          live ? MOY_MATCH_LIVE_RATE : MOY_MATCH_PORTS_RATE,
+                          live ? MOY_MATCH_LIVE_BURST : MOY_MATCH_PORTS_BURST);
+    if (!mine || !all) {
+        q->refused++;
+        return MOY_MATCH_PORT_AGAIN;
     }
     uint8_t p[MOY_MATCH_PORT_HDR + MOY_MATCH_MSG_MAX];
     p[0] = MOY_MATCH_PROTO;
@@ -1328,7 +1364,13 @@ int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size
     if (n) {
         memcpy(p + MOY_MATCH_PORT_HDR, body, n);
     }
-    return broadcast(m, p, MOY_MATCH_PORT_HDR + n) ? 0 : MOY_MATCH_PORT_DOWN;
+    if (!broadcast(m, p, MOY_MATCH_PORT_HDR + n)) {
+        return MOY_MATCH_PORT_DOWN;
+    }
+    q->budget.credit -= 1000u;
+    m->ports_budget.credit -= 1000u;
+    q->sent++;
+    return 0;
 }
 
 int moy_match_port_take(moy_match_t *m, uint16_t port, uint8_t mac[6], uint8_t *out,
@@ -1355,6 +1397,16 @@ int moy_match_port_take(moy_match_t *m, uint16_t port, uint8_t mac[6], uint8_t *
 int32_t moy_match_port_drops(const moy_match_t *m, uint16_t port) {
     const moy_match_port_t *q = port_of((moy_match_t *)m, port);
     return q == NULL ? -1 : (int32_t)q->drops;
+}
+
+int32_t moy_match_port_sent(const moy_match_t *m, uint16_t port) {
+    const moy_match_port_t *q = port_of((moy_match_t *)m, port);
+    return q == NULL ? -1 : (int32_t)q->sent;
+}
+
+int32_t moy_match_port_refused(const moy_match_t *m, uint16_t port) {
+    const moy_match_port_t *q = port_of((moy_match_t *)m, port);
+    return q == NULL ? -1 : (int32_t)q->refused;
 }
 
 int moy_match_port_waiting(const moy_match_t *m, uint16_t port) {
