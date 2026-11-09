@@ -102,6 +102,9 @@ moybyte_patch_import_cache
 # DECLINED moybyte_patch_mdns_psram -- this board's responder runs for its
 # whole power-on (it is found by name), so the buffers would be held anyway.
 
+# DECLINED moybyte_patch_tinyusb_msc_psram -- this board denies
+# native/moy_usbdisk, so TinyUSB's MSC class is not built.
+
 # DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
 #    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
 #    heap and the lwIP buffers both live in it). It is a dependency argument:

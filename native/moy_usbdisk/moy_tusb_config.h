@@ -22,7 +22,8 @@
 #define MOY_TUSB_RHPORT 1
 #define CFG_TUD_MAX_SPEED OPT_MODE_HIGH_SPEED
 #define CFG_TUSB_RHPORT1_MODE (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
-// a transfer's sectors at a time: 16 per callback on the P4, whose RAM it is
+// a transfer's sectors at a time: 16 per callback on the P4, in PSRAM taken
+// at the drive's first start (tools/patch_tinyusb_msc_psram.py)
 #define CFG_TUD_MSC_EP_BUFSIZE 8192
 #else
 #define MOY_TUSB_RHPORT 0

@@ -123,6 +123,10 @@ moybyte_patch_psram_retune
 # (tools/patch_mdns_psram.py).
 moybyte_patch_mdns_psram
 
+# DECLINED moybyte_patch_tinyusb_msc_psram -- this board's MSC endpoint buffer
+# is one 64-byte full-speed packet (native/moy_usbdisk/moy_tusb_config.h); its
+# sector is already gathered in PSRAM.
+
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 # the MIPI-DSI bridge-underrun ISR. This board has no DSI peripheral.
 

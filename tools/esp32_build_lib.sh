@@ -419,6 +419,16 @@ moybyte_patch_mdns_psram() {
   MOYBYTE_MDNS_PSRAM=1
 }
 
+# TinyUSB's MSC endpoint buffer (native/moy_usbdisk) in PSRAM, taken at the
+# drive's first start, not internal .bss for the whole power-on.
+# tools/patch_tinyusb_msc_psram.py is the patch and why; all-or-nothing,
+# idempotent. Applied, like the mDNS one, by moybyte_submodules after the
+# component manager's fetch.
+moybyte_patch_tinyusb_msc_psram() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  MOYBYTE_TUSB_MSC_PSRAM=1
+}
+
 # LittleFS's default program size and lookahead, 32 -> 256 each, so a P4's
 # flash store programs 1 KB of a file at a time instead of 128 bytes and walks
 # the filesystem for free blocks an eighth as often. tools/patch_lfs_sizes.py is
@@ -892,8 +902,10 @@ moybyte_submodules_key() {
 moybyte_submodules() {
   local bout="$1"
   local mdns="managed_components/espressif__mdns/mdns.c"
+  local msc="managed_components/espressif__tinyusb/src/class/msc/msc_device.c"
   if [ "$(cat "${bout}/.moybyte-submodules" 2>/dev/null)" != "$(moybyte_submodules_key)" ] \
-     || { [ -n "${MOYBYTE_MDNS_PSRAM:-}" ] && [ ! -f "${mdns}" ]; }; then
+     || { [ -n "${MOYBYTE_MDNS_PSRAM:-}" ] && [ ! -f "${mdns}" ]; } \
+     || { [ -n "${MOYBYTE_TUSB_MSC_PSRAM:-}" ] && [ ! -f "${msc}" ]; }; then
     make submodules BOARD_DIR="${BOARD_DIR}"
     mkdir -p "${bout}"
     moybyte_submodules_key > "${bout}/.moybyte-submodules"
@@ -902,6 +914,9 @@ moybyte_submodules() {
   # managed components are there to patch before the build compiles them.
   if [ -n "${MOYBYTE_MDNS_PSRAM:-}" ]; then
     "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_mdns_psram.py" "${MPY_DIR}" || exit 1
+  fi
+  if [ -n "${MOYBYTE_TUSB_MSC_PSRAM:-}" ]; then
+    "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_tinyusb_msc_psram.py" "${MPY_DIR}" || exit 1
   fi
 }
 

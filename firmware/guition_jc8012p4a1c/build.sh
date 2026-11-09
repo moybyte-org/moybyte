@@ -101,6 +101,9 @@ moybyte_patch_thread_state_tls
 # DECLINED moybyte_patch_mdns_psram -- measured on the two S3s, whose internal
 # SRAM is the squeeze (#246); this board's mDNS keeps the component's statics.
 
+# DECLINED moybyte_patch_tinyusb_msc_psram -- this board denies
+# native/moy_usbdisk, so TinyUSB's MSC class is not built.
+
 # DECLINED moybyte_patch_psram_retune -- not applicable: an ESP32-S3 MSPI
 # timing-tuner patch (#169); this is an ESP32-P4 and the file does not exist
 # in its build.
