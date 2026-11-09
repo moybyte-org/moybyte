@@ -190,7 +190,7 @@ static void role_here(void *arg) {
         c->why = EIO;
         return;
     }
-    c->r = moy_app_role(c->run->a, c->run->g, c->row, c->arg, c->n, c->ans, c->cap);
+    c->r = moy_app_role_here(c->run->a, c->run->g, c->row, c->arg, c->n, c->ans, c->cap);
     c->why = moy_app_why(c->run->a);
 }
 
