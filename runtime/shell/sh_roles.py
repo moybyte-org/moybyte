@@ -6,7 +6,8 @@
 #   r_http                            a GET by the http worker, stepped
 #   r_snd                             stdin through the audio ring
 #   r_python                          a REPL or code in the shell's VM
-#   r_cron, r_at                      the crontab and the at jobs (cron.py)
+#   r_cron                            the crontab (cron.py)
+#   r_at                              the at jobs (cron.py)
 """The C shell's role commands (docs/os_2026-11/system.md section 1): the
 command faces of the console's Python services, which the shell reaches
 through its door (runtime/shell/sh_door.py's `role`) and refuses with "needs
