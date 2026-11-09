@@ -860,8 +860,8 @@ module; `native/moy_wasm/README.md` is the tier.
 **Devices by handle.** A compiled program (a compiled app, a WASI program,
 a native module) holds a lease or a device API by a handle where a Python
 program holds an object (`native/moy_kernel/moy_dev.h` is the authority
-on `gpio<n>` and `pins`, `runtime/system/dev_handles.py` on every other
-name, key and answer). `dev_open(name, cfg)` answers the handle:
+on the leases' names, keys and answers, `runtime/system/dev_handles.py` on
+the device APIs'). `dev_open(name, cfg)` answers the handle:
 `name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
 `"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`, `"camera"`, `"media"`), the `pins` permission's
 pins (`"pins"`) or a port of the console-to-console radio link (`"net"`), `cfg` words

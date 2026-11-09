@@ -434,14 +434,14 @@ def test_the_fixture_is_a_service():
 @pytest.mark.parametrize("perms", [("lease:gpio", "lease:uart1"), ()])
 def test_a_wasi_service_holds_leases_by_handle_until_it_ends(svc, perms):
     """moybyte.os `dev_*` are the device handles' rows (native/moy_kernel/
-    moy_dev.h's pin, runtime/system/dev_handles.py's UART) for the service's
+    moy_dev.h's pin and UART, over its buses' host twin) for the service's
     process: a pin driven and read back, a
     UART written and read through its peer, a handle it never had NOENT, each
     refused ACCES without its `lease:<row>`. A pin it holds is BUSY to a
     Python program until the service ends, whose sweep leaves it safe."""
     from runtime import leases
     from runtime import moy_lease as N
-    from runtime.host import lease_sim
+    from runtime.host import bus_sim, lease_sim
     import sys
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import board_config
@@ -449,7 +449,8 @@ def test_a_wasi_service_holds_leases_by_handle_until_it_ends(svc, perms):
     leases.stand_in(lease_sim, board_config.lease_spec(
         os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
     lease_sim.reset()
-    lease_sim.loopback(1, True)
+    bus_sim.reset()
+    bus_sim.loopback(1, True)
     try:
         since = L.next()
         pid = S.start_cart(ws, _granted(ws, cart, perms), s)

@@ -24,7 +24,8 @@
 // or kill -- closes its edge sources and leaves every pin it held SAFE: an
 // input, no pull, its interrupt off, no peripheral driving it; a UART's driver
 // is uninstalled. An SPI host's driver is its binding's to end (the Python
-// lease deinits its machine.SPI before the drop); the drop leaves its pins safe.
+// lease deinits its machine.SPI, a device handle's close frees its bus,
+// moy_devbus.h, before the drop); the drop leaves its pins safe.
 // moy_lease_pin_state reads a pin back: on a board from the GPIO matrix, on
 // the host from the stand-in's record.
 //

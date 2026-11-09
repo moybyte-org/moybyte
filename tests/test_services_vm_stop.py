@@ -464,16 +464,19 @@ def _two_ws(tmp_path, items):
 
 @pytest.fixture
 def pins():
-    """The Waveshare P4's lease rows offered by the host's stand-in."""
+    """The Waveshare P4's lease rows offered by the host's stand-in, its
+    uart1 looped back in the buses' twin."""
     import sys
     from runtime import leases
     from runtime import moy_lease as N
-    from runtime.host import lease_sim
+    from runtime.host import bus_sim, lease_sim
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import board_config
     leases.stand_in(lease_sim, board_config.lease_spec(
         os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
     lease_sim.reset()
+    bus_sim.reset()
+    bus_sim.loopback(1, True)
     yield N
     for p in list(leases.LEASES.held):
         leases.LEASES.sweep(p)
@@ -488,16 +491,19 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     drives a gpio handle's pin and reads it back, `service_running` finds
     each service by its app's id in its tier's table, and a WASI service reads
     the edges a pin made during the stop from its handle, whose reader the
-    stop kept, and puts text on the clipboard (native/moy_kernel/moy_lock.h);
+    stop kept, writes a UART it opened before the stop and reads back its
+    peer's bytes and its own (native/moy_kernel/moy_devbus.h's twin, looped
+    back), and puts text on the clipboard (native/moy_kernel/moy_lock.h);
     each lease the kernel took is no VM's, and a service's end closes its
     handles."""
     import moy_app
     from runtime import moy_input
+    from runtime.host import bus_sim
     N = pins
     perms = ["full_access", "lease:gpio"]
     ws = _two_ws(tmp_path, ((elf_built, "elf_svc.moy", {"permissions": perms}),
                             (wasi_built, "wasi_svc.moy",
-                             {"permissions": ["lease:gpio", "clipboard"]})))
+                             {"permissions": ["lease:gpio", "lease:uart1", "clipboard"]})))
     s = fresh
     since = L.next()
     elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
@@ -510,6 +516,8 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
                                   for p in (elf, wasi)))
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["edges"]')[0] == 1
     assert _polled(s, lambda: "edges 0 errno 0" in _texts(since, wasi)), _texts(since, wasi)
+    assert moy_evq.send(peer_w, "wasi.svc", "wake", '["uart"]')[0] == 1
+    assert _polled(s, lambda: "uart 4 ping errno 0" in _texts(since, wasi)), _texts(since, wasi)
     assert N.held(N.VM) == 0, "the kernel's leases hold no VM stop off"
     rec, door = _stop(ws, s)
     moy_input._lib().moy_input_vm_stop()
@@ -525,7 +533,9 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
         app.end(g)
     N.sim_level(5, 1)
     N.sim_level(5, 0)
+    bus_sim.feed(1, b"far")
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["read"]')[0] == 1
+    assert moy_evq.send(peer_w, "wasi.svc", "wake", '["uart"]')[0] == 1
     assert moy_evq.send(peer_e, "elf.svc", "pin", "[]")[0] == 1
     assert moy_evq.send(peer_w, "wasi.svc", "wake", '["clip"]')[0] == 1
     got = []
@@ -538,8 +548,10 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
             got.append(m)
     assert got[0][2:] == ("pinned", "[1,1,0]"), got
     assert "read 2 1 0 errno 0" in _texts(since, wasi), _texts(since, wasi)
+    assert "uart 4 farping errno 0" in _texts(since, wasi), _texts(since, wasi)
+    assert bus_sim.sent(1) == b"pingping"
     assert "clip 0 clipped errno 0" in _texts(since, wasi), _texts(since, wasi)
-    assert N.held() == 1, "the WASI service's pin, the ELF one's closed"
+    assert N.held() == 2, "the WASI service's pin and UART, the ELF one's closed"
     s2, _started = _back(ws, rec, door, monkeypatch)
     for p in (elf, wasi):
         assert s2.stop(p)

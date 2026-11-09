@@ -36,7 +36,9 @@
 // time; a "wake" carrying ["pass", app] sends that app a "ping" of its own,
 // printing how many took it; a "wake" carrying ["edges"] opens gpio5 as an
 // input and listens on both its edges, and one carrying ["read"] reads them
-// back, printing how many and each level; a "wake" carrying ["clip"] puts
+// back, printing how many and each level; a "wake" carrying ["uart"] opens
+// uart1 the first time and keeps it, writes "ping" and reads back what waits,
+// printing what it wrote and read; a "wake" carrying ["clip"] puts
 // "clipped" on the clipboard and reads it back; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
@@ -79,7 +81,7 @@ int main(void) {
         moy_evq_ev_t ev;
         char b[sizeof(moy_evq_ev_t) + 256];
     } m;
-    int ticks = 0, pings = 0, ticker = 0, net = 0, rearm = 0, edges = -1;
+    int ticks = 0, pings = 0, ticker = 0, net = 0, rearm = 0, edges = -1, uart = -1;
     long next = now_ms() + TICK_MS;
     for (;;) {
         long left = next - now_ms();
@@ -138,6 +140,16 @@ int main(void) {
                 printf(" %d", e[k + 4]);
             }
             printf(" errno %d\n", n < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"uart\"]") == 0) {
+            if (uart <= 0) {
+                uart = (int)moy_dev_open("uart1", "baudrate=9600");
+            }
+            int w = (int)moy_dev_write(uart, "ping", 4);
+            char b[32];
+            int r = (int)moy_dev_read(uart, b, sizeof b);
+            printf("uart %d %.*s errno %d\n", w, r > 0 ? r : 0, b, w < 0 || r < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0
                    && strcmp(m.b + sizeof m.ev, "[\"clip\"]") == 0) {

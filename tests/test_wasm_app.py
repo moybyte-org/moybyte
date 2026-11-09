@@ -277,8 +277,8 @@ def test_a_compiled_app_is_refused_what_its_permissions_do_not_grant(talk):
 
 @pytest.mark.parametrize("off", [(), ("lease:gpio", "lease:uart1")])
 def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
-    """moybyte_dev_* (native/moy_kernel/moy_dev.h for the pin and the pins,
-    runtime/system/dev_handles.py for the UART): a pin the app drives and
+    """moybyte_dev_* (native/moy_kernel/moy_dev.h's pin, pins and UART, over
+    its buses' host twin): a pin the app drives and
     reads back, a UART it writes and reads through its peer, each DENIED with
     its `lease:<row>` turned off; the pin it keeps is BUSY to a Python
     program while it runs and safe once its run ends. A `pins` handle
@@ -289,11 +289,12 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
     import board_config
     from runtime import leases, moybyte
     from runtime import moy_lease as N
-    from runtime.host import lease_sim
+    from runtime.host import bus_sim, lease_sim
     leases.stand_in(lease_sim, board_config.lease_spec(
         os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
     lease_sim.reset()
-    lease_sim.loopback(1, True)
+    bus_sim.reset()
+    bus_sim.loopback(1, True)
     try:
         ws, pid, lines = talk(off)
         got = [ln for ln in lines if ln.startswith("dev_")]

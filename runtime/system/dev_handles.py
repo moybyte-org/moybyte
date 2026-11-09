@@ -9,13 +9,6 @@
 #   sweep                    a process's end closes every handle it held
 #   words                    a cfg string of `key=value` words as a dict
 #   _Handle                  the base every handle's verbs default from
-#   _Lease                   the base of a lease row's handle (leases.py)
-#   _Uart                    uart<n>
-#   _Spi                     spi<n>: full-duplex transfers
-#   _Pwm                     pwm<n>
-#   _Adc                     adc<n>
-#   _I2c                     i2c: register reads as a write then a read
-#   _lease                   the lease row a name opens, taken for a process
 #   _Http                    http: a fetch's body, kept or windowed
 #   _Lora                    lora: raw packets and LoRaWAN
 #   _Mic                     mic: the microphone's samples
@@ -30,15 +23,13 @@
 """Leases and device APIs by handle: what a compiled program (a wasm app, a
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
-`moybyte.dev_*`. The kernel's handle table serves gpio<n> and pins on the
-calling program's own task (native/moy_kernel/moy_dev.h, which says what
-they answer); every other kind is served here, by the door's Python half as
-the calling process (runtime/shell/shell_servers.py, ConsoleCalls), on the
-VM's task:
+`moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
+pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- on the calling program's
+own task (native/moy_kernel/moy_dev.h, which says what they answer); the
+device APIs are served here, by the door's Python half as the calling
+process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
-  open(name, cfg) -> h      a lease of row `name` (leases.py's names:
-                            "uart<n>", "spi<n>", "pwm<n>", "adc<n>", "i2c")
-                            or a device API ("http", "lora", "mic", "ble",
+  open(name, cfg) -> h      a device API ("http", "lora", "mic", "ble",
                             "usb", "midi", "camera", "media", "net"),
                             configured by `cfg`
   close(h)                  given back; the process's end closes the rest
@@ -52,17 +43,6 @@ VM's task:
 address, a UUID, a name and bytes (in hex) stay text. What each handle
 answers:
 
-  uart<n>   cfg baudrate bits parity=none|even|odd stop tx rx timeout rxbuf
-            txbuf; read: the bytes waiting; write; get any
-  spi<n>    cfg baudrate polarity phase bits firstbit=msb|lsb sck mosi miso;
-            read: n bytes clocked in, 0 clocked out; write; xfer: full duplex,
-            as many bytes in as out (FULL where `into` is shorter)
-  pwm<n>    cfg freq duty (0..65535); set the same; get freq, duty
-  adc<n>    get value (0..65535)
-  i2c       cfg scl sda (required) freq addr; set addr; read: n bytes from
-            the device at addr; write: to it; xfer: a write with no stop,
-            then a read (a register read); a device that does not answer is
-            ABSENT
   http      cfg url (required) cap (a body kept up to cap bytes) or window
             (a body of any length through a window of that many bytes); read:
             the body's next bytes, 0 while it runs and at its end; get status
@@ -168,8 +148,8 @@ answers:
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
-name needs (leases.perm_of's `lease:<row>`, a device's own, `media` or
-`media:url` for media), BUSY where another process holds the lease or the
+name needs (a device's own, `media` or `media:url` for media, and a midi
+port's UART its `lease:<row>`), BUSY where another process holds the
 device (a Python program's object, or another compiled program's handle; a
 process opens every device API but http and midi once), BAD for a name, a
 key or a value this console does not take, ABSENT for a handle not open, a
@@ -217,14 +197,6 @@ def _code(exc):
         e = exc.args[0] if exc.args and isinstance(exc.args[0], int) else EIO
         return _CODE.get(e, IO)
     return BAD
-
-
-def _leases():
-    try:
-        import leases
-    except ImportError:  # host: the runtime package
-        from runtime import leases
-    return leases
 
 
 def _face(name):
@@ -293,14 +265,6 @@ def _only(cfg, keys):
     return cfg
 
 
-def _named(cfg, key, names):
-    if key in cfg:
-        v = cfg[key]
-        if v not in names:
-            raise OSError(EINVAL, "%s=%r" % (key, v))
-        cfg[key] = names[v]
-
-
 class _Handle:
     """What every handle answers where its kind does not."""
 
@@ -321,168 +285,6 @@ class _Handle:
 
     def close(self, pid):
         pass
-
-
-class _Lease(_Handle):
-    def __init__(self, obj):
-        self.obj = obj
-
-    def close(self, pid):
-        _leases().LEASES.drop(self.obj)
-
-
-class _Uart(_Lease):
-    @staticmethod
-    def cfg(cfg):
-        _only(cfg, ("baudrate", "bits", "parity", "stop", "tx", "rx", "timeout", "rxbuf",
-                    "txbuf"))
-        _named(cfg, "parity", {"none": None, "even": 0, "odd": 1})
-        return cfg
-
-    def read(self, cap):
-        n = min(cap, self.obj.any())
-        return (self.obj.read(n) or b"") if n > 0 else b""
-
-    def write(self, data):
-        return self.obj.write(data) or 0
-
-    def set(self, cfg):
-        self.obj.init(**self.cfg(cfg))
-        return 0
-
-    def get(self, what):
-        if what != "any":
-            raise OSError(EINVAL, "no %s" % what)
-        return self.obj.any()
-
-
-class _Spi(_Lease):
-    @staticmethod
-    def cfg(cfg):
-        _only(cfg, ("baudrate", "polarity", "phase", "bits", "firstbit", "sck", "mosi", "miso"))
-        _named(cfg, "firstbit", {"msb": 0, "lsb": 1})
-        return cfg
-
-    def read(self, cap):
-        return self.obj.read(cap, 0) if cap > 0 else b""
-
-    def write(self, data):
-        self.obj.write(data)
-        return len(data)
-
-    def xfer(self, data, cap):
-        if cap < len(data):
-            return FULL
-        into = bytearray(len(data))
-        self.obj.write_readinto(data, into)
-        return bytes(into)
-
-    def set(self, cfg):
-        cfg = self.cfg(cfg)
-        for k in ("sck", "mosi", "miso"):
-            if k in cfg:
-                raise OSError(EINVAL, "a bus's pins are its open's")
-        self.obj.init(**cfg)
-        return 0
-
-
-class _Pwm(_Lease):
-    @staticmethod
-    def cfg(cfg):
-        _only(cfg, ("freq", "duty"))
-        if "duty" in cfg:
-            cfg["duty_u16"] = cfg.pop("duty")
-        return cfg
-
-    def set(self, cfg):
-        cfg = self.cfg(cfg)
-        if "freq" in cfg:
-            self.obj.freq(cfg["freq"])
-        if "duty_u16" in cfg:
-            self.obj.duty_u16(cfg["duty_u16"])
-        return 0
-
-    def get(self, what):
-        if what == "freq":
-            return self.obj.freq()
-        if what == "duty":
-            return self.obj.duty_u16()
-        raise OSError(EINVAL, "no %s" % what)
-
-
-class _Adc(_Lease):
-    @staticmethod
-    def cfg(cfg):
-        return _only(cfg, ())
-
-    def get(self, what):
-        if what != "value":
-            raise OSError(EINVAL, "no %s" % what)
-        return self.obj.read_u16()
-
-
-class _I2c(_Lease):
-    def __init__(self, obj, addr):
-        _Lease.__init__(self, obj)
-        self.addr = addr
-
-    @staticmethod
-    def cfg(cfg):
-        return _only(cfg, ("scl", "sda", "freq"))
-
-    def _at(self):
-        if self.addr is None:
-            raise OSError(EINVAL, "set addr first")
-        return self.addr
-
-    def set(self, cfg):
-        _only(cfg, ("addr",))
-        if "addr" in cfg:
-            a = cfg["addr"]
-            if not isinstance(a, int) or not 0 <= a < 128:
-                raise OSError(EINVAL, "addr=%r" % a)
-            self.addr = a
-        return 0
-
-    def get(self, what):
-        if what != "addr":
-            raise OSError(EINVAL, "no %s" % what)
-        return -1 if self.addr is None else self.addr
-
-    def read(self, cap):
-        return self.obj.readfrom(self._at(), cap) if cap > 0 else b""
-
-    def write(self, data):
-        self.obj.writeto(self._at(), data)
-        return len(data)
-
-    def xfer(self, data, cap):
-        a = self._at()
-        self.obj.writeto(a, data, False)
-        return self.obj.readfrom(a, cap) if cap > 0 else b""
-
-
-_LEASES = {"uart": _Uart, "spi": _Spi, "pwm": _Pwm, "adc": _Adc}
-
-
-def _lease(pid, name, cfg):
-    L = _leases()
-    kind = name.rstrip("0123456789")
-    if name == "i2c":
-        addr = cfg.pop("addr", None)
-        obj = L.LEASES.take(pid, name, _I2c.cfg(cfg))
-        hd = _I2c(obj, None)
-        if addr is not None:
-            try:
-                hd.set({"addr": addr})
-            except OSError:
-                L.LEASES.drop(obj)
-                raise
-        return hd
-    cls = _LEASES.get(kind)
-    if cls is None or kind == name:
-        raise OSError(EINVAL, "no lease %s" % name)
-    return cls(L.LEASES.take(pid, name, cls.cfg(cfg)))
 
 
 class _Http(_Handle):
@@ -1258,12 +1060,11 @@ def open(pid, name, cfg=None):  # noqa: A001 -- the row's verb
         c = words(cfg)
         dev = _DEVICES.get(name)
         if dev is None:
-            hd = _lease(pid, name, c)
-        else:
-            _need(pid, name)
-            if name in _ONE and any(type(x) is dev for x in HANDLES.get(pid, {}).values()):
-                raise OSError(EBUSY, "%s is open" % name)
-            hd = dev(pid, c) if dev is _Net else dev(c)
+            raise OSError(EINVAL, "no device %s" % name)
+        _need(pid, name)
+        if name in _ONE and any(type(x) is dev for x in HANDLES.get(pid, {}).values()):
+            raise OSError(EBUSY, "%s is open" % name)
+        hd = dev(pid, c) if dev is _Net else dev(c)
         h = _NEXT[0]
         _NEXT[0] += 1
         HANDLES.setdefault(pid, {})[h] = hd

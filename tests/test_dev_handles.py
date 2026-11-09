@@ -1,9 +1,11 @@
 """Leases and device APIs by handle (docs/os_2026-11/hardware.md section 4):
 what the `moybyte.dev_*` rows answer a compiled program, here called as its
-process would be served -- gpio<n> and pins by the kernel's handle table
-(native/moy_kernel/moy_dev.h), every other kind by runtime/system/
-dev_handles.py -- over the host's stand-ins (runtime/host/lease_sim.py,
-lora_sim.py, mic_sim.py) and the http client against a local server. The
+process would be served -- the leases (gpio<n>, pins, uart<n>, spi<n>, i2c,
+pwm<n>, adc<n>) by the kernel's handle table (native/moy_kernel/moy_dev.h)
+over its buses' host twin (runtime/host/bus_sim.py's far end), every device
+API by runtime/system/dev_handles.py -- over the host's stand-ins
+(runtime/host/lease_sim.py, lora_sim.py, mic_sim.py) and the http client
+against a local server. The
 rows reached from each compiled tier are tests/test_wasm_app.py's,
 tests/test_wasi_services.py's and tests/test_elf_commands.py's."""
 
@@ -21,7 +23,7 @@ from runtime import devices, leases, moybyte
 from runtime import moy_input as mi
 from runtime import moy_lease as N
 from runtime import moy_log as L
-from runtime.host import lease_sim
+from runtime.host import bus_sim, lease_sim
 from unix_mp import ROOT
 
 sys.path.insert(0, str(ROOT / "tools"))
@@ -34,6 +36,7 @@ SPEC = board_config.lease_spec(str(ROOT / "firmware/esp32_p4_wifi6_touch_lcd_7b"
 def board():
     leases.stand_in(lease_sim, SPEC)
     lease_sim.reset()
+    bus_sim.reset()
     yield
     for pid in list(H.HANDLES):
         moybyte.end(pid)
@@ -69,6 +72,9 @@ _DEV_SIGS = (
     ("moy_dev_open", [_U, _U, _C, _S, _C, _S], _Z),
     ("moy_dev_close", [_U, _Z], _Z),
     ("moy_dev_read", [_U, _Z, ctypes.c_void_p, _S], _Z),
+    ("moy_dev_write", [_U, _Z, _C, _S], _Z),
+    ("moy_dev_xfer", [_U, _Z, _C, _S, ctypes.c_void_p, _S], _Z),
+    ("moy_dev_perm_bit", [_C, _S], _U),
     ("moy_dev_set", [_U, _Z, _C, _S], _Z),
     ("moy_dev_get", [_U, _Z, _C, _S], _Z),
     ("moy_dev_sweep", [_U], _U),
@@ -85,9 +91,26 @@ def _K():
     return lib
 
 
-def _kopen(pid, name, cfg="", perms=P_GPIO | P_PINS):
+def _bit(perm):
+    b = perm.encode()
+    return _K().moy_dev_perm_bit(b, len(b))
+
+
+def _kopen(pid, name, cfg="", perms=None):
+    if perms is None:
+        perms = P_GPIO | P_PINS | _bit("lease:uart1") | _bit("lease:spi2")
     b, c = name.encode(), cfg.encode()
     return _K().moy_dev_open(pid, perms, b, len(b), c, len(c))
+
+
+def _kwrite(pid, h, data):
+    return _K().moy_dev_write(pid, h, data, len(data))
+
+
+def _kxfer(pid, h, data, cap):
+    buf = ctypes.create_string_buffer(max(cap, 1))
+    n = _K().moy_dev_xfer(pid, h, data, len(data), buf, cap)
+    return buf.raw[:n] if n >= 0 else n
 
 
 def _kset(pid, h, cfg):
@@ -154,73 +177,115 @@ def test_a_gpio_handle_reads_the_edges_its_trigger_names():
 
 def test_a_uart_handle_writes_and_reads_what_waits():
     pid = L.spawn("t.uart")
-    h = _open(pid, "uart1", "baudrate=9600 parity=none")
-    lease_sim.loopback(1, True)
-    assert H.write(pid, h, b"ping") == 4 and H.get(pid, h, "any") == 4
-    assert H.read(pid, h, 2) == b"pi" and H.read(pid, h, 64) == b"ng"
-    assert H.read(pid, h, 64) == b""
-    assert H.set(pid, h, "baudrate=115200") == 0
-    assert H.set(pid, h, "speed=3") == H.BAD
+    h = _kopen(pid, "uart1", "baudrate=9600 parity=none")
+    assert h > 0 and N.pin_state(47) & N.PIN_PERIPH and N.pin_state(48) & N.PIN_PERIPH
+    bus_sim.loopback(1, True)
+    assert _kwrite(pid, h, b"ping") == 4 and _kget(pid, h, "any") == 4
+    assert _kread(pid, h, 2) == b"pi" and _kread(pid, h, 64) == b"ng"
+    assert _kread(pid, h, 64) == b"" and bus_sim.sent(1) == b"ping"
+    bus_sim.feed(1, b"pong")
+    assert _kread(pid, h, 64) == b"pong"
+    assert _kset(pid, h, "baudrate=115200 bits=7 parity=even stop=2 timeout=5") == 0
+    assert _kset(pid, h, "speed=3") == H.BAD
+    assert _kset(pid, h, "parity=0") == H.BAD
+    assert _kset(pid, h, "tx=20") == H.BAD                # a bus's pins are its open's
+    assert _kxfer(pid, h, b"x", 1) == H.BAD and _kget(pid, h, "baudrate") == H.BAD
+    assert _kclose(pid, h) == 0 and N.pin_state(47) == N.PIN_SAFE
+
+
+def test_a_uart_handle_takes_other_pins_of_the_gpio_row():
+    pid = L.spawn("t.uart")
+    h = _kopen(pid, "uart1", "tx=20 rx=21 rxbuf=1024")
+    assert h > 0 and N.of_pin(20) and N.of_pin(21) and not N.of_pin(47)
+    assert _kopen(L.spawn("t.other"), "uart1") == H.BUSY  # one unit, one holder
+    assert _kclose(pid, h) == 0
+    assert _kopen(pid, "uart1", "tx=7") == H.BAD          # not a pin of the row
 
 
 def test_an_spi_handle_writes_reads_and_transfers_full_duplex():
     pid = L.spawn("t.spi")
-    h = _open(pid, "spi2", "baudrate=1000000 polarity=0 phase=0")
-    assert H.write(pid, h, b"\x9f") == 1
-    assert H.xfer(pid, h, b"\x01\x02\x03", 3) == b"\xff\xff\xff"
-    assert H.xfer(pid, h, b"\x01\x02\x03", 2) == H.FULL
-    assert H.read(pid, h, 2) == b"\xff\xff"
-    assert lease_sim.SPI_LOG[1][:2] == [b"\x9f", b"\x01\x02\x03"]
+    h = _kopen(pid, "spi2", "baudrate=1000000 polarity=0 phase=0")
+    assert h > 0 and N.pin_state(49) & N.PIN_PERIPH
+    assert _kwrite(pid, h, b"\x9f") == 1
+    assert _kxfer(pid, h, b"\x01\x02\x03", 3) == b"\xff\xff\xff"
+    assert _kxfer(pid, h, b"\x01\x02\x03", 2) == H.FULL
+    assert _kread(pid, h, 2) == b"\xff\xff"
+    assert bus_sim.spi_sent(2) == b"\x9f\x01\x02\x03\x00\x00"
+    assert _kset(pid, h, "polarity=1 phase=1 firstbit=lsb baudrate=8000000") == 0
+    assert _kset(pid, h, "sck=20") == H.BAD and _kset(pid, h, "bits=16") == H.BAD
+    assert _kset(pid, h, "firstbit=1") == H.BAD and _kget(pid, h, "any") == H.BAD
+    assert _kopen(pid, "spi2", "sck=20 mosi=20") == H.BAD
 
 
 def test_an_i2c_handle_reads_a_register_of_the_device_at_its_address():
     pid = L.spawn("t.i2c")
-    lease_sim.I2C_DEV[0x48] = bytearray(b"\x10\x20\x30\x40")
-    h = _open(pid, "i2c", "scl=20 sda=21 freq=100000")
-    assert H.read(pid, h, 1) == H.BAD                  # no address yet
-    assert H.set(pid, h, "addr=0x48") == 0 and H.get(pid, h, "addr") == 0x48
-    assert H.xfer(pid, h, b"\x02", 2) == b"\x30\x40"
-    assert H.write(pid, h, b"\x00\x99") == 2 and lease_sim.I2C_DEV[0x48][0] == 0x99
-    assert H.set(pid, h, "addr=0x50") == 0 and H.read(pid, h, 1) == H.ABSENT   # no ACK
+    bus_sim.i2c(0x48, b"\x10\x20\x30\x40")
+    h = _kopen(pid, "i2c", "scl=20 sda=21 freq=100000")
+    assert _kread(pid, h, 1) == H.BAD                  # no address yet
+    assert _kget(pid, h, "addr") == -1
+    assert _kset(pid, h, "addr=0x48") == 0 and _kget(pid, h, "addr") == 0x48
+    assert _kxfer(pid, h, b"\x02", 2) == b"\x30\x40"
+    assert _kwrite(pid, h, b"\x00\x99") == 2 and bus_sim.i2c_regs(0x48)[0] == 0x99
+    assert _kset(pid, h, "addr=0x50") == 0 and _kread(pid, h, 1) == H.ABSENT   # no ACK
+    assert _kset(pid, h, "addr=128") == H.BAD and _kget(pid, h, "addr") == 0x50
     assert N.pin_state(20) & N.PIN_PERIPH and N.pin_state(21) & N.PIN_PERIPH
-    assert _open(pid, "i2c", "scl=20") == H.BAD
+    assert _kopen(pid, "i2c", "scl=20") == H.BAD
+    assert _kopen(pid, "i2c", "scl=22 sda=22") == H.BAD
+    assert _kopen(L.spawn("t.other"), "i2c", "scl=22 sda=23") == H.BUSY   # one unit
+    assert _kclose(pid, h) == 0
+    h = _kopen(pid, "i2c", "scl=22 sda=23 addr=0x48")
+    assert h > 0 and _kget(pid, h, "addr") == 0x48
 
 
 def test_a_pwm_and_an_adc_handle():
     pid = L.spawn("t.pwm")
-    p = _open(pid, "pwm22", "freq=1000 duty=32768")
-    assert H.get(pid, p, "freq") == 1000 and H.get(pid, p, "duty") == 32768
-    assert H.set(pid, p, "duty=0") == 0 and H.get(pid, p, "duty") == 0
-    lease_sim.ADC_LEVEL[23] = 1234
-    a = _open(pid, "adc23")
-    assert H.get(pid, a, "value") == 1234
-    assert H.write(pid, a, b"x") == H.BAD
+    p = _kopen(pid, "pwm22", "freq=1000 duty=32768")
+    assert _kget(pid, p, "freq") == 1000 and _kget(pid, p, "duty") == 32768
+    assert bus_sim.pwm(22) == (1000, 32768) and N.pin_state(22) & N.PIN_OUT
+    assert _kset(pid, p, "duty=0") == 0 and _kget(pid, p, "duty") == 0
+    assert _kset(pid, p, "duty=65536") == H.BAD and bus_sim.pwm(22) == (1000, 0)
+    q = _kopen(pid, "pwm20")
+    assert _kget(pid, q, "freq") == 5000 and _kget(pid, q, "duty") == 32768
+    assert _kopen(pid, "pwm21") == H.FULL, "two PWM slots"
+    assert _kclose(pid, q) == 0 and bus_sim.pwm(20) == (0, 0)
+    bus_sim.adc(23, 1234)
+    a = _kopen(pid, "adc23")
+    assert _kget(pid, a, "value") == 1234
+    assert _kwrite(pid, a, b"x") == H.BAD and _kset(pid, a, "x=1") == H.BAD
+    assert _kopen(pid, "adc23") == H.BUSY and _kopen(pid, "adc21", "atten=3") == H.BAD
 
 
 def test_a_name_or_cfg_the_console_does_not_take_is_bad():
     pid = L.spawn("t.bad")
-    assert _open(pid, "uart9") == H.BAD
+    assert _kopen(pid, "uart9") == H.BAD and _kopen(pid, "spi1") == H.BAD
+    assert _kopen(pid, "uart1", "baudrate=0") == H.BAD
     assert _open(pid, "gpio6") == H.BAD                   # the kernel's, never Python's
+    assert _open(pid, "uart1") == H.BAD and _open(pid, "i2c") == H.BAD
     assert _kopen(pid, "gpio") == PASS and _open(pid, "gpio") == H.BAD   # not the kernel's
+    assert _kopen(pid, "uart") == PASS and _kopen(pid, "uart123") == PASS
     assert _kopen(pid, "gpio6", "mode=sideways") == H.BAD
     assert _kopen(pid, "gpio6", "nonsense") == H.BAD
     assert _open(pid, "toaster") == H.BAD
-    assert N.held() == 0
+    assert N.held() == 0 and _K().moy_dev_count() == 0
 
 
 def test_a_lease_needs_its_row_granted():
     pid = L.spawn("t.perm")
-    leases.LEASES.grants = lambda p: ("lease:gpio",) if p == pid else None
-    assert _open(pid, "uart1") == H.DENIED
-    assert _open(pid, "pwm22") > 0
+    assert _kopen(pid, "uart1", perms=P_GPIO) == H.DENIED
+    assert _kopen(pid, "spi2", perms=P_GPIO | _bit("lease:uart1")) == H.DENIED
+    assert _kopen(pid, "uart1", perms=_bit("lease:uart1")) > 0
+    assert _kopen(pid, "pwm22", perms=P_PINS) == H.DENIED
+    assert _kopen(pid, "i2c", "scl=20 sda=21", perms=0) == H.DENIED
+    assert _kopen(pid, "pwm22", perms=P_GPIO) > 0
     assert _kopen(pid, "gpio6", perms=P_PINS) == H.DENIED
     assert _kopen(pid, "gpio6", perms=P_GPIO) > 0
+    assert _bit("lease:uart9") == 0
 
 
 def test_one_holder_across_the_tiers_a_python_object_or_a_handle():
     py, native = L.spawn("t.py"), L.spawn("t.native")
     u = _as(py, lambda: moybyte.lease("uart1"))
-    assert _open(native, "uart1") == H.BUSY
+    assert _kopen(native, "uart1") == H.BUSY
     h = _kopen(native, "gpio6", "mode=out")
     with pytest.raises(OSError) as e:
         _as(py, lambda: moybyte.lease("gpio6"))
@@ -229,8 +294,13 @@ def test_one_holder_across_the_tiers_a_python_object_or_a_handle():
         _as(py, lambda: moybyte.lease("i2c", scl=6, sda=20))
     assert e.value.errno == errno.EBUSY
     leases.LEASES.drop(u)
-    assert _open(native, "uart1") > 0
-    assert _kclose(native, h) == 0
+    k = _kopen(native, "uart1")
+    assert k > 0
+    with pytest.raises(OSError) as e:
+        _as(py, lambda: moybyte.lease("uart1"))
+    assert e.value.errno == errno.EBUSY
+    assert _kopen(native, "i2c", "scl=20 sda=6") == H.BUSY
+    assert _kclose(native, h) == 0 and _kclose(native, k) == 0
     _as(py, lambda: moybyte.lease("gpio6"))
 
 
@@ -239,9 +309,10 @@ def test_a_handle_is_its_process_s_own():
     h = _kopen(a, "gpio6", "mode=out")
     assert _kget(b, h, "value") == H.ABSENT and _kclose(b, h) == H.ABSENT
     assert _kclose(a, h) == 0 and _kclose(a, h) == H.ABSENT
-    u = _open(a, "uart1")
-    assert H.get(b, u, "baudrate") == H.ABSENT and H.close(b, u) == H.ABSENT
-    assert H.close(a, u) == 0 and H.close(a, u) == H.ABSENT
+    u = _kopen(a, "uart1")
+    assert _kget(b, u, "any") == H.ABSENT and _kwrite(b, u, b"x") == H.ABSENT
+    assert _kclose(b, u) == H.ABSENT
+    assert _kclose(a, u) == 0 and _kclose(a, u) == H.ABSENT
 
 
 def test_the_process_s_end_closes_every_handle_and_leaves_the_pins_safe():
@@ -252,12 +323,16 @@ def test_the_process_s_end_closes_every_handle_and_leaves_the_pins_safe():
         _kopen(pid, "gpio5", "mode=in")
         h = _kopen(pid, "gpio6", "mode=out value=1")
         assert _kset(pid, h, "edges=both") == 0
-        _open(pid, "uart1")
-        _open(pid, "i2c", "scl=20 sda=21")
-        assert N.held() == 4 and N.held(N.VM) == 2, "the kernel's two hold no VM stop off"
+        assert _kopen(pid, "uart1") > 0 and _kopen(pid, "spi2") > 0
+        assert _kopen(pid, "i2c", "scl=20 sda=21") > 0
+        assert _kopen(pid, "pwm22") > 0 and _kopen(pid, "adc23") > 0
+        assert N.held() == 7 and N.held(N.VM) == 0, "the kernel's hold no VM stop off"
         _end(pid)
-        assert pid not in H.HANDLES and N.held() == 0 and _K().moy_dev_count() == 0
-        assert [N.pin_state(p) for p in (5, 6, 20, 21, 47, 48)] == [N.PIN_SAFE] * 6
+        assert N.held() == 0 and _K().moy_dev_count() == 0
+        pins = (5, 6, 20, 21, 22, 23, 47, 48, 49, 50, 51)
+        assert [N.pin_state(p) for p in pins] == [N.PIN_SAFE] * len(pins)
+        assert bus_sim.pwm(22) == (0, 0)
+        assert _kopen(L.spawn("t.next"), "i2c", "scl=20 sda=21") > 0, "the unit went back"
     finally:
         moybyte.WAKES.table = None
         if was is not None:
