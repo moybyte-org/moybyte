@@ -500,6 +500,7 @@ typedef struct {
     char *name;
     int64_t mtime;
     int kind;                   // the trash listing's
+    uint8_t dir;                // a folder (a listing's raw entries)
 } entry_t;
 
 typedef struct {
@@ -542,18 +543,23 @@ static int entries_add(entries_t *es, const char *name, size_t n, int64_t mt, in
     es->e[es->n].name = s;
     es->e[es->n].mtime = mt;
     es->e[es->n].kind = kind;
+    es->e[es->n].dir = 0;
     es->n++;
     return 0;
 }
 
-static int list_cb(void *ctx, const char *name, size_t len, int dir, uint32_t size) {
-    (void)size;
+static int list_cb(void *ctx, const char *name, size_t len, const moy_vol_stat_t *st) {
     entries_t *es = ctx;
-    return entries_add(es, name, len, dir, 0);
+    int rc = entries_add(es, name, len, st->mtime, 0);
+    if (rc == 0) {
+        es->e[es->n - 1].dir = st->is_dir;
+    }
+    return rc;
 }
 
-// A folder's entries (`mtime` holds whether each is a folder), or `*missing`
-// the errno value when it cannot be listed (os.listdir's OSError).
+// A folder's entries, each with its mtime and whether it is a folder from the
+// folder's own listing (moy_vol_scan: no entry is stat'ed), or `*missing` the
+// errno value when it cannot be listed (os.listdir's OSError).
 static int list_dir(const char *dir, entries_t *out, int *missing) {
     moy_vol_t v;
     const char *rest;
@@ -561,7 +567,7 @@ static int list_dir(const char *dir, entries_t *out, int *missing) {
     *missing = 0;
     int rc = moy_vol_at(dir, &v, &rest);
     if (rc == 0) {
-        rc = moy_vol_list(&v, rest, list_cb, out);
+        rc = moy_vol_scan(&v, rest, list_cb, out);
     }
     if (rc == MOY_ENOMEM) {
         entries_free(out);
@@ -610,7 +616,7 @@ static int ends_any(const char *name, size_t n, size_t nexts) {
     return 0;
 }
 
-// The kind's items in `dir` with their mtimes (moy_files._kind_entries),
+// The kind's items in `dir` with their mtimes from its listing,
 // sorted newest first, each entry's kind `kind`.
 static int kind_entries(const char *dir, int kind, entries_t *out) {
     entries_t raw;
@@ -623,21 +629,10 @@ static int kind_entries(const char *dir, int kind, entries_t *out) {
     const char *ext = KINDS[kind].ext;
     size_t en = strlen(ext), nwhole = kind == DOCS ? NVAULT : 0u;
     for (size_t i = 0; i < raw.n && rc == 0; i++) {
-        moy_store_yield();
         const char *n = raw.e[i].name;
         size_t nl = strlen(n);
-        char *p = cat(dir, "/", n, NULL);
-        if (p == NULL) {
-            rc = MOY_ENOMEM;
-            break;
-        }
-        moy_vol_stat_t st;
-        int dir = 0;
-        int64_t mt = 0;
-        if (moy_fs_stat(p, &st) == 0) {
-            dir = st.is_dir;
-            mt = st.mtime;
-        }
+        int dir = raw.e[i].dir;
+        int64_t mt = raw.e[i].mtime;
         if (KINDS[kind].folder) {
             if (dir) {
                 rc = entries_add(out, n, nl, mt, kind);
@@ -647,7 +642,6 @@ static int kind_entries(const char *dir, int kind, entries_t *out) {
         } else if (nl > en && memcmp(n + nl - en, ext, en) == 0 && !dir) {
             rc = entries_add(out, n, nl - en, mt, kind);
         }
-        str_free(p);
     }
     entries_free(&raw);
     if (rc != 0) {
@@ -726,21 +720,14 @@ static int project_list(const char *root, const char *kind, entries_t *out) {
     sort_names(&raw);
     memset(&flat, 0, sizeof flat);
     for (size_t i = 0; i < raw.n && rc == 0; i++) {
-        moy_store_yield();
         const char *n = raw.e[i].name;
         size_t nl = strlen(n);
         if (ends(n, nl, ".bak") || ends(n, nl, ".tmp")) {
             continue;
         }
-        char *p = cat(d, "/", n, NULL);
-        if (p == NULL) {
-            rc = MOY_ENOMEM;
-            break;
-        }
-        if (!is_dir(p)) {
+        if (!raw.e[i].dir) {
             rc = entries_add(&flat, n, nl, 0, 0);
         }
-        str_free(p);
     }
     for (size_t k = 0; k < NORDER && rc == 0; k++) {
         for (size_t i = 0; i < flat.n; i++) {
@@ -845,17 +832,10 @@ int moy_uf_count(const char *root, const char *kind, uint32_t *count) {
         const char *ext = KINDS[k].ext;
         size_t en = strlen(ext), nwhole = k == DOCS ? NVAULT : 0u;
         for (size_t i = 0; i < raw.n && rc == 0; i++) {
-            moy_store_yield();
             const char *n = raw.e[i].name;
             size_t nl = strlen(n);
             if (KINDS[k].folder) {
-                char *p = cat(d, "/", n, NULL);
-                if (p == NULL) {
-                    rc = MOY_ENOMEM;
-                    break;
-                }
-                *count += (uint32_t)is_dir(p);
-                str_free(p);
+                *count += raw.e[i].dir;
             } else if (ends_any(n, nl, nwhole)
                        || (nl > en && memcmp(n + nl - en, ext, en) == 0)) {
                 (*count)++;
@@ -1183,7 +1163,7 @@ static int copy_tree(const char *src, const char *dst) {
         if ((rc = path_pair(&s, &d)) != 0) {
             break;
         }
-        rc = is_dir(s) ? copy_tree(s, d) : copy_file(s, d);
+        rc = raw.e[i].dir ? copy_tree(s, d) : copy_file(s, d);
         str_free(s);
         str_free(d);
     }

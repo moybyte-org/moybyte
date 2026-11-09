@@ -380,3 +380,51 @@ def test_kvfs_answers_every_verb_as_vfslfs2_does(tmp_path):
     assert out.returncode == 0 and "KV" in lines, out.stdout + out.stderr
     assert lines["KV"] == lines["REF"]
     assert "('mtime', True)" in lines["KV"]
+
+
+LISTING = '''
+import os, time, vfs, moy_store, moy_ufiles
+FS = "@FS@"
+if FS == "fat":
+    vfs.mount(moy_store.card_ram(32768), "/v")
+else:
+    moy_store.kvol_load(None)
+    vfs.mount(moy_store.KVfs(), "/v")
+D = moy_ufiles.file_kind_dir("docs", "/v/moybyte/carts")
+for d in ("/v/moybyte", "/v/moybyte/carts", "/v/moybyte/files", D):
+    os.mkdir(d)
+for i in range(@N@):
+    with open(D + "/doc%03d.md" % i, "w") as f:
+        f.write("doc %d" % i)
+    if i % 100 == 99:
+        time.sleep(1.1)             # a few distinct stamps for the order
+s0 = moy_store.card_stats() if FS == "fat" else (0, 0, 0, 0)
+names = moy_ufiles.list_files("docs", "/v/moybyte/carts")
+s1 = moy_store.card_stats() if FS == "fat" else (0, 0, 0, 0)
+want = sorted(("doc%03d" % i for i in range(@N@)),
+              key=lambda n: (-os.stat(D + "/" + n + ".md")[8], n))
+print("order", list(names) == want, len(names))
+print("count", moy_ufiles.count_files("docs", "/v/moybyte/carts"))
+print("handed", s1[2] - s0[2])
+'''
+
+
+@pytest.mark.parametrize("fs", ["fat", "kv"])
+def test_a_listing_reads_each_entry_once_and_orders_it_as_stat_does(tmp_path, fs):
+    """files.list and the Files app's listing (moy_ufiles.c's kind_entries)
+    take each entry's mtime and folder bit from the folder's own listing
+    (moy_vol_scan): newest first, then by name, as os.stat orders them, and
+    on FAT the sectors one listing hands FatFS grow with the folder, not with
+    its square (a stat per entry is a scan of the folder each)."""
+    exe = require_unix_mp("moy_store", why="the store's listing on the boards' file systems")
+    n = 500
+    script = tmp_path / "listing.py"
+    script.write_text(LISTING.replace("@FS@", fs).replace("@N@", str(n)))
+    out = subprocess.run([exe, "-X", "heapsize=64m", str(script)],
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stdout + out.stderr
+    lines = out.stdout.splitlines()
+    assert lines[0] == "order True %d" % n, lines
+    assert lines[1] == "count %d" % n, lines
+    if fs == "fat":
+        assert int(lines[2].split()[1]) < n // 2, lines   # a stat each handed 11390

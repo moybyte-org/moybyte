@@ -896,6 +896,36 @@ static int64_t days_from_civil(int y, unsigned m, unsigned d) {
 }
 #endif
 
+#if MOY_VOL_FAT
+// What a FAT directory entry says of its file: folder, size, stamp.
+static void fat_info(const FILINFO *fno, moy_vol_stat_t *st) {
+    st->is_dir = (fno->fattrib & AM_DIR) != 0;
+    st->size = (uint32_t)fno->fsize;
+    st->mtime = 0;
+    unsigned mo = (fno->fdate >> 5) & 0x0f, dd = fno->fdate & 0x1f;
+    if (mo >= 1 && mo <= 12 && dd >= 1) {
+        st->mtime = days_from_civil(1980 + ((fno->fdate >> 9) & 0x7f), mo, dd) * 86400
+                    + ((fno->ftime >> 11) & 0x1f) * 3600 + ((fno->ftime >> 5) & 0x3f) * 60
+                    + 2 * (fno->ftime & 0x1f);
+    }
+}
+#endif
+
+#if MOY_VOL_LFS2
+// littlefs's mtime: attribute 1, nanoseconds, little-endian; 0 where unset.
+static int64_t lfs_mtime(lfs2_t *fs, const char *path) {
+    uint8_t b[8];
+    if (lfs2_getattr(fs, path, 1, b, sizeof b) != (lfs2_ssize_t)sizeof b) {
+        return 0;
+    }
+    uint64_t ns = 0;
+    for (size_t i = sizeof b; i > 0; --i) {
+        ns = ns << 8 | b[i - 1];
+    }
+    return (int64_t)(ns / 1000000000u);
+}
+#endif
+
 static int vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
     st->is_dir = 0;
     st->size = 0;
@@ -912,14 +942,7 @@ static int vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
             if (r != FR_OK) {
                 return fat_err(r);
             }
-            st->is_dir = (fno.fattrib & AM_DIR) != 0;
-            st->size = (uint32_t)fno.fsize;
-            unsigned mo = (fno.fdate >> 5) & 0x0f, dd = fno.fdate & 0x1f;
-            if (mo >= 1 && mo <= 12 && dd >= 1) {
-                st->mtime = days_from_civil(1980 + ((fno.fdate >> 9) & 0x7f), mo, dd) * 86400
-                            + ((fno.ftime >> 11) & 0x1f) * 3600 + ((fno.ftime >> 5) & 0x3f) * 60
-                            + 2 * (fno.ftime & 0x1f);
-            }
+            fat_info(&fno, st);
             return 0;
         }
         #endif
@@ -932,14 +955,7 @@ static int vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
             }
             st->is_dir = info.type == LFS2_TYPE_DIR;
             st->size = info.size;
-            uint8_t b[8];
-            if (lfs2_getattr((lfs2_t *)v->fs, path, 1, b, sizeof b) == (lfs2_ssize_t)sizeof b) {
-                uint64_t ns = 0;
-                for (size_t i = sizeof b; i > 0; --i) {
-                    ns = ns << 8 | b[i - 1];
-                }
-                st->mtime = (int64_t)(ns / 1000000000u);
-            }
+            st->mtime = lfs_mtime((lfs2_t *)v->fs, path);
             return 0;
         }
         #endif
@@ -961,9 +977,13 @@ static int vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
     }
 }
 
-static int vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
-                    void *ctx) {
+// The listing: each entry with what its folder's entry says of it; littlefs's
+// mtime, an attribute of its own, read only where `mtime` asks.
+static int vol_scan(const moy_vol_t *v, const char *dir, moy_vol_scan_fn fn,
+                    void *ctx, int mtime) {
     int rc = 0;
+    moy_vol_stat_t st;
+    (void)mtime;
     moy_store_tick();
     switch (v->kind) {
         #if MOY_VOL_FAT
@@ -984,8 +1004,8 @@ static int vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
                         if (fno->fname[0] == 0) {
                             break;
                         }
-                        rc = fn(ctx, fno->fname, strlen(fno->fname),
-                                (fno->fattrib & AM_DIR) != 0, (uint32_t)fno->fsize);
+                        fat_info(fno, &st);
+                        rc = fn(ctx, fno->fname, strlen(fno->fname), &st);
                         if (rc) {
                             break;
                         }
@@ -1021,8 +1041,23 @@ static int vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
                             || (info->name[1] == '.' && info->name[2] == 0))) {
                             continue;
                         }
-                        rc = fn(ctx, info->name, strlen(info->name),
-                                info->type == LFS2_TYPE_DIR, info->size);
+                        st.is_dir = info->type == LFS2_TYPE_DIR;
+                        st.size = info->size;
+                        st.mtime = 0;
+                        if (mtime) {
+                            size_t dl = strlen(dir), nl = strlen(info->name);
+                            char *full = moy_store_alloc(dl + nl + 2);
+                            if (full == NULL) {
+                                rc = MOY_ENOMEM;
+                                break;
+                            }
+                            memcpy(full, dir, dl);
+                            full[dl] = '/';
+                            memcpy(full + dl + 1, info->name, nl + 1);
+                            st.mtime = lfs_mtime((lfs2_t *)v->fs, full);
+                            moy_store_free(full, dl + nl + 2);
+                        }
+                        rc = fn(ctx, info->name, strlen(info->name), &st);
                         if (rc) {
                             break;
                         }
@@ -1070,8 +1105,10 @@ static int vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
                 struct stat s;
                 int ok = stat(full, &s) == 0;
                 moy_store_free(full, full_n);
-                rc = fn(ctx, nm, nl, ok && S_ISDIR(s.st_mode),
-                        ok ? (uint32_t)s.st_size : 0u);
+                st.is_dir = ok && S_ISDIR(s.st_mode);
+                st.size = ok ? (uint32_t)s.st_size : 0u;
+                st.mtime = ok ? (int64_t)s.st_mtime : 0;
+                rc = fn(ctx, nm, nl, &st);
                 if (rc) {
                     break;
                 }
@@ -1220,9 +1257,27 @@ int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st) {
     return rc;
 }
 
+typedef struct {
+    moy_vol_ent_fn fn;
+    void *ctx;
+} ent_of_t;
+
+static int ent_of(void *c, const char *name, size_t len, const moy_vol_stat_t *st) {
+    ent_of_t *e = c;
+    return e->fn(e->ctx, name, len, st->is_dir, st->size);
+}
+
 int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn, void *ctx) {
+    ent_of_t e = { fn, ctx };
     moy_store_lock();
-    int rc = vol_list(v, dir, fn, ctx);
+    int rc = vol_scan(v, dir, ent_of, &e, 0);
+    moy_store_unlock();
+    return rc;
+}
+
+int moy_vol_scan(const moy_vol_t *v, const char *dir, moy_vol_scan_fn fn, void *ctx) {
+    moy_store_lock();
+    int rc = vol_scan(v, dir, fn, ctx, 1);
     moy_store_unlock();
     return rc;
 }

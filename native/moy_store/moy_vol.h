@@ -138,8 +138,8 @@ void moy_vol_unwind(void);                      // close every file still open
 //   * on the T-Deck the panel's kick takes it, so no frame starts while a
 //     task holds the card's bus (modmoy_lcd.c).
 //
-// An op that walks a folder entry by entry (a listing that stats each one, a
-// free name tried after another) calls moy_store_yield between entries: where
+// An op that walks a folder entry by entry (a free name tried after another,
+// a tree copied file by file) calls moy_store_yield between entries: where
 // the VM's task waits for the lock and the caller is another task, the
 // caller lets its holds and its bus gate go, the VM's op runs, and the caller
 // takes them back at the same depth, the bus gate draining whatever frame the
@@ -212,6 +212,12 @@ void moy_vol_gate_leave(int entered);
 int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st);
 int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
                  void *ctx);
+// One entry of a listing with what its folder's own entry says of it, as
+// moy_vol_stat answers it (FAT's stamp, POSIX's stat; littlefs's mtime
+// attribute read per entry): a listing ordered by time stats nothing.
+typedef int (*moy_vol_scan_fn)(void *ctx, const char *name, size_t len,
+                               const moy_vol_stat_t *st);
+int moy_vol_scan(const moy_vol_t *v, const char *dir, moy_vol_scan_fn fn, void *ctx);
 int moy_vol_mkdir(const moy_vol_t *v, const char *path);
 int moy_vol_remove(const moy_vol_t *v, const char *path);
 // `dst` must not exist, on every backend, as FAT has it: EEXIST.
