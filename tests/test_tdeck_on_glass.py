@@ -53,7 +53,27 @@ def board():
 # Plus mDNS's scratch (the espressif/mdns component's four function-static
 # buffers, a PSRAM block while the responder runs, moybyte_patch_mdns_psram):
 # 1849 bytes of .bss by the link map against dev 145567a4f, 2026-11-06.
-WASM_IDLE_BASELINE = (125863 + 1849, 86016)
+# Less CORE_DUMP_SRAM, what the core dump keeps internal (8fa65650d,
+# 2026-11-09), all of it reached by a panic with the cache off: its own
+# 1792-byte stack (the IDF's floor while task stacks may be PSRAM), 1892 with
+# what the IDF adds to it; the ISR stacks, which an ELF dump needs at 2096
+# bytes a core where they were 1536, 1120; the panic's registers, frames,
+# flash config and the writer's other statics, 941; the kernel's table of
+# loaded modules, which the dump carries (native/moy_elf/moy_elf_maps.h,
+# .dram2.coredump), and its keys, 240; and 177 bytes of IRAM, the flash and
+# port functions the writer calls with the cache off, which move the DRAM's
+# start a 256-byte step. 4450 bytes by the heap's start against dev
+# eb0498275, link maps, 2026-11-09.
+# And BATCH6_SRAM, the statics of the kernel's alarms (native/moy_kernel/
+# moy_evq.c: the woken pids and the timer counters, the timers themselves
+# PSRAM in their queues), the media service's last run's end and key time
+# (native/moy_media/moy_media.c, its state PSRAM) and the VM queue's flag:
+# 70 bytes of .bss by the link map against dev eb0498275, 2026-11-09.
+CORE_DUMP_SRAM = 4450
+BATCH6_SRAM = 70
+# The largest block falls with the heap's start, by one of its steps (81920
+# and 77824 on two fresh boots of 65e7e49ae).
+WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM, 86016 - 4096)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 

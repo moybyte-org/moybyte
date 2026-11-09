@@ -122,8 +122,32 @@ CARD_SRAM = 1804
 # block with them, by one of the heap's steps (51200 before, 49152 after).
 # The look's corner and shadow caches and the UI API's run context are PSRAM.
 LOOK_SRAM = (1272, 2048)
-WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM - CARD_SRAM - LOOK_SRAM[0],
-                      55296 - LOOK_SRAM[1])
+# Less CORE_DUMP_SRAM, what the core dump keeps internal (8fa65650d,
+# 2026-11-09), all of it reached by a panic with the cache off: its own
+# 1792-byte stack (the IDF's floor while task stacks may be PSRAM), 1892 with
+# what the IDF adds to it; the ISR stacks, which an ELF dump needs at 2096
+# bytes a core where they were 1536, 1120; the kernel's table of loaded
+# modules, which the dump carries (native/moy_elf/moy_elf_maps.h,
+# .dram2.coredump), and its keys, 240; the panic's registers, frames,
+# flash config and the writer's other statics, 941; and 177 bytes of IRAM,
+# the flash and port functions the writer calls with the cache off, which
+# move the DRAM's start a 256-byte step.
+# 4466 bytes by the heap's start against dev eb0498275 less the other objects'
+# growth, link maps, 2026-11-09.
+# And BATCH6_SRAM, the statics of the kernel's alarms (native/moy_kernel/
+# moy_evq.c: the woken pids and the timer counters, the timers themselves
+# PSRAM in their queues) and the VM queue's flag: 46 bytes of .bss by the
+# link map against dev eb0498275, 2026-11-09; and 68 bytes more of the idle
+# heap in use, which no allocation in the batch names: fresh boots of
+# eb0498275 and 65e7e49ae read 265987 total / 89927 free and 261475 / 85347
+# (the total fell by the heap's start, 4512, the free by 4580).
+CORE_DUMP_SRAM = 4466
+BATCH6_SRAM = 46 + 68
+# The largest block falls with the heap's start, by one of its steps: 49152
+# and 45056 on those boots.
+WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM - CARD_SRAM - LOOK_SRAM[0]
+                      - CORE_DUMP_SRAM - BATCH6_SRAM,
+                      55296 - LOOK_SRAM[1] - 4096)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc3248w535"
 
 

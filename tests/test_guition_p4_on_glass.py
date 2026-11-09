@@ -108,7 +108,28 @@ TF_CARD_SRAM = 756
 # geometry, k_floor_t), PSRAM since 2026-11-05 where it was .bss: 640 bytes
 # by the link map.
 KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348 + 16 + 270 + 4 - 640
-WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
+# Less CORE_DUMP_SRAM, what the core dump keeps internal (8fa65650d,
+# 2026-11-09), all of it reached by a panic with the cache off: its own
+# 1792-byte stack (the IDF's floor while task stacks may be PSRAM), 1892 with
+# what the IDF adds to it; the ISR stacks, which an ELF dump needs at 2096
+# bytes a core where they were 1536, 1120; the kernel's table of loaded
+# modules, which the dump carries (native/moy_elf/moy_elf_maps.h,
+# .dram2.coredump), and its keys, 240; and the panic's registers,
+# frames, ELF notes and flash config, with the flash, port and log functions
+# the writer calls with the cache off, 809 by the objects' sizes.
+# 4016 bytes by the heap's start against dev eb0498275 less the other objects'
+# growth, link maps, 2026-11-09.
+# And BATCH6_SRAM, the statics of the kernel's alarms (native/moy_kernel/
+# moy_evq.c: the woken pids and the timer counters, the timers themselves
+# PSRAM in their queues), the media service's last run's end and key time
+# (native/moy_media/moy_media.c, its state PSRAM) and the VM queue's flag,
+# 70 bytes of .bss, and 10 bytes of IRAM the compiler's output moved: 80 by
+# the link map against dev eb0498275, 2026-11-09.
+CORE_DUMP_SRAM = 4016
+BATCH6_SRAM = 80
+# The largest block falls with the heap's start, by one of its steps.
+WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM - CORE_DUMP_SRAM - BATCH6_SRAM,
+                      94208 - 4096)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
 

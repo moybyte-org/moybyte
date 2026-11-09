@@ -132,7 +132,30 @@ TEXT_SRAM = 44
 # land ahead of the high region's largest block, so the largest block's
 # baseline takes them too.
 LATE_SRAM = 5206 + 1107 - 3130
-WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM - LATE_SRAM,
+# Less CORE_DUMP_SRAM, what the core dump keeps internal (8fa65650d,
+# 2026-11-09), all of it reached by a panic with the cache off: its own
+# 1792-byte stack (the IDF's floor while task stacks may be PSRAM), 1892 with
+# what the IDF adds to it; the ISR stacks, which an ELF dump needs at 2096
+# bytes a core where they were 1536, 1120; the kernel's table of loaded
+# modules, which the dump carries (native/moy_elf/moy_elf_maps.h,
+# .dram2.coredump), and its keys, 240; and the panic's registers,
+# frames, ELF notes and flash config, with the flash, port and log functions
+# the writer calls with the cache off, 809 by the objects' sizes.
+# 4040 bytes by the heap's start against dev eb0498275 less the other objects'
+# growth, link maps, 2026-11-09.
+# And BATCH6_SRAM, the statics of the kernel's alarms (native/moy_kernel/
+# moy_evq.c: the woken pids and the timer counters, the timers themselves
+# PSRAM in their queues), the media service's last run's end and key time
+# (native/moy_media/moy_media.c, its state PSRAM) and the VM queue's flag,
+# 70 bytes of .bss, and 2 bytes of IRAM the compiler's output moved: 72 by
+# the link map against dev eb0498275, 2026-11-09; and 48 bytes more of the
+# idle heap in use, which no allocation in the batch names: fresh boots read
+# 269731 free at eb0498275 and 265571 at 65e7e49ae, 4160 against the heap
+# start's 4112.
+CORE_DUMP_SRAM = 4040
+BATCH6_SRAM = 72 + 48
+WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM - LATE_SRAM
+                      - CORE_DUMP_SRAM - BATCH6_SRAM,
                       188416 - LATE_SRAM)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
