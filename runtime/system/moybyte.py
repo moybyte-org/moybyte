@@ -684,6 +684,15 @@ def _may_alarm(pid):
         raise OSError(EPERM, 'needs "%s"' % ALARMS)
 
 
+def _ear(pid, name):
+    """Process `pid` listening on wake message `name`, once whatever the
+    wakes it asks for (the kernel's count of a name's listens is finite).
+    The queue answers whether it listens already: a queue closed in C and
+    its pid reused carries nothing over."""
+    if not _E.hears(pid, name) and _E.listen(pid, name, True) != _E.OK:
+        raise OSError(EMFILE, "process %d hears no %s" % (pid, name))
+
+
 def at(t, fn):
     _may_alarm(_pid())
     return WAKES.alarm(t, fn, True)
