@@ -44,6 +44,14 @@
 #   the store and the image's roster seeds the empty one on first boot. Every
 #   slot byte is paid for twice and comes off the store.
 #
+# NO COREDUMP PARTITION (2026-11-09), where every console board has one
+# (docs/os_2026-11/processes.md section 10). This board runs no native module
+# (it denies moy_elf), its kernel's crash record keeps a panic's pc and
+# backtrace, and the partition's 64-128 KiB would come off a store that is the
+# only copy of a browser-made cart, or off slots 131 KB above the image; and
+# any change to this table costs every deployed Zero a cable flash and its
+# store. The image keeps CONFIG_ESP_COREDUMP_ENABLE_TO_NONE.
+#
 # WHAT WOULD FALSIFY IT: the app image crossing its slot, or the store filling
 # with the roster plus a kid's carts. The build says so on every run (the #168
 # guard reads THIS FILE's ota_0 size, prints the headroom beside board.toml's

@@ -96,7 +96,9 @@ them back on the next visit — but anything that existed *only* here is.
   The console S3 layout does not fit 8MB, and the failure is not a build error:
   the bootloader rejects the table and the board boot loops with no console at
   all. That was learned here — see the hardware facts below — so this table is
-  authored, not inherited.
+  authored, not inherited. It has no coredump partition, where every console
+  board's has one (2026-11-09; the CSV says why), and the image builds with
+  `CONFIG_ESP_COREDUMP_ENABLE_TO_NONE`.
 - **What makes two slots fit** is that the image is headless: no console, no
   canvas, and only one shared native module. Measured on the first build,
   2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against

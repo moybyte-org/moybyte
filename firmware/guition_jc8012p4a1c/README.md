@@ -183,8 +183,10 @@ as a Home Assistant panel.
   no BOOT button: esptool's default reset drove `chip_id`, a full 16MB
   `read_flash` and every `write_flash` first try.
 - **16MB flash, not 32**: the Waveshare's OTA-shaped table head (otadata
-  at 0xd000) with 2×7.875 MiB app slots leaves the tail from 0xFD0000 (192 KiB)
-  for the auto-built VFS, the store's fallback without a card; a WiFi
+  at 0xd000) with 2×7.8125 MiB app slots and the 128 KiB coredump partition
+  after them (a panic's ESP-IDF core dump, `tools/coredump.py`) leaves the
+  tail from 0xFD0000 (192 KiB) for the auto-built VFS, the store's fallback
+  without a card; a WiFi
   update streams into the inactive slot, so no image stages there. The build
   prints the app slot headroom; nothing else about it is current.
 

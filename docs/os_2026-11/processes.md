@@ -906,10 +906,18 @@ process id**, a service heals after N callbacks or T seconds (configuration,
 in the binding), an ELF's strikes key by content hash (`tiers.md` §1). Memory
 corruption by an ELF striking a bystander is accepted as the tier's trust
 level. **A native crash writes an ESP-IDF core dump to flash** (owner,
-2026-11-03), readable with gdb from the SDK (`tiers.md` §1); the images build
-with `CONFIG_ESP_COREDUMP_ENABLE_TO_NONE` today, and the `coredump`
-partition's cost is checked against `headroom_floor_kib` in phase 5. Python
-keeps its tracebacks (§9).
+2026-11-03), readable with gdb from the SDK (`tiers.md` §1): every console
+board's table has a 128 KiB `coredump` partition right after its slots and
+its `sdkconfig.board` writes an ELF dump there; the headless Zero has none
+(its partition CSV says why). The kernel keeps the loaded modules' sha256 and
+load addresses in internal RAM every dump carries
+(`native/moy_elf/moy_elf_maps.h`), so `moy app coredump BOARD`
+(`tools/coredump.py`) reads the dump over the cable and gdb shows a module's
+frames under its own symbols, from the unstripped twin `tools/elf_cart.py`
+keeps by that sha. The console reports a dump (`moy_crash.dump()`, `state`'s
+`dump`) and Settings → LAST CRASH clears it. On a P4 a module's own fault is
+caught in U-mode and kills the process (`moy_elf.faults()`), so a dump there
+is a kernel panic's. Python keeps its tracebacks (§9).
 
 ## 11. How it maps onto what exists
 

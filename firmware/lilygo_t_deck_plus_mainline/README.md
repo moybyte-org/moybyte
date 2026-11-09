@@ -39,8 +39,10 @@ not in it, and the panel is one C file. Both builds stamped OTA board id
 `tdeck` against a byte-identical partition table, so a payload from either
 installed into the other's inactive slot — which made the migration an OTA
 rather than a cable flash. The build prints the image's headroom; nothing else
-is current. The slots are 7 MiB since 2026-10-26 (the table's CSV,
-`boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why).
+is current. The slots are 7 MiB since 2026-10-26, and the 128 KiB coredump
+partition after them (2026-11-09: a panic's ESP-IDF core dump,
+`tools/coredump.py`) came off the vfs; the table's CSV,
+`boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why.
 
 ---
 

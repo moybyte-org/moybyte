@@ -8,9 +8,14 @@
 # the built-in theme fonts stay in the image, and with them the image left
 # ~1.1 MB above the 1024 KiB headroom floor while the 2026-10 look's next
 # steps add several hundred KB; 8 MiB keeps ~1.6 MB above the floor after
-# +500 KB. The store is the TF card when one mounts; the internal fallback,
-# the tail from 0x1010000 (the rest of the chip, 15.94 MiB), holds the whole
-# seed set with room to spare. The tail is deliberately UNLISTED: mainline
+# +500 KB. The coredump partition (owner, 2026-11-03,
+# docs/os_2026-11/processes.md section 10) follows ota_1: a panic writes an
+# ESP-IDF ELF core dump there (sdkconfig.board), tools/coredump.py reads it
+# over the cable, and Settings -> LAST CRASH clears it; 128 KiB holds every
+# task's TCB and the used part of its stack with room for a deep VM stack.
+# The store is the TF card when one mounts; the internal fallback, the tail
+# from 0x1030000 (the rest of the chip, 15.81 MiB), holds the whole seed set
+# with room to spare. The tail is deliberately UNLISTED: mainline
 # MicroPython auto-builds the vfs over the unallocated remainder (the "plus"
 # table behavior). build.sh copies this file into ports/esp32/ at stage time
 # (CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves project-relative).
@@ -27,3 +32,4 @@ otadata,  data, ota,     0xd000,   0x2000,
 phy_init, data, phy,     0xf000,   0x1000,
 ota_0,    app,  ota_0,   0x10000,  0x800000,
 ota_1,    app,  ota_1,   0x810000, 0x800000,
+coredump, data, coredump, 0x1010000, 0x20000,

@@ -35,6 +35,10 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-zero.csv"
 
+# No core dump (2026-11-09): this board's table has no coredump partition, for
+# the reasons its partition CSV gives, where every console board has one.
+CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
+
 # Rollback (#53). Restated here (sdkconfig.base already sets it) because this
 # file is what the guard derives its required list from, and because on THIS
 # board it is the whole safety net: every other board confirms a new image by
