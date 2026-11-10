@@ -2912,21 +2912,30 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         int bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
         int bw = moy_ui_role_w(s, MOY_UI_FONT_UI, label) + 2 * bpad;
         bw = bw > minw ? bw : minw;
-        if (!c->brow) {
-            b = mua_place(c, mua_row_h(c) + reach, &stacked);
-            c->brow = 1;
-            c->brow_y = (int16_t)(b.y - c->page.y + c->scroll + reach);
-            c->brow_x = 0;
-        }
         int lp = mua_kmetric(c->cls ? MOY_UI_K_GROUP : MOY_UI_K_ROW,
                              c->cls ? MOY_UI_M_GROUP_PAD : MOY_UI_M_ROW_PAD) * fs;
         int right = c->page.x + c->page.w - lp;
-        b = (moy_ui_box_t){(int16_t)(right - c->brow_was + c->brow_x),
-                           (int16_t)(c->page.y + c->brow_y - c->scroll), (int16_t)bw,
-                           (int16_t)mua_row_h(c)};
+        // a row the last frame laid out wider than the card stacks instead,
+        // each button a row of the card's width
+        int as_row = c->brow_was <= c->page.w - 2 * lp;
+        if (!c->brow) {
+            c->brow = 1;
+            c->brow_x = 0;
+            if (as_row) {
+                b = mua_place(c, mua_row_h(c) + reach, &stacked);
+                c->brow_y = (int16_t)(b.y - c->page.y + c->scroll + reach);
+            }
+        }
+        if (as_row) {
+            b = (moy_ui_box_t){(int16_t)(right - c->brow_was + c->brow_x),
+                               (int16_t)(c->page.y + c->brow_y - c->scroll), (int16_t)bw,
+                               (int16_t)mua_row_h(c)};
+            stacked = 1;
+        } else {
+            b = mua_place(c, mua_row_h(c), &stacked);
+        }
         c->brow_x = (int16_t)(c->brow_x + bw + gap);
         c->brow_w = (int16_t)(c->brow_x - gap);
-        stacked = 1;
     } else {
         b = mua_place(c, mua_row_h(c), &stacked);
     }
