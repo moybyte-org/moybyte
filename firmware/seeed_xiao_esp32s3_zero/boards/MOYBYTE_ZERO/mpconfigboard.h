@@ -70,6 +70,10 @@
 #define MICROPY_PY_ESPNOW                   (0)
 #define MICROPY_PY_MACHINE_I2S              (0)
 
+// NO framebuf: nothing on this board draws (no panel, and the console it
+// serves rasterizes in the browser).
+#define MICROPY_PY_FRAMEBUF                 (0)
+
 // UART0 REPL stays ON (the generic S3 board's default): D6/D7 are GPIO43/44,
 // they are broken out on this board's header, and MOY_NET_GPIO_PINS holds them
 // back from the GPIO allowlist precisely BECAUSE they are the recovery console

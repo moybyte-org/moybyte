@@ -33,3 +33,7 @@ set(SDKCONFIG_DEFAULTS
 list(APPEND MICROPY_DEF_BOARD
     MICROPY_HW_BOARD_NAME="Moybyte Zero (XIAO ESP32-S3)"
 )
+
+# No `btree`: the store is files on the board's LittleFS, and nothing on this
+# board opens a database. ~23 KB of the image (extmod/modbtree + berkeley-db).
+set(MICROPY_PY_BTREE OFF)
