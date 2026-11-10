@@ -274,6 +274,13 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         b = bytes(lines)
         return int(lib.moy_ui_api_empty(p, c.byref(s), t, u, b, len(b)))
 
+    def api_note(ctx, cv, look, icon, lines):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = _span0(icon)
+        b = bytes(lines)
+        return int(lib.moy_ui_api_note(p, c.byref(s), t, b, len(b)))
+
     def api_bubble(ctx, cv, look, text, head, status, opt, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -802,7 +809,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
               api_grid,
               api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
               api_split_toward, api_popover, api_menu, api_menu_danger,
-              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_bubble, api_month, api_toast,
+              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_note, api_bubble, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_back, api_run_back, api_run_bar_lent,
               api_run_bar_tap, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,

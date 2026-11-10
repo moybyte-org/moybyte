@@ -117,6 +117,7 @@ int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t);
 int32_t moy_ui_wasm_held_all(void *);
 int32_t moy_ui_wasm_empty(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                           const uint8_t *, uint32_t);
+int32_t moy_ui_wasm_note(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 int32_t moy_ui_wasm_bubble(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                            const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *,
                            uint32_t, uint8_t *, uint32_t);
@@ -363,6 +364,12 @@ static inline int32_t ui_empty(const char *icon, uint32_t icon_n, const char *ti
                                uint32_t title_n, const char *lines, uint32_t lines_n) {
     return moy_ui_wasm_empty(moy_ui_link_target(), (const uint8_t *)icon, icon_n,
                              (const uint8_t *)title, title_n, (const uint8_t *)lines, lines_n);
+}
+// ui.note
+static inline int32_t ui_note(const char *icon, uint32_t icon_n, const char *lines,
+                              uint32_t lines_n) {
+    return moy_ui_wasm_note(moy_ui_link_target(), (const uint8_t *)icon, icon_n,
+                            (const uint8_t *)lines, lines_n);
 }
 // ui.bubble
 static inline int32_t ui_bubble(const char *text, uint32_t text_n, const char *head,

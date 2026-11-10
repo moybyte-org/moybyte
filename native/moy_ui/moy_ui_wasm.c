@@ -553,6 +553,13 @@ int moy_ui_run_empty(void *target, moy_ui_span_t icon, moy_ui_span_t title, cons
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_note(void *target, moy_ui_span_t icon, const uint8_t *lines, size_t n,
+                    int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_note(c, &r.s, icon, lines, n);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size_t n, uint32_t off,
                    int32_t *out) {
     OPEN(target);
@@ -1038,6 +1045,14 @@ int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8
     (void)e;
     int32_t y = 0;
     int rc = moy_ui_run_empty(wasm_target(), span(icon, in), span(title, n), lines, len, &y);
+    return rc == 0 ? y : rc;
+}
+
+int32_t moy_ui_wasm_note(void *e, const uint8_t *icon, uint32_t in, const uint8_t *lines,
+                         uint32_t len) {
+    (void)e;
+    int32_t y = 0;
+    int rc = moy_ui_run_note(wasm_target(), span(icon, in), lines, len, &y);
     return rc == 0 ? y : rc;
 }
 

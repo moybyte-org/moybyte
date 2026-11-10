@@ -83,6 +83,10 @@
   (import "moybyte.app" "ui_held_all" (func $ui_held_all (result i32)))
   (import "moybyte.app" "ui_split" (func $ui_split
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_empty" (func $ui_empty (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_note" (func $ui_note (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_bubble" (func $ui_bubble
+    (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 

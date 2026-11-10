@@ -165,6 +165,15 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     lua_pop(L, 1);
     o->check = (int8_t)(moycore_ui_flag(L, i, "check") == 1);
     o->card = (int8_t)(moycore_ui_flag(L, i, "card") == 1);
+    lua_getfield(L, i, "tag");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        size_t tn = 0;
+        const char *t = lua_tolstring(L, -1, &tn);   /* stays on the stack while the verb runs */
+        o->tag.p = (const uint8_t *)t;
+        o->tag.n = (uint16_t)(tn > 0xFFFFu ? 0xFFFFu : tn);
+    } else {
+        lua_pop(L, 1);
+    }
     /* a list's texts a row: each joined text stays on the stack over its
      * table while the verb runs */
     static const char *const rows[] = {"values", "subs", "icons", "counts", "tags", "marks"};
@@ -815,6 +824,16 @@ static int moycore_ui_empty(lua_State *L)
     return 1;
 }
 
+static int moycore_ui_note(lua_State *L)
+{
+    size_t len = 0;
+    const char *lines = lua_isnoneornil(L, 2) ? "" : moycore_ui_items(L, 2, &len);
+    int32_t y = 0;
+    moy_ui_run_note(moycore_ui_canvas(), moycore_ui_span(L, 1), (const uint8_t *)lines, len, &y);
+    lua_pushinteger(L, y);
+    return 1;
+}
+
 static int moycore_ui_part(lua_State *L)
 {
     moy_ui_over_t o;
@@ -1042,7 +1061,7 @@ static void moycore_ui_open(lua_State *L)
         {"popover", moycore_ui_popover}, {"menu", moycore_ui_menu},
         {"tool", moycore_ui_tool}, {"bar", moycore_ui_bar},
         {"rule", moycore_ui_rule}, {"text_view", moycore_ui_text_view},
-        {"empty", moycore_ui_empty}, {"bubble", moycore_ui_bubble},
+        {"empty", moycore_ui_empty}, {"note", moycore_ui_note}, {"bubble", moycore_ui_bubble},
         {NULL, NULL},
     };
     luaL_newlib(L, verbs);

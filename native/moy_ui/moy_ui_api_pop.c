@@ -328,6 +328,26 @@ void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int ma
     c->spread_top = (int16_t)(top < 0 ? 0 : top);
 }
 
+int moy_ui_api_note(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
+                    const uint8_t *lines, size_t n) {
+    mua_grid_end(c, s);
+    int slot = moy_ui_icon_slot(icon.p, icon.n), glyph = moy_ui_icon_glyph(icon.p, icon.n);
+    int warn = icon.n == 4 && memcmp(icon.p, "warn", 4) == 0;
+    int pf = mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0);
+    moy_ui_box_t m = c->has_at ? c->at : c->page;
+    int h = moy_ui_note(s, m, slot, glyph, warn, lines, n, c->fs, pf, 0);
+    int stacked;
+    moy_ui_box_t b = mua_place(c, h, &stacked);
+    b.x = m.x;
+    b.w = m.w;
+    clip_t k;
+    EACH_ROW(c, k, s, b, stacked, c->page) {
+        moy_ui_note(s, b, slot, glyph, warn, lines, n, c->fs, pf, 1);
+        mua_clip_out(&k);
+    }
+    return b.y + h;
+}
+
 int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
                      moy_ui_span_t title, const uint8_t *lines, size_t n) {
     mua_grid_end(c, s);

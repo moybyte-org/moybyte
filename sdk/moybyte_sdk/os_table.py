@@ -99,6 +99,7 @@ WASM_APP = {
     'ui_link': (),
     'ui_list': (),
     'ui_menu': (),
+    'ui_note': (),
     'ui_page': (),
     'ui_part': (),
     'ui_part_at': (),

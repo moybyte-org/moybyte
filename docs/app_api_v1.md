@@ -449,6 +449,17 @@ local open = ui.list("", {"LongFast", "Ana Ridge"}, -1,
 ui.group()
 ```
 
+**A note belongs to the page.** `ui.note(icon, lines)` is a card in the
+page's flow, no stop and no dialog: the icon (`"warn"` in the danger tone)
+and the lines, the first in `ink`, the rest dim. A row's tag, `{tag =
+"Public"}` on `ui.link` or `ui.info`, is a short pill at its right:
+
+```lua
+ui.note("warn", {"Every radio on a mesh uses one preset.",
+                 "On another one you hear none of them."})
+if ui.link("LongFast", "", {tag = "Public"}) then open_channel() end
+```
+
 **A settings page shows whole rows.** `{snap = true}` on `ui.page` or
 `ui.scroll` leaves out a row the view's edge would cut (a group's caption
 goes with its first row, a list's rows are each a row), and the band the

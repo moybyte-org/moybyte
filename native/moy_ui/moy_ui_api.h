@@ -225,6 +225,8 @@ typedef struct {
     moy_ui_span_t subs, icons, counts, tags, marks;
     // A group with no caption (ui.group("", {card = true})): 1 opens its card.
     int8_t card;
+    // An info's or a link's tag: a pill at its value's right (p NULL: none).
+    moy_ui_span_t tag;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -251,6 +253,7 @@ typedef struct {
                                     // the values', then each list it names, its length's word
                                     // and its text, in the bits' order
 #define MOY_UI_O_CARD 67108864      // and `card`
+#define MOY_UI_O_TAG 134217728      // and `tag`, its length's word and its text after the rows'
 #define MOY_UI_OR_SUBS 1
 #define MOY_UI_OR_ICONS 2
 #define MOY_UI_OR_COUNTS 4
@@ -932,6 +935,11 @@ void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // An empty page's head (ui.empty) at `at`'s rect, else the page's next row:
 // the icon on its disc, the title and the lines (NUL-separated), centred.
 // Its foot's y, where the page's verbs go.
+// ui.note(icon, lines): a note on the page (moy_ui.h's moy_ui_note), a
+// stacked row (else at `at`'s rect's top) and no stop; `icon` "warn" in the
+// danger label tone. The y under it.
+int moy_ui_api_note(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
+                    const uint8_t *lines, size_t n);
 int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
                      moy_ui_span_t title, const uint8_t *lines, size_t n);
 // A chat's bubble (ui.bubble, moy_ui.h's moy_ui_bubble) at `at`'s rect's

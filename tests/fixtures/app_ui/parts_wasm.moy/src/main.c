@@ -197,5 +197,17 @@ EXPORT(_draw) void _draw(void) {
         ui_list("", 0, S("LongFast\0Planinari\0Base\0Open\0Family"), 0, over_buf, over_n);
         ui_group("", 0, NULL, 0);
         ui_scroll("", 0, NULL, 0);
+    } else if (page == 9) {
+        ui_note(S("warn"), S("Every radio on a mesh uses one preset.\0"
+                             "On another one you hear none of them."));
+        over_begin(134217728);              // MOY_UI_O_TAG
+        over_text(S("Public"));
+        ui_link(S("LongFast"), S(""), over_buf, over_n);
+        ui_group(S("Channel"), NULL, 0);
+        over_begin(134217728);
+        over_text(S("Private"));
+        ui_info(S("Key"), S("256-bit"), over_buf, over_n);
+        ui_group("", 0, NULL, 0);
+        ui_note(S("paste"), S("Your clipboard holds a channel link."));
     }
 }

@@ -86,3 +86,11 @@ def _draw():
                                              "No key", "256-bit key"]})
         ui.group()
         ui.scroll()
+    elif page == 9:
+        ui.note("warn", ["Every radio on a mesh uses one preset.",
+                         "On another one you hear none of them."])
+        ui.link("LongFast", "", {"tag": "Public"})
+        ui.group("Channel")
+        ui.info("Key", "256-bit", {"tag": "Private"})
+        ui.group()
+        ui.note("paste", ["Your clipboard holds a channel link."])

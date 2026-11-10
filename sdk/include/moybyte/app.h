@@ -212,6 +212,9 @@ int32_t ui_held_all(void) MOYBYTE_APP_IMPORT(ui_held_all);
 // ui.empty
 int32_t ui_empty(const char *icon, uint32_t icon_n, const char *title, uint32_t title_n,
                  const char *lines, uint32_t lines_n) MOYBYTE_APP_IMPORT(ui_empty);
+// ui.note
+int32_t ui_note(const char *icon, uint32_t icon_n, const char *lines,
+                uint32_t lines_n) MOYBYTE_APP_IMPORT(ui_note);
 // ui.bubble
 int32_t ui_bubble(const char *text, uint32_t text_n, const char *head, uint32_t head_n,
                   const char *status, uint32_t status_n, const char *opt, uint32_t opt_n,

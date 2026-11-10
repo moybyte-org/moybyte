@@ -221,6 +221,7 @@ def _block(o):
     check = o.get("check")
     rows = [o.get(k) for k in _ROWS]
     card = o.get("card")
+    tag = o.get("tag")
     rmask = 0
     for i in range(5):
         if rows[i] is not None:
@@ -230,7 +231,7 @@ def _block(o):
             or axis or snap or offset is not None or spill is not None or keep is not None
             or ov is not None or whole or across is not None or at is not None or shift
             or fade or sig is not None or vals is not None or check or rmask
-            or card):
+            or card or tag is not None):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
@@ -241,7 +242,7 @@ def _block(o):
                  | (1048576 if fade else 0) | (2097152 if sig is not None else 0)
                  | (4194304 if vals is not None else 0) | (8388608 if check else 0)
                  | (16777216 if wash == "view" else 0) | (33554432 if rmask else 0)
-                 | (67108864 if card else 0))
+                 | (67108864 if card else 0) | (134217728 if tag is not None else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -276,6 +277,9 @@ def _block(o):
             if r is not None:
                 rb = "\0".join([str(v) for v in r]).encode("utf-8")
                 tail += _pack("<i", len(rb)) + rb
+    if tag is not None:
+        tb = str(tag).encode("utf-8")
+        tail += _pack("<i", len(tb)) + tb
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -1133,6 +1137,16 @@ def empty(icon, title, lines=()):
     The y under it."""
     t = _T
     return _C.api_empty(t[0], t[1], t[2], icon, title, _opts(lines))
+
+
+def note(icon, lines):
+    """A note on the page, part of it and no stop: `icon` ("warn" in the
+    danger label tone, else in `value`) and `lines`' paragraphs, each
+    wrapped in the caption face, the first in `ink` and the rest dim, on a
+    card inset to the page's gutters. Stacked, else at `at`'s rect's top.
+    The y under it."""
+    t = _T
+    return _C.api_note(t[0], t[1], t[2], icon, _opts(lines))
 
 
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",

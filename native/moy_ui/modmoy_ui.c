@@ -2363,7 +2363,7 @@ enum {
     OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
     OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
     OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_VALUES, OV_CHECK,
-    OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS, OV_CARD, OV_COUNT
+    OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS, OV_CARD, OV_TAG, OV_COUNT
 };
 
 // A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
@@ -2416,6 +2416,7 @@ static int over_slot(qstr q) {
         case MP_QSTR_tags: return OV_TAGS;
         case MP_QSTR_marks: return OV_MARKS;
         case MP_QSTR_card: return OV_CARD;
+        case MP_QSTR_tag: return OV_TAG;
         default: return -1;
     }
 }
@@ -2582,6 +2583,10 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     v = vals[OV_CARD];
     if (v != MP_OBJ_NULL) {
         out->card = mp_obj_is_true(v);
+    }
+    v = vals[OV_TAG];
+    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
+        out->tag = span_of(v);
     }
 }
 
@@ -3718,6 +3723,19 @@ static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_empty_obj, 6, 6, ui_api_empty);
 
+// api_note(ctx, cv, look, icon, lines) -> the note's foot y
+static mp_obj_t ui_api_note(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t b;
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[4], ob, &b);
+    return mp_obj_new_int(moy_ui_api_note(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_note_obj, 5, 5, ui_api_note);
+
 // api_month(ctx, cv, look, title, days, first, n, today) -> -1, 0 or 1
 static mp_obj_t ui_api_month(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -4247,6 +4265,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_grid_spread), MP_ROM_PTR(&ui_api_grid_spread_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_group_card), MP_ROM_PTR(&ui_api_group_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_empty), MP_ROM_PTR(&ui_api_empty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_note), MP_ROM_PTR(&ui_api_note_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_bubble), MP_ROM_PTR(&ui_api_bubble_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_month), MP_ROM_PTR(&ui_api_month_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },

@@ -421,6 +421,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_grid_spread", [c.c_void_p, _I, _I, _I, _I, _I], None),
     ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_empty", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_char_p, _Z], _I),
+    ("moy_ui_api_note", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z], _I),
     ("moy_ui_api_bubble", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, _Span, c.c_void_p, _I,
                            c.c_void_p, c.c_void_p], None),
     ("moy_ui_api_month", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, _I, _I, _I], _I),
@@ -470,7 +471,7 @@ class _Over(c.Structure):
                 ("across_first", c.c_int16), ("across_pitch", c.c_int16), ("at", c.c_int16),
                 ("signal", c.c_int8), ("values", _Span), ("check", c.c_int8),
                 ("subs", _Span), ("icons", _Span), ("counts", _Span), ("tags", _Span),
-                ("marks", _Span), ("card", c.c_int8)]
+                ("marks", _Span), ("card", c.c_int8), ("tag", _Span)]
 
 
 class _Line(c.Structure):

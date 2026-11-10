@@ -241,6 +241,7 @@
     {"name": "ui.held_last", "server": "c", "in": ["id:str", "key:int"], "ret": "int", "how": "direct", "wasm": true, "elf": "linked"},
     {"name": "ui.held_all", "server": "c", "in": [], "ret": "int", "how": "direct", "wasm": true, "elf": "linked"},
     {"name": "ui.empty", "server": "c", "in": ["icon:str", "title:str", "lines:str"], "ret": "int", "how": "direct", "wasm": true, "elf": "linked"},
+    {"name": "ui.note", "server": "c", "in": ["icon:str", "lines:str"], "ret": "int", "how": "direct", "wasm": true, "elf": "linked"},
     {"name": "ui.bubble", "server": "c", "in": ["text:str", "head:str", "status:str", "opt:str", "o:bytes", "out:out"], "ret": "int", "how": "direct", "wasm": true, "elf": "linked"},
     {"name": "moybyte.notify", "server": "c", "perm": "notifications", "in": ["summary:str", "body:str?"], "ret": "int", "elf": 77, "py": ["moybyte.notify"], "lua": ["moybyte.notify"], "how": "here", "wasm": true, "wasi": true},
     {"name": "moybyte.open_with", "server": "call", "perm": "front", "in": ["item:str", "choose:int"], "ret": "int", "door": true, "elf": 78, "py": ["moybyte.open_with"], "lua": ["moybyte.open_with"], "how": "hop", "wasm": true, "wasi": true},

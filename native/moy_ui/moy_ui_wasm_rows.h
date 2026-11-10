@@ -9,7 +9,7 @@
 
 #include <stdint.h>
 
-#define MOY_UI_WASM_ROWS 45
+#define MOY_UI_WASM_ROWS 46
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t);
@@ -79,6 +79,7 @@ int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t);
 int32_t moy_ui_wasm_held_all(void *);
 int32_t moy_ui_wasm_empty(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                           const uint8_t *, uint32_t);
+int32_t moy_ui_wasm_note(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t);
 int32_t moy_ui_wasm_bubble(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                            const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *,
                            uint32_t, uint8_t *, uint32_t);
@@ -128,6 +129,7 @@ int32_t moy_ui_wasm_bubble(void *, const uint8_t *, uint32_t, const uint8_t *, u
     { "ui_held_last", FN(moy_ui_wasm_held_last) }, \
     { "ui_held_all", FN(moy_ui_wasm_held_all) }, \
     { "ui_empty", FN(moy_ui_wasm_empty) }, \
+    { "ui_note", FN(moy_ui_wasm_note) }, \
     { "ui_bubble", FN(moy_ui_wasm_bubble) }, \
 }
 

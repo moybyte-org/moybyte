@@ -76,6 +76,8 @@ HOME = {"values": ("2 min", "", "1 h"), "subs": ("Gate opens at seven", "Snow", 
         "icons": ("bubble", "@Ana Ridge", ""), "counts": (0, 3, "12"),
         "tags": ("Public", "", ""), "marks": ("", "lock", "lock")}
 CARD = {"card": True}
+TAG = {"tag": "Public"}
+NOTE = ("Every radio on a mesh uses one preset.", "On another one you hear none.")
 SHORT = [False]
 OUT = [0] * 5
 
@@ -113,6 +115,8 @@ def page():
     ui.group("", CARD)
     ui.list("Two", WORDS, -1, HOME)
     ui.group()
+    ui.link("LongFast", "", TAG)
+    ui.note("warn", NOTE)
     ui.end()
     return out
 

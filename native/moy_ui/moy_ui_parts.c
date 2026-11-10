@@ -498,6 +498,8 @@ int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, 
 // -- value rows -------------------------------------------------------------------------
 
 static int signal_d(pd_t *d, int x, int foot, int n, uint16_t under);
+static int pill(pd_t *d, const pf_t *f, moy_ui_span_t t, int right, int y, int h, int has_fill,
+                uint16_t fc, uint16_t ring, uint16_t ink, int minw);
 
 static int pad_of(const pd_t *d, const moy_ui_vrow_t *r) {
     return r->card || (r->desk & MOY_UI_DESK) ? gm(MOY_UI_M_GROUP_PAD, d->fs)
@@ -808,6 +810,12 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 x -= chev;
                 chevron(&d, x, cy, chev, 1, cdim);
                 x -= kind == MOY_UI_V_CYCLE ? gap + d.fs : gap;
+            }
+            if (r->tag.n > 0 && kind != MOY_UI_V_CYCLE) {
+                pf_t fc = font_of(&d, MOY_UI_FONT_CAPTION);
+                x -= pill(&d, &fc, r->tag, x, b.y, b.h, 0, 0,
+                          pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_INK_DIM)), cdim, 0)
+                     + (r->value.n > 0 ? gap : 0);
             }
             // the value in the label's face and weight, set apart by its ink;
             // a key the hints draw as a sign, as the sign (no face's arrows)
@@ -1909,6 +1917,73 @@ int moy_ui_row2(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_row2_t *r, 
     }
     text_cut(&d, &fc, r->sub, tx, l1 + lh, ch, right - tx - cw, pal(&d, unread ? ink : dim), sc);
     return MOY_UI_OK;
+}
+
+// -- a note on the page (ui.note) -----------------------------------------------------------
+
+#define NOTE_LINES 24
+
+// Each paragraph of `lines` wrapped to `room` (`fc`'s), drawn from x, y a line
+// a pitch where `draw`, the first in `first`, the rest in `rest`: the lines.
+static int note_lines(pd_t *d, const pf_t *fc, const uint8_t *lines, size_t n, int room, int x,
+                      int y, uint16_t first, uint16_t rest, int draw) {
+    int sc = tscale(d->s), shown = 0, para = 0;
+    uint8_t buf[256];
+    for (size_t i = 0, from = 0; i <= n; i++) {
+        if (i < n && lines[i] != 0) {
+            continue;
+        }
+        moy_ui_span_t p = {lines + from, (uint16_t)(i - from)};
+        from = i + 1;
+        moy_text_line_t ln[NOTE_LINES];
+        int k = p.n ? moy_text_wrap(fc->id, p.p, p.n, room / sc, MOY_WRAP_WORDS_PX, ln, NOTE_LINES)
+                    : 0;
+        for (int j = 0; j < k; j++) {
+            if (draw) {
+                moy_ui_span_t part = {p.p + ln[j].off, ln[j].len};
+                if (ln[j].collapse && ln[j].len <= sizeof(buf)) {
+                    part.p = buf;
+                    part.n = (uint16_t)moy_text_collapse(p.p, &ln[j], buf);
+                }
+                text(d, fc, part.p, part.n, x, y + shown * fc->line * sc, fc->line * sc,
+                     para == 0 ? first : rest, sc);
+            }
+            shown++;
+        }
+        para++;
+    }
+    return shown;
+}
+
+int moy_ui_note(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, int warn,
+                const uint8_t *lines, size_t n, int fs, int desk, int draw) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s), k = d.fs;
+    pf_t fc = font_of(&d, d.tap ? MOY_UI_FONT_TAP_CAPTION : MOY_UI_FONT_CAPTION);
+    int g = (d.desk ? 12 : 8) * k, pad = (d.desk ? 10 : d.tap ? 8 : 6) * k;
+    int is = ((d.desk || d.tap) ? 14 : 12) * k, lh = fc.line * sc;
+    int x = b.x + g, w = b.w - 2 * g;
+    int tx = x + pad + 4 * k + is + 6 * k, room = x + w - pad - tx;
+    uint16_t ink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK));
+    uint16_t dim = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK));
+    int count = note_lines(&d, &fc, lines, n, room, tx, 0, ink, dim, 0);
+    int h = 2 * pad + count * lh;
+    if (!draw) {
+        return h;
+    }
+    rrect_sq(&d, x, b.y, w, h, 8 * k, -1, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), k,
+             pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_INK_DIM)));
+    int ci = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+    if (warn) {
+        int di = ink_danger(&d);
+        ci = di >= 0 ? di : tok(&d, MOY_UI_T_DANGER, MOY_UI_T_INK);
+    }
+    moy_ui_box_t ib = {(int16_t)(tx - is - 6 * k), (int16_t)(b.y + pad + moy_ui_fdiv(lh - is, 2)),
+                       (int16_t)is, (int16_t)is};
+    icon_d(&d, slot, glyph, ib, ci);
+    note_lines(&d, &fc, lines, n, room, tx, b.y + pad, ink, dim, 1);
+    return h;
 }
 
 // -- a snapping page's "More below" cue ---------------------------------------------------

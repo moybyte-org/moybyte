@@ -885,6 +885,7 @@ typedef struct {
     int16_t keys;                   // info: the value is the keys the row answers to, and
                                     // one the hints draw as a sign (`left`, `right`, `up`,
                                     // `down`, `enter`) draws as that sign
+    moy_ui_span_t tag;              // info, link: a tag (a pill) at the value's right
     int16_t signal;                 // info, link: the signal glyph before the value, its
                                     // lit bars + 1 (0: none)
 } moy_ui_vrow_t;
@@ -1042,6 +1043,13 @@ int moy_ui_row2(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_row2_t *r, 
                 int desk);
 // A two-line row's height at the scale.
 int moy_ui_row2_h(int fs, int desk);
+// A note on the page (ui.note): the `slot`/`glyph` icon (with `warn` in the
+// danger label tone, else `value`) and `lines`' paragraphs (NUL-separated,
+// `n` bytes) each wrapped in the caption face, the first in `ink` and the
+// rest in the dim ink, on a `surface` card with a 1 unit `border` ring,
+// radius 8, inset to the page's gutters. Its height, drawn where `draw`.
+int moy_ui_note(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, int warn,
+                const uint8_t *lines, size_t n, int fs, int desk, int draw);
 // The "More below" cue in the band a snapping page's foot leaves (its
 // left-out units' room): the band on the page's ground, a down chevron and
 // the words in the caption face's dim ink, centred. The band it needs.

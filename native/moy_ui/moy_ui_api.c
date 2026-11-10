@@ -153,6 +153,8 @@ void moy_ui_over_none(moy_ui_over_t *o) {
         rows[i]->n = 0;
     }
     o->card = 0;
+    o->tag.p = NULL;
+    o->tag.n = 0;
 }
 
 int32_t mua_word(const uint8_t *w, int i) {
@@ -301,6 +303,16 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                         at += (size_t)rn;
                     }
                 }
+                if ((fl & MOY_UI_O_TAG) && n - at >= 4u) {
+                    int32_t tn = mua_word(w + at, 0);
+                    at += 4u;
+                    if (tn < 0 || (size_t)tn > n - at || tn > 0xffff) {
+                        return MOY_UI_BAD;
+                    }
+                    o->tag.p = w + at;
+                    o->tag.n = (uint16_t)tn;
+                    at += (size_t)tn;
+                }
             }
         }
     }
@@ -317,7 +329,7 @@ const moy_ui_over_t *mua_over(const moy_ui_over_t *o) {
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {NULL, 0},
                                        0, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0},
-                                       0};
+                                       0, {NULL, 0}};
     return o != NULL ? o : &none;
 }
 
@@ -3173,6 +3185,7 @@ int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_s
     mua_vrow_init(c, &r, label);
     r.value = value;
     r.signal = o->signal;
+    r.tag = o->tag;
     mua_vrow_draw(c, s, b, stacked, kind, st, o, &r);
     return (st & MOY_UI_ST_ACTIVATED) != 0;
 }

@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 113
+#define MOY_APP_WASM_N 114
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -79,6 +79,7 @@ int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t) UI_WEA
 int32_t moy_ui_wasm_held_all(void *) UI_WEAK;
 int32_t moy_ui_wasm_empty(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                           const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_ui_wasm_note(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
 int32_t moy_ui_wasm_bubble(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                            const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *,
                            uint32_t, uint8_t *, uint32_t) UI_WEAK;
@@ -501,6 +502,7 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "ui_link", FN(moy_ui_wasm_link), "(*~*~*~)i", NULL },
     { "ui_list", FN(moy_ui_wasm_list), "(*~*~i*~)i", NULL },
     { "ui_menu", FN(moy_ui_wasm_menu), "(*~*~*~*~)i", NULL },
+    { "ui_note", FN(moy_ui_wasm_note), "(*~*~)i", NULL },
     { "ui_page", FN(moy_ui_wasm_page), "(*~*~*~)i", NULL },
     { "ui_part", FN(moy_ui_wasm_part), "(*~ii*~*~)i", NULL },
     { "ui_part_at", FN(moy_ui_wasm_part_at), "(*~)i", NULL },
@@ -549,9 +551,9 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_UI_FIELD, MOY_T_UI_FOCUS, MOY_T_UI_GRID, MOY_T_UI_GROUP, MOY_T_UI_HELD,
     MOY_T_UI_HELD_ALL, MOY_T_UI_HELD_LAST, MOY_T_UI_HINTS, MOY_T_UI_ICON, MOY_T_UI_INFO,
     MOY_T_UI_KEYS_TAKEN, MOY_T_UI_LABEL, MOY_T_UI_LINK, MOY_T_UI_LIST, MOY_T_UI_MENU,
-    MOY_T_UI_PAGE, MOY_T_UI_PART, MOY_T_UI_PART_AT, MOY_T_UI_POPOVER, MOY_T_UI_PROGRESS,
-    MOY_T_UI_RULE, MOY_T_UI_SCROLL, MOY_T_UI_SEG, MOY_T_UI_SLIDER, MOY_T_UI_SLOT,
-    MOY_T_UI_SLOT_NEXT, MOY_T_UI_SLOTS, MOY_T_UI_SPLIT, MOY_T_UI_SWATCHES, MOY_T_UI_TABLE,
-    MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_TABLE_PART, MOY_T_UI_TABS,
-    MOY_T_UI_TEXT_VIEW, MOY_T_UI_TOGGLE, MOY_T_UI_TOOL,
+    MOY_T_UI_NOTE, MOY_T_UI_PAGE, MOY_T_UI_PART, MOY_T_UI_PART_AT, MOY_T_UI_POPOVER,
+    MOY_T_UI_PROGRESS, MOY_T_UI_RULE, MOY_T_UI_SCROLL, MOY_T_UI_SEG, MOY_T_UI_SLIDER,
+    MOY_T_UI_SLOT, MOY_T_UI_SLOT_NEXT, MOY_T_UI_SLOTS, MOY_T_UI_SPLIT, MOY_T_UI_SWATCHES,
+    MOY_T_UI_TABLE, MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_TABLE_PART,
+    MOY_T_UI_TABS, MOY_T_UI_TEXT_VIEW, MOY_T_UI_TOGGLE, MOY_T_UI_TOOL,
 };

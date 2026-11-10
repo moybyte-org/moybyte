@@ -78,5 +78,13 @@ function _draw()
             {values = {"Primary", "256-bit key", "128-bit key", "No key", "256-bit key"}})
     ui.group()
     ui.scroll()
+  elseif page == 9 then
+    ui.note("warn", {"Every radio on a mesh uses one preset.",
+                     "On another one you hear none of them."})
+    ui.link("LongFast", "", {tag = "Public"})
+    ui.group("Channel")
+    ui.info("Key", "256-bit", {tag = "Private"})
+    ui.group()
+    ui.note("paste", {"Your clipboard holds a channel link."})
   end
 end
