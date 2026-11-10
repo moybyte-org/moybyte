@@ -247,8 +247,8 @@ def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):
 
     baked = gen_device_carts.build_carts(str(src))
     assert len(baked) == 1
-    assert baked[0]["src_before"] == [("p8.lua", "-- prologue\n")]
-    assert baked[0]["src_after"] == [("perf.lua", "-- epilogue\n")]
+    assert baked[0]["src_before"] == [["p8.lua", "-- prologue\n"]]
+    assert baked[0]["src_after"] == [["perf.lua", "-- epilogue\n"]]
 
     root = str(tmp_path / "carts")
     (tmp_path / "carts").mkdir()
