@@ -30,8 +30,8 @@ moymesh`), is the whole app in Lua: a window over a service that holds the
 LoRa radio by handle and wakes on it, a Meshtastic node of its own (the
 channels and presets a Meshtastic setup names, its NodeInfo under the
 console's name from `moybyte.name()`, direct messages under the nodes' X25519
-keys); its copy `tests/fixtures/apps/moymesh.moy` runs in
-`tests/test_moymesh_app.py`.
+keys, its own pair the console's, `moybyte.key_make`); its copy
+`tests/fixtures/apps/moymesh.moy` runs in `tests/test_moymesh_app.py`.
 
 ---
 

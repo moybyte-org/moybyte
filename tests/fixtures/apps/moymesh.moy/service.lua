@@ -6,7 +6,8 @@
 -- frequency slot, the hop limit and up to eight channels; LongFast in EU_868
 -- until another is chosen), sleeps until the radio posts it "lora", and keeps
 -- what it heard and sent in the app's prefs. It is a node of its own: a node
--- number, an X25519 key pair and a name it announces (NodeInfo) at its start,
+-- number, an X25519 key pair (the console's, KEY below) and a name it
+-- announces (NodeInfo) at its start,
 -- every three hours and to any node that asks, a table of the nodes it heard,
 -- and direct messages to and from them under their keys (PKI). It answers
 -- the acknowledgements a node asks for and relays nothing: a Meshtastic
@@ -57,10 +58,9 @@
 --                 many hops it came over, where the packet says), ch (the
 --                 channel it was last heard on) } }, at most NODES_MAX, the
 --                 longest unheard dropped first
---     key         this node's X25519 secret key, 64 hex digits: made once
 --   The prefs it reads: mesh.lua's setup (region, preset, slot, hops,
 --   channels), and
---     long_name   the name this node announces, up to 39 bytes; none or ""
+--     long_name   the name this node announces, up to 24 bytes; none or ""
 --                 for the console's name (moybyte.name())
 --     short_name  up to 4 bytes; none or "" for the long name's first four,
 --                 or, where the long name is a board's (moybyte-...), the
@@ -85,7 +85,8 @@
 --                counter block the packet id as a little-endian u64, the
 --                sender as a u32, then a zero 32-bit counter.
 --   a direct message to a node's key (PKI, channel hash 0): AES-CCM under
---                SHA-256 of the X25519 secret, a 13-byte nonce (the packet
+--                SHA-256 of the X25519 shared secret (CryptoEngine::
+--                setDHPublicKey, then hash), a 13-byte nonce (the packet
 --                id, the 4-byte extra nonce the payload ends with, the
 --                sender, a zero), the ciphertext, an 8-byte tag, the extra
 --                nonce. Text only: NodeInfo and routing go on the channel.
@@ -115,6 +116,12 @@
 --                NodeInfo with another is dropped, as NodeDB::updateUser
 --                drops it.
 --
+-- THE KEY PAIR is the console's (moybyte.key_make, key_public, key_shared):
+-- the console keeps its secret where no app reads it and the settings carry
+-- nothing of it, and answers this app the public key and, for a node's
+-- public key, the X25519 shared secret. A console without those calls runs
+-- no Moy Mesh service: the service stops at its start, saying why.
+--
 -- A Lua integer is 32 bits on the consoles (LUA_32BITS): a u32 above
 -- 0x7fffffff is negative here, packs and prints as the same 32 bits, and
 -- compares unsigned through math.ult.
@@ -123,7 +130,9 @@ BROADCAST = 0xFFFFFFFF
 TEXT, NODEINFO, ROUTING = 1, 4, 5       -- portnums.proto
 KEEP = 30                               -- messages the log keeps
 TEXT_MAX = 200                          -- bytes a message carries
-LONG_MAX, SHORT_MAX = 39, 4             -- mesh.options: User names' max_size less 1
+LONG_MAX = 24                           -- mesh.proto: the long name newer devices keep
+LONG_READ, SHORT_MAX = 39, 4            -- mesh.options: User names' max_size less 1
+KEY = "node"                            -- this node's key pair, by the console's name
 NODES_MAX = 40                          -- nodes the table keeps
 HW_MODEL = 255                          -- mesh.proto HardwareModel PRIVATE_HW
 ROLE = 1                                -- config.proto Role CLIENT_MUTE
@@ -273,13 +282,8 @@ function decode(packet, key, chash)
     return h, portnum, payload, x
 end
 
--- The AES-CCM key between X25519 secret `secret` and public key `peer`; nil
--- for a peer key of small order.
-function pki_key(secret, peer)
-    local ok, shared = pcall(moybyte.x25519, secret, peer)
-    if not ok or shared == string.rep("\0", 32) then
-        return nil
-    end
+-- The AES-CCM key of two nodes' X25519 shared secret `shared`.
+function pki_key(shared)
     return moybyte.sha256(shared)
 end
 
@@ -287,29 +291,20 @@ local function pki_nonce(pid, extra, frm)
     return pack("<I4", pid) .. extra .. pack("<I4", frm) .. "\0"
 end
 
--- A direct message's Data protobuf to the node of X25519 `secret` from the
--- node of public key `peer`; nil where it does not open.
-function pki_open(secret, peer, packet)
+-- A direct message's Data protobuf under the AES-CCM key `key` of the two
+-- nodes (pki_key); nil where it does not open.
+function pki_open(key, packet)
     local to, frm, pid = parse_header(packet)
     local body = packet:sub(HEADER + 1)
     if to == nil or #body <= PKI_OVERHEAD then
         return nil
     end
-    local key = pki_key(secret, peer)
-    if key == nil then
-        return nil
-    end
     return moybyte.aes_ccm_open(key, pki_nonce(pid, body:sub(-4), frm) .. body:sub(1, -5), 8)
 end
 
--- A direct message: Data protobuf `plain` from node `frm` of X25519 `secret`
--- to node `to` of public key `peer`, its 4-byte extra nonce `extra`; nil for
--- a peer key of small order.
-function pki_packet(secret, peer, to, frm, pid, f, plain, extra, relay)
-    local key = pki_key(secret, peer)
-    if key == nil then
-        return nil
-    end
+-- A direct message: Data protobuf `plain` from node `frm` to node `to` under
+-- the AES-CCM key `key` of the two (pki_key), its 4-byte extra nonce `extra`.
+function pki_packet(key, to, frm, pid, f, plain, extra, relay)
     local sealed = moybyte.aes_ccm_seal(key, pki_nonce(pid, extra, frm) .. plain, 8)
     return header(to, frm, pid, f, 0, 0, relay) .. sealed .. extra
 end
@@ -340,7 +335,7 @@ function user_decode(b)
     end
     local key = pb_get(f, 8, nil)
     return {
-        id = text(1, 15), long = text(2, LONG_MAX), short = text(3, SHORT_MAX),
+        id = text(1, 15), long = text(2, LONG_READ), short = text(3, SHORT_MAX),
         hw = int(5), role = int(7), licensed = int(6) ~= 0,
         key = type(key) == "string" and #key == 32 and key or nil,
     }
@@ -426,7 +421,7 @@ end
 -- -- the service --------------------------------------------------------------------
 
 local S = {
-    node = 0, secret = "", public = "", long = "", short = "", sig = "",
+    node = 0, public = "", long = "", short = "", sig = "",
     setup = nil, chans = {}, hops = HOPS, h = nil,
     seen = {}, nodes = {}, dirty = false, saved = 0,
     out = {}, pending = {}, replied = {}, asked = {}, tick = 0, announced = 0,
@@ -445,23 +440,25 @@ local function draw_node()
     return n
 end
 
--- This node's X25519 key pair: the prefs' secret, else a new one kept there.
-local function keys()
-    local secret = unhex(prefs.get("key"))
-    if secret and #secret == 32 then
-        local ok, public = pcall(moybyte.x25519, secret)
-        if ok and public ~= string.rep("\0", 32) then
-            return secret, public
-        end
+-- This node's X25519 public key: the console's pair KEY, made at the first
+-- start.
+local function public_key()
+    if moybyte.key_make == nil then
+        error("this console keeps no keys for apps (moybyte.key_make): update it", 0)
     end
-    while true do
-        secret = moybyte.random(32)
-        local ok, public = pcall(moybyte.x25519, secret)
-        if ok and public ~= string.rep("\0", 32) then
-            prefs.set("key", hex(secret))
-            return secret, public
-        end
+    local public = unhex(moybyte.key_make(KEY))
+    if public == nil or #public ~= 32 then
+        error("the console made no key", 0)
     end
+    return public
+end
+
+-- The AES-CCM key between this node and the node of public key `peer` (64
+-- hex digits); nil for a key that is not one or of small order.
+local function dm_key(peer)
+    local shared = type(peer) == "string" and #peer == 64 and moybyte.key_shared(KEY, peer)
+    shared = shared and unhex(shared)
+    return shared and #shared == 32 and pki_key(shared) or nil
 end
 
 local function console_name()
@@ -746,9 +743,9 @@ end
 local function open(packet, h)
     if h[5] == 0 and h[1] == S.node then
         local n = S.nodes[node_name(h[2])]
-        local peer = n and unhex(n.key or "")
-        if peer and #peer == 32 then
-            local plain = pki_open(S.secret, peer, packet)
+        local key = n and dm_key(n.key)
+        if key then
+            local plain = pki_open(key, packet)
             local port, payload, x
             if plain then
                 port, payload, x = data_decode(plain)
@@ -850,19 +847,19 @@ end
 local function dm(text, peer)
     local to = node_number(peer)
     local n = S.nodes[peer]
-    local key = n and unhex(n.key or "")
-    if not key or #key ~= 32 then
+    if not (n and n.key) then
         log({ from = "", dm = peer, text = text, state = "failed", why = "no key" })
         announce_to(S.asked, to, true, n and n.ch or 0)
         return
     end
-    local pid = new_id()
-    local packet = pki_packet(S.secret, key, to, S.node, pid, flags(S.hops, S.hops, true),
-                              data_encode(TEXT, text), moybyte.random(4), S.node & 0xFF)
-    if packet == nil then
+    local key = dm_key(n.key)
+    if key == nil then
         log({ from = "", dm = peer, text = text, state = "failed", why = "its key is not a key" })
         return
     end
+    local pid = new_id()
+    local packet = pki_packet(key, to, S.node, pid, flags(S.hops, S.hops, true),
+                              data_encode(TEXT, text), moybyte.random(4), S.node & 0xFF)
     fresh(S.node, pid)
     log({ from = "", dm = peer, text = text, id = pid, pki = true, state = "sending" })
     local p = { packet = packet, to = to, tries = 1, due = nil }
@@ -957,7 +954,7 @@ end
 
 function moy_start()
     S.node = draw_node()
-    S.secret, S.public = keys()
+    S.public = public_key()
     local nodes = prefs.get("nodes")
     S.nodes = type(nodes) == "table" and nodes or {}
     moybyte.on("lora", radio)

@@ -455,17 +455,19 @@ def test_the_header_reads_the_firmware_s_pki_packet(c):
     assert c("answer_hops(0x63, 3)") == 2 and c("answer_hops(0xE0, 3)") == 7
 
 
+def _key_of(secret, peer):
+    """The codec's AES-CCM key of X25519 `secret` and `peer`, as Lua."""
+    return "pki_key(moybyte.x25519(%s, %s))" % (_x(secret), _x(peer))
+
+
 def test_a_direct_message_opens_as_the_firmware_s_test_says(c):
     radio = H(V.MESH_PKI_RADIO)
-    args = "%s, %s" % (_x(H(V.MESH_PKI_SECRET)), _x(H(V.MESH_PKI_PEER)))
-    assert c("H(pki_open(%s, %s))" % (args, _x(radio))) == V.MESH_PKI_PLAIN
+    key = _key_of(H(V.MESH_PKI_SECRET), H(V.MESH_PKI_PEER))
+    assert c("H(pki_open(%s, %s))" % (key, _x(radio))) == V.MESH_PKI_PLAIN
     assert c("P(%s)" % _x(H(V.MESH_PKI_PLAIN))) == "1:test"
     changed = bytearray(radio)
     changed[20] ^= 1
-    assert c("T(pki_open(%s, %s))" % (args, _x(changed))) == "nil"
-    # the firmware's weak point (test_DH25519): a key of small order opens nothing
-    weak = H("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f")
-    assert c("T(pki_key(%s, %s))" % (_x(H(V.MESH_PKI_SECRET)), _x(weak))) == "nil"
+    assert c("T(pki_open(%s, %s))" % (key, _x(changed))) == "nil"
 
 
 def test_a_direct_message_sealed_here_opens_in_pyca(c):
@@ -473,14 +475,14 @@ def test_a_direct_message_sealed_here_opens_in_pyca(c):
     alice_pub, bob_pub = _x25519_public(alice), _x25519_public(bob)
     assert c("H(moybyte.x25519(%s))" % _x(alice)) == alice_pub.hex()
     plain = _data(1, b"hello Bob")
-    packet = H(c("H(pki_packet(%s, %s, 0x%x, 0x%x, 0x%x, flags(3, 3, true), %s, %s, 0x56))" % (
-        _x(alice), _x(bob_pub), 0xB0B, 0xA11CE, 0xDEADBEEF, _x(plain), _x(b"\x01\x02\x03\x04"))))
+    packet = H(c("H(pki_packet(%s, 0x%x, 0x%x, 0x%x, flags(3, 3, true), %s, %s, 0x56))" % (
+        _key_of(alice, bob_pub), 0xB0B, 0xA11CE, 0xDEADBEEF, _x(plain), _x(b"\x01\x02\x03\x04"))))
     assert packet[:16] == struct.pack("<IIIBBBB", 0xB0B, 0xA11CE, 0xDEADBEEF, 0x6B, 0, 0, 0x56)
     assert len(packet) == 16 + len(plain) + 12 and packet[-4:] == b"\x01\x02\x03\x04"
     assert _pki_open(bob, alice_pub, packet) == plain
     # and what pyca seals, the codec opens
     theirs = _pki_packet(bob, alice_pub, 0xA11CE, 0xB0B, 77, _data(1, b"hi Alice"))
-    assert c("P(pki_open(%s, %s, %s))" % (_x(alice), _x(bob_pub), _x(theirs))) == "1:hi Alice"
+    assert c("P(pki_open(%s, %s))" % (_key_of(alice, bob_pub), _x(theirs))) == "1:hi Alice"
 
 
 def test_a_channel_packet_is_what_an_independent_encoder_makes(c):
@@ -669,8 +671,10 @@ def _me(pl):
     return int(_prefs(pl, "node")[1:], 16)
 
 
-def _secret(pl):
-    return H(_prefs(pl, "key"))
+def _my_public(ws):
+    """The service's public key, as the console keeps its pair."""
+    from runtime import app_keys
+    return H(app_keys.public(ws.carts_root, "moymesh", "node"))
 
 
 def _u32(v):
@@ -701,7 +705,8 @@ def test_the_service_announces_its_node_info_at_its_start(mesh):
     assert user[2] == [b"moybyte-beef"], "the console's name (ssh_service.default_name)"
     assert user[3] == [("%04x" % (me & 0xFFFF)).encode()]
     assert (user[5], user[7]) == ([255], [1]), "PRIVATE_HW, CLIENT_MUTE"
-    assert user[8] == [_x25519_public(_secret(pl))], "its key pair's public half"
+    assert user[8] == [_my_public(ws)], "its key pair's public half"
+    assert _prefs(pl, "key") is None, "the console keeps the pair, the prefs nothing of it"
     assert moybyte.name() == "moybyte-beef"
     win = _Window(pl)
     win.run("NAME = moybyte.name()")
@@ -713,13 +718,13 @@ def test_its_names_are_the_console_s_or_the_prefs(tmp_path):
     try:
         user = _pb(_open(_sent(drv)[0][0])[1][2][0])
         assert (user[2], user[3]) == (["Kuhinja š".encode()], [b"Kuhi"])
-        key = _prefs(pl, "key")
+        key = _my_public(ws)
         pl.ns["prefs"].set("long_name", "x" * 50)
         pl.ns["prefs"].set("short_name", "ššš")
         moybyte.send("moymesh", "retune")
         user = _pb(_open(_sent(drv)[0][0])[1][2][0])
-        assert (user[2], user[3]) == ([b"x" * 39], ["šš".encode()])
-        assert _prefs(pl, "key") == key, "made once"
+        assert (user[2], user[3]) == ([b"x" * 24], ["šš".encode()])
+        assert _my_public(ws) == key == user[8][0], "made once"
         moybyte.send("moymesh", "retune")
         assert _sent(drv) == [], "nothing it announces moved"
     finally:
@@ -822,7 +827,7 @@ def test_a_direct_message_goes_under_the_node_s_key_and_is_delivered(mesh):
     me = _me(pl)
     to, frm, pid, flags, chash, nh, relay = struct.unpack("<IIIBBBB", packet[:16])
     assert (to, frm, flags, chash, relay) == (THEM, me, 0x6B, 0, me & 0xFF), "want-ack, PKI"
-    my_pub = _x25519_public(_secret(pl))
+    my_pub = _my_public(ws)
     assert _pb(_pki_open(THEIR_SECRET, my_pub, packet)) == {1: [1], 2: ["psst š".encode()]}
     rec, = _dm_log(pl)
     assert (rec["state"], rec["pki"], _u32(rec["id"])) == ("sent", True, pid)
@@ -875,7 +880,7 @@ def test_a_direct_message_with_no_ack_is_sent_three_times_then_fails(tmp_path):
 def test_a_direct_message_to_this_node_is_kept_and_acknowledged(mesh):
     ws, pl, drv, svc = mesh
     _sent(drv)
-    me, my_pub = _me(pl), _x25519_public(_secret(pl))
+    me, my_pub = _me(pl), _my_public(ws)
     # from a node whose key it lacks: PKI_UNKNOWN_PUBKEY on the primary
     dm = _pki_packet(THEIR_SECRET, my_pub, me, THEM, 0x5150, _data(1, b"secret"))
     _hear(drv, dm)
