@@ -494,6 +494,8 @@ int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, 
 
 // -- value rows -------------------------------------------------------------------------
 
+static int signal_d(pd_t *d, int x, int foot, int n, uint16_t under);
+
 static int pad_of(const pd_t *d, const moy_ui_vrow_t *r) {
     return r->card || (r->desk & MOY_UI_DESK) ? gm(MOY_UI_M_GROUP_PAD, d->fs)
                               : metric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * d->fs;
@@ -834,6 +836,15 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 x -= vw;
                 text(&d, &fl, r->value.p, r->value.n, x, b.y, b.h,
                      kind == MOY_UI_V_CYCLE ? cink : cdim, sc);
+            }
+            if (r->signal > 0 && kind != MOY_UI_V_CYCLE) {
+                // the glyph a gap before the value, its foot a unit over the
+                // value's baseline
+                int sw, sh;
+                moy_ui_signal_size(d.fs, d.desk ? MOY_UI_DESK : 0, &sw, &sh);
+                x -= 4 * d.fs + sw;
+                int base = b.y + moy_ui_fdiv(b.h - fl.line * sc, 2) + fl.ascent * sc;
+                signal_d(&d, x, base - d.fs, r->signal - 1, rg);
             }
             if (kind == MOY_UI_V_CYCLE) {
                 x -= gap + d.fs + chev;

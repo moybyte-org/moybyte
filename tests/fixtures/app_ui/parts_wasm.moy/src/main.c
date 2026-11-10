@@ -31,6 +31,17 @@ static const void *over_id(const char *id, uint32_t n) {
     return over_buf;
 }
 
+// An override block naming only `signal` (0..4 bars): the nine words, no
+// hint (-1), the flags word's MOY_UI_O_SIGNAL and the signal's word.
+static const void *over_signal(int32_t bars) {
+    int32_t w[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2097152, bars};
+    for (uint32_t i = 0; i < 48; i++) {
+        over_buf[i] = (uint8_t)(w[i / 4] >> (8 * (i % 4)));
+    }
+    over_n = 48;
+    return over_buf;
+}
+
 EXPORT(_layout) void _layout(int32_t w, int32_t h, int32_t fs) {
     (void)w;
     (void)h;
@@ -63,5 +74,12 @@ EXPORT(_draw) void _draw(void) {
         ui_bubble(S("Clear skies up here, wind from the north. Bring a warm layer, the hut is cold after dark and the stove is out. Bring tea for the morning, and the long rope from the shed by the gate."), S("1E2F"), S(""), (const char *)cut, sizeof(cut), NULL, 0, v, sizeof(v));
         pmem(1, v[4] & 16, 1);
         ui_focus(S("gate"), NULL, 0);
+    } else if (page == 3) {
+        ui_group(S("Heard"), NULL, 0);
+        ui_info(S("From"), S("Ana Ridge"), NULL, 0);
+        ui_info(S("Signal"), S("-104 dBm"), over_signal(2), over_n);
+        ui_info(S("SNR"), S("2.0 dB"), NULL, 0);
+        ui_group("", 0, NULL, 0);
+        ui_link(S("Base Camp"), S("-96 dBm"), over_signal(4), over_n);
     }
 }

@@ -386,7 +386,9 @@ that wraps itself: `"in"` at the left with its sender (`o.head`) and the
 signal glyph (`o.signal`, 0 to 4 bars), `"out"` at the right in your
 colour, `o.tone = "failed"` as its tint; `o.status` is the line under it.
 It answers its rect and state; `ui.CUT` is set where the text ran past
-`o.lines` (4), the cue to offer the whole message on a page of its own:
+`o.lines` (4), the cue to offer the whole message on a page of its own.
+The details repeat the glyph on an info row, `ui.info("Signal", "-104
+dBm", {signal = 2})`:
 
 ```lua
 for i, m in ipairs(log) do

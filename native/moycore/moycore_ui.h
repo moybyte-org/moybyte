@@ -156,6 +156,12 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
         o->axis_x = (int8_t)(n == 1 && a[0] == 'x');
     }
     lua_pop(L, 1);
+    lua_getfield(L, i, "signal");
+    if (lua_isnumber(L, -1)) {
+        lua_Integer sg = lua_tointeger(L, -1);
+        o->signal = (int8_t)(sg < 0 ? 0 : sg > 4 ? 5 : sg + 1);
+    }
+    lua_pop(L, 1);
     lua_getfield(L, i, "offset");
     if (lua_isnumber(L, -1)) {
         o->has_offset = 1;

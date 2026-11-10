@@ -207,6 +207,9 @@ typedef struct {
     // the current row's part its gen and marks belong to.
     int8_t has_across;
     int16_t across_first, across_pitch, at;
+    // An info or a link row: the signal glyph (moy_ui.h's moy_ui_signal)
+    // before its value, its lit bars + 1 (0: no glyph).
+    int8_t signal;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -225,6 +228,7 @@ typedef struct {
 #define MOY_UI_O_AT 262144          // and `at`, its word after the across's
 #define MOY_UI_O_SHIFT 524288       // and `shift`
 #define MOY_UI_O_FADE 1048576       // and `fade`, its word after the at's
+#define MOY_UI_O_SIGNAL 2097152     // and `signal` (0..4 bars lit), its word after the fade's
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);

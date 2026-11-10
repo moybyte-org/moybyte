@@ -139,6 +139,7 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->over_x = o->over_y = o->over_w = o->over_h = 0;
     o->shift = 0;
     o->fade = 0;
+    o->signal = 0;
 }
 
 int32_t mua_word(const uint8_t *w, int i) {
@@ -249,6 +250,11 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                     o->fade = (int16_t)(fh < 0 ? 0 : fh > 4096 ? 4096 : fh);
                     at += 4u;
                 }
+                if ((fl & MOY_UI_O_SIGNAL) && n - at >= 4u) {
+                    int32_t sg = mua_word(w + at, 0);
+                    o->signal = (int8_t)(sg < 0 ? 0 : sg > 4 ? 5 : sg + 1);
+                    at += 4u;
+                }
             }
         }
     }
@@ -263,7 +269,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 const moy_ui_over_t *mua_over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
-                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     return o != NULL ? o : &none;
 }
 
@@ -3017,6 +3023,7 @@ int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_s
     moy_ui_vrow_t r;
     mua_vrow_init(c, &r, label);
     r.value = value;
+    r.signal = o->signal;
     mua_vrow_draw(c, s, b, stacked, kind, st, o, &r);
     return (st & MOY_UI_ST_ACTIVATED) != 0;
 }

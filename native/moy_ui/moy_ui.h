@@ -874,6 +874,8 @@ typedef struct {
     int16_t keys;                   // info: the value is the keys the row answers to, and
                                     // one the hints draw as a sign (`left`, `right`, `up`,
                                     // `down`, `enter`) draws as that sign
+    int16_t signal;                 // info, link: the signal glyph before the value, its
+                                    // lit bars + 1 (0: none)
 } moy_ui_vrow_t;
 enum { MOY_UI_VROW_PLAIN = 0, MOY_UI_VROW_DANGER = 1 };
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,

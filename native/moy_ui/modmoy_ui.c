@@ -2356,7 +2356,7 @@ static int8_t over_flag(mp_obj_t v) {
 enum {
     OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
     OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
-    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_COUNT
+    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_COUNT
 };
 
 // A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
@@ -2400,6 +2400,7 @@ static int over_slot(qstr q) {
         case MP_QSTR_over: return OV_OVER;
         case MP_QSTR_shift: return OV_SHIFT;
         case MP_QSTR_fade: return OV_FADE;
+        case MP_QSTR_signal: return OV_SIGNAL;
         default: return -1;
     }
 }
@@ -2529,6 +2530,11 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     if (v != MP_OBJ_NULL) {
         mp_int_t h = mp_obj_get_int_truncated(v);
         out->fade = (int16_t)(h < 0 ? 0 : h > 4096 ? 4096 : h);
+    }
+    v = vals[OV_SIGNAL];
+    if (v != MP_OBJ_NULL) {
+        mp_int_t g = mp_obj_get_int_truncated(v);
+        out->signal = (int8_t)(g < 0 ? 0 : g > 4 ? 5 : g + 1);
     }
 }
 

@@ -19,5 +19,12 @@ function _draw()
     local _, _, _, _, st = ui.bubble("Clear skies up here, wind from the north. Bring a warm layer, the hut is cold after dark and the stove is out. Bring tea for the morning, and the long rope from the shed by the gate.", "in", {head = "1E2F", signal = 1, anchor = true, max = 0.5, lines = 3})
     pmem(1, st & ui.CUT)
     ui.focus("gate")
+  elseif page == 3 then
+    ui.group("Heard")
+    ui.info("From", "Ana Ridge")
+    ui.info("Signal", "-104 dBm", {signal = 2})
+    ui.info("SNR", "2.0 dB")
+    ui.group()
+    ui.link("Base Camp", "-96 dBm", {signal = 4})
   end
 end

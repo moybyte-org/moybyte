@@ -10,6 +10,8 @@ names the page each app draws:
   2  ui.bubble: an "in" bubble with its head and signal glyph, an "out"
      one sending, a failed one focused, and one at half the width cut at three
      lines, wearing the anchor ring; pmem 1 the CUT bit the last answered.
+  3  the signal glyph in a details card: an info row's before its value
+     (`o.signal`), and a link's.
 """
 
 import os
@@ -27,7 +29,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2)
+PAGES = (1, 2, 3)
 CONSOLES = ("tdeck", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 

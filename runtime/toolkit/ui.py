@@ -207,11 +207,12 @@ def _over(o):
     at = o.get("at")
     shift = o.get("shift")
     fade = o.get("fade")
+    sig = o.get("signal")
     flags = None
     if (wash is not None or lead is not None or gen is not None or part is not None or bar
             or axis or snap or offset is not None or spill is not None or keep is not None
             or ov is not None or whole or across is not None or at is not None or shift
-            or fade):
+            or fade or sig is not None):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
@@ -219,7 +220,7 @@ def _over(o):
                  | (16384 if keep is not None else 0) | (32768 if ov is not None else 0)
                  | (65536 if whole else 0) | (131072 if across is not None else 0)
                  | (262144 if at is not None else 0) | (524288 if shift else 0)
-                 | (1048576 if fade else 0))
+                 | (1048576 if fade else 0) | (2097152 if sig is not None else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -243,6 +244,8 @@ def _over(o):
         tail += _pack("<i", int(at))
     if fade:
         tail += _pack("<i", int(fade))
+    if sig is not None:
+        tail += _pack("<i", int(sig))
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
