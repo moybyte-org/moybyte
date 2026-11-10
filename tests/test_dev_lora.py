@@ -285,3 +285,31 @@ def test_the_shells_lora_is_served_in_c_over_the_radios_lease(tmp_path):
         assert line("lora")[-1] == "usage: lora send TEXT... | recv [MS]"
     finally:
         term.close_session()
+
+
+def test_a_host_console_on_the_kernel_s_table_wakes_a_python_face(tmp_path):
+    """The simulator's console binds the kernel's input table, as a board's
+    does (host_app.build_workstation(kernel_input=True)), so the radio's
+    records reach a Python program's moybyte.lora.on() with no binding of its
+    own."""
+    from runtime import host_app
+    was = moybyte.WAKES.table
+    try:
+        ws = host_app.build_workstation(str(tmp_path / "carts"), kernel_input=True)
+        assert moybyte.WAKES.table is ws.input and ws.input._t == mi.kernel()._t
+        devices.grants = devices.console = None     # every process may, as above
+        pid = L.spawn("t.mesh")
+        seen = []
+        _as(pid, lambda: moybyte.lora.config(sf=7))
+        _as(pid, moybyte.lora.listen)
+        _as(pid, lambda: moybyte.lora.on(lambda *e: seen.append(e)))
+        assert lora_sim.air(b"hello", 868100000, 7, rssi=-80, snr=20)
+        N.step(0)
+        out = [0] * 8
+        for wid in out[:moybyte.WAKES.due(0, out)]:
+            _as(pid, lambda: moybyte.WAKES.call(wid))
+        assert seen == [(moybyte.lora.EV_RX, 5, -80, 5.0)]
+    finally:
+        moybyte.WAKES.table = None
+        if was is not None:
+            moybyte.bind(was)

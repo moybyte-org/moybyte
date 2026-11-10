@@ -300,7 +300,11 @@ is its run grant's, `moy_app_grant_folder`).
 The host's stand-ins are `runtime/host/mic_sim.py`, `lora_sim.py` (with a
 LoRaWAN network server written apart from the C), `gatt_sim.py`,
 `usb_sim.py`, `midi_sim.py` (a UART port's wire) and `camera_sim.py`;
-`http` runs for real.
+`http` runs for real. The drivers post their records on the kernel's input
+table, which the simulator's console binds as a board's does
+(`runtime/host/host_app.py`'s `kernel_input`), so a face's `on(fn)` wakes
+there; a test's console keeps a table of its own and binds the kernel's
+where it reads a driver's records.
 
 **Absence.** A board that lacks a lever reports `None`, never `0`. The
 **simulator and browser** read the same board table (the simulator stands in

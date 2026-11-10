@@ -340,7 +340,7 @@ def main():
     sys_size = parse_size(args.size)
     ws = host_app.build_workstation(args.save_dir, sys_size=sys_size,
                                     font_scale=args.font_scale,
-                                    windowed=args.windowed)
+                                    windowed=args.windowed, kernel_input=True)
     # Live windowed run -> the mix to the speakers (#16). Headless / scripted
     # runs pull it and discard it, so they stay deterministic + device-free.
     if not args.demo and args.script is None:

@@ -273,7 +273,8 @@ def _bind_media_keys(table):
 
 
 def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
-                      windowed=False, panel_diagonal_in=None, first_variant=None):
+                      windowed=False, panel_diagonal_in=None, first_variant=None,
+                      kernel_input=False):
     """Build the shared console.Workstation wired to host backends.
     `first_variant` ("dark"/"light") is the theme variant of a first run, as
     `console.wire_workstation_core` takes it.
@@ -293,7 +294,14 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     `panel_diagonal_in` is the board fact a BOARD declares in its board.toml
     (#203): the glass's diagonal in inches, from which the chrome tap-target
     floor is derived. None -- every simulated tier by default -- keeps chrome on
-    the font scale."""
+    the font scale.
+
+    `kernel_input=True` makes the console's input the kernel's table
+    (moy_input_kernel), as a board's console binds it (device/wire_input.py),
+    so the device APIs' records (the radio's, the microphone's), which their
+    drivers post there, wake a Python program's `on(fn)`. One console a
+    process may hold it (the simulator's); by default a console's table is
+    its own, so two consoles in one process never share input."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
     carts = moy_catalogue.catalogue(carts_dir)
@@ -324,7 +332,11 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     for cv in (canvas, sys_canvas):
         if cv is not None:
             cv._owners = owners
-    inp = InputState()
+    if kernel_input:
+        from . import moy_input as _mi
+        inp = InputState(_mi._lib().moy_input_kernel())
+    else:
+        inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale,
                              panel_diagonal_in=panel_diagonal_in)
