@@ -701,5 +701,9 @@ def test_pkg_install_through_the_shells_door(tmp_path):
                for c in ws.carts.all), "the shelf was scanned again"
     code, out, err = _role(ws, "pkg", "list")
     assert out == "dm 1 installed Dm\n"
+    from runtime import app_keys, app_perms
+    aid = app_perms.app_id(next(c for c in ws.carts.all if c.get("id") == "dm"))
+    app_keys.make(ws.carts_root, aid, "node")
     assert _role(ws, "pkg", "remove", "dm")[0] == 0
+    assert app_keys.public(ws.carts_root, aid, "node") is None, "its keys go with it"
     assert _role(ws, "pkg", "frob")[0] == 2

@@ -117,3 +117,12 @@ def aes_ccm_open(*args: Any, **kwargs: Any) -> Any:
 
 def name(*args: Any, **kwargs: Any) -> Any:
     """moybyte.name(): the row moybyte.name"""
+
+def key_make(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.key_make(name: str): the row moybyte.key_make"""
+
+def key_public(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.key_public(name: str): the row moybyte.key_public"""
+
+def key_shared(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.key_shared(name: str, peer: str): the row moybyte.key_shared"""

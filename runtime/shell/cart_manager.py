@@ -79,6 +79,14 @@ def _perms():
     return app_perms
 
 
+def _app_keys():
+    try:
+        import app_keys
+    except ImportError:  # host: the runtime package
+        from runtime import app_keys
+    return app_keys
+
+
 class CartManager:
     """The scanned cart list, its store-writing verbs and the #105 favorites.
 
@@ -393,7 +401,8 @@ class CartManager:
         """Delete `cart` (a home's Delete), else the OPEN cart (the system
         menu's "Delete cart"), for good: the folder goes, its consent record
         with it, and no Trash holds a cart. Every route asks first
-        (`console_notices.DeleteConfirm`) and calls this on its Delete. Keeps
+        (`console_notices.DeleteConfirm`) and calls this on its Delete. Its
+        keys go too (runtime/system/app_keys.py). Keeps
         at least one real cart on the device."""
         ws = self.ws
         target = cart if cart is not None else ws.cart
@@ -404,9 +413,11 @@ class CartManager:
         path = target["path"]
         try:
             self.store.call(lambda: moy_catalogue.delete(target["h"]))
+            aid = _perms().app_id(target)
             consent = getattr(ws, "consent", None)
             if consent is not None:
-                consent.forget(_perms().app_id(target))
+                consent.forget(aid)
+            self.store.call(lambda: _app_keys().forget(ws.carts_root, aid))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
         self.rescan([path])

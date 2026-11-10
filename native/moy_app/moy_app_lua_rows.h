@@ -67,6 +67,9 @@
     X("service_stop") \
     X("service_running") \
     X("name") \
+    X("key_make") \
+    X("key_public") \
+    X("key_shared") \
 
 // The rows a Lua name calls that run where they are called (how "here"),
 // on a Lua service's own task too, hopped only where they answer NEEDS_VM.

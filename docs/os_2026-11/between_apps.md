@@ -277,3 +277,24 @@ stack (Reticulum, Meshtastic) can be an app on any tier. Decisions
   Meshtastic's CTR and CCM were (above; the Moy Mesh app, moybyte-org/carts'
   `carts/moymesh/`, is their first user). HKDF is two
   HMACs an app writes.
+- **An app's own key pairs are the console's (2026-11-10, #246's mesh
+  item).** Beside the rows that keep nothing, three console calls keep an
+  X25519 pair for the calling app under a name of its own
+  (`moybyte.key_make(name)`, `key_public(name)`, `key_shared(name, peer)`;
+  `runtime/system/app_keys.py`), so a node's long-lived secret never
+  reaches the app, its prefs or anything that syncs them. The scheduler
+  serves them as the calling process's app id, the one its consent and
+  prefs go by, so one app never reaches another's pair. The secret is 32
+  bytes in `system/keys/<app>/<name>` of the store the console booted on,
+  beside the settings and the SSH host key: no app's file access reaches
+  the system folder, the web sync carries its settings file alone, and a
+  cart's removal (`pkg remove`, Get Carts' Remove, Delete) deletes the
+  app's folder of keys. Keys cross as hex text, a console call carrying
+  text. `key_shared` answers the raw X25519 output, not a hash of it:
+  Meshtastic keys its CCM with the SHA-256 of it (`CryptoEngine::
+  setDHPublicKey`, then `hash`), but Noise, HPKE and Signal's X3DH feed it
+  to HKDF's extract, which a hash of it cannot serve, and a hash would hide
+  nothing from the app, whose derived key opens every message the raw
+  secret does. Curve25519's twist security and the clamped scalar keep the
+  raw output from leaking the secret to a chosen peer, and a peer of small
+  order is answered None. No compiled tier imports them.

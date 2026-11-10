@@ -61,6 +61,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_fs import _exists, _mkdir, _read, _remove
 
 try:
+    import app_keys as _keys
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import app_keys as _keys
+
+try:
     import app_perms as _perms
     from player_fit import fit_notice as _fit_notice, board_share as _board_share
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -223,14 +228,18 @@ def through(steps):
 def removed(inst, folder):
     """`yield from` it, a step a frame: the cart in `folder` taken off the
     shelf with what it wrote (cart_index.remove_steps, a store op a step),
-    the consent it was installed with forgotten, and the shelf re-read
+    the consent it was installed with forgotten, its keys deleted
+    (app_keys.forget), and the shelf re-read
     there. Get Carts' Remove and `pkg remove` both step it, through
     `through`."""
     had = inst.find(folder)
     yield from _ci.stepped(inst.op, _ci.remove_steps(inst.root(), folder, inst.keep()))
     if had is not None:
         yield
-        yield from inst.consent().forget_steps(_perms.app_id(had))
+        aid = _perms.app_id(had)
+        yield from inst.consent().forget_steps(aid)
+        yield
+        inst.op(lambda: _keys.forget(inst.root(), aid))
     yield
     inst.rescan(folder)
 

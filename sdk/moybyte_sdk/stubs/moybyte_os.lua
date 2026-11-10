@@ -134,3 +134,9 @@ function moybyte.aes_ccm_seal(...) end
 function moybyte.aes_ccm_open(...) end
 --- moybyte.name(): the row moybyte.name
 function moybyte.name(...) end
+--- moybyte.key_make(name: str): the row moybyte.key_make
+function moybyte.key_make(...) end
+--- moybyte.key_public(name: str): the row moybyte.key_public
+function moybyte.key_public(...) end
+--- moybyte.key_shared(name: str, peer: str): the row moybyte.key_shared
+function moybyte.key_shared(...) end

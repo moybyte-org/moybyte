@@ -8,6 +8,7 @@
 #   send                     a message to an app (open_with, share, pick)
 #   service_start            this app's own service (service_stop, service_running)
 #   name                     the console's name
+#   key_make                 this app's own key pairs (key_public, key_shared)
 #   log                      a line of the OS log
 #   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_*, aes_ctr, aes_ccm_*, x25519, ed25519_*)
 #   __getattr__              the device APIs (http, ble, camera, ...) by name
@@ -75,6 +76,25 @@ one, `time.ticks_us()`.
                      network (`<name>.local`): the name Settings gives it,
                      else its board's own ("moybyte-" and its MAC's last
                      four hex digits; the Zero's "moybyte-zero")
+
+THE APP'S KEYS (runtime/system/app_keys.py): X25519 key pairs the console
+keeps for the calling app, each under a name of its own (1 to 32 of a-z, 0-9,
+'_' and '-'), whose secret half never reaches the app. Keys cross as hex text
+(64 digits for 32 bytes), as a console call carries text. A name that is not
+one, or a peer that is not 64 hex digits, raises ValueError; a process of no
+app (the shell) is answered None.
+
+  key_make(name)     the public key of the pair under `name`, made now where
+                     there is none; a pair is made once and kept until the
+                     app is removed
+  key_public(name)   the public key under `name`, None where none was made
+  key_shared(name, peer)
+                     RFC 7748's X25519 of the secret under `name` and the
+                     peer's public key `peer`: the shared secret, for the app
+                     to derive its keys from (Meshtastic's is its SHA-256).
+                     None where no pair is under `name` or the peer's key is
+                     of small order
+
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
@@ -339,6 +359,8 @@ class Wakes:
         self.service = None         # fn(pid, verb) -> service_<verb>'s answer
                                     # (the scheduler's `own`)
         self.named = None           # fn() -> the console's name (the scheduler's)
+        self.keys = None            # fn(pid, verb, name, peer) -> key_<verb>'s
+                                    # answer (the scheduler's `keys`)
         self._rbuf = None
 
     def bind(self, table):
@@ -888,6 +910,23 @@ def name():
     except ImportError:  # host: the runtime package
         from runtime import ssh_service as _ssh
     return _ssh.default_name()
+
+
+def _keys(verb, name, peer=None):
+    fn = WAKES.keys
+    return fn(_pid(), verb, name, peer) if fn is not None else None
+
+
+def key_make(name):
+    return _keys("make", name)
+
+
+def key_public(name):
+    return _keys("public", name)
+
+
+def key_shared(name, peer):
+    return _keys("shared", name, peer)
 
 
 ACHIEVEMENTS = "moybyte.achievements"

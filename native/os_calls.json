@@ -299,7 +299,10 @@
     {"name": "moybyte.aes_ctr", "server": "c", "perm": null, "py": ["moybyte.aes_ctr"], "lua": ["moybyte.aes_ctr"], "in": ["key:bytes", "data:bytes", "text:out"], "ret": "len", "how": "seq", "wasm": true, "wasi": true, "elf": 121},
     {"name": "moybyte.aes_ccm_seal", "server": "c", "perm": null, "py": ["moybyte.aes_ccm_seal"], "lua": ["moybyte.aes_ccm_seal"], "in": ["key:bytes", "data:bytes", "tag:int", "sealed:out"], "ret": "len", "how": "seq", "wasm": true, "wasi": true, "elf": 122},
     {"name": "moybyte.aes_ccm_open", "server": "c", "perm": null, "py": ["moybyte.aes_ccm_open"], "lua": ["moybyte.aes_ccm_open"], "in": ["key:bytes", "sealed:bytes", "tag:int", "plain:out"], "ret": "len", "how": "seq", "wasm": true, "wasi": true, "elf": 123},
-    {"name": "moybyte.name", "server": "call", "perm": null, "py": ["moybyte.name"], "lua": ["moybyte.name"], "in": ["name:out"], "ret": "len", "how": "hop"}
+    {"name": "moybyte.name", "server": "call", "perm": null, "py": ["moybyte.name"], "lua": ["moybyte.name"], "in": ["name:out"], "ret": "len", "how": "hop"},
+    {"name": "moybyte.key_make", "server": "call", "perm": null, "py": ["moybyte.key_make"], "lua": ["moybyte.key_make"], "in": ["name:str", "public:out"], "ret": "len", "how": "hop"},
+    {"name": "moybyte.key_public", "server": "call", "perm": null, "py": ["moybyte.key_public"], "lua": ["moybyte.key_public"], "in": ["name:str", "public:out"], "ret": "len", "how": "hop"},
+    {"name": "moybyte.key_shared", "server": "call", "perm": null, "py": ["moybyte.key_shared"], "lua": ["moybyte.key_shared"], "in": ["name:str", "peer:str", "shared:out"], "ret": "len", "how": "hop"}
   ],
   "permissions": [
     {"perm": "graphics", "grants": "floor", "prompt": null, "needs": null, "py": [], "doc": "nothing extra: the floor every cart has", "spec": true},

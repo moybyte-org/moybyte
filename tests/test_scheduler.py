@@ -61,6 +61,7 @@ def sched():
     wakes.ended = S.SCHED._ended
     wakes.opener = S.SCHED._open
     wakes.named = S.SCHED.console_name
+    wakes.keys = S.SCHED.keys
 
 
 def _since():

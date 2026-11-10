@@ -172,8 +172,11 @@ The crypto rows (random bytes, hashing, MACs, AES-GCM, X25519, Ed25519) are
 the vendored Monocypher (`native/moy_net/monocypher/`). What they hold: a
 GCM open that does not authenticate is refused, a small-order X25519 peer is
 refused, and an Ed25519 key or signature that does not decode verifies as 0.
-There is no key store: an app keeps its keys in its prefs or files, in the
-clear on the card.
+An app's X25519 pairs can be the console's (`moybyte.key_make`, `key_public`,
+`key_shared`; `between_apps.md` §5): the secret sits in the store's system
+folder, in the clear on the card, out of the app's reach and the web sync's,
+and goes with the app's removal. Any other key an app keeps is in its prefs
+or files, in the clear on the card.
 
 Every random byte the console makes (the sign-in's, the SSH server's, the TLS
 client's, a WASI program's `random_get`, LoRaWAN's and these rows') comes

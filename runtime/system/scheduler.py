@@ -243,6 +243,9 @@ _CALLS = {
     "moybyte.service_stop": _moybyte.service_stop,
     "moybyte.service_running": _moybyte.service_running,
     "moybyte.name": _moybyte.name,
+    "moybyte.key_make": _moybyte.key_make,
+    "moybyte.key_public": _moybyte.key_public,
+    "moybyte.key_shared": _moybyte.key_shared,
 }
 # END GENERATED
 
@@ -439,6 +442,7 @@ class Scheduler:
         self.wakes.opener = self._open
         self.wakes.service = self.own
         self.wakes.named = self.console_name
+        self.wakes.keys = self.keys
 
     # -- the tick ---------------------------------------------------------
 
@@ -552,17 +556,8 @@ class Scheduler:
         and `notifications` (moy_evq.h's MOY_EVQ_ALARMS and MOY_EVQ_NOTIFY:
         what the kernel's alarms and notifications check) and its badges'
         goals; `vm` where the VM's task serves it (a Python process)."""
-        p = self.procs.get(pid)
-        cart = p.cart if p is not None else None
-        if cart is None and self.cart_of is not None:
-            cart = self.cart_of(pid)
-        app = self.app_of(pid) if self.app_of is not None else None
-        if app is None and cart is not None:
-            try:
-                import app_perms
-            except ImportError:  # host: the runtime package
-                from runtime import app_perms
-            app = app_perms.app_id(cart)
+        cart = self._cart(pid)
+        app = self.app_id(pid, cart)
         if app is None:
             app = (_L.name(pid) if _L is not None else "") or "pid%d" % pid
         recv = cart.get("receives") if cart is not None else None
@@ -1278,6 +1273,50 @@ class Scheduler:
                 return None
         return _ssh.name(self.ws)
 
+    def _cart(self, pid):
+        p = self.procs.get(pid)
+        cart = p.cart if p is not None else None
+        if cart is None and self.cart_of is not None:
+            cart = self.cart_of(pid)
+        return cart
+
+    def app_id(self, pid, cart=None):
+        """The app id process `pid` runs under (`app_of`, else its cart's,
+        `cart` where the caller has it), None where neither names one."""
+        app = self.app_of(pid) if self.app_of is not None else None
+        if app is None:
+            cart = cart if cart is not None else self._cart(pid)
+            if cart is not None:
+                try:
+                    import app_perms
+                except ImportError:  # host: the runtime package
+                    from runtime import app_perms
+                app = app_perms.app_id(cart)
+        return app
+
+    def keys(self, pid, verb, name, peer=None):
+        """moybyte's `key_<verb>` as process `pid`: its app's own key pair
+        `name` (runtime/system/app_keys.py), in the store of the console
+        this scheduler is attached to, each read or write one store op.
+        None for the shell, a process of no app, or before an attach."""
+        ws = self.ws
+        root = getattr(ws, "carts_root", None)
+        app = self.app_id(pid) if pid != SHELL and root is not None else None
+        if app is None:
+            return None
+        try:
+            import app_keys as _keys
+        except ImportError:  # host: the runtime package
+            from runtime import app_keys as _keys
+        if verb == "make":
+            fn = lambda: _keys.make(root, app, name)  # noqa: E731
+        elif verb == "public":
+            fn = lambda: _keys.public(root, app, name)  # noqa: E731
+        else:
+            fn = lambda: _keys.shared(root, app, name, peer)  # noqa: E731
+        store = getattr(ws, "store", None)
+        return store.call(fn) if store is not None else fn()
+
     def own(self, pid, verb):
         """moybyte's `service_<verb>` as process `pid` (AN APP'S OWN
         SERVICE): its app's service, from any process of the app. "start"
@@ -1834,9 +1873,12 @@ def compiled_run(ws, p, cart):
 
 def attach(ws, sched=None):
     """The console whose settings hold the restart policies and whose
-    processes' app ids and carts stamp their event queues (`_open`)."""
+    processes' app ids and carts stamp their event queues (`_open`), and
+    whose name and store answer moybyte's `name` and `key_*`."""
     sched = sched or SCHED
     sched.ws = ws
+    sched.wakes.named = sched.console_name
+    sched.wakes.keys = sched.keys
     sched.store = getattr(ws, "system", None)
     procs = getattr(ws, "procs", None)
     sched.app_of = getattr(procs, "app_id", None)

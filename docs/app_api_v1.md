@@ -894,6 +894,9 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_ccm_seal` | none | `moybyte.aes_ccm_seal` | `moybyte.aes_ccm_seal` | `moybyte_aes_ccm_seal`, `moybyte.os.aes_ccm_seal` | `moy_aes_ccm_seal` |
 | `moybyte.aes_ccm_open` | none | `moybyte.aes_ccm_open` | `moybyte.aes_ccm_open` | `moybyte_aes_ccm_open`, `moybyte.os.aes_ccm_open` | `moy_aes_ccm_open` |
 | `moybyte.name` | none | `moybyte.name` | `moybyte.name` |  |  |
+| `moybyte.key_make` | none | `moybyte.key_make` | `moybyte.key_make` |  |  |
+| `moybyte.key_public` | none | `moybyte.key_public` | `moybyte.key_public` |  |  |
+| `moybyte.key_shared` | none | `moybyte.key_shared` | `moybyte.key_shared` |  |  |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -946,6 +949,17 @@ signatures; `ed25519_verify` answers 1 or 0 (`True` or `False` in Python,
 `true` or `false` in Lua), 0 for any signature that does not check, a key or
 a signature that does not decode among them. A buffer too small is FULL
 (`ERANGE`), a length refused BAD (`EINVAL`; a `ValueError` in Python).
+
+**An app's own key pairs** (`docs/os_2026-11/between_apps.md` §5):
+`moybyte.key_make(name)`, `key_public(name)` and `key_shared(name, peer)` are
+console calls a Python or a Lua program holds, with no permission. The console keeps an X25519
+pair for the calling app under `name` (1 to 32 of a-z, 0-9, `_` and `-`),
+whose secret never reaches the app: `key_make` answers the public key,
+making the pair the first time; `key_public` answers it, or `None` (`nil`)
+where none was made; `key_shared` answers the X25519 shared secret with the
+peer's public key `peer`, or `None` where the pair is missing or the peer
+is of small order. Keys and secrets cross as 64 hex digits. The pairs go
+when the app is removed.
 
 **A compiled app (#224)** is `"runtime": "wasm"` with `"extensions":
 ["moybyte.app"]`. It reaches its roles through imports from module
