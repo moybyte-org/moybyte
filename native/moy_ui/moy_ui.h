@@ -854,7 +854,9 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // so a bar icon is chrome.MIN_TAP_MM across on its glass (the Guition S3) --
 // so the rows a finger aims at meet it: a list's rows are MOY_UI_TAP_ROW tall
 // at least, a bubble takes its tap metrics and faces (MOY_UI_FONT_TAP_*).
-enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2, MOY_UI_TAP = 8, MOY_UI_PANEL = 32 };
+// MOY_UI_CARDED: on the desk, a group's card (ui.group's `card`) is a ring
+// round its rows, as the handheld's card is, not rules alone.
+enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2, MOY_UI_TAP = 8, MOY_UI_PANEL = 32, MOY_UI_CARDED = 64 };
 #define MOY_UI_TAP_ROW 36
 // moy_ui_api_begin's: the keys are another surface's this frame (a cart's
 // editor handle holds them), so no stop holds focus.
@@ -1143,7 +1145,8 @@ int moy_ui_tip_draw(const moy_ui_sink_t *s, moy_ui_box_t at, moy_ui_span_t t, mo
                     int fs, int desk);
 // A group's card (handheld) behind row box `row`: `card` is its x, width and
 // top; `first` rounds the card's top corners, else a rule heads the row. On
-// the desk (`desk`) the card is plain rules between rows.
+// the desk (`desk`) the card is plain rules between rows, and with
+// MOY_UI_CARDED a ring round them as well, a pixel out from the rows.
 int moy_ui_group_band(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t row, int first,
                       int fs, int desk);
 // The card's foot: its bottom corners rounded under the last row (`last`),

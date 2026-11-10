@@ -477,6 +477,7 @@ typedef struct {
     int16_t grp_top;
     uint16_t grp_flags;
     uint8_t grp_open, grp_n, grp_any, grp_first;
+    uint8_t grp_card;               // the open group is a desk's card (ui.group's `card`)
     moy_ui_box_t grp_last;
     // ui.icon's: the next row's icon, then the row's being drawn (an icon
     // set's slot and the glyph table's glyph, -1 none).

@@ -2488,6 +2488,13 @@ int moy_ui_group_band(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t row, 
     open_pd(s, &d, fs, desk);
     uint16_t line = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
     if (d.desk) {
+        if (desk & MOY_UI_CARDED) {
+            // the ring's sides beside the row, its top over the first
+            int top = first ? c.y : row.y, r = moy_ui_group_r(fs);
+            pd_t k = d;
+            clip_to(&k, c.x, top, c.w, row.y + row.h - top);
+            rrect(&k, c.x, c.y, c.w, row.y + row.h + r + 2 * d.fs - c.y, r, 0, 0, d.fs, line);
+        }
         if (!first) {
             fill(&d, c.x, row.y, c.w, d.fs, line);
         }
@@ -2510,6 +2517,13 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
     int r = moy_ui_group_r(fs), line = card_line(&d);
     int bottom = last.y + last.h;
     if (d.desk) {
+        if (desk & MOY_UI_CARDED) {
+            // the ring's foot a pixel under the last row, its corners round
+            pd_t k = d;
+            uint16_t lc = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+            clip_to(&k, c.x, bottom - r, c.w, r + d.fs);
+            rrect(&k, c.x, c.y, c.w, bottom + d.fs - c.y, r, 0, 0, d.fs, lc);
+        }
         return MOY_UI_OK;
     }
     if (line > 0) {             // the ring's foot between the corners

@@ -327,9 +327,10 @@ def _rules(pages, console, page):
 def test_two_line_rows_take_the_consoles_height(pages, console, pitch):
     """A two-line row is 34 px on the T-Deck, 44 under the Guition's tap
     floor and 42 in a desk window: the rules heading its rows lie that far
-    apart."""
+    apart (the desk's card rings its rows, its top a pixel over them)."""
     rules = _rules(pages, console, 7)
-    assert rules[:3] == [pitch, 2 * pitch, 3 * pitch], rules
+    top = 1 if console == "desk" else 0
+    assert rules[:3] == [top + pitch, top + 2 * pitch, top + 3 * pitch], rules
 
 
 @pytest.mark.parametrize("console", CONSOLES)
@@ -360,3 +361,17 @@ def test_a_drag_let_go_settles_onto_a_units_top(pages, tier, console):
     if tier == "python":
         assert held_a != rest_a and held_b != rest_b, (held_a, rest_a, held_b, rest_b)
         assert rest_a == rest_b > 0, (rest_a, rest_b)
+
+
+def test_the_desks_card_rings_its_rows(pages):
+    """On the desk `ui.group("", {card = true})` is a card as the mocks draw
+    it, not rules alone: a column at its left, beside its rows, is one
+    colour (the rules') from its top to its foot, and not the ground."""
+    (w, h), px = pages[("desk", "python", 7)]
+
+    def at(x, y):
+        return px[2 * (y * w + x):2 * (y * w + x) + 2]
+    ground = at(w // 2, h - 4)
+    rule = at(w // 2, _rules(pages, "desk", 7)[0])
+    edge = [x for x in range(24) if all(at(x, y) == rule for y in range(12, 4 * 42 - 12))]
+    assert edge and rule != ground, edge

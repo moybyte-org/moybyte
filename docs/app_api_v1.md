@@ -438,7 +438,8 @@ icon, or with `"@"` and a name, that person's initials on a disc;
 `o.counts` puts the unread badge at the row's right (`""` or 0 none), and a
 row with one draws its title in your colour; `o.tags` sets a pill after
 the title and `o.marks` an icon there. `{card = true}` opens a group with
-no caption around it:
+no caption around it, a card on every console (on the desk a ring round
+its rows, where a captioned group's rows have rules alone):
 
 ```lua
 ui.group("", {card = true})

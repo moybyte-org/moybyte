@@ -731,7 +731,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                 int f = table_flags(c, o, id, i, cur, st, disabled, grp) | (part ? MOY_UI_F_PART : 0);
                 if (grp) {
                     moy_ui_group_band(s, gcard, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh},
-                                      i == 0 && c->grp_first, c->fs, mua_ground_of(c));
+                                      i == 0 && c->grp_first, c->fs, mua_card_flags(c));
                 }
                 size_t end = e < cells_n ? e : cells_n;
                 moy_ui_table_row(s, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh}, &g,

@@ -1725,7 +1725,7 @@ moy_ui_box_t mua_place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
     int gap = metric(MOY_UI_M_ROW_STACK_GAP) * c->fs;
     if (c->grp_open) {
         // a group's rows sit on its card, one under the next
-        if (!c->cls) {
+        if (!c->cls || c->grp_card) {
             int in = mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
             b.x = (int16_t)(b.x + in);
             b.w = (int16_t)(b.w - 2 * in);
@@ -2128,12 +2128,18 @@ int mua_clip_next(clip_t *k) {
 
 // -- groups (ui.group) ---------------------------------------------------------------
 
-// The open group's card: its x and width, its top on screen.
+// The open group's card: its x and width, its top on screen. A desk's card
+// rings its rows a pixel out.
 moy_ui_box_t mua_card_of(const moy_ui_ctx_t *c) {
-    int in = c->cls ? 0 : mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
-    return (moy_ui_box_t){(int16_t)(c->page.x + in),
-                          (int16_t)(c->page.y + c->grp_top - c->scroll),
-                          (int16_t)(c->page.w - 2 * in), 0};
+    int in = c->cls && !c->grp_card ? 0 : mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
+    int out = c->grp_card ? c->fs : 0;
+    return (moy_ui_box_t){(int16_t)(c->page.x + in - out),
+                          (int16_t)(c->page.y + c->grp_top - c->scroll - out),
+                          (int16_t)(c->page.w - 2 * in + 2 * out), 0};
+}
+
+int mua_card_flags(const moy_ui_ctx_t *c) {
+    return mua_ground_of(c) | (c->grp_card ? MOY_UI_CARDED : 0);
 }
 
 // A stacked row b of an open group shows: its marks (MOY_UI_F_FOCUS,
@@ -2156,7 +2162,7 @@ void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stack
     // says the rows run on, and a rule there reads as a second foot line
     int foot = c->page.y + c->page.h;
     int cut = b.y + b.h > foot && b.y >= foot - FADE_H * c->fs;
-    moy_ui_group_band(s, mua_card_of(c), b, c->grp_first || cut, c->fs, mua_ground_of(c));
+    moy_ui_group_band(s, mua_card_of(c), b, c->grp_first || cut, c->fs, mua_card_flags(c));
 }
 
 // The open group ends: its card's foot under its last row, and the gap the
@@ -2172,11 +2178,13 @@ void mua_group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
         clip_t k;
         EACH_ROW(c, k, s, c->grp_last, 1, c->page) {
             moy_ui_group_end(s, mua_card_of(c), c->grp_last, c->grp_flags, c->fs,
-                             mua_ground_of(c));
+                             mua_card_flags(c));
             mua_clip_out(&k);
         }
     }
-    c->y = (int16_t)(c->y + mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_GAP) * c->fs);
+    // a desk's card keeps its ring's foot below its last row
+    c->y = (int16_t)(c->y + (mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_GAP) + c->grp_card) * c->fs);
+    c->grp_card = 0;
 }
 
 // Whether a dialog's or a popover's body (or a dialog's buttons) is being
@@ -3206,6 +3214,9 @@ void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     c->has_at = 0;
     c->grp_open = 1;
     c->grp_n = 0;
+    // on the desk a card is a ring round its rows: its top's room above them
+    c->grp_card = (uint8_t)(c->cls != 0);
+    c->y = (int16_t)(c->y + c->grp_card * c->fs);
     c->grp_top = c->y;
 }
 
@@ -3573,7 +3584,7 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                     r.label.n = 0;
                     if (i > 0 && stacked && c->grp_open) {
                         // a group's two-line rows are its rows: a rule heads each
-                        moy_ui_group_band(s, mua_card_of(c), ib, 0, c->fs, mua_ground_of(c));
+                        moy_ui_group_band(s, mua_card_of(c), ib, 0, c->fs, mua_card_flags(c));
                     }
                 } else if (o->values.p != NULL) {
                     r.value = list_field(o->values, i);
