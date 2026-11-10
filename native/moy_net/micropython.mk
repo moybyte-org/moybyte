@@ -21,7 +21,8 @@ CFLAGS_USERMOD += -DMOY_NET_SERVE=0
 else
 SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_net_port.c $(MOY_NET_DIR)/moy_wifi.c $(MOY_NET_DIR)/moy_link.c \
     $(MOY_NET_DIR)/moy_webhost.c $(MOY_NET_DIR)/moy_webauth.c $(MOY_NET_DIR)/moy_ota.c $(MOY_NET_DIR)/moy_webconsole.c $(MOY_NET_DIR)/moy_gpio.c $(MOY_NET_DIR)/moy_dns.c \
-    $(MOY_NET_DIR)/moy_fetch.c $(MOY_NET_DIR)/moy_aes.c $(MOY_NET_DIR)/moy_lorawan.c $(MOY_NET_DIR)/moy_lora.c
+    $(MOY_NET_DIR)/moy_fetch.c $(MOY_NET_DIR)/moy_aes.c $(MOY_NET_DIR)/moy_lorawan.c $(MOY_NET_DIR)/moy_lora.c \
+    $(MOY_NET_DIR)/moy_lora_dev.c
 SRC_USERMOD_C += $(MOY_NET_DIR)/modmoy_http.c $(MOY_NET_DIR)/modmoy_lora.c
 endif
 CFLAGS_USERMOD += -I$(MOY_NET_DIR) -I$(MOY_NET_DIR)/../moy_spine -I$(MOY_NET_DIR)/../moy_store -I$(MOY_NET_DIR)/../moy_web -I$(MOY_NET_DIR)/../moy_input

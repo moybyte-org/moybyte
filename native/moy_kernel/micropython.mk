@@ -4,7 +4,8 @@
 # log (the module `moy_log`), the scheduler's callback guard (the module
 # `moy_guard`, where the build defines MICROPY_ENABLE_VM_ABORT), the lease
 # table with its host stand-in (the module `moy_lease`) and a compiled
-# program's device handles over it (moy_dev.c, its buses' host twin
+# program's device handles over it (moy_dev.c, its device APIs
+# moy_dev_kinds.c, its buses' host twin
 # moy_devbus.c), the writer lock moy_app's
 # seqlock takes (moy_lock.c), the process table
 # (moy_proc.c), the service model's queues and supervisor (the module
@@ -21,8 +22,8 @@ SRC_USERMOD_C += $(MOY_KERNEL_DIR)/modmoy_loop.c $(MOY_KERNEL_DIR)/modmoy_log.c 
 SRC_USERMOD_LIB_C += $(MOY_KERNEL_DIR)/moy_loop.c $(MOY_KERNEL_DIR)/moy_idle.c \
     $(MOY_KERNEL_DIR)/moy_perf.c $(MOY_KERNEL_DIR)/moy_devch.c $(MOY_KERNEL_DIR)/moy_log.c \
     $(MOY_KERNEL_DIR)/moy_loop_host.c $(MOY_KERNEL_DIR)/moy_loop_board.c \
-    $(MOY_KERNEL_DIR)/moy_lease.c $(MOY_KERNEL_DIR)/moy_dev.c $(MOY_KERNEL_DIR)/moy_devbus.c \
-    $(MOY_KERNEL_DIR)/moy_ledc.c \
+    $(MOY_KERNEL_DIR)/moy_lease.c $(MOY_KERNEL_DIR)/moy_dev.c $(MOY_KERNEL_DIR)/moy_dev_kinds.c \
+    $(MOY_KERNEL_DIR)/moy_devbus.c $(MOY_KERNEL_DIR)/moy_ledc.c \
     $(MOY_KERNEL_DIR)/moy_lock.c $(MOY_KERNEL_DIR)/moy_proc.c \
     $(MOY_KERNEL_DIR)/moy_evq.c $(MOY_KERNEL_DIR)/moy_super.c $(MOY_KERNEL_DIR)/moy_vmq.c \
     $(MOY_KERNEL_DIR)/moy_screen_slot.c

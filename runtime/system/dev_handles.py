@@ -10,8 +10,6 @@
 #   words                    a cfg string of `key=value` words as a dict
 #   _Handle                  the base every handle's verbs default from
 #   _Http                    http: a fetch's body, kept or windowed
-#   _Lora                    lora: raw packets and LoRaWAN
-#   _Mic                     mic: the microphone's samples
 #   _Ring                    the base of the event-ring devices
 #   _Ble                     ble: GATT by handle
 #   _Usb                     usb: the USB host
@@ -24,13 +22,13 @@
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
 `moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
-pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- on the calling program's
-own task (native/moy_kernel/moy_dev.h, which says what they answer); the
-device APIs are served here, by the door's Python half as the calling
+pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora
+and mic on the calling program's own task (native/moy_kernel/moy_dev.h,
+which says what they answer); the other device APIs are served here, by the door's Python half as the calling
 process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
-  open(name, cfg) -> h      a device API ("http", "lora", "mic", "ble",
-                            "usb", "midi", "camera", "media", "net"),
+  open(name, cfg) -> h      a device API ("http", "ble", "usb", "midi",
+                            "camera", "media", "net"),
                             configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
@@ -48,20 +46,6 @@ answers:
             the body's next bytes, 0 while it runs and at its end; get status
             (0 while it runs, the HTTP status, IO where it got no response),
             errno (why), length (a kept body's), ended (a window's)
-  lora      cfg freq sf bw cr power sync preamble listen=0|1 (listening by
-            default); set the same; write: a packet out; read: the next packet
-            in; get rssi, snr (dB x 4) of the packet read last. LoRaWAN (the
-            face's OTAA, class A, EU868): set join=otaa dev_eui=<8 bytes hex>
-            join_eui=<8> app_key=<16> (dr=0..5) starts a join; send=<port>
-            (1..223) makes each write an uplink on that port, send=raw a
-            packet again, with confirmed=0|1 and dr; a downlink is read as a
-            packet is, its port from get port (0: a raw packet); get joined
-            (1 once a join is accepted), fcnt (uplinks sent), busy (1 while a
-            transmission, a join or an uplink's receive windows run: a join
-            nobody accepted reads joined 0 once busy is 0); an uplink before
-            a join is ABSENT, one while busy BUSY
-  mic       read: PCM16 mono samples, little-endian, oldest first; get rate,
-            drops
   ble       set: one action a set, its outcome a record --
             scan=<ms>, connect=aa:bb:cc:dd:ee:ff | off, find=<uuid> (16-bit
             hex, 0x.. or not, or the 128-bit string), read=<handle>,
@@ -218,7 +202,7 @@ def _value(v):
 
 
 # Keys whose value stays text: an address, a UUID, a name, bytes in hex.
-_TEXT = ("connect", "find", "advertise", "data", "dev_eui", "join_eui", "app_key")
+_TEXT = ("connect", "find", "advertise", "data")
 
 
 def words(cfg):
@@ -338,105 +322,6 @@ class _Http(_Handle):
 
     def close(self, pid):
         self.req.close()
-
-
-_LORA_CFG = ("freq", "sf", "bw", "cr", "power", "sync", "preamble")
-
-
-_LORAWAN = ("join", "dev_eui", "join_eui", "app_key", "dr", "send", "confirmed")
-
-
-class _Lora(_Handle):
-    def __init__(self, cfg):
-        self.f = _face("lora")
-        self.meta = _array("i", [0, 0, 0])
-        self.last = (0, 0, 0)
-        self.port = 0           # 0: a write is a raw packet, else an uplink on this port
-        self.confirmed = False
-        self.dr = 5
-        cfg.setdefault("listen", 1)
-        self.set(cfg)
-
-    def set(self, cfg):
-        _only(cfg, _LORA_CFG + ("listen",) + _LORAWAN)
-        join = cfg.pop("join", None)
-        keys = [cfg.pop(k, None) for k in ("dev_eui", "join_eui", "app_key")]
-        if join is None and keys != [None, None, None]:
-            raise OSError(EINVAL, "keys are a join's")
-        if join is not None and (join != "otaa" or None in keys):
-            raise OSError(EINVAL, "join=otaa with dev_eui, join_eui and app_key")
-        if join is not None:
-            keys = [_hex(k, n) for k, n in zip(keys, (8, 8, 16))]
-        if "dr" in cfg:
-            self.dr = _int(cfg.pop("dr"), 0, 5, "dr")
-        if "send" in cfg:
-            p = cfg.pop("send")
-            self.port = 0 if p == "raw" else _int(p, 1, 223, "send")
-        if "confirmed" in cfg:
-            self.confirmed = bool(_int(cfg.pop("confirmed"), 0, 1, "confirmed"))
-        listen = cfg.pop("listen", None)
-        if cfg:
-            self.f.config(**cfg)
-        if listen is not None:
-            self.f.listen(bool(listen))
-        if join is not None:
-            self.f.join(keys[0], keys[1], keys[2], dr=self.dr)
-        return 0
-
-    def write(self, data):
-        if self.port:
-            self.f.uplink(self.port, data, self.confirmed, self.dr)
-        else:
-            self.f.send(data)
-        return len(data)
-
-    def read(self, cap):
-        buf = bytearray(max(cap, 0))
-        n = self.f.recv(buf, self.meta)
-        if n:
-            self.last = (self.meta[0], self.meta[1], self.meta[2])
-        return bytes(buf[:n])
-
-    def get(self, what):
-        if what == "rssi":
-            return self.last[0]
-        if what == "snr":
-            return self.last[1]
-        if what == "port":
-            return self.last[2]
-        if what == "joined":
-            return int(self.f.joined() is not None)
-        if what == "fcnt":
-            j = self.f.joined()
-            return 0 if j is None else j[1]
-        if what == "busy":
-            return int(self.f.busy())
-        raise OSError(EINVAL, "no %s" % what)
-
-    def close(self, pid):
-        self.f.sweep(pid)
-
-
-class _Mic(_Handle):
-    def __init__(self, cfg):
-        _only(cfg, ())
-        self.f = _face("mic")
-        self.f.open()
-
-    def read(self, cap):
-        buf = bytearray(cap & ~1)
-        n = self.f.read(buf) if buf else 0
-        return bytes(buf[:2 * n])
-
-    def get(self, what):
-        if what == "rate":
-            return self.f.rate() or 0
-        if what == "drops":
-            return self.f.drops()
-        raise OSError(EINVAL, "no %s" % what)
-
-    def close(self, pid):
-        self.f.sweep(pid)
 
 
 HEAD = 12                   # a record's head: event, n (u16), a, b (i32)
@@ -1019,11 +904,11 @@ class _Net(_Handle):
         self._let_go(_link()[0], pid)
 
 
-_DEVICES = {"http": _Http, "lora": _Lora, "mic": _Mic, "ble": _Ble, "usb": _Usb,
+_DEVICES = {"http": _Http, "ble": _Ble, "usb": _Usb,
             "midi": _Midi, "camera": _Camera,
             "media": _Media, "net": _Net}
 # A device with one holder: a process opens it once.
-_ONE = ("lora", "mic", "ble", "usb", "camera", "media")
+_ONE = ("ble", "usb", "camera", "media")
 # The permissions a device needs, one of them, where they are not its name.
 _PERMS = {"media": ("media", "media:url"), "net": ("multiplayer",)}
 

@@ -11,7 +11,7 @@
 MOY_AUDIO_MOD_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c
-SRC_USERMOD_LIB_C += $(MOY_AUDIO_MOD_DIR)/moy_aud.c $(MOY_AUDIO_MOD_DIR)/moy_aud_out.c $(MOY_AUDIO_MOD_DIR)/moy_mic.c
+SRC_USERMOD_LIB_C += $(MOY_AUDIO_MOD_DIR)/moy_aud.c $(MOY_AUDIO_MOD_DIR)/moy_aud_out.c $(MOY_AUDIO_MOD_DIR)/moy_mic.c $(MOY_AUDIO_MOD_DIR)/moy_mic_dev.c
 SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_mic.c
 SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/libmoy/moy_audio.c
 

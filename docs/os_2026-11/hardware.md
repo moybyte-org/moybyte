@@ -138,10 +138,12 @@ module) are the same objects held by HANDLE: the `moybyte.dev_*` rows
 whose driver has a C face safe on any task are the kernel's handle table's
 (`native/moy_kernel/moy_dev.h`: every lease, `gpio<n>`, `pins`, `uart<n>`,
 `spi<n>`, `i2c`, `pwm<n>` and `adc<n>`, over ESP-IDF's drivers in
-`native/moy_kernel/moy_devbus.h`), served on the calling
+`native/moy_kernel/moy_devbus.h`, and the device APIs `lora` and `mic`, over
+their drivers' verbs in `native/moy_net/moy_lora_dev.c` and
+`native/moy_audio/moy_mic_dev.c`), served on the calling
 program's own task under its grant's device permissions, so they answer with
 no VM and through an S3's VM stop; a pin's edges are read through an input
-reader the stop keeps. The device APIs are the door's Python half's, hopped
+reader the stop keeps. The other device APIs are the door's Python half's, hopped
 to the VM's task and run as the calling process
 (`runtime/system/dev_handles.py`, which holds those names, keys and answers,
 over the faces with the process's pid). `dev_open(name, cfg)` answers a handle, `cfg` words
@@ -166,10 +168,11 @@ object kept past its process raises `OSError(EBADF)`; a compiled process's
 handles close at its end (the kernel's at its event queue's close,
 `moy_dev_sweep`; the rest by `dev_handles.sweep`, ahead of the leases' in
 `moybyte.ENDS`), a handle closed answers ABSENT. The VM's end, a soft reset
-as a stop, drops every device row and every `MOY_LEASE_VM` row
-(`moy_lease_vm_stop`, from the kernel's VM down): their holders' Python half
-went with the heap, so the drivers close and the next VM can take them, while
-the radio's rows and a C service's pins (the webhost's) stay. **A VM stop is refused
+as a stop, drops every `MOY_LEASE_VM` row and every device row a Python face
+holds (`moy_lease_vm_stop`, from the kernel's VM down): their holders' Python
+half went with the heap, so the drivers close and the next VM can take them,
+while the radio's rows, a C service's pins (the webhost's) and a device a
+compiled program holds by a handle of the kernel's (`moy_dev_holds`) stay. **A VM stop is refused
 while a lease is held** (`MOY_LEASE_VM`, read by
 `native/moy_play/moy_play_stop.c` beside the radio's row): a Python
 program's lease is a VM object. A compiled program's handle is the kernel's
@@ -609,7 +612,8 @@ Leases (Python gets them as `machine` objects, §1:
 subset every tier may hold), and on the compiled tiers leases and the
 `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices, the
 `pins` and the radio link's ports (`net`) by handle (`native/moy_kernel/moy_dev.h`
-for the leases and `pins`, `runtime/system/dev_handles.py` for the devices and `net`;
+for the leases, `pins`, `lora` and `mic`, `runtime/system/dev_handles.py` for the
+other devices and `net`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
 ```
@@ -675,7 +679,7 @@ pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,
 | design piece | today | what changes |
 |---|---|---|
 | hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1), with `uart1` and `spi2` riding them, offered as `MOY_LEASE_ROWS` | |
-| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects (Pin, UART, SPI, PWM, ADC, a SoftI2C on the pins), `pins` (P2.3; `tests/test_leases.py`); the compiled tiers' handles, `native/moy_kernel/moy_dev.h` (the leases, a hardware I²C unit among them) and `runtime/system/dev_handles.py` (the devices) (`tests/test_dev_handles.py`, and each tier's fixture) | a hardware I²C unit as a class of the table |
+| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects (Pin, UART, SPI, PWM, ADC, a SoftI2C on the pins), `pins` (P2.3; `tests/test_leases.py`); the compiled tiers' handles, `native/moy_kernel/moy_dev.h` (the leases, a hardware I²C unit among them, `lora` and `mic`) and `runtime/system/dev_handles.py` (the other devices) (`tests/test_dev_handles.py`, and each tier's fixture) | a hardware I²C unit as a class of the table |
 | the link ring | `native/moy_net/moy_link.h`, counting its drops | the link's records a ring source's (LINK) |
 | GPIO edges | `native/moy_input/moy_edge.h`: a leased pin's edges as an ISR ring source, opened through `moy_lease_edge` and closed by the drop (P2.3) | |
 | brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the backlight is a `class` row naming `brightness` on every console (P2.1), whose API is P2.3's |

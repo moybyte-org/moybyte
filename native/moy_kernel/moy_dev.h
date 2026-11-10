@@ -2,12 +2,15 @@
 // hardware.md section 4; native/os_calls.json's `moybyte.dev_*` rows, how
 // "here"). A WASI program, an ELF module and a compiled app hold a lease or a
 // device by HANDLE where a Python program holds an object; this table serves
-// every lease kind, each over a driver that is safe on the caller's own task,
-// so they answer with no VM, through an S3's VM stop too, on every image
-// that links moy_app (each links this kernel too). The device APIs are the
-// console's Python (runtime/system/dev_handles.py): a call this table does
-// not own answers MOY_DEV_PASS, and the door hands it to Python on the VM's
-// task (native/moy_app/moy_app.c, dev_row).
+// every lease kind and the device APIs below, each over a driver that is
+// safe on the caller's own task, so they answer with no VM, through an S3's
+// VM stop too, on every image that links moy_app (each links this kernel
+// too). A device API's verbs are its driver module's (moy_<driver>_dev.c,
+// moy_dev_kinds.h), reached weakly: an image without the driver answers
+// ABSENT. The other device APIs are the console's Python
+// (runtime/system/dev_handles.py): a call this table does not own answers
+// MOY_DEV_PASS, and the door hands it to Python on the VM's task
+// (native/moy_app/moy_app.c, dev_row).
 //
 // WHAT IT OWNS (the buses' drivers are moy_devbus.h's):
 //   gpio<n>  a pin of the board's gpio row, leased (moy_lease.h) for the
@@ -49,6 +52,34 @@
 //   adc<n>   pin n of the gpio row read by its ADC channel (`lease:gpio`; BAD
 //            for a pin with none, BUSY for a unit MicroPython's machine.ADC
 //            holds): get value (0..65535)
+//
+// THE DEVICE APIS (each its permission, MOY_DEV_P_*; one handle a process,
+// BUSY for a second):
+//   lora     the LoRa radio (native/moy_net/moy_lora.h; its one holder the
+//            lease table's MOY_LEASE_LORA, BUSY while another process holds
+//            it): cfg freq sf bw cr power sync preamble (868100000, 9, 125000,
+//            5, 14, 0x12, 8 at the open; a set changes the keys it names)
+//            listen=0|1 (1 at the open); set the same; write: a packet out;
+//            read: the next packet in, cut to `cap`; get rssi, snr (dB x 4)
+//            and port of the packet read last. LoRaWAN (the driver's OTAA,
+//            class A, EU868; its session the driver's): set join=otaa
+//            dev_eui=<8 bytes hex> join_eui=<8> app_key=<16> (dr=0..5, 5)
+//            starts a join; send=<port> (1..223) makes each write an uplink
+//            on that port, send=raw a packet again, with confirmed=0|1 and
+//            dr; a downlink is read as a packet is, its port from get port
+//            (0: a raw packet); get joined, fcnt (uplinks sent), busy (1
+//            while a transmission, a join or an uplink's receive windows
+//            run: a join nobody accepted reads joined 0 once busy is 0); an
+//            uplink before a join is ABSENT, one while busy BUSY;
+//            a value outside the radio's range is BAD. Every word is checked
+//            before any applies
+//   mic      the microphone's ring (native/moy_audio/moy_mic.h, its holder
+//            MOY_LEASE_MIC's): no cfg; read: PCM16 mono samples,
+//            little-endian, oldest first, as many whole samples as `cap`
+//            holds; get rate, drops
+// A device a handle holds stays through the VM's end (moy_lease.h's THE
+// VM'S END, moy_dev_holds) and goes with its process.
+//
 // Every other name, and a handle without MOY_DEV_BASE, is MOY_DEV_PASS.
 //
 // THE GRAMMAR. `cfg` is words `key=value` split by spaces, a value a number
@@ -57,17 +88,20 @@
 //
 // THE ANSWERS are moy_app.h's codes, negated (MOY_DEV_E*): DENIED without
 // the permission (MOY_DEV_P_* in the caller's mask, from its grant), BUSY
-// where another process holds the pin or the unit (a Python program's lease
-// or another handle) or the process holds `pins` already, BAD for a name, a
-// row the board does not offer, a key, a value or a verb its kind does not
-// take, ABSENT for a handle not the caller's and a console with no gpio row,
-// FULL where a read's `cap` holds no record, IO where a driver failed. A
-// lease the table takes holds no VM stop off (no MOY_LEASE_VM).
+// where another process holds the pin, the unit or the device (a Python
+// program's lease or face, or another handle) or the process holds `pins`
+// or that device already, BAD for a name, a row the board does not offer, a
+// key, a value or a verb its kind does not take, ABSENT for a handle not the
+// caller's, a console with no gpio row and a device it lacks, FULL where a
+// read's `cap` holds no record or the table is full, NOMEM, IO where a
+// driver failed. A lease the table takes holds no VM stop off (no
+// MOY_LEASE_VM).
 //
 // A handle is its process's; its end closes every handle it left open
 // (moy_dev_sweep, which the process's event queue's close runs, moy_evq.h).
 // Every call holds the lease table's lock (moy_lease_lock) throughout, a
-// bus's transfer included, so any task may make one.
+// bus's transfer and a device's driver call included, so any task may make
+// one.
 
 #ifndef MOY_DEV_H
 #define MOY_DEV_H
@@ -117,6 +151,8 @@ int32_t moy_dev_set(uint32_t pid, int32_t h, const char *cfg, size_t n);
 int32_t moy_dev_get(uint32_t pid, int32_t h, const char *what, size_t n);
 // Process `pid` ended: every handle it held closed. How many.
 uint32_t moy_dev_sweep(uint32_t pid);
+// Whether process `pid` holds lease class `cls`'s device by a handle here.
+bool moy_dev_holds(uint32_t pid, uint8_t cls);
 // The handles open (every process's).
 uint32_t moy_dev_count(void);
 // Every handle closed (a test's teardown).

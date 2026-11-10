@@ -258,7 +258,7 @@ uint32_t moy_mic_rate(void) {
     #endif
 }
 
-int moy_mic_open(uint32_t owner) {
+static int open_(uint32_t owner) {
     if (owner == 0 || !moy_mic_present()) {
         return -MOY_MIC_ENODEV;
     }
@@ -298,7 +298,7 @@ int moy_mic_open(uint32_t owner) {
     return 0;
 }
 
-int moy_mic_close(uint32_t owner) {
+static int close_(uint32_t owner) {
     if (owner == 0 || M == NULL || owner != M->owner) {
         return -MOY_MIC_EBADF;
     }
@@ -309,6 +309,23 @@ int moy_mic_close(uint32_t owner) {
     M->head = M->count = 0;
     moy_lease_let(owner, MOY_LEASE_MIC);
     return 0;
+}
+
+// Open and close hold the lease table's lock (the lease they take or let
+// inside it), so a compiled program's handle (moy_mic_dev.c, on its own task)
+// and the VM's face never race them, and the lease lock is the outer one.
+int moy_mic_open(uint32_t owner) {
+    moy_lease_lock();
+    int r = open_(owner);
+    moy_lease_unlock();
+    return r;
+}
+
+int moy_mic_close(uint32_t owner) {
+    moy_lease_lock();
+    int r = close_(owner);
+    moy_lease_unlock();
+    return r;
 }
 
 void moy_mic_lease_end(uint32_t owner) {

@@ -40,14 +40,15 @@
 // in any tier -- the row ends the driver's hold too (the driver's
 // moy_<driver>_lease_end, weak: an image without the driver has none).
 //
-// THE VM'S END. A device row and a MOY_LEASE_VM row are the VM's: every
-// tier reaches a device through a Python face (a compiled process's handles
-// are dev_handles.py's), so its holder's half of it lives in the VM's heap.
+// THE VM'S END. A MOY_LEASE_VM row is the VM's, and so is a device row
+// reached through a Python face, whose holder's half lives in the VM's heap.
 // The kernel's VM down (a soft reset and a stop alike, moy_kernel.c) drops
 // them all (moy_lease_vm_stop), each as its owner's sweep would, so the
 // next VM finds the drivers closed and free; machine.PWM's LEDC channels go
 // from the LEDC book with them (moy_ledc.h). What is not the VM's stays:
-// the radio's rows (THE RADIO) and a C service's pins (the webhost's).
+// the radio's rows (THE RADIO), a C service's pins (the webhost's), and a
+// device a compiled program holds by handle in the kernel's handle table
+// (moy_dev.h, moy_dev_holds), which its process's end lets go.
 //
 // THE RADIO. The WiFi station is off unless something holds it (the
 // consoles' rule, .claude/rules/boards.md): MOY_LEASE_WIFI is a SHARED class
@@ -169,8 +170,8 @@ int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
 int moy_lease_drop(uint32_t h);
 // Drop every lease of `owner`; answers how many.
 uint32_t moy_lease_sweep(uint32_t owner);
-// The VM's end (THE VM'S END): every device row and every MOY_LEASE_VM row
-// dropped; answers how many.
+// The VM's end (THE VM'S END): every MOY_LEASE_VM row and every device row
+// but a handle's dropped; answers how many.
 uint32_t moy_lease_vm_stop(void);
 int moy_lease_get(uint32_t h, moy_lease_row_t *out);
 bool moy_lease_live(uint32_t h);

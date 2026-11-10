@@ -40,7 +40,9 @@
 // input and listens on both its edges, and one carrying ["read"] reads them
 // back, printing how many and each level; a "wake" carrying ["uart"] opens
 // uart1 the first time and keeps it, writes "ping" and reads back what waits,
-// printing what it wrote and read; a "wake" carrying ["clip"] puts
+// printing what it wrote and read; a "wake" carrying ["radio"] opens lora
+// and the mic the first time and keeps them, reads the next packet and the
+// samples waiting, and prints the packet and how many sample bytes it read; a "wake" carrying ["clip"] puts
 // "clipped" on the clipboard and reads it back; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
@@ -136,6 +138,7 @@ int main(void) {
         char b[sizeof(moy_evq_ev_t) + 256];
     } m;
     int ticks = 0, pings = 0, ticker = 0, net = 0, rearm = 0, edges = -1, uart = -1;
+    int lora = -1, mic = -1;
     long next = now_ms() + TICK_MS;
     for (;;) {
         long left = next - now_ms();
@@ -204,6 +207,21 @@ int main(void) {
             char b[32];
             int r = (int)moy_dev_read(uart, b, sizeof b);
             printf("uart %d %.*s errno %d\n", w, r > 0 ? r : 0, b, w < 0 || r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"radio\"]") == 0) {
+            if (lora <= 0) {
+                lora = (int)moy_dev_open("lora", "sf=7");
+            }
+            if (mic <= 0) {
+                mic = (int)moy_dev_open("mic", "");
+            }
+            char b[32];
+            int r = (int)moy_dev_read(lora, b, sizeof b);
+            char s[64];
+            int k = r < 0 ? r : (int)moy_dev_read(mic, s, sizeof s);
+            printf("radio %d %.*s mic %d errno %d\n", r, r > 0 ? r : 0, b, k,
+                   r < 0 || k < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0
                    && strcmp(m.b + sizeof m.ev, "[\"clip\"]") == 0) {

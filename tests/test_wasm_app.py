@@ -380,8 +380,8 @@ def test_a_compiled_app_talks_on_a_port_of_the_radio_link_by_handle(talk):
 
 
 def test_a_compiled_app_joins_a_lorawan_network_by_handle(talk):
-    """A `lora` handle's LoRaWAN words from a wasm app (runtime/system/
-    dev_handles.py): its join=otaa keys reach the air as a join request the
+    """A `lora` handle's LoRaWAN words from a wasm app (the kernel's handle
+    table, native/moy_kernel/moy_dev.h): its join=otaa keys reach the air as a join request the
     network server (runtime/host/lora_sim.py) accepts, the radio busy while
     the join runs and an uplink before it ABSENT; the join completes on the
     handle the app keeps, and its run's end lets the radio go."""

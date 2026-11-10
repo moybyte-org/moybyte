@@ -560,6 +560,52 @@ def test_compiled_services_hold_device_handles_through_a_vm_stop(
     moy_evq.close(peer_w)
 
 
+def test_a_wasi_service_reads_lora_and_the_mic_through_a_vm_stop(
+        tmp_path, wasi_built, fresh, monkeypatch, pins):
+    """The device APIs the kernel's handle table owns (native/moy_kernel/
+    moy_dev.h's lora and mic) answer on the program's own task: a WASI
+    service opens the radio and the microphone before the stop, the VM's end
+    (moy_lease_vm_stop) keeps both its devices, and with the VM down it reads
+    a packet heard during the stop and the samples the
+    microphone pushed; its end lets both go."""
+    from runtime import moy_lora, moy_mic
+    from runtime.host import lora_sim, mic_sim
+    N = pins
+    lora_sim.install()
+    mic_sim.install(22050)
+    try:
+        ws = _two_ws(tmp_path, ((wasi_built, "wasi_svc.moy",
+                                 {"permissions": ["lora", "mic"]}),))
+        s = fresh
+        since = L.next()
+        wasi = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+        peer = L.spawn("peer")
+        assert moy_evq.open(peer, "wasi.svc", "", False) == moy_evq.OK
+        assert _polled(s, lambda: any(t in ("listening", "started") for t in _texts(since, wasi)))
+        assert moy_evq.send(peer, "wasi.svc", "wake", '["radio"]')[0] == 1
+        assert _polled(s, lambda: "radio 0  mic 0 errno 0" in _texts(since, wasi)), \
+            _texts(since, wasi)
+        assert moy_lora.owner() == wasi and moy_mic.owner() == wasi
+        rec, door = _stop(ws, s)
+        assert N.vm_stop() == 0, "a handle's devices are not the VM's"
+        assert moy_lora.owner() == wasi and moy_mic.owner() == wasi
+        assert lora_sim.air(b"ping", 868100000, 7, rssi=-97, snr=-26)
+        moy_lora.step(0)
+        mic_sim.push([1, -2, 3])
+        assert moy_evq.send(peer, "wasi.svc", "wake", '["radio"]')[0] == 1
+        t0 = time.monotonic()
+        while "radio 4 ping mic 6 errno 0" not in _texts(since, wasi):
+            assert time.monotonic() - t0 < 5, _texts(since, wasi)
+            _during(10)
+        s2, _started = _back(ws, rec, door, monkeypatch)
+        assert s2.stop(wasi)
+        assert moy_lora.owner() == 0 and moy_mic.owner() == 0, "its end let both go"
+        moy_evq.close(peer)
+    finally:
+        mic_sim.remove()
+        lora_sim.remove()
+
+
 def _files_services(tmp_path, elf_built, wasi_built):
     """A console whose shelf holds the ELF and the WASI service, granted files
     and prefs, each hearing its files round's message."""

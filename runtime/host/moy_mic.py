@@ -17,7 +17,7 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 _AUDIO = os.path.join(native_build.ROOT, "native", "moy_audio")
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
-PART = native_build.Part("mic", ("moy_mic.h", "moy_mic.c"), (_AUDIO, _KERNEL))
+PART = native_build.Part("mic", ("moy_mic.h", "moy_mic.c", "moy_mic_dev.c"), (_AUDIO, _KERNEL))
 
 RING = 16384
 

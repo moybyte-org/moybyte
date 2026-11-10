@@ -707,12 +707,17 @@ static uint32_t sweep_u(uint32_t owner) {
     return n;
 }
 
+// A device a compiled program holds by handle (moy_dev.h): not the VM's.
+bool moy_dev_holds(uint32_t pid, uint8_t cls) __attribute__((weak));
+
 static uint32_t vm_stop_u(void) {
     uint32_t n = 0;
     for (uint32_t s = 0; s_tab != NULL && s < moy_htab_slots(s_tab); s++) {
         uint32_t at = moy_htab_at(s_tab, s);
         const moy_lease_row_t *r = at != 0 ? moy_htab_row(s_tab, s) : NULL;
-        if (r != NULL && (is_device(r->cls) || (r->flags & MOY_LEASE_VM))) {
+        bool device = r != NULL && is_device(r->cls)
+                      && !(moy_dev_holds != NULL && moy_dev_holds(r->owner, r->cls));
+        if (r != NULL && (device || (r->flags & MOY_LEASE_VM))) {
             moy_lease_drop(at);
             n++;
         }

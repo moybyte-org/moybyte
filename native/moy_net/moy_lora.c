@@ -1089,13 +1089,20 @@ uint32_t moy_lora_source(void) {
 }
 
 // -- the verbs, each under the radio's lock --
+//
+// Open and close take or let the radio's lease, so they hold the lease
+// table's lock outside the radio's, as a lease dropped from outside does
+// (moy_lora_lease_end): one order on every task, the VM's face, a compiled
+// program's handle (moy_lora_dev.c) and the radio's own.
 
 int moy_lora_open(uint32_t owner) {
-    if (radio_lock() != 0) {
-        return -MOY_LORA_ENOMEM;
+    moy_lease_lock();
+    int r = -MOY_LORA_ENOMEM;
+    if (radio_lock() == 0) {
+        r = open_(owner);
+        radio_unlock();
     }
-    int r = open_(owner);
-    radio_unlock();
+    moy_lease_unlock();
     return r;
 }
 
@@ -1103,11 +1110,13 @@ int moy_lora_close(uint32_t owner) {
     if (R == NULL) {
         return -MOY_LORA_EBADF;         // never opened: no state is made to close it
     }
-    if (radio_lock() != 0) {
-        return -MOY_LORA_ENOMEM;
+    moy_lease_lock();
+    int r = -MOY_LORA_ENOMEM;
+    if (radio_lock() == 0) {
+        r = close_(owner);
+        radio_unlock();
     }
-    int r = close_(owner);
-    radio_unlock();
+    moy_lease_unlock();
     return r;
 }
 

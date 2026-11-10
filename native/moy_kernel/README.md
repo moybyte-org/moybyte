@@ -10,7 +10,8 @@ the dev channel's `log` word reads), the scheduler's callback guard
 (`modmoy_guard.c`, the VM abort), the lease table (`moy_lease.h`, the
 resources a process holds raw, safe from any task under its one lock), a
 compiled program's device handles over it (`moy_dev.h`, served on the
-caller's own task, and the buses they drive, `moy_devbus.h`), the lock the app ABI's seqlock writers and the tiers' service tables take
+caller's own task, the buses they drive, `moy_devbus.h`, and the device APIs
+whose drivers' verbs it reaches weakly, `moy_dev_kinds.h`), the lock the app ABI's seqlock writers and the tiers' service tables take
 (`moy_lock.h`), the process table (`moy_proc.h`, a row per
 Lua or compiled run the Player launches), the service model's three pieces
 (`moy_evq.h`, every process's event queue and the one wait; `moy_super.h`,

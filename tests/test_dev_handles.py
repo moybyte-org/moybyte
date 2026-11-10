@@ -1,8 +1,9 @@
 """Leases and device APIs by handle (docs/os_2026-11/hardware.md section 4):
 what the `moybyte.dev_*` rows answer a compiled program, here called as its
 process would be served -- the leases (gpio<n>, pins, uart<n>, spi<n>, i2c,
-pwm<n>, adc<n>) by the kernel's handle table (native/moy_kernel/moy_dev.h)
-over its buses' host twin (runtime/host/bus_sim.py's far end), every device
+pwm<n>, adc<n>) and the lora and mic APIs by the kernel's handle table
+(native/moy_kernel/moy_dev.h) over its buses' host twin
+(runtime/host/bus_sim.py's far end) and the drivers' C, every other device
 API by runtime/system/dev_handles.py -- over the host's stand-ins
 (runtime/host/lease_sim.py, lora_sim.py, mic_sim.py) and the http client
 against a local server. The
@@ -367,49 +368,55 @@ def test_the_process_s_end_closes_every_handle_and_leaves_the_pins_safe():
 
 # -- the device APIs --------------------------------------------------------------------
 
+LORA, MIC = 1 << 3, 1 << 2              # moy_dev.h's MOY_DEV_P_LORA, MOY_DEV_P_MIC
 
-def test_a_lora_handle_sends_and_reads_packets_with_their_rssi():
-    from runtime import moy_lora
-    from runtime.host import lora_sim
-    devices.grants = devices.console = None
-    lora_sim.install()
-    try:
-        pid, other = L.spawn("t.lora"), L.spawn("t.other")
-        h = _open(pid, "lora", "sf=7")
-        assert _open(pid, "lora") == H.BUSY                 # one handle on the one radio
-        assert _open(other, "lora") == H.BUSY
-        assert lora_sim.air(b"ping", 868100000, 7, rssi=-97, snr=-26)
-        moy_lora.step(0)
-        assert _as(pid, lambda: H.read(pid, h, 64)) == b"ping"
-        assert H.get(pid, h, "rssi") == -97 and H.get(pid, h, "snr") == -26
-        assert _as(pid, lambda: H.read(pid, h, 64)) == b""
-        assert _as(pid, lambda: H.write(pid, h, b"pong")) == 4
-        assert lora_sim.sent()[0] == b"pong"
-        assert _as(pid, lambda: H.close(pid, h)) == 0 and moy_lora.owner() == 0
-        devices.grants = lambda p: ()
-        assert _open(other, "lora") == H.DENIED
-    finally:
-        devices.grants = None
-        while moy_lora.owner():
-            moybyte.end(moy_lora.owner())
-        lora_sim.remove()
+
+def test_a_lora_handle_sends_and_reads_packets_with_their_rssi(radio):
+    N, sim = radio
+    pid, other = L.spawn("t.lora"), L.spawn("t.other")
+    h = _kopen(pid, "lora", "sf=7", LORA)
+    assert h > 0 and N.owner() == pid
+    assert _kopen(pid, "lora", "", LORA) == H.BUSY        # one handle on the one radio
+    assert _kopen(other, "lora", "", LORA) == H.BUSY
+    assert sim.air(b"ping", 868100000, 7, rssi=-97, snr=-26)
+    N.step(0)
+    assert _kread(pid, h, 64) == b"ping"
+    assert _kget(pid, h, "rssi") == -97 and _kget(pid, h, "snr") == -26
+    assert _kread(pid, h, 64) == b""
+    assert _kwrite(pid, h, b"pong") == 4 and sim.sent()[0] == b"pong"
+    assert _kset(pid, h, "freq=1") == H.BAD                # outside the radio's range
+    assert _kset(pid, h, "sf=8 speed=3") == H.BAD and _kget(pid, h, "nope") == H.BAD
+    assert _kclose(pid, h) == 0 and N.owner() == 0
+    assert _kopen(other, "lora", "", 0) == H.DENIED
+    assert _kopen(other, "lora", "sf=13", LORA) == H.BAD and N.owner() == 0
+
+
+def test_a_lora_handle_ends_with_its_process(radio):
+    N, sim = radio
+    pid = L.spawn("t.lora")
+    h = _kopen(pid, "lora", "", LORA)
+    assert h > 0 and _K().moy_dev_count() == 1
+    _end(pid)
+    assert N.owner() == 0 and _K().moy_dev_count() == 0 and _kget(pid, h, "rssi") == H.ABSENT
 
 
 def test_a_mic_handle_reads_pcm16_and_its_end_lets_the_microphone_go():
     from runtime import moy_mic
     from runtime.host import mic_sim
-    devices.grants = devices.console = None
     mic_sim.install(22050)
     try:
         pid = L.spawn("t.mic")
-        h = _open(pid, "mic")
-        assert moy_mic.owner() == pid and H.get(pid, h, "rate") == 22050
+        assert _kopen(pid, "mic", "", 0) == H.DENIED
+        assert _kopen(pid, "mic", "gain=3", MIC) == H.BAD
+        h = _kopen(pid, "mic", "", MIC)
+        assert moy_mic.owner() == pid and _kget(pid, h, "rate") == 22050
         mic_sim.push([1, -2, 3])
-        got = _as(pid, lambda: H.read(pid, h, 7))           # whole samples only
-        assert got == struct.pack("<3h", 1, -2, 3)
-        assert _open(L.spawn("t.other"), "mic") == H.BUSY
-        moybyte.end(pid)
-        assert moy_mic.owner() == 0
+        assert _kread(pid, h, 7) == struct.pack("<3h", 1, -2, 3)   # whole samples only
+        assert _kread(pid, h, 64) == b"" and _kget(pid, h, "drops") == 0
+        assert _kwrite(pid, h, b"x") == H.BAD
+        assert _kopen(L.spawn("t.other"), "mic", "", MIC) == H.BUSY
+        _end(pid)
+        assert moy_mic.owner() == 0 and _K().moy_dev_count() == 0
     finally:
         mic_sim.remove()
 
@@ -589,6 +596,18 @@ def test_one_ble_holder_its_permission_and_its_end(air):
 
 # -- LoRaWAN ----------------------------------------------------------------------------
 
+@pytest.fixture
+def radio():
+    from runtime import moy_lora
+    from runtime.host import lora_sim
+    lora_sim.install()
+    yield moy_lora, lora_sim
+    _K().moy_dev_reset()
+    while moy_lora.owner():
+        moybyte.end(moy_lora.owner())
+    lora_sim.remove()
+
+
 DEV_EUI = "70B3D57ED0050001"
 JOIN_EUI = "0000000000000000"
 APP_KEY = "8E3F2A1B0C9D8E7F6A5B4C3D2E1F0A9B"
@@ -596,19 +615,6 @@ JOIN = "join=otaa dev_eui=%s join_eui=%s app_key=%s" % (DEV_EUI, JOIN_EUI, APP_K
 EARLY = 20                      # MOY_LORA_WIN_EARLY_MS
 
 
-@pytest.fixture
-def radio():
-    from runtime import moy_lora
-    from runtime.host import lora_sim
-    devices.grants = devices.console = None
-    lora_sim.install()
-    yield moy_lora, lora_sim
-    for pid in list(H.HANDLES):
-        moybyte.end(pid)
-    while moy_lora.owner():
-        moybyte.end(moy_lora.owner())
-    devices.grants = None
-    lora_sim.remove()
 
 
 def _rx1(N, sim, reply, freq, sf, t0):
@@ -625,46 +631,45 @@ def test_a_lora_handle_joins_sends_uplinks_and_reads_a_downlink(radio):
     N, sim = radio
     pid = L.spawn("t.node")
     net = sim.Network(bytes.fromhex(DEV_EUI), bytes.fromhex(JOIN_EUI), bytes.fromhex(APP_KEY))
-    h = _open(pid, "lora", "send=2")
-    assert _as(pid, lambda: H.write(pid, h, b"early")) == H.ABSENT        # before a join
-    assert _get(pid, h, "joined") == 0
-    assert _as(pid, lambda: H.set(pid, h, JOIN)) == 0
+    h = _kopen(pid, "lora", "send=2", LORA)
+    assert _kwrite(pid, h, b"early") == H.ABSENT        # before a join
+    assert _kget(pid, h, "joined") == 0
+    assert _kset(pid, h, JOIN) == 0
     req, freq, sf, *_ = sim.sent()
-    assert _get(pid, h, "busy") == 1
+    assert _kget(pid, h, "busy") == 1
     _rx1(N, sim, net.answer(req), freq, sf, 1000)
-    assert _get(pid, h, "joined") == 1 and _get(pid, h, "busy") == 0
-    assert _as(pid, lambda: H.write(pid, h, b"temp=21.5")) == 9
+    assert _kget(pid, h, "joined") == 1 and _kget(pid, h, "busy") == 0
+    assert _kwrite(pid, h, b"temp=21.5") == 9
     up, freq, sf, *_ = sim.sent()
     assert net.answer(up) is None and net.uplinks == [(0, 2, b"temp=21.5", False)]
     t = 20000
     N.step(t)
-    while _get(pid, h, "busy") and t < 40000:                # its windows close empty
+    while _kget(pid, h, "busy") and t < 40000:                # its windows close empty
         t = N.step(t) or t + 1
-    assert _get(pid, h, "busy") == 0 and _get(pid, h, "fcnt") == 1
+    assert _kget(pid, h, "busy") == 0 and _kget(pid, h, "fcnt") == 1
     net.down(7, b"\x01\x02led")
-    assert _as(pid, lambda: H.set(pid, h, "send=5 confirmed=1 dr=4")) == 0
-    assert _as(pid, lambda: H.write(pid, h, b"\xff")) == 1
-    assert _as(pid, lambda: H.write(pid, h, b"\xfe")) == H.BUSY          # its windows run
+    assert _kset(pid, h, "send=5 confirmed=1 dr=4") == 0
+    assert _kwrite(pid, h, b"\xff") == 1
+    assert _kwrite(pid, h, b"\xfe") == H.BUSY          # its windows run
     up, freq, sf, *_ = sim.sent()
     assert sf == 8
     reply = net.answer(up)
     assert net.uplinks[-1] == (1, 5, b"\xff", True)
     _rx1(N, sim, reply, freq, sf, 50000)
-    assert _as(pid, lambda: H.read(pid, h, 32)) == b"\x01\x02led"
-    assert _get(pid, h, "port") == 7
-    assert _as(pid, lambda: H.set(pid, h, "send=raw")) == 0
-    assert _as(pid, lambda: H.write(pid, h, b"mesh")) == 4 and sim.sent()[0] == b"mesh"
+    assert _kread(pid, h, 32) == b"\x01\x02led"
+    assert _kget(pid, h, "port") == 7
+    assert _kset(pid, h, "send=raw") == 0
+    assert _kwrite(pid, h, b"mesh") == 4 and sim.sent()[0] == b"mesh"
 
 
 def test_a_lora_handle_refuses_a_join_it_cannot_make(radio):
     pid = L.spawn("t.node")
-    h = _open(pid, "lora")
+    h = _kopen(pid, "lora", "", LORA)
     for bad in ("join=abp " + JOIN[10:], "join=otaa dev_eui=%s" % DEV_EUI,
                 JOIN.replace(APP_KEY, APP_KEY[:-2]), JOIN.replace(DEV_EUI, "zz" * 8),
                 "dev_eui=" + DEV_EUI, "send=0", "send=224", "confirmed=2", "dr=9"):
-        assert _as(pid, lambda: H.set(pid, h, bad)) == H.BAD, bad
-    devices.grants = lambda p: ()
-    assert _open(L.spawn("t.other"), "lora", JOIN) == H.DENIED
+        assert _kset(pid, h, bad) == H.BAD, bad
+    assert _kopen(L.spawn("t.other"), "lora", JOIN, 0) == H.DENIED
 
 
 # -- USB ---------------------------------------------------------------------------------

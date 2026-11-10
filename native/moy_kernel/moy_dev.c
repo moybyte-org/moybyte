@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_dev_kinds.h"
 #include "moy_devbus.h"
 #include "moy_lease.h"
 
@@ -31,7 +32,7 @@ size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n)
 #define DEV_PSRAM 1
 #endif
 
-enum { K_GPIO = 1, K_PINS, K_UART, K_SPI, K_I2C, K_PWM, K_ADC };
+enum { K_GPIO = 1, K_PINS, K_UART, K_SPI, K_I2C, K_PWM, K_ADC, K_API };
 enum { EDGE_RISING = 1, EDGE_FALLING = 2 };
 #define EDGE_BYTES 8u
 #define BATCH 8u
@@ -75,7 +76,7 @@ static int32_t lease_rc(int rc) {
 
 // -- the permissions ---------------------------------------------------------------
 
-static bool is(const char *p, size_t n, const char *s) {
+bool moy_dev_is(const char *p, size_t n, const char *s) {
     return strlen(s) == n && memcmp(p, s, n) == 0;
 }
 
@@ -83,7 +84,7 @@ uint32_t moy_dev_perm_bit(const char *perm, size_t n) {
     static const char *const named[] = { "lease:gpio", "pins", "mic", "lora", "ble", "usb",
                                          "midi", "camera", "media", "media:url", "http" };
     for (uint32_t i = 0; i < sizeof named / sizeof named[0]; i++) {
-        if (is(perm, n, named[i])) {
+        if (moy_dev_is(perm, n, named[i])) {
             return 1u << i;
         }
     }
@@ -98,17 +99,7 @@ uint32_t moy_dev_perm_bit(const char *perm, size_t n) {
 
 // -- the grammar ---------------------------------------------------------------------
 
-typedef struct {
-    const char *p, *end;
-} words_t;
-
-typedef struct {
-    const char *k, *v;
-    size_t kn, vn;
-} word_t;
-
-// The next word into *w: 1, 0 at the end, -1 for a word that is no key=value.
-static int next_word(words_t *it, word_t *w) {
+int moy_dev_word(words_t *it, word_t *w) {
     while (it->p < it->end && (*it->p == ' ' || *it->p == '\t' || *it->p == '\n'
                                || *it->p == '\r')) {
         it->p++;
@@ -132,8 +123,7 @@ static int next_word(words_t *it, word_t *w) {
     return 1;
 }
 
-// A value as a number (decimal or 0x.. hex, with a sign): false for none.
-static bool number(const char *v, size_t n, int64_t *out) {
+bool moy_dev_number(const char *v, size_t n, int64_t *out) {
     bool neg = false;
     size_t i = 0;
     if (i < n && (v[i] == '-' || v[i] == '+')) {
@@ -189,20 +179,20 @@ static int32_t gpio_cfg(const char *cfg, size_t n, pin_cfg_t *c, bool edges) {
     words_t it = { cfg, cfg + n };
     word_t w;
     int got;
-    while ((got = next_word(&it, &w)) > 0) {
+    while ((got = moy_dev_word(&it, &w)) > 0) {
         int64_t v;
-        if (is(w.k, w.kn, "mode")) {
-            c->mode = is(w.v, w.vn, "in") ? MOY_PIN_MODE_IN : is(w.v, w.vn, "out")
-                      ? MOY_PIN_MODE_OUT : is(w.v, w.vn, "od") ? MOY_PIN_MODE_OD : -2;
-        } else if (is(w.k, w.kn, "pull")) {
-            c->pull = is(w.v, w.vn, "up") ? MOY_PIN_PULL_UP : is(w.v, w.vn, "down")
-                      ? MOY_PIN_PULL_DOWN : is(w.v, w.vn, "none") ? MOY_PIN_PULL_NONE : -2;
-        } else if (is(w.k, w.kn, "value")) {
-            c->level = number(w.v, w.vn, &v) ? v != 0 : -2;
-        } else if (edges && is(w.k, w.kn, "edges")) {
-            c->edges = is(w.v, w.vn, "rising") ? EDGE_RISING : is(w.v, w.vn, "falling")
-                       ? EDGE_FALLING : is(w.v, w.vn, "both") ? EDGE_RISING | EDGE_FALLING
-                       : is(w.v, w.vn, "off") ? 0 : -2;
+        if (moy_dev_is(w.k, w.kn, "mode")) {
+            c->mode = moy_dev_is(w.v, w.vn, "in") ? MOY_PIN_MODE_IN : moy_dev_is(w.v, w.vn, "out")
+                      ? MOY_PIN_MODE_OUT : moy_dev_is(w.v, w.vn, "od") ? MOY_PIN_MODE_OD : -2;
+        } else if (moy_dev_is(w.k, w.kn, "pull")) {
+            c->pull = moy_dev_is(w.v, w.vn, "up") ? MOY_PIN_PULL_UP : moy_dev_is(w.v, w.vn, "down")
+                      ? MOY_PIN_PULL_DOWN : moy_dev_is(w.v, w.vn, "none") ? MOY_PIN_PULL_NONE : -2;
+        } else if (moy_dev_is(w.k, w.kn, "value")) {
+            c->level = moy_dev_number(w.v, w.vn, &v) ? v != 0 : -2;
+        } else if (edges && moy_dev_is(w.k, w.kn, "edges")) {
+            c->edges = moy_dev_is(w.v, w.vn, "rising") ? EDGE_RISING : moy_dev_is(w.v, w.vn, "falling")
+                       ? EDGE_FALLING : moy_dev_is(w.v, w.vn, "both") ? EDGE_RISING | EDGE_FALLING
+                       : moy_dev_is(w.v, w.vn, "off") ? 0 : -2;
         } else {
             return MOY_DEV_EBAD;
         }
@@ -433,10 +423,10 @@ static int32_t pins_set(dev_row_t *d, const char *cfg, size_t n) {
         words_t it = { cfg, cfg + n };
         word_t w;
         int got;
-        while ((got = next_word(&it, &w)) > 0) {
+        while ((got = moy_dev_word(&it, &w)) > 0) {
             int pin = pin_of(w.k, w.kn);
             int64_t v;
-            if (pin < 0 || !number(w.v, w.vn, &v) || (v != 0 && v != 1)) {
+            if (pin < 0 || !moy_dev_number(w.v, w.vn, &v) || (v != 0 && v != 1)) {
                 return MOY_DEV_EBAD;
             }
             if (pass == 1) {
@@ -499,9 +489,8 @@ static int32_t pins_open(uint32_t pid, uint32_t perms, const char *cfg, size_t c
 
 // -- the buses -----------------------------------------------------------------------
 
-// A value as a number in [lo, hi]: false for none or one outside.
-static bool in_range(const word_t *w, int64_t lo, int64_t hi, int64_t *out) {
-    return number(w->v, w->vn, out) && *out >= lo && *out <= hi;
+bool moy_dev_in_range(const word_t *w, int64_t lo, int64_t hi, int64_t *out) {
+    return moy_dev_number(w->v, w->vn, out) && *out >= lo && *out <= hi;
 }
 
 // `name` as kind `pre` and its number ("uart1": 1): -1 for anything else.
@@ -529,33 +518,33 @@ static int32_t uart_cfg(const char *cfg, size_t n, moy_devbus_uart_t *c, bus_pin
     words_t it = { cfg, cfg + n };
     word_t w;
     int got;
-    while ((got = next_word(&it, &w)) > 0) {
+    while ((got = moy_dev_word(&it, &w)) > 0) {
         int64_t v = 0;
         bool ok;
-        if (is(w.k, w.kn, "parity")) {
+        if (moy_dev_is(w.k, w.kn, "parity")) {
             ok = true;
-            c->parity = is(w.v, w.vn, "none") ? MOY_DEVBUS_PARITY_NONE
-                        : is(w.v, w.vn, "even") ? MOY_DEVBUS_PARITY_EVEN
-                        : is(w.v, w.vn, "odd") ? MOY_DEVBUS_PARITY_ODD : (ok = false, 0);
-        } else if (is(w.k, w.kn, "baudrate")) {
-            ok = in_range(&w, 1, 5000000, &v);
+            c->parity = moy_dev_is(w.v, w.vn, "none") ? MOY_DEVBUS_PARITY_NONE
+                        : moy_dev_is(w.v, w.vn, "even") ? MOY_DEVBUS_PARITY_EVEN
+                        : moy_dev_is(w.v, w.vn, "odd") ? MOY_DEVBUS_PARITY_ODD : (ok = false, 0);
+        } else if (moy_dev_is(w.k, w.kn, "baudrate")) {
+            ok = moy_dev_in_range(&w, 1, 5000000, &v);
             c->baud = (uint32_t)v;
-        } else if (is(w.k, w.kn, "bits")) {
-            ok = in_range(&w, 5, 8, &v);
+        } else if (moy_dev_is(w.k, w.kn, "bits")) {
+            ok = moy_dev_in_range(&w, 5, 8, &v);
             c->bits = (uint8_t)v;
-        } else if (is(w.k, w.kn, "stop")) {
-            ok = in_range(&w, 1, 2, &v);
+        } else if (moy_dev_is(w.k, w.kn, "stop")) {
+            ok = moy_dev_in_range(&w, 1, 2, &v);
             c->stop = (uint8_t)v;
-        } else if (is(w.k, w.kn, "timeout")) {
-            ok = in_range(&w, 0, INT32_MAX, &v);
-        } else if (p != NULL && is(w.k, w.kn, "rxbuf")) {
-            ok = in_range(&w, 0, 32768, &v);
+        } else if (moy_dev_is(w.k, w.kn, "timeout")) {
+            ok = moy_dev_in_range(&w, 0, INT32_MAX, &v);
+        } else if (p != NULL && moy_dev_is(w.k, w.kn, "rxbuf")) {
+            ok = moy_dev_in_range(&w, 0, 32768, &v);
             c->rxbuf = (uint32_t)v;
-        } else if (p != NULL && is(w.k, w.kn, "txbuf")) {
-            ok = in_range(&w, 0, 32768, &v);
+        } else if (p != NULL && moy_dev_is(w.k, w.kn, "txbuf")) {
+            ok = moy_dev_in_range(&w, 0, 32768, &v);
             c->txbuf = (uint32_t)v;
-        } else if (p != NULL && (is(w.k, w.kn, "tx") || is(w.k, w.kn, "rx"))) {
-            ok = in_range(&w, 0, PIN_MAX - 1, &v);
+        } else if (p != NULL && (moy_dev_is(w.k, w.kn, "tx") || moy_dev_is(w.k, w.kn, "rx"))) {
+            ok = moy_dev_in_range(&w, 0, PIN_MAX - 1, &v);
             p->pin[*w.k == 't' ? 0 : 1] = (int)v;
         } else {
             ok = false;
@@ -572,25 +561,25 @@ static int32_t spi_cfg(const char *cfg, size_t n, moy_devbus_spi_t *c, bus_pins_
     words_t it = { cfg, cfg + n };
     word_t w;
     int got;
-    while ((got = next_word(&it, &w)) > 0) {
+    while ((got = moy_dev_word(&it, &w)) > 0) {
         int64_t v = 0;
         bool ok = false;
-        if (is(w.k, w.kn, "firstbit")) {
-            ok = is(w.v, w.vn, "msb") || is(w.v, w.vn, "lsb");
-            c->lsb = is(w.v, w.vn, "lsb");
-        } else if (is(w.k, w.kn, "baudrate")) {
-            ok = in_range(&w, 1, 80000000, &v);
+        if (moy_dev_is(w.k, w.kn, "firstbit")) {
+            ok = moy_dev_is(w.v, w.vn, "msb") || moy_dev_is(w.v, w.vn, "lsb");
+            c->lsb = moy_dev_is(w.v, w.vn, "lsb");
+        } else if (moy_dev_is(w.k, w.kn, "baudrate")) {
+            ok = moy_dev_in_range(&w, 1, 80000000, &v);
             c->baud = (uint32_t)v;
-        } else if (is(w.k, w.kn, "polarity") || is(w.k, w.kn, "phase")) {
-            ok = in_range(&w, 0, 1, &v);
+        } else if (moy_dev_is(w.k, w.kn, "polarity") || moy_dev_is(w.k, w.kn, "phase")) {
+            ok = moy_dev_in_range(&w, 0, 1, &v);
             uint8_t bit = *w.k == 'p' && w.k[1] == 'o' ? 2u : 1u;
             c->mode = (uint8_t)(v ? c->mode | bit : c->mode & ~bit);
-        } else if (is(w.k, w.kn, "bits")) {
-            ok = in_range(&w, 8, 8, &v);
+        } else if (moy_dev_is(w.k, w.kn, "bits")) {
+            ok = moy_dev_in_range(&w, 8, 8, &v);
         } else {
             for (int i = 0; p != NULL && i < 3; i++) {
-                if (is(w.k, w.kn, pins[i])) {
-                    ok = in_range(&w, 0, PIN_MAX - 1, &v);
+                if (moy_dev_is(w.k, w.kn, pins[i])) {
+                    ok = moy_dev_in_range(&w, 0, PIN_MAX - 1, &v);
                     p->pin[i] = (int)v;
                 }
             }
@@ -671,11 +660,11 @@ static int32_t i2c_open(dev_row_t *d, uint32_t perms, const char *cfg, size_t cn
     words_t it = { cfg, cfg + cn };
     word_t w;
     int got;
-    while ((got = next_word(&it, &w)) > 0) {
-        bool ok = is(w.k, w.kn, "scl") ? in_range(&w, 0, PIN_MAX - 1, &scl)
-                  : is(w.k, w.kn, "sda") ? in_range(&w, 0, PIN_MAX - 1, &sda)
-                  : is(w.k, w.kn, "freq") ? in_range(&w, 1, 1000000, &freq)
-                  : is(w.k, w.kn, "addr") ? in_range(&w, 0, 127, &addr) : false;
+    while ((got = moy_dev_word(&it, &w)) > 0) {
+        bool ok = moy_dev_is(w.k, w.kn, "scl") ? moy_dev_in_range(&w, 0, PIN_MAX - 1, &scl)
+                  : moy_dev_is(w.k, w.kn, "sda") ? moy_dev_in_range(&w, 0, PIN_MAX - 1, &sda)
+                  : moy_dev_is(w.k, w.kn, "freq") ? moy_dev_in_range(&w, 1, 1000000, &freq)
+                  : moy_dev_is(w.k, w.kn, "addr") ? moy_dev_in_range(&w, 0, 127, &addr) : false;
         if (!ok) {
             return MOY_DEV_EBAD;
         }
@@ -701,10 +690,10 @@ static int32_t pwm_cfg(dev_row_t *d, const char *cfg, size_t n) {
     words_t it = { cfg, cfg + n };
     word_t w;
     int got;
-    while ((got = next_word(&it, &w)) > 0) {
+    while ((got = moy_dev_word(&it, &w)) > 0) {
         int64_t v;
-        bool ok = is(w.k, w.kn, "freq") ? in_range(&w, 1, 40000000, &v)
-                  : is(w.k, w.kn, "duty") ? in_range(&w, 0, 65535, &v) : false;
+        bool ok = moy_dev_is(w.k, w.kn, "freq") ? moy_dev_in_range(&w, 1, 40000000, &v)
+                  : moy_dev_is(w.k, w.kn, "duty") ? moy_dev_in_range(&w, 0, 65535, &v) : false;
         if (!ok) {
             return MOY_DEV_EBAD;
         }
@@ -727,7 +716,7 @@ static int32_t pin_bus_open(dev_row_t *d, uint32_t perms, int pin, const char *c
     } else {
         words_t it = { cfg, cfg + cn };
         word_t w;
-        rc = next_word(&it, &w) != 0 ? MOY_DEV_EBAD : 0;   // an adc takes no key
+        rc = moy_dev_word(&it, &w) != 0 ? MOY_DEV_EBAD : 0;   // an adc takes no key
     }
     if (rc != 0) {
         return rc;
@@ -842,8 +831,8 @@ static int32_t bus_set(dev_row_t *d, const char *cfg, size_t n) {
             words_t it = { cfg, cfg + n };
             word_t w;
             int got;
-            while ((got = next_word(&it, &w)) > 0) {
-                if (!is(w.k, w.kn, "addr") || !in_range(&w, 0, 127, &addr)) {
+            while ((got = moy_dev_word(&it, &w)) > 0) {
+                if (!moy_dev_is(w.k, w.kn, "addr") || !moy_dev_in_range(&w, 0, 127, &addr)) {
                     return MOY_DEV_EBAD;
                 }
             }
@@ -872,20 +861,26 @@ static int32_t bus_set(dev_row_t *d, const char *cfg, size_t n) {
 
 static int32_t bus_get(dev_row_t *d, const char *what, size_t n) {
     switch (d->kind) {
-        case K_UART: return is(what, n, "any") ? moy_devbus_uart_any(d->unit) : MOY_DEV_EBAD;
-        case K_I2C: return is(what, n, "addr") ? d->addr : MOY_DEV_EBAD;
+        case K_UART: return moy_dev_is(what, n, "any") ? moy_devbus_uart_any(d->unit) : MOY_DEV_EBAD;
+        case K_I2C: return moy_dev_is(what, n, "addr") ? d->addr : MOY_DEV_EBAD;
         case K_PWM:
-            return is(what, n, "freq") ? (int32_t)d->freq
-                   : is(what, n, "duty") ? (int32_t)d->duty : MOY_DEV_EBAD;
-        case K_ADC: return is(what, n, "value") ? moy_devbus_adc_read(d->pin) : MOY_DEV_EBAD;
+            return moy_dev_is(what, n, "freq") ? (int32_t)d->freq
+                   : moy_dev_is(what, n, "duty") ? (int32_t)d->duty : MOY_DEV_EBAD;
+        case K_ADC: return moy_dev_is(what, n, "value") ? moy_devbus_adc_read(d->pin) : MOY_DEV_EBAD;
         default: return MOY_DEV_EBAD;
     }
 }
 
 // -- the rows ------------------------------------------------------------------------
 
+static uint32_t slot_of(const dev_row_t *d) {
+    return (uint32_t)(d - s_dev);
+}
+
 static void close_row(dev_row_t *d) {
-    if (d->kind == K_GPIO) {
+    if (d->kind == K_API) {
+        moy_dev_kind_close(slot_of(d));
+    } else if (d->kind == K_GPIO) {
         edges_off(d);
         moy_lease_drop(d->lease);
     } else if (d->kind == K_PINS) {
@@ -899,7 +894,7 @@ static void close_row(dev_row_t *d) {
 // The bus a name opens (its kind, and a pwm's or an adc's pin): 0 for none.
 static uint8_t bus_kind(const char *name, size_t n, int *pin) {
     *pin = -1;
-    if (is(name, n, "i2c")) {
+    if (moy_dev_is(name, n, "i2c")) {
         return K_I2C;
     }
     if (unit_of(name, n, "uart") >= 0) {
@@ -921,15 +916,30 @@ static uint8_t bus_kind(const char *name, size_t n, int *pin) {
     return 0;
 }
 
+static int32_t api_open(uint32_t pid, uint32_t perms, int api, const char *cfg, size_t cn) {
+    dev_row_t *d = row_new(pid, K_API);
+    if (d == NULL) {
+        return MOY_DEV_EFULL;
+    }
+    int32_t r = moy_dev_kind_open(slot_of(d), api, pid, perms, cfg, cn);
+    if (r < 0) {
+        d->pid = 0;
+        return r;
+    }
+    return handle_of(d);
+}
+
 int32_t moy_dev_open(uint32_t pid, uint32_t perms, const char *name, size_t n,
                      const char *cfg, size_t cn) {
     int pin = pin_of(name, n), bpin;
     uint8_t bus = bus_kind(name, n, &bpin);
-    if (pid == 0 || (pin < 0 && bus == 0 && !is(name, n, "pins"))) {
+    int api = moy_dev_kind(name, n);
+    if (pid == 0 || (pin < 0 && bus == 0 && api == 0 && !moy_dev_is(name, n, "pins"))) {
         return MOY_DEV_PASS;
     }
     moy_lease_lock();
-    int32_t r = pin >= 0 ? gpio_open(pid, perms, pin, cfg, cn)
+    int32_t r = api != 0 ? api_open(pid, perms, api, cfg, cn)
+                : pin >= 0 ? gpio_open(pid, perms, pin, cfg, cn)
                 : bus != 0 ? bus_open(pid, perms, bus, bpin, name, n, cfg, cn)
                 : pins_open(pid, perms, cfg, cn);
     moy_lease_unlock();
@@ -943,7 +953,7 @@ int32_t moy_dev_open(uint32_t pid, uint32_t perms, const char *name, size_t n,
         return MOY_DEV_PASS;                        \
     }                                               \
     moy_lease_lock();                               \
-    dev_row_t *d = row_of((pid), (h));                  \
+    dev_row_t *d = row_of((pid), (h));              \
     int32_t r = MOY_DEV_EABSENT;                    \
     if (d != NULL) {                                \
         body;                                       \
@@ -957,36 +967,42 @@ int32_t moy_dev_close(uint32_t pid, int32_t h) {
 
 int32_t moy_dev_read(uint32_t pid, int32_t h, uint8_t *out, size_t cap) {
     WITH_ROW(pid, h, d, {
-        r = d->kind == K_GPIO ? gpio_read(d, out, cap)
+        r = d->kind == K_API ? moy_dev_kind_read(slot_of(d), out, cap)
+            : d->kind == K_GPIO ? gpio_read(d, out, cap)
             : d->kind == K_PINS ? MOY_DEV_EBAD : bus_read(d, out, cap);
     })
 }
 
 int32_t moy_dev_write(uint32_t pid, int32_t h, const uint8_t *data, size_t n) {
     WITH_ROW(pid, h, d, {
-        r = d->kind == K_GPIO || d->kind == K_PINS ? MOY_DEV_EBAD : bus_write(d, data, n);
+        r = d->kind == K_API ? moy_dev_kind_write(slot_of(d), data, n)
+            : d->kind == K_GPIO || d->kind == K_PINS ? MOY_DEV_EBAD : bus_write(d, data, n);
     })
 }
 
 int32_t moy_dev_xfer(uint32_t pid, int32_t h, const uint8_t *data, size_t n, uint8_t *out,
                      size_t cap) {
     WITH_ROW(pid, h, d, {
-        r = d->kind == K_GPIO || d->kind == K_PINS ? MOY_DEV_EBAD
+        r = d->kind == K_API ? moy_dev_kind_xfer(slot_of(d), data, n, out, cap)
+            : d->kind == K_GPIO || d->kind == K_PINS ? MOY_DEV_EBAD
             : bus_xfer(d, data, n, out, cap);
     })
 }
 
 int32_t moy_dev_set(uint32_t pid, int32_t h, const char *cfg, size_t n) {
     WITH_ROW(pid, h, d, {
-        r = d->kind == K_GPIO ? gpio_set(d, cfg, n)
+        r = d->kind == K_API ? moy_dev_kind_set(slot_of(d), cfg, n)
+            : d->kind == K_GPIO ? gpio_set(d, cfg, n)
             : d->kind == K_PINS ? pins_set(d, cfg, n) : bus_set(d, cfg, n);
     })
 }
 
 int32_t moy_dev_get(uint32_t pid, int32_t h, const char *what, size_t n) {
     WITH_ROW(pid, h, d, {
-        if (d->kind == K_GPIO) {
-            r = is(what, n, "value") ? moy_lease_pin_level(d->pin) : MOY_DEV_EBAD;
+        if (d->kind == K_API) {
+            r = moy_dev_kind_get(slot_of(d), what, n);
+        } else if (d->kind == K_GPIO) {
+            r = moy_dev_is(what, n, "value") ? moy_lease_pin_level(d->pin) : MOY_DEV_EBAD;
         } else if (d->kind != K_PINS) {
             r = bus_get(d, what, n);
         } else {
