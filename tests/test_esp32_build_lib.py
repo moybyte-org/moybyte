@@ -1648,7 +1648,7 @@ def test_an_unchanged_generated_file_keeps_its_mtime_and_a_changed_one_moves(
     assert [p.name for p in tmp_path.iterdir()] == ["gen.h"]
 
 
-def _frozen(tmp_path, manifest_text, mpy_cross=b"mpy-cross v1"):
+def _frozen(tmp_path, manifest_text, mpy_cross=b"mpy-cross v1", board_h="#define A (1)\n"):
     """A port build dir with frozen output in it, then the guard over it.
     Returns (frozen_mpy survived, frozen_content.c survived)."""
     mpy = tmp_path / "mpy"
@@ -1660,8 +1660,11 @@ def _frozen(tmp_path, manifest_text, mpy_cross=b"mpy-cross v1"):
     (bout / "frozen_mpy").mkdir(parents=True, exist_ok=True)
     (bout / "frozen_mpy" / "a.mpy").write_bytes(b"M")
     (bout / "frozen_content.c").write_text("frozen")
+    board = tmp_path / "board"
+    board.mkdir(exist_ok=True)
+    (board / "mpconfigboard.h").write_text(board_h)
     r = sh("moybyte_frozen_guard '%s'" % bout, MPY_DIR=str(mpy),
-           MANIFEST=str(manifest))
+           MANIFEST=str(manifest), BOARD_DIR=str(board))
     assert r.returncode == 0, r.stderr
     return ((bout / "frozen_mpy" / "a.mpy").exists(),
             (bout / "frozen_content.c").exists())
@@ -1682,6 +1685,14 @@ def test_a_deleted_module_regenerates_the_frozen_content(tmp_path):
     _frozen(tmp_path, HEAD + "# frozen-source fingerprint: aaa\n")
     assert _frozen(tmp_path, HEAD + "# frozen-source fingerprint: bbb\n") \
         == (True, False)
+
+
+def test_a_board_config_change_regenerates_the_frozen_content(tmp_path):
+    """frozen_content.c names the qstrs the C build provides: a module the
+    board turns off (MICROPY_PY_FRAMEBUF) takes `fill` with it."""
+    text = HEAD + "# frozen-source fingerprint: aaa\n"
+    _frozen(tmp_path, text)
+    assert _frozen(tmp_path, text, board_h="#define A (0)\n") == (True, False)
 
 
 def test_a_new_freeze_option_or_compiler_recompiles_every_module(tmp_path):

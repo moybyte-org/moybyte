@@ -674,13 +674,18 @@ EOF
 # MicroPython's makemanifest rebuilds a module's .mpy when the .py is newer and
 # frozen_content.c when any input is, so on its own it misses three changes:
 # a module DELETED from the tree (nothing is newer), a new freeze option, and
-# a new mpy-cross. $1 is the port's build dir; the manifest ($MANIFEST, whose
-# fingerprint names every frozen file and its bytes) and the mpy-cross binary
-# are the keys. A changed set drops frozen_content.c; a changed option or
-# compiler drops every .mpy too. Recorded before the build, like genhdr's.
+# a new mpy-cross, nor a board config that changes the C build's qstrs
+# (frozen_content.c names the ones the C provides, so a module turned off
+# leaves it citing a qstr that no longer exists). $1 is the port's build dir;
+# the manifest ($MANIFEST, whose fingerprint names every frozen file and its
+# bytes), the board's mpconfigboard.* (BOARD_DIR) and the mpy-cross binary are
+# the keys. A changed set or board config drops frozen_content.c; a changed
+# option or compiler drops every .mpy too. Recorded before the build, like
+# genhdr's.
 moybyte_frozen_guard() {
   local bout="$1" set tool
-  set="$(md5sum < "${MANIFEST}" | cut -d' ' -f1)"
+  set="$( { cat "${MANIFEST}"; cat "${BOARD_DIR:-/nonexistent}"/mpconfigboard.* 2>/dev/null; } \
+          | md5sum | cut -d' ' -f1)"
   tool="$( { grep -v '^# frozen-source fingerprint' "${MANIFEST}"
              md5sum < "${MPY_DIR}/mpy-cross/build/mpy-cross"; } | md5sum | cut -d' ' -f1)"
   mkdir -p "${bout}"
