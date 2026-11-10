@@ -201,6 +201,17 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
     return s_ctx;
 }
 
+// What shows of the table's part open now (moy_ui_run_table_part), x0, y0,
+// x1, y1 on the canvas: every verb drawn while it is open draws inside it,
+// as the canvas's own verbs do.
+static int32_t s_tp_in[4];
+
+static void run_in_part(run_t *r, const moy_ui_ctx_t *c) {
+    if (c->tp_open) {
+        memcpy(&r->row.st[MOY_ST_CX0], s_tp_in, sizeof(s_tp_in));
+    }
+}
+
 static moy_ui_span_t span(const uint8_t *p, size_t n) {
     moy_ui_span_t s = { p, (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n) };
     return s;
@@ -221,7 +232,7 @@ static moy_ui_span_t span(const uint8_t *p, size_t n) {
     if (c == NULL) {                                    \
         return close_run(&r, MOY_UI_NOMEM);             \
     }                                                   \
-    (void)0
+    run_in_part(&r, c)
 
 int moy_ui_run_page(void *target, moy_ui_span_t title, const moy_ui_over_t *o, int32_t out[4]) {
     OPEN(target);
@@ -402,6 +413,10 @@ static int s_tp_on, s_tp_clip[4];
 
 int moy_ui_run_table_part(void *target, int32_t out[8]) {
     OPEN(target);
+    // the table's fades after its last part lie over the view, not the part
+    r.row.st[MOY_ST_CX0] = r.row.st[MOY_ST_CY0] = 0;
+    r.row.st[MOY_ST_CX1] = r.row.w;
+    r.row.st[MOY_ST_CY1] = r.row.h;
     int32_t i = moy_ui_api_table_part(c, &r.s, out);
     close_run(&r, MOY_UI_OK);
     if (s_tp_on) {
@@ -418,6 +433,10 @@ int moy_ui_run_table_part(void *target, int32_t out[8]) {
         s_tp_clip[3] = t_->clip_y1;
         s_tp_on = 1;
         moy_clip(t_, out[4], out[5], out[6], out[7]);
+        s_tp_in[0] = out[4];
+        s_tp_in[1] = out[5];
+        s_tp_in[2] = out[4] + out[6];
+        s_tp_in[3] = out[5] + out[7];
     }
     return i;
 }
