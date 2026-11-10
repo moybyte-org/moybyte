@@ -1,5 +1,5 @@
 # Mesh: Meshtastic text on the LoRa radio. The window lists what the service
-# (service.py) heard and sent on the default channel, newest first, and sends
+# (service.lua) heard and sent on the default channel, newest first, and sends
 # what is typed; the service holds the radio and keeps running when the window
 # closes. The region picks the frequency and must match the law where the
 # console is: EU_868 until another is chosen.
@@ -33,7 +33,7 @@ def _reload(*_):
     r = prefs.get("region")
     region = REGIONS.index(r) if r in REGIONS else 0
     n = prefs.get("node")
-    node = "!%08x" % n if isinstance(n, int) else ""
+    node = n if isinstance(n, str) else ""
 
 
 def send(words):

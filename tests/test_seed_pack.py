@@ -84,7 +84,7 @@ def test_a_cart_s_entry_files_round_trip_through_the_blob(tmp_path):
     shutil.copytree(src, str(tmp_path / "moybyte.mesh.moy"))
     (cart,) = gen.build_carts(str(tmp_path))
     ((_title, _version, blob),) = gen.build_packed(str(tmp_path))
-    assert [name for name, _text in cart["entry_src"]] == ["service.py"]
+    assert [name for name, _text in cart["entry_src"]] == ["service.lua"]
     assert moy_carts.unpack_seed(blob) == cart
 
 

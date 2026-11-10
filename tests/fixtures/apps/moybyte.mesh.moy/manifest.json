@@ -20,7 +20,7 @@
       "prefs"
     ],
     "entries": {
-      "service": "service.py"
+      "service": "service.lua"
     },
     "config": {},
     "edit": []

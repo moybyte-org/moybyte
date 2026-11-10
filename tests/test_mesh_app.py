@@ -1,14 +1,16 @@
 """Mesh (tests/fixtures/apps/moybyte.mesh.moy): Meshtastic text on the LoRa radio.
 
-The codec in its service (service.py) against the Meshtastic firmware's own
-numbers and an independent implementation over pyca's cryptography: the
+The codec in its Lua service (service.lua), run on the host's Lua VM with
+the boards' 32-bit integers (LUA_32BITS), against the Meshtastic firmware's
+own numbers and an independent implementation over pyca's cryptography: the
 LongFast channel's hash (8) and frequency slots (EU_868 869.525 MHz, US
 906.875 MHz), the 16-byte header, the AES-CTR counter block, the Data
 protobuf, and the firmware's own PKI test packet (test/test_crypto) decoded
-and opened. Then the app on the console with the stand-in radio: the service
-tunes LongFast on the region's slot, sends what the window typed as a
-packet a Meshtastic node decodes, keeps what another node sent with its RSSI
-and SNR, and drops another channel's packets, its own echo and a repeat."""
+and opened. Then the app on the console with the stand-in radio: the
+service holds the radio by handle and tunes LongFast on the region's slot,
+sends what the window typed as a packet a Meshtastic node decodes, keeps
+what another node sent with its RSSI and SNR, and drops another channel's
+packets, its own echo and a repeat."""
 
 import json
 import os
@@ -19,7 +21,6 @@ import pytest
 
 import crypto_vectors as V
 from runtime import moybyte, scheduler as S
-from runtime import moy_input as mi
 from runtime import moy_lora as N
 from runtime.host import lora_sim
 
@@ -30,20 +31,54 @@ CART = os.path.join(ROOT, "tests", "fixtures", "apps", "moybyte.mesh.moy")
 H = bytes.fromhex
 DEFAULT_KEY = H("d4f1bb3a20290759f0bcffabcf4e6901")
 
+# Glue the tests read the codec through: X(hex) bytes in, H(bytes) and J(...)
+# (each number as unsigned hex) out, D(...) a decoded packet, P(...) a Data
+# protobuf, T(v) any value as text.
+GLUE = """
+function X(h) return (h:gsub("..", function(c) return string.char(tonumber(c, 16)) end)) end
+function H(s) return (s:gsub(".", function(c) return string.format("%02x", c:byte()) end)) end
+function J(...)
+  local t = table.pack(...)
+  for i = 1, t.n do t[i] = string.format("%x", t[i]) end
+  return table.concat(t, ",", 1, t.n)
+end
+function T(v) return tostring(v) end
+function D(p, key, ch)
+  local h, port, pl = decode(p, key, ch)
+  if h == nil then return "nil" end
+  return string.format("%x,%x,%d,", h[2], h[3], port) .. H(pl)
+end
+function P(b)
+  local port, pl = data_decode(b)
+  if port == nil then return "nil" end
+  return port .. ":" .. pl
+end
+"""
 
-class _Prefs(dict):
-    def get(self, k, d=None):
-        return dict.get(self, k, d)
 
-    def set(self, k, v):
-        self[k] = v
+class _Codec:
+    """service.lua's functions on a Lua state of their own."""
+
+    def __init__(self):
+        from runtime import lua_binding
+        self.run = lua_binding.HostLuaRun(bytearray(64 * 64 * 2), 64, 64)
+        with open(os.path.join(CART, "service.lua")) as f:
+            self.run.exec(f.read(), "service.lua")
+        self.run.exec(GLUE)
+
+    def __call__(self, expr):
+        self.run.exec("__R = " + expr)
+        return self.run.get_global("__R")
+
+    def close(self):
+        self.run.close()
 
 
-def _codec():
-    ns = {"__name__": "mesh_service", "moybyte": moybyte, "prefs": _Prefs()}
-    with open(os.path.join(CART, "service.py")) as f:
-        exec(compile(f.read(), "service.py", "exec"), ns)
-    return ns
+@pytest.fixture
+def c():
+    codec = _Codec()
+    yield codec
+    codec.close()
 
 
 def _ctr(key, block, data):
@@ -61,70 +96,84 @@ def _node_packet(text, frm, pid, chash=8, key=DEFAULT_KEY, to=0xFFFFFFFF):
     return head + _ctr(key, block, body)
 
 
+def _x(b):
+    return 'X"%s"' % bytes(b).hex()
+
+
 # -- the codec --------------------------------------------------------------------------
 
 
-def test_the_long_fast_channel_is_meshtastic_s():
-    c = _codec()
-    key = c["channel_key"](b"\x01")
-    assert key == DEFAULT_KEY
-    assert c["channel_key"](b"\x02")[-1] == 0x02 and c["channel_key"](b"\x00") == b""
-    assert c["channel_hash"]("LongFast", key) == 0x08
-    assert c["frequency"]("EU_868") == 869525000
-    assert c["frequency"]("US") == 906875000
-    assert c["power"]("EU_868") == 22 and c["power"]("JP") == 13
-    assert (c["BW"], c["SF"], c["CR"], c["SYNC"], c["PREAMBLE"]) == (250000, 11, 5, 0x2B, 16)
+def test_the_long_fast_channel_is_meshtastic_s(c):
+    assert c('H(channel_key("\\1"))') == DEFAULT_KEY.hex()
+    assert c('channel_key("\\2"):byte(16)') == 0x02 and c('channel_key("\\0")') == ""
+    assert c('channel_hash("LongFast", channel_key("\\1"))') == 0x08
+    assert c('frequency("EU_868")') == 869525000
+    assert c('frequency("US")') == 906875000
+    # a name whose hash is past 31 bits: unsigned on 32-bit integers
+    assert c('J(djb2("LongModerate"))') == "afa60066"
+    assert c('frequency("US", "LongModerate")') == 923625000
+    assert c('power("EU_868")') == 22 and c('power("JP")') == 13
+    assert c('J(BW, SF, CR, SYNC, PREAMBLE)') == "3d090,b,5,2b,10"
 
 
-def test_the_header_reads_the_firmware_s_pki_packet():
-    c = _codec()
+def test_the_header_reads_the_firmware_s_pki_packet(c):
     radio = H(V.MESH_PKI_RADIO)
-    to, frm, pid, flags, chash, next_hop, relay = c["parse_header"](radio)
+    got = c("J(parse_header(%s))" % _x(radio)).split(",")
+    to, frm, pid, flags, chash, next_hop, relay = (int(v, 16) for v in got)
     assert (to, frm, pid) == (0x7A6D648C, 0x0929, 0x13B2D662)
     assert (flags & 7, flags >> 5, bool(flags & 8)) == (3, 3, True)
     assert (chash, next_hop, relay) == (0, 0, 0)
-    assert c["header"](to, frm, pid, flags, chash) == radio[:16]
-    assert c["parse_header"](radio[:15]) is None
+    assert c("H(header(0x%x, 0x%x, 0x%x, %d, %d))" % (to, frm, pid, flags, chash)) == radio[:16].hex()
+    assert c("T(parse_header(%s))" % _x(radio[:15])) == "nil"
 
 
-def test_a_direct_message_opens_as_the_firmware_s_test_says():
-    c = _codec()
+def test_a_direct_message_opens_as_the_firmware_s_test_says(c):
     radio = H(V.MESH_PKI_RADIO)
-    data = c["pki_open"](H(V.MESH_PKI_SECRET), H(V.MESH_PKI_PEER), radio)
-    assert data.hex() == V.MESH_PKI_PLAIN
-    assert c["data_decode"](data) == (1, b"test")
+    args = "%s, %s" % (_x(H(V.MESH_PKI_SECRET)), _x(H(V.MESH_PKI_PEER)))
+    assert c("H(pki_open(%s, %s))" % (args, _x(radio))) == V.MESH_PKI_PLAIN
+    assert c("P(%s)" % _x(H(V.MESH_PKI_PLAIN))) == "1:test"
     changed = bytearray(radio)
     changed[20] ^= 1
-    assert c["pki_open"](H(V.MESH_PKI_SECRET), H(V.MESH_PKI_PEER), bytes(changed)) is None
+    assert c("T(pki_open(%s, %s))" % (args, _x(changed))) == "nil"
 
 
-def test_a_channel_packet_is_what_an_independent_encoder_makes():
-    c = _codec()
-    key = c["channel_key"](b"\x01")
-    mine = c["encode_text"]("hello mesh", 0x12345678, 0xCAFEF00D, key, 8)
+def test_a_channel_packet_is_what_an_independent_encoder_makes(c):
+    c.run.exec('KEY = channel_key("\\1")')
+    mine = H(c('H(encode_text("hello mesh", 0x12345678, 0xCAFEF00D, KEY, 8))'))
     head = mine[:16]
     assert head == struct.pack("<IIIBBBB", 0xFFFFFFFF, 0x12345678, 0xCAFEF00D, 0x63, 8, 0, 0)
     block = struct.pack("<QII", 0xCAFEF00D, 0x12345678, 0)
-    assert _ctr(key, block, mine[16:]) == b"\x08\x01\x12\x0ahello mesh"
+    assert _ctr(DEFAULT_KEY, block, mine[16:]) == b"\x08\x01\x12\x0ahello mesh"
     theirs = _node_packet(b"from a node", 0xA1B2C3D4, 77)
-    h, portnum, payload = c["decode"](theirs, key, 8)
-    assert (h[1], h[2], portnum, payload) == (0xA1B2C3D4, 77, 1, b"from a node")
-    assert c["decode"](theirs, key, 9) is None, "another channel's hash"
-    assert c["decode"](theirs[:10], key, 8) is None
-    long = c["encode_text"]("\u00e9" * 150, 1, 2, key, 8)
-    assert c["decode"](long, key, 8)[2] == ("\u00e9" * 100).encode(), "whole characters, 200 bytes"
+    assert c("D(%s, KEY, 8)" % _x(theirs)) == "a1b2c3d4,4d,1," + b"from a node".hex()
+    assert c("D(%s, KEY, 9)" % _x(theirs)) == "nil", "another channel's hash"
+    assert c("D(%s, KEY, 8)" % _x(theirs[:10])) == "nil"
+    long = 'encode_text(("\\xc3\\xa9"):rep(150), 1, 2, KEY, 8)'
+    assert c("D(%s, KEY, 8)" % long).endswith(("\u00e9" * 100).encode().hex()), \
+        "whole characters, 200 bytes"
 
 
-def test_the_data_protobuf_reads_past_what_it_does_not_need():
-    c = _codec()
-    d = c["data_decode"]
-    assert d(c["data_encode"](1, b"x" * 200)) == (1, b"x" * 200)
+def test_the_data_protobuf_reads_past_what_it_does_not_need(c):
+    assert c('P(data_encode(1, ("x"):rep(200)))') == "1:" + "x" * 200
     # want_response, dest (fixed32), a nonce (fixed64), bitfield: read past
     full = b"\x08\x01\x12\x02hi\x18\x01\x25\x01\x02\x03\x04\x49" + bytes(8) + b"\x48\x01"
-    assert d(full) == (1, b"hi")
-    assert d(b"\x12\x02hi") is None, "no portnum"
-    assert d(b"\x08\x01\x12\x09hi") is None, "a length past the end"
-    assert d(b"\x08\x01\x0b") is None, "a wire type it does not know"
+    assert c("P(%s)" % _x(full)) == "1:hi"
+    # a varint of ten bytes (a negative int32 field): read past
+    assert c("P(%s)" % _x(b"\x08\x01\x12\x02hi\x18" + b"\xff" * 9 + b"\x01")) == "1:hi"
+    assert c("P(%s)" % _x(b"\x12\x02hi")) == "nil", "no portnum"
+    assert c("P(%s)" % _x(b"\x08\x01\x12\x09hi")) == "nil", "a length past the end"
+    assert c("P(%s)" % _x(b"\x08\x01\x0b")) == "nil", "a wire type it does not know"
+
+
+def test_a_text_is_utf8_and_a_node_number_is_unsigned(c):
+    for ok in ("hi", "\u00e9t\u00e9", "\u20ac", "\U0001f600"):
+        assert c("T(utf8_ok(%s))" % _x(ok.encode())) == "true", ok
+    for bad in (b"\xff", b"\xc3", b"\xc0\x80", b"\xed\xa0\x80", b"\xf4\x90\x80\x80"):
+        assert c("T(utf8_ok(%s))" % _x(bad)) == "false", bad
+    assert c("node_name(0xA1B2C3D4)") == "!a1b2c3d4"
+    assert [c("T(node_ok(%s))" % n) for n in ("3", "4", "0xA1B2C3D4", "0xFFFFFFFE",
+                                               "0xFFFFFFFF")] == \
+        ["false", "true", "true", "true", "false"]
 
 
 # -- the app on the console -------------------------------------------------------------
@@ -136,10 +185,6 @@ def mesh(tmp_path):
     shutil.copytree(CART, os.path.join(ws.carts_root, "moybyte.mesh.moy"))
     ws.carts.rescan()
     lora_sim.install()
-    # The radio posts on the kernel's input table, the one a board's console
-    # binds; the host's console binds a table of its own.
-    was = moybyte.WAKES.table
-    moybyte.bind(mi.kernel())
     S.attach(ws)
     assert select_on_home(ws, "Mesh") is not None
     ws.open()
@@ -157,7 +202,6 @@ def mesh(tmp_path):
     while N.owner():
         moybyte.end(N.owner())
     lora_sim.remove()
-    moybyte.bind(was)
 
 
 def _frames(drv, n=4):
@@ -170,8 +214,9 @@ def _frames(drv, n=4):
 def test_the_service_holds_the_radio_and_sends_what_the_window_typed(mesh):
     ws, pl, drv, svc = mesh
     assert N.owner() == svc.pid
-    node = pl.ns["prefs"].get("node")
-    assert 3 < node < 0xFFFFFFFF and pl.ns["node"] == "!%08x" % node
+    name = pl.ns["prefs"].get("node")
+    node = int(name[1:], 16)
+    assert 3 < node < 0xFFFFFFFF and pl.ns["node"] == name == "!%08x" % node
     pl.ns["send"]("hi from moybyte")
     _frames(drv)
     packet, freq, sf, bw, sync, iq, pre = lora_sim.sent()
@@ -195,7 +240,7 @@ def test_the_service_keeps_another_node_s_text_with_its_signal(mesh):
     log = pl.ns["prefs"].get("log")
     assert log == [{"from": "!a1b2c3d4", "text": "hello T-Deck", "rssi": -112, "snr": -8.5}]
     # a repeat (a relay's copy), another channel and its own echo are dropped
-    node = pl.ns["prefs"].get("node")
+    node = int(pl.ns["prefs"].get("node")[1:], 16)
     for again in (p, _node_packet(b"other", 0xA1B2C3D4, 4243, chash=9),
                   _node_packet(b"echo", node, 99)):
         assert lora_sim.air(again, 869525000, 11, bw=250000, sync=0x2B)
@@ -220,5 +265,5 @@ def test_the_manifest_asks_for_the_radio_and_names_its_service():
     with open(os.path.join(CART, "manifest.json")) as f:
         man = json.load(f)
     assert man["id"] == "moybyte.mesh" and man["moybyte"]["type"] == "app"
-    assert man["moybyte"]["entries"] == {"service": "service.py"}
+    assert man["moybyte"]["entries"] == {"service": "service.lua"}
     assert set(man["moybyte"]["required"]) == {"lora", "prefs"}
