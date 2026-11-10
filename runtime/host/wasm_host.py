@@ -36,12 +36,12 @@ Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
 
 try:
-    from runtime.lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared,
+    from runtime.lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
                                  sync_view, drain_audio)
     from runtime.moy_input import pointer_state
     from runtime.ticks import _since_ms
 except ImportError:                                  # pragma: no cover
-    from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared,
+    from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
                          sync_view, drain_audio)
     from moy_input import pointer_state
     from ticks import _since_ms
@@ -288,7 +288,8 @@ class WasmHostRun:
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
         snap_shared(s, inp, self._ws.run.cart_start_ms, self._I_SNAP, pointer_state,
                     self._touch_out, _since_ms,
-                    getattr(self._ws, "windowed_chrome", False))
+                    getattr(self._ws, "windowed_chrome", False),
+                    run_room(self._ws.run))
         err = self._run.tick(dt, self.draw_next)
         # quit() sets SNAP_QUIT; the Player honours cart_quit after the tick.
         if s[SNAP_QUIT]:

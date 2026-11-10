@@ -480,6 +480,17 @@ class MinimalInput:
         return name in self._pressed
 
 
+class FakePlayer:
+    """The Player's `ui_room()`: None, a game's whole canvas, unless a test
+    sets an app's content_rect."""
+
+    def __init__(self):
+        self.room = None
+
+    def ui_room(self):
+        return self.room
+
+
 class FakeRun:
     """The run the glue plays in (procs.Run's fields it reads). `view` is a
     plain attribute; this counts the writes so `_sync_view`'s
@@ -493,6 +504,7 @@ class FakeRun:
         self.view_writes = []
         self.view = None
         self.cart_start_ms = start
+        self.player = FakePlayer()
 
     def __setattr__(self, name, value):
         if name == "view" and "view_writes" in self.__dict__:
@@ -1352,13 +1364,28 @@ def test_the_last_typed_key_crosses_as_an_int_and_none_reads_zero(w):
     assert run.snap[C_CONSTS["SNAP_KEY"]] == 0
 
 
+def test_the_ui_room_crosses_and_a_game_reads_the_whole_canvas(w):
+    """The Player's ui_room() is the snapshot's room on a Python-driven tick
+    too, the browser's: an app's ui.page lies in its content_rect()."""
+    ws = FakeWs(inp=FakeInput())
+    run = w.run(ws=ws)
+    room = [C_CONSTS["SNAP_ROOM_" + k] for k in "XYWH"]
+    ws.run.player.room = (0, 18, 320, 222)
+    run._refresh()
+    assert [run.snap[i] for i in room] == [0, 18, 320, 222]
+    ws.run.player.room = None
+    run._refresh()
+    assert [run.snap[i] for i in room] == [0, 0, 0, 0]
+
+
 def test_the_slot_numbers_are_bound_once_at_construction(w):
     """They were a module attribute lookup per frame, a dozen times a frame."""
     run = w.run()
     for name in ("SNAP_BTN", "SNAP_BTNP", "SNAP_BTN_P1", "SNAP_BTNP_P1",
                  "SNAP_PLAYERS", "SNAP_TIME_MS", "SNAP_TOUCH_X",
                  "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN", "SNAP_TOUCH_MS",
-                 "SNAP_KEY"):
+                 "SNAP_KEY", "SNAP_WINDOW", "SNAP_ROOM_X", "SNAP_ROOM_Y",
+                 "SNAP_ROOM_W", "SNAP_ROOM_H"):
         delattr(w.core, name)
     run._refresh()                       # reads nothing off the module
     assert run.snap[run._I_KEY] == 0

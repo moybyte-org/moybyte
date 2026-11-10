@@ -65,14 +65,14 @@ try:
                          LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
                          install_handles, end_handles, put_scenes, layer_restore,
                          layer_restore_end,
-                         snap_slots, audio_ops, snap_shared, sync_view,
+                         snap_slots, audio_ops, snap_shared, run_room, sync_view,
                          drain_audio, cfg_blob)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
                                  install_handles, end_handles, put_scenes,
                                  layer_restore, layer_restore_end, snap_slots, audio_ops,
-                                 snap_shared, sync_view, drain_audio, cfg_blob)
+                                 snap_shared, run_room, sync_view, drain_audio, cfg_blob)
 
 try:
     from moy_input import pointer_state
@@ -411,7 +411,8 @@ class MoycoreRun:
         s[self._I_BTNP] = pressed
         snap_shared(s, inp, self.ws.run.cart_start_ms, self._I_SNAP, pointer_state,
                     self._touch_out, _since_ms,
-                    getattr(self.ws, "windowed_chrome", False))
+                    getattr(self.ws, "windowed_chrome", False),
+                    run_room(self.ws.run))
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):

@@ -101,7 +101,8 @@ MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 
 SNAP_SLOTS = ("SNAP_BTN_P1", "SNAP_BTNP_P1", "SNAP_PLAYERS",
               "SNAP_TOUCH_X", "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN",
-              "SNAP_TOUCH_MS", "SNAP_TIME_MS", "SNAP_WINDOW")
+              "SNAP_TOUCH_MS", "SNAP_TIME_MS", "SNAP_WINDOW",
+              "SNAP_ROOM_X", "SNAP_ROOM_Y", "SNAP_ROOM_W", "SNAP_ROOM_H")
 
 AQ_OPS = ("AQ_SFX", "AQ_MUSIC", "AQ_BEEP", "AQ_MUSIC_STOP", "AQ_SOUND_STOP",
           "AQ_VOLUME")
@@ -117,9 +118,10 @@ def audio_ops(mod):
     return tuple(getattr(mod, name) for name in AQ_OPS)
 
 
-def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False):
-    """PLAYER TWO, THE POINTER, THE CLOCK and THE WINDOW, into the snapshot the
-    tick will read.
+def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False,
+                room=None):
+    """PLAYER TWO, THE POINTER, THE CLOCK, THE WINDOW and THE ROOM, into the
+    snapshot the tick will read.
 
     PLAYER TWO (#65). These slots exist in the C ABI and nothing filled them, so
     libmoy's `players()` answered 1 forever and a Lua cart could not have a
@@ -145,6 +147,11 @@ def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False):
     THE WINDOW: whether the run's surface is a window's body (the desk's
     `windowed_chrome`), which the public UI API's page lies on: its ground is
     then the window's (native/moy_ui/moy_ui_wasm.c), as a Python app's is.
+
+    THE ROOM: the rect (x, y, w, h) the run's `ui` frame lies in, the
+    Player's `ui_room()`: an app's content_rect(), below the host's bars; None,
+    a game's, is a W of 0, the whole canvas. moy_play.frame writes the same
+    slots where the kernel's Player takes the run.
     """
     n = 1
     pr = getattr(inp, "players", None)
@@ -166,6 +173,18 @@ def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False):
     if start is not None:
         s[idx[7]] = since_ms(start)
     s[idx[8]] = 1 if window else 0
+    x, y, w, h = room if room else (0, 0, 0, 0)
+    s[idx[9]] = int(x)
+    s[idx[10]] = int(y)
+    s[idx[11]] = int(w)
+    s[idx[12]] = int(h)
+
+
+def run_room(run):
+    """`snap_shared`'s room for `run` (procs.Run): its Player's `ui_room()`,
+    None where the run has no Player."""
+    player = getattr(run, "player", None)
+    return player.ui_room() if player is not None else None
 
 
 def cfg_blob(cfg):
