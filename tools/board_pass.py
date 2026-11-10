@@ -236,6 +236,17 @@ def image_path(board_dir):
                         .get("image", ""))
 
 
+def image_built_since(board_dir, since):
+    """Whether the image in dist/ was written at or after `since` (wall
+    seconds, a second's slack for the filesystem's coarse clock): a build
+    that answered 0 without linking leaves the last one, which is not this
+    tree's."""
+    try:
+        return os.path.getmtime(image_path(board_dir)) >= since - 1.0
+    except OSError:
+        return False
+
+
 def image_stamp(board_dir):
     """The commit the image in dist/ was built from, from the build's
     `ota_build.json` beside it; `?` from a build that did not stamp one."""
@@ -322,13 +333,15 @@ def _run_board(row, a, ctx):
 
     if not a.no_flash and not a.skip_build:
         path = log("build")
-        t = time.monotonic()
+        t, began = time.monotonic(), time.time()
         rc = build(run, d, path)
         row.times["wait"] = lock_wait(path)
         row.times["build"] = max(0.0, time.monotonic() - t - row.times["wait"])
         row.headroom = headroom_of(path)
         if rc != 0:
             return stop("build failed", path)
+        if not image_built_since(d, began):
+            return stop("no image built (the one in dist/ predates this build)", path)
         if a.build_only:
             row.image = image_stamp(d)
             return row

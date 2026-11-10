@@ -95,8 +95,9 @@ class FakeSteps:
     """The runner: records each command, holds builds, writes junit XML."""
 
     def __init__(self, fail=(), build_s=0.15, s3_barrier=None, build_rc=None,
-                 build_barrier=None):
+                 build_barrier=None, links_nothing=()):
         self.cmds = []
+        self.links_nothing = set(links_nothing)    # boards whose build answers 0 and writes no image
         self.fail = dict(fail)
         self.build_s = build_s
         self.barrier = s3_barrier
@@ -141,7 +142,10 @@ class FakeSteps:
             with open(log, "a") as f:
                 f.write("App image: 3000000 bytes of a 4128768-byte ota_0 slot "
                         "-- 1128768 bytes headroom (1102 KB)\n")
-            return self.build_rc.get(name, 0)
+            rc = self.build_rc.get(name, 0)
+            if rc == 0 and name not in self.links_nothing:
+                os.utime(board_pass.image_path(os.path.dirname(cmd[1])))
+            return rc
         if "pytest" in cmd:
             xml = cmd[cmd.index("--junitxml") + 1]
             failing = self.fail.get(env and next(
@@ -262,6 +266,18 @@ def test_build_only_fails_on_a_failed_build(bench, capsys):
     steps = FakeSteps(build_rc={"xiao_zero": 2})
     assert run_pass(bench, steps, "--all", "--build-only") == 1
     assert "build failed (xiao_zero.build.log)" in capsys.readouterr().out
+
+
+def test_a_build_that_writes_no_image_fails_and_reports_none_built(bench, capsys):
+    """A build that answers 0 but leaves dist/'s image as it was (older than
+    the build) is a failure naming its board, never the last image's commit."""
+    image = bench / "image.bin"
+    os.utime(image, (time.time() - 3600, time.time() - 3600))
+    steps = FakeSteps(links_nothing={"guition_s3"})
+    assert run_pass(bench, steps, "guition_s3", "--build-only") == 1
+    out = capsys.readouterr().out
+    assert "no image built" in out and "guition_s3.build.log" in out
+    assert "c2d35a0c" not in out
 
 
 @pytest.mark.parametrize("flag", [("--skip-build",), ("--no-flash",), ("--shot",), ("-k", "x")])
