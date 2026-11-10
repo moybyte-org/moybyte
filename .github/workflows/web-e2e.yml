@@ -51,6 +51,21 @@ name: Web console E2E
 #   tests/test_web_look_parity.py  the console's frames in both arrangements
 #                                  are the host's in the board's, pixel for
 #                                  pixel, under every seed theme.
+#   tests/test_web_first_run_e2e.py  what an embedding page asks of a
+#                                  first run (its scheme, ?start, ?edit), a
+#                                  saved theme winning over it, and Esc over a
+#                                  handheld playtest.
+#   tests/test_web_desk_input_e2e.py  the desk's keys and mouse in Chrome: the
+#                                  Sprite tab's keys, Shift+Tab, Super and
+#                                  F11, the wheel, and the Code tab's drag,
+#                                  word, Shift+click and middle autoscroll.
+#   tests/test_web_update_e2e.py   updating the board that serves the page:
+#                                  its strip and panel, for a headless board
+#                                  and for one with glass.
+#
+# Every suite gated on MOYBYTE_WEB_E2E is named in the drive step below
+# (tests/test_preflight_web_filter.py), which is how first_run and
+# desk_input went untested for weeks: they were never on this list.
 #
 # All are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
 # it: the whole browser tier -- the thing a visitor actually touches -- had no
@@ -237,7 +252,8 @@ jobs:
             tests/test_web_board_system_e2e.py tests/test_web_term_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
             tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
-            tests/test_web_music_e2e.py \
+            tests/test_web_music_e2e.py tests/test_web_first_run_e2e.py \
+            tests/test_web_desk_input_e2e.py \
             tests/test_web_fonts.py tests/test_web_look_parity.py \
             tests/test_editor_ladder_icons.py
 

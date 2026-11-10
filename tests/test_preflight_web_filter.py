@@ -1,6 +1,7 @@
 """preflight.sh's `web_touched` is web-e2e.yml's `paths:` list, and its
 `firmware_touched` firmware-build.yml's, word for word; its browser lane runs
-the suites web-e2e.yml's drive step names, as that step runs them."""
+the suites web-e2e.yml's drive step names, as that step runs them; and that
+step names every suite gated on MOYBYTE_WEB_E2E."""
 
 import re
 import subprocess
@@ -57,3 +58,17 @@ def test_the_browser_lane_runs_the_workflows_suites():
     assert "< <(web_suites)" in lane and '"${suites[@]}"' in lane
     assert "MOYBYTE_REQUIRE_WEB_E2E=1" in lane and "skipped" in lane
     assert 'step "browser suites in real Chrome, none skipped" browser_suites' in script
+
+
+def test_every_browser_suite_is_on_the_drive_step():
+    """A suite gated on MOYBYTE_WEB_E2E runs nowhere else: one left off the
+    drive step rots unseen (first_run and desk_input did)."""
+    text = (ROOT / ".github" / "workflows" / "web-e2e.yml").read_text()
+    drive = text[text.index("- name: Drive the hosted console in real Chrome"):]
+    drive = drive[:drive.index("- name:", 1)]
+    named = set(re.findall(r"tests/(\w+\.py)", drive))
+    gated = {p.name for p in (ROOT / "tests").glob("test_*.py")
+             if p.name != Path(__file__).name
+             and "MOYBYTE_WEB_E2E" in p.read_text(encoding="utf-8")}
+    assert gated - named == set(), "add them to web-e2e.yml's drive step"
+    assert {p.name for p in (ROOT / "tests").glob("test_web_*_e2e.py")} <= named
