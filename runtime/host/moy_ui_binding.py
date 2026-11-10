@@ -447,6 +447,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_at", [c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_dup", [c.c_void_p], c.c_char_p),
     ("moy_ui_api_lost", [c.c_void_p], _I),
+    ("moy_ui_over_size", [], c.c_size_t),
 )
 
 
@@ -461,8 +462,10 @@ class _Over(c.Structure):
                 ("axis_x", c.c_int8), ("snap", c.c_int8), ("has_offset", c.c_int8),
                 ("offset", c.c_int32), ("spill", c.c_int16), ("has_keep", c.c_int8), ("whole", c.c_int8),
                 ("keep", c.c_int32), ("over_x", c.c_int16), ("over_y", c.c_int16),
-                ("over_w", c.c_int16), ("over_h", c.c_int16), ("has_across", c.c_int8),
-                ("across_first", c.c_int16), ("across_pitch", c.c_int16), ("at", c.c_int16)]
+                ("over_w", c.c_int16), ("over_h", c.c_int16), ("shift", c.c_int8),
+                ("fade", c.c_int16), ("has_across", c.c_int8),
+                ("across_first", c.c_int16), ("across_pitch", c.c_int16), ("at", c.c_int16),
+                ("signal", c.c_int8), ("values", _Span), ("check", c.c_int8)]
 
 
 class _Line(c.Structure):

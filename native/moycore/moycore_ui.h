@@ -132,6 +132,8 @@ static int8_t moycore_ui_flag(lua_State *L, int t, const char *key)
 
 /* The override table at stack index `i` into *o. An `id` and a `hint` string
  * are left on the stack, so the spans stay valid for the call. */
+static const char *moycore_ui_items(lua_State *L, int i, size_t *len);
+
 static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *o)
 {
     moy_ui_over_none(o);
@@ -156,6 +158,17 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
         o->axis_x = (int8_t)(n == 1 && a[0] == 'x');
     }
     lua_pop(L, 1);
+    o->check = (int8_t)(moycore_ui_flag(L, i, "check") == 1);
+    lua_getfield(L, i, "values");
+    if (lua_type(L, -1) == LUA_TTABLE) {
+        size_t vn = 0;
+        // the joined text stays on the stack under the table while the verb runs
+        const char *v = moycore_ui_items(L, lua_absindex(L, -1), &vn);
+        o->values.p = (const uint8_t *)v;
+        o->values.n = (uint16_t)(vn > 0xFFFFu ? 0xFFFFu : vn);
+    } else {
+        lua_pop(L, 1);
+    }
     lua_getfield(L, i, "signal");
     if (lua_isnumber(L, -1)) {
         lua_Integer sg = lua_tointeger(L, -1);

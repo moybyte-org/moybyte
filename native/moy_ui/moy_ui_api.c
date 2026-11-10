@@ -116,6 +116,10 @@ static void name_copy(char *dst, moy_ui_span_t t) {
     dst[n] = 0;
 }
 
+size_t moy_ui_over_size(void) {
+    return sizeof(moy_ui_over_t);
+}
+
 void moy_ui_over_none(moy_ui_over_t *o) {
     o->fill = o->ink = o->border = MOY_UI_O_NONE;
     o->id.p = NULL;
@@ -140,6 +144,9 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->shift = 0;
     o->fade = 0;
     o->signal = 0;
+    o->values.p = NULL;
+    o->values.n = 0;
+    o->check = 0;
 }
 
 int32_t mua_word(const uint8_t *w, int i) {
@@ -255,6 +262,17 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                     o->signal = (int8_t)(sg < 0 ? 0 : sg > 4 ? 5 : sg + 1);
                     at += 4u;
                 }
+                if ((fl & MOY_UI_O_VALUES) && n - at >= 4u) {
+                    int32_t vn = mua_word(w + at, 0);
+                    at += 4u;
+                    if (vn < 0 || (size_t)vn > n - at || vn > 0xffff) {
+                        return MOY_UI_BAD;
+                    }
+                    o->values.p = w + at;
+                    o->values.n = (uint16_t)vn;
+                    at += (size_t)vn;
+                }
+                o->check = (int8_t)((fl & MOY_UI_O_CHECK) != 0);
             }
         }
     }
@@ -269,7 +287,8 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 const moy_ui_over_t *mua_over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
-                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {NULL, 0},
+                                       0};
     return o != NULL ? o : &none;
 }
 
@@ -3218,6 +3237,22 @@ void mua_rows_note(moy_ui_ctx_t *c, uint32_t id, int row, int top) {
     }
 }
 
+// Field i of NUL-separated `t` (empty past its end).
+static moy_ui_span_t list_field(moy_ui_span_t t, int i) {
+    size_t at = 0;
+    int k = 0;
+    for (size_t j = 0; j <= t.n; j++) {
+        if (j == t.n || t.p[j] == 0) {
+            if (k == i) {
+                return (moy_ui_span_t){t.p + at, (uint16_t)(j - at)};
+            }
+            at = j + 1;
+            k++;
+        }
+    }
+    return (moy_ui_span_t){t.p, 0};
+}
+
 int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                         const uint8_t *items, size_t len, int32_t cur, const moy_ui_over_t *o) {
     o = mua_over(o);
@@ -3313,6 +3348,15 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                 moy_ui_row_t r;
                 row_init(&r, t, c->fs, col);
                 moy_ui_box_t ib = {b.x, (int16_t)ry, b.w, (int16_t)rh};
+                int rpad = mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
+                int cs = (c->cls ? 14 : 12) * c->fs;
+                if (o->values.p != NULL) {
+                    r.value = list_field(o->values, i);
+                    r.value_ink = (int16_t)moy_ui_token(s->look, MOY_UI_T_INK_DIM);
+                }
+                if (o->check == 1) {
+                    r.pad_right = (int16_t)(rpad + cs + 6 * c->fs);   // the check's column
+                }
                 int f = MOY_UI_F_EDGE | (i == cur ? MOY_UI_F_ON : 0)
                         | (disabled ? MOY_UI_F_DISABLED : 0);
                 if ((st & MOY_UI_ST_FOCUS) && o->mark != 0 && i == row) {
@@ -3324,6 +3368,14 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                          : (st & MOY_UI_ST_HOVER) ? MOY_UI_HOVER : -1;
                 }
                 moy_ui_row(s, ib, MOY_UI_K_ROW_LIST, f, ia, &r, MOY_UI_PHASE_ALL);
+                if (o->check == 1 && i == cur) {
+                    moy_ui_box_t cb = {(int16_t)(ib.x + ib.w - rpad - cs),
+                                       (int16_t)(ry + moy_ui_fdiv(rh - cs, 2)), (int16_t)cs,
+                                       (int16_t)cs};
+                    moy_ui_icon_in(s, moy_ui_icon_slot((const uint8_t *)"check", 5),
+                                   moy_ui_icon_glyph((const uint8_t *)"check", 5), cb,
+                                   moy_ui_token(s->look, MOY_UI_T_VALUE), c->fs);
+                }
             }
             at = e + 1;
         }

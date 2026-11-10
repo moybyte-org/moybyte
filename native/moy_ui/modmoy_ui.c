@@ -2356,7 +2356,7 @@ static int8_t over_flag(mp_obj_t v) {
 enum {
     OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
     OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
-    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_COUNT
+    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_VALUES, OV_CHECK, OV_COUNT
 };
 
 // A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
@@ -2401,6 +2401,8 @@ static int over_slot(qstr q) {
         case MP_QSTR_shift: return OV_SHIFT;
         case MP_QSTR_fade: return OV_FADE;
         case MP_QSTR_signal: return OV_SIGNAL;
+        case MP_QSTR_values: return OV_VALUES;
+        case MP_QSTR_check: return OV_CHECK;
         default: return -1;
     }
 }
@@ -2426,6 +2428,9 @@ static void over_vals(mp_map_t *m, mp_obj_t *v) {
 
 // The override table (§3) straight from the app's dict, as runtime/toolkit/ui.py's
 // block reads: no block is built, so a verb given a table allocates nothing.
+#define OPTS_BUF 512
+static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out);
+
 static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     mp_obj_t vals[OV_COUNT];
     over_vals(mp_obj_dict_get_map(d), vals);
@@ -2536,6 +2541,19 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         mp_int_t g = mp_obj_get_int_truncated(v);
         out->signal = (int8_t)(g < 0 ? 0 : g > 4 ? 5 : g + 1);
     }
+    v = vals[OV_VALUES];
+    if (v != MP_OBJ_NULL) {
+        // a list's secondary texts, joined into the module's own buffer
+        static uint8_t joined[OPTS_BUF];
+        mp_buffer_info_t b;
+        opts_of(v, joined, &b);
+        out->values.p = (const uint8_t *)b.buf;
+        out->values.n = (uint16_t)(b.len > 0xffff ? 0xffff : b.len);
+    }
+    v = vals[OV_CHECK];
+    if (v != MP_OBJ_NULL) {
+        out->check = mp_obj_is_true(v);
+    }
 }
 
 static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
@@ -2560,7 +2578,6 @@ static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
 // `buf` (OPTS_BUF bytes, the caller's) or, where they run longer, into the
 // heap. runtime/toolkit/ui.py's `_opts` hands a sequence straight over where the
 // module takes one (`opts_seq`), so a verb given its options builds nothing.
-#define OPTS_BUF 512
 static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
     if (!mp_obj_is_type(o, &mp_type_list) && !mp_obj_is_type(o, &mp_type_tuple)) {
         mp_get_buffer_raise(o, out, MP_BUFFER_READ);

@@ -415,6 +415,15 @@ if ui.button("Send again", "primary") then resend(m) end
 ui.popover()
 ```
 
+**A list says more on its right.** `o.values` gives each `ui.list` row a
+secondary text in the dim ink, and `o.check` marks the current row with
+the check icon:
+
+```lua
+region = ui.list("Region", {"EU_868", "US"}, region,
+                 {values = {"Europe", "United States"}, check = true})
+```
+
 **Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
 "Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
 `cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,

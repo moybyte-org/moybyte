@@ -40,3 +40,6 @@ def _draw():
         ui.button("Send again", "primary")
         ui.popover()
         ui.focus("Send again")
+    elif page == 5:
+        ui.list("Region", ["EU_868", "US", "CN"], 1,
+                {"values": ["Europe", "United States", "China"], "check": True})

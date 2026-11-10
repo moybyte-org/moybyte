@@ -37,5 +37,8 @@ function _draw()
     ui.button("Send again", "primary")
     ui.popover()
     ui.focus("Send again")
+  elseif page == 5 then
+    ui.list("Region", {"EU_868", "US", "CN"}, 2,
+            {values = {"Europe", "United States", "China"}, check = true})
   end
 end

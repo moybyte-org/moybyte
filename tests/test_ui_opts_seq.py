@@ -70,6 +70,7 @@ BUBBLES = (("in", {"head": "Ana Ridge", "signal": 2, "lines": 1, "id": "b0"}),
            ("out", {"tone": "failed", "status": "Not sent", "max": 0.5, "anchor": True}),
            ("out", None))
 SIGNAL = {"signal": 3}
+REGION = {"values": ("Europe", "United States", "China"), "check": True}
 SHORT = [False]
 OUT = [0] * 5
 
@@ -98,6 +99,8 @@ def page():
         ui.bubble("a message long enough to wrap and be cut", BUBBLES[i][0], BUBBLES[i][1])
     ui.at(4, 130, 230, 20)
     ui.info("Signal", "-104 dBm", SIGNAL)
+    ui.at(4, 150, 230, 48)
+    ui.list("Region", WORDS, 1, REGION)
     ui.end()
     return out
 

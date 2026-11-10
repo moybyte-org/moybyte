@@ -1005,3 +1005,14 @@ def test_a_parts_press_with_no_page_to_drag_stays_its_own_through_a_drag():
     assert got["st"] & ui.PRESSED and got["at"] == (40, 70)
     r.frame(ptr=(60, 90, 1))
     assert got["st"] & ui.ACTIVATED and got["at"] == (40, 70)
+
+
+def test_the_hosts_mirror_of_the_override_block_is_the_engines_struct():
+    """The host binding parses an override block into its ctypes mirror of
+    moy_ui_over_t (runtime/host/moy_ui_binding.py's _Over), which the engine
+    writes whole: a key added to the C struct and not to the mirror writes
+    past the mirror's end."""
+    import ctypes
+    from runtime import glass_binding
+    from runtime.moy_ui_binding import _Over
+    assert ctypes.sizeof(_Over) == glass_binding._lib().moy_ui_over_size()

@@ -210,6 +210,11 @@ typedef struct {
     // An info or a link row: the signal glyph (moy_ui.h's moy_ui_signal)
     // before its value, its lit bars + 1 (0: no glyph).
     int8_t signal;
+    // A list: each row's secondary text, NUL-separated, at its right in the
+    // dim ink (p NULL: none); `check` (0 or 1) the check icon at the
+    // current row's right, its column kept on every row.
+    moy_ui_span_t values;
+    int8_t check;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -229,9 +234,13 @@ typedef struct {
 #define MOY_UI_O_SHIFT 524288       // and `shift`
 #define MOY_UI_O_FADE 1048576       // and `fade`, its word after the at's
 #define MOY_UI_O_SIGNAL 2097152     // and `signal` (0..4 bars lit), its word after the fade's
+#define MOY_UI_O_VALUES 4194304     // and `values`, its length's word and its text after the signal's
+#define MOY_UI_O_CHECK 8388608      // and `check`
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
+// sizeof(moy_ui_over_t): what a binding's mirror of it is held to.
+size_t moy_ui_over_size(void);
 // The block of `n` bytes at `w` (NULL or 0: every key absent) into *o, its id
 // pointing into the block. MOY_UI_BAD where it is short or its id overruns.
 int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n);

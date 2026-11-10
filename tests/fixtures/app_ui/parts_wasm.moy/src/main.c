@@ -16,7 +16,7 @@ int32_t pmem(int32_t slot, int32_t v, int32_t write)
 // An override block (moy_ui_api.h, docs/ui_api_2026-10.md section 3) naming
 // only the id: nine words, every key but the id's length absent (-1), then
 // the id's bytes. Its length in over_n.
-static uint8_t over_buf[64];
+static uint8_t over_buf[128];
 static uint32_t over_n;
 
 static const void *over_id(const char *id, uint32_t n) {
@@ -39,6 +39,21 @@ static const void *over_signal(int32_t bars) {
         over_buf[i] = (uint8_t)(w[i / 4] >> (8 * (i % 4)));
     }
     over_n = 48;
+    return over_buf;
+}
+
+// An override block naming only a list's `values` (NUL-separated) and
+// `check`: the nine words, no hint, the flags word's MOY_UI_O_VALUES and
+// MOY_UI_O_CHECK, the values' length and their text.
+static const void *over_values(const char *v, uint32_t n) {
+    int32_t w[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 4194304 | 8388608, (int32_t)n};
+    for (uint32_t i = 0; i < 48; i++) {
+        over_buf[i] = (uint8_t)(w[i / 4] >> (8 * (i % 4)));
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        over_buf[48 + i] = (uint8_t)v[i];
+    }
+    over_n = 48 + n;
     return over_buf;
 }
 
@@ -95,5 +110,8 @@ EXPORT(_draw) void _draw(void) {
         ui_button(S("Send again"), 1, NULL, 0);
         ui_popover("", 0, 0, NULL, 0);
         ui_focus(S("Send again"), NULL, 0);
+    } else if (page == 5) {
+        ui_list(S("Region"), S("EU_868\0US\0CN"), 1,
+                over_values(S("Europe\0United States\0China")), over_n);
     }
 }
