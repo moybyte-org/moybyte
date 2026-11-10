@@ -171,14 +171,20 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   fragmented allocation takes every byte and every big cart fails to load until
   a hard reset.
 - **The WiFi radio is a LEASE (2026-09-07)**: off unless something holds it.
-  `Workstation.wifi_hold(tag, pid=None)` powers the STA up and the last
-  `wifi_release(tag, pid=None)` powers it down (`esp_wifi_stop`), which keeps the S3's
-  WLAN-vs-LCD-DMA internal-RAM fight to when the network is needed. The holders
-  are `web` (released when the webhost's socket closes), `update` (taken before
+  The holds are the lease table's radio rows (`native/moy_kernel/moy_lease.h`,
+  THE RADIO), and the station's power follows them in C
+  (`native/moy_net/moy_net.h`, THE BOOK): the first holder powers the STA up
+  and the last out powers it down (`esp_wifi_stop`), from whichever task
+  changed the rows, which keeps the S3's WLAN-vs-LCD-DMA internal-RAM fight to
+  when the network is needed. Python's `Workstation.wifi_hold(tag, pid=None)`
+  and `wifi_release(tag, pid=None)` take and drop rows of that table; a
+  compiled program's http handle and the media service take theirs in C. The
+  holders are `web` (released when the webhost's socket closes), `update` (taken before
   the hand-off releases `web`), `settings` (the WIFI panel), `cart` (a run with
   the "network" permission), `link` (a match; taken before `link.start()`),
   `carts` (the Get Carts app while it fetches an index or a cart), `http`
-  (an app's `moybyte.http` request while it runs, `runtime/system/dev_http.py`)
+  (an app's `moybyte.http` request while it runs: `runtime/system/dev_http.py`
+  for a Python app, the kernel's http handle for a compiled one),
   `media` (the media service's run while a URL of its list may play, held
   under the run's own pid and let go by its end in C,
   `runtime/system/dev_media.py`), `ssh` (the SSH server while a password
@@ -196,6 +202,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   it outlives a soft reset, and a new VM puts it down unless the kernel's
   ESP-NOW link rides it. The Zero is outside this: WiFi is its only I/O, and
   it keeps the port's station for its setup access point.
+- **A process's devices are the kernel's handle table**
+  (`native/moy_kernel/moy_dev.h`), answered on the calling program's own task:
+  leases, pins (gpio, pins, uart, spi, i2c, pwm, adc), lora, mic, midi, http,
+  usb and ble are C (`moy_dev.c`, `moy_dev_kinds.c`); camera, media and net
+  are Python (`runtime/system/dev_handles.py`).
 - **The frame never waits on the radio (2026-11-06)**: on a P4 every
   `esp_wifi_*` call is a round trip to the C6, and a blocking scan, a join's
   poll or a link wait held the whole desk for seconds. The console asks and
