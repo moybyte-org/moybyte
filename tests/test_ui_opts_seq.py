@@ -77,6 +77,7 @@ HOME = {"values": ("2 min", "", "1 h"), "subs": ("Gate opens at seven", "Snow", 
         "tags": ("Public", "", ""), "marks": ("", "lock", "lock")}
 CARD = {"card": True}
 TAG = {"tag": "Public"}
+DFOCUS = {"focus": "Cancel"}
 NOTE = ("Every radio on a mesh uses one preset.", "On another one you hear none.")
 SHORT = [False]
 OUT = [0] * 5
@@ -117,6 +118,9 @@ def page():
     ui.group()
     ui.link("LongFast", "", TAG)
     ui.note("warn", NOTE)
+    ui.dialog("Switch?", ("Cancel", "Switch"), "primary", DFOCUS)
+    ui.toggle("Keep", True)
+    ui.dialog()
     ui.end()
     return out
 

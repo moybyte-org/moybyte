@@ -460,6 +460,22 @@ ui.note("warn", {"Every radio on a mesh uses one preset.",
 if ui.link("LongFast", "", {tag = "Public"}) then open_channel() end
 ```
 
+**A field is a row's value.** In a group, `ui.field(label, text, max)` sits
+at the row's right as wide as its text, cut at `max` bytes; a text wider
+than it shows its tail after an ellipsis. `{disabled = true}` draws it off
+and takes no focus. A confirm opens on the button `o.focus` names:
+
+```lua
+ui.group("This node")
+name = ui.field("Name", name, 39)
+short = ui.field("Short name", short, 4)
+ui.group()
+ui.field("", "", 200, {hint = "Replaced by Srbija", disabled = true})
+if ui.dialog("Switch to ShortFast?", {"Cancel", "Switch"}, "primary",
+             {focus = "Cancel"}) == 2 then switch() end
+ui.dialog()
+```
+
 **A settings page shows whole rows.** `{snap = true}` on `ui.page` or
 `ui.scroll` leaves out a row the view's edge would cut (a group's caption
 goes with its first row, a list's rows are each a row), and the band the

@@ -30,6 +30,10 @@ P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
      of a list's rows) and the "More below" cue in the band the foot leaves.
   9  ui.note: a warning's and a paste note's card on the page; a link's
      and an info's tag (`o.tag`).
+ 10  fields: two in a group's rows at their `max` (the short name given five
+     bytes keeps four), an off one (`o.disabled`) showing its hint, and a
+     focused one whose text runs past it, its tail led by an ellipsis.
+ 11  a dialog with a stop in its body opening on its Cancel (`o.focus`).
 """
 
 import os
@@ -47,7 +51,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+PAGES = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 

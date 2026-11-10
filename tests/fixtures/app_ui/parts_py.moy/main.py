@@ -94,3 +94,18 @@ def _draw():
         ui.info("Key", "256-bit", {"tag": "Private"})
         ui.group()
         ui.note("paste", ["Your clipboard holds a channel link."])
+    elif page == 10:
+        ui.group("This node")
+        ui.field("Name", "moybyte-beef", 39)
+        ui.field("Short name", "BEEFY", 4)
+        ui.info("Id", "!A1B2BEEF")
+        ui.group()
+        ui.field("", "", 200, {"hint": "Replaced by Srbija", "disabled": True})
+        ui.field("", "Headed up the ridge trail now, the weather is turning", 200, {"id": "long", "hint": "Message"})
+        ui.focus("long")
+    elif page == 11:
+        ui.label("Behind")
+        ui.dialog("Switch to ShortFast?", ("Cancel", "Switch"), "primary", {"focus": "Cancel"})
+        ui.label("You hear only radios on ShortFast.")
+        ui.toggle("Keep channels", True)
+        ui.dialog()

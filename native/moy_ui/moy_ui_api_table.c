@@ -863,6 +863,9 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     o = mua_over(o);
     if (len > cap) {
         len = cap;
+        while (len > 0 && (buf[len] & 0xC0) == 0x80) {
+            len--;                  // never half a character
+        }
     }
     int stacked;
     // in a group the field fits the row (moy_ui_field); elsewhere the row
@@ -1129,7 +1132,11 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         moy_ui_box_t bb = {(int16_t)x, (int16_t)by, (int16_t)bw[i], (int16_t)rh};
         // `o.disabled`: the last button (the dialog's verb) is off, no stop
         int off = o->disabled == 1 && i == nb - 1;
-        int st = off ? 0 : mua_stop(c, mua_hash(t.p, t.n, id), bb, STOP_DLG_BTN, t);
+        uint32_t bid = mua_hash(t.p, t.n, id);
+        if (!off && o->focus.p != NULL && o->focus.n == t.n && memcmp(o->focus.p, t.p, t.n) == 0) {
+            c->dlg_open = bid;          // focus opens here when the dialog opens
+        }
+        int st = off ? 0 : mua_stop(c, bid, bb, STOP_DLG_BTN, t);
         if (st < 0) {
             st = 0;
         }

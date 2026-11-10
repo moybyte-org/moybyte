@@ -92,6 +92,20 @@ static void over_text(const char *t, uint32_t n) {
     }
 }
 
+// A field's block: its id (NULL none), its hint and `disabled` (-1 absent).
+static void over_field(const char *id, uint32_t idn, const char *hint, uint32_t hn,
+                       int32_t disabled) {
+    int32_t w[9] = {-1, -1, -1, id ? (int32_t)idn : -1, -1, disabled, -1, -1, -1};
+    over_n = 0;
+    for (int i = 0; i < 9; i++) {
+        over_word(w[i]);
+    }
+    for (uint32_t i = 0; id && i < idn; i++) {
+        over_buf[over_n++] = (uint8_t)id[i];
+    }
+    over_text(hint, hn);
+}
+
 EXPORT(_layout) void _layout(int32_t w, int32_t h, int32_t fs) {
     (void)w;
     (void)h;
@@ -209,5 +223,26 @@ EXPORT(_draw) void _draw(void) {
         ui_info(S("Key"), S("256-bit"), over_buf, over_n);
         ui_group("", 0, NULL, 0);
         ui_note(S("paste"), S("Your clipboard holds a channel link."));
+    } else if (page == 10) {
+        static char name[39] = "moybyte-beef", shrt[4] = "BEEF", msg[200] = "Headed up the ridge trail now, the weather is turning";
+        static char off[200];
+        ui_group(S("This node"), NULL, 0);
+        ui_field(S("Name"), name, sizeof(name), 12, NULL, 0);
+        ui_field(S("Short name"), shrt, sizeof(shrt), 4, NULL, 0);
+        ui_info(S("Id"), S("!A1B2BEEF"), NULL, 0);
+        ui_group("", 0, NULL, 0);
+        over_field(NULL, 0, S("Replaced by Srbija"), 1);
+        ui_field("", 0, off, sizeof(off), 0, over_buf, over_n);
+        over_field(S("long"), S("Message"), -1);
+        ui_field("", 0, msg, sizeof(msg), 53, over_buf, over_n);
+        ui_focus(S("long"), NULL, 0);
+    } else if (page == 11) {
+        ui_label(S("Behind"), NULL, 0);
+        over_begin(268435456 | 8);          // MOY_UI_O_FOCUS, and no wash given
+        over_text(S("Cancel"));
+        ui_dialog(S("Switch to ShortFast?"), S("Cancel\0Switch"), 1, over_buf, over_n);
+        ui_label(S("You hear only radios on ShortFast."), NULL, 0);
+        ui_toggle(S("Keep channels"), 1, NULL, 0);
+        ui_dialog("", 0, "", 0, 0, NULL, 0);
     }
 }

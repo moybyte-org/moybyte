@@ -165,14 +165,19 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     lua_pop(L, 1);
     o->check = (int8_t)(moycore_ui_flag(L, i, "check") == 1);
     o->card = (int8_t)(moycore_ui_flag(L, i, "card") == 1);
-    lua_getfield(L, i, "tag");
-    if (lua_type(L, -1) == LUA_TSTRING) {
-        size_t tn = 0;
-        const char *t = lua_tolstring(L, -1, &tn);   /* stays on the stack while the verb runs */
-        o->tag.p = (const uint8_t *)t;
-        o->tag.n = (uint16_t)(tn > 0xFFFFu ? 0xFFFFu : tn);
-    } else {
-        lua_pop(L, 1);
+    /* a tag's and a dialog's focus's text stay on the stack while the verb runs */
+    static const char *const texts[] = {"tag", "focus"};
+    moy_ui_span_t *tspans[] = {&o->tag, &o->focus};
+    for (int k = 0; k < 2; k++) {
+        lua_getfield(L, i, texts[k]);
+        if (lua_type(L, -1) == LUA_TSTRING) {
+            size_t tn = 0;
+            const char *t = lua_tolstring(L, -1, &tn);
+            tspans[k]->p = (const uint8_t *)t;
+            tspans[k]->n = (uint16_t)(tn > 0xFFFFu ? 0xFFFFu : tn);
+        } else {
+            lua_pop(L, 1);
+        }
     }
     /* a list's texts a row: each joined text stays on the stack over its
      * table while the verb runs */
@@ -669,6 +674,9 @@ static int moycore_ui_field(lua_State *L)
     if (cap > 255) cap = 255;
     uint8_t buf[255];
     size_t len = n < (size_t)cap ? n : (size_t)cap;
+    while (len > 0 && len < n && ((uint8_t)text[len] & 0xC0) == 0x80) {
+        len--;                      /* never half a character */
+    }
     memcpy(buf, text, len);
     moy_ui_over_t o;
     int32_t v = (int32_t)len;

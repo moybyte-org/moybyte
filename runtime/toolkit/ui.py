@@ -222,6 +222,7 @@ def _block(o):
     rows = [o.get(k) for k in _ROWS]
     card = o.get("card")
     tag = o.get("tag")
+    foc = o.get("focus")
     rmask = 0
     for i in range(5):
         if rows[i] is not None:
@@ -231,7 +232,7 @@ def _block(o):
             or axis or snap or offset is not None or spill is not None or keep is not None
             or ov is not None or whole or across is not None or at is not None or shift
             or fade or sig is not None or vals is not None or check or rmask
-            or card or tag is not None):
+            or card or tag is not None or foc is not None):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
@@ -242,7 +243,8 @@ def _block(o):
                  | (1048576 if fade else 0) | (2097152 if sig is not None else 0)
                  | (4194304 if vals is not None else 0) | (8388608 if check else 0)
                  | (16777216 if wash == "view" else 0) | (33554432 if rmask else 0)
-                 | (67108864 if card else 0) | (134217728 if tag is not None else 0))
+                 | (67108864 if card else 0) | (134217728 if tag is not None else 0)
+                 | (268435456 if foc is not None else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -280,6 +282,9 @@ def _block(o):
     if tag is not None:
         tb = str(tag).encode("utf-8")
         tail += _pack("<i", len(tb)) + tb
+    if foc is not None:
+        fb = str(foc).encode("utf-8")
+        tail += _pack("<i", len(fb)) + fb
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -982,7 +987,12 @@ def field(label, text, max=32, o=None):
     it. An empty field shows `o`'s `hint`, dim; `o.border` (a role, "danger"
     for a field in error) is its box's border in place of its own."""
     t = _T
-    raw = str(text).encode("utf-8")[:max]
+    raw = str(text).encode("utf-8")
+    if len(raw) > max:
+        n = max
+        while n > 0 and (raw[n] & 0xC0) == 0x80:
+            n -= 1                  # never half a character
+        raw = raw[:n]
     b = bytearray(max)
     b[:len(raw)] = raw
     r = _C.api_field(t[0], t[1], t[2], label, b, len(raw), _over(o))
@@ -994,8 +1004,9 @@ def dialog(title=None, buttons=(), kind="primary", o=None):
     its `buttons` at its foot (the last of `kind`, the others normal) and its
     body the rows stacked until `dialog()` ends it; while it is drawn nothing
     under it takes input, and focus opens on its body's first stop, else its
-    first button. `o.disabled` turns its last button (its verb) off: drawn
-    as there and off, never a stop. The button activated this frame (from 0),
+    first button, or with `o.focus` the button of that label (a confirm
+    that changes something opens on Cancel). `o.disabled` turns its last
+    button (its verb) off: drawn as there and off, never a stop. The button activated this frame (from 0),
     -1 none."""
     t = _T
     if title is None:

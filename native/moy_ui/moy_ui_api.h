@@ -227,6 +227,9 @@ typedef struct {
     int8_t card;
     // An info's or a link's tag: a pill at its value's right (p NULL: none).
     moy_ui_span_t tag;
+    // A dialog's button focus opens on, by its label (p NULL: its body's
+    // first stop, else its first button).
+    moy_ui_span_t focus;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -253,6 +256,7 @@ typedef struct {
                                     // the values', then each list it names, its length's word
                                     // and its text, in the bits' order
 #define MOY_UI_O_CARD 67108864      // and `card`
+#define MOY_UI_O_FOCUS 268435456    // and `focus`, its length's word and its text after the tag's
 #define MOY_UI_O_TAG 134217728      // and `tag`, its length's word and its text after the rows'
 #define MOY_UI_OR_SUBS 1
 #define MOY_UI_OR_ICONS 2
@@ -561,6 +565,7 @@ typedef struct {
     // screen. dw_*: the last frame's, and the frames it has stood as it is
     // (dw_n, a dialog's rows frame: moy_ui_api_shift_plan).
     uint32_t dlg_id;
+    uint32_t dlg_open;              // the button a dialog opens on (its `focus`; 0: its first stop)
     moy_ui_box_t dlg_card;
     uint8_t dlg_held;
     int32_t dlg_gen;

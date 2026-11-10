@@ -3174,7 +3174,8 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     int on_card = card && !desk;
     uint16_t ink = pal(&d, on_card ? tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK)
                                    : tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
-    int focused = (flags & MOY_UI_F_FOCUS) != 0;
+    int disabled = (flags & MOY_UI_F_DISABLED) != 0;
+    int focused = !disabled && (flags & MOY_UI_F_FOCUS) != 0;
     // in a group, the row's focus mark, as a value row wears it, under the
     // label and the field (on a fill mark the field's ring takes the
     // mark's ink); elsewhere -- a dialog's body, a page -- the field's own
@@ -3216,9 +3217,13 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
         x += moy_ui_text_in(s, fl.id, 0, label, x, ty, mi >= 0 ? pal(&d, mi) : ink) + gap;
     }
     if (card) {
-        // in a group the field is the row's value: as wide as a slider's
-        // track, at the row's right, the label keeping the room left of it
-        int col = right - pm(&d, MOY_UI_M_VALUE_ROW_TRACK, 1);
+        // in a group the field is the row's value at its right: as wide as
+        // a slider's track, or as its text (else its hint) where that is
+        // wider, the label keeping the room left of it
+        moy_ui_span_t shown = text_.n ? text_ : hint;
+        int need = shown.n ? tw(&fl, shown.p, shown.n, sc) + 16 * d.fs + 2 * d.fs : 0;
+        int track = pm(&d, MOY_UI_M_VALUE_ROW_TRACK, 1);
+        int col = right - (need > track ? need : track);
         x = col > x ? col : x;
     }
     moy_ui_box_t f = {(int16_t)x, (int16_t)fy, (int16_t)(right - x), (int16_t)fh};
@@ -3245,28 +3250,43 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     }
     // a border the caller names (a field in error: the danger ink) is the
     // box's own, focused or not
-    rrect(&d, f.x, f.y, f.w, f.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
-          d.fs, edge >= 0 ? pal(&d, edge) : ring);
+    // off, the box is the page's `panel` in a `border` ring, its words dim
+    uint16_t box = pal(&d, disabled ? tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE)
+                                    : tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+    if (disabled) {
+        ring = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+    }
+    rrect(&d, f.x, f.y, f.w, f.h, r, 1, box, d.fs, edge >= 0 ? pal(&d, edge) : ring);
     // the text 8 pixels at the scale inside the box each side, the caret's
     // room kept inside that on the right
     int inner = 8 * d.fs;
     int tx = f.x + inner;
     int room = f.x + f.w - inner - tx - (focused ? 2 * d.fs : 0);
-    uint16_t tink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
-    // the text's tail shows where it is wider than the field
+    uint16_t tink = pal(&d, disabled ? tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM)
+                                     : tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
+    // the text's tail shows where it is wider than the field, led by an
+    // ellipsis, so the caret stays in view
     size_t from = 0;
-    while (from < text_.n && tw(&fl, text_.p + from, text_.n - from, sc) > room) {
-        from++;
-        while (from < text_.n && (text_.p[from] & 0xC0) == 0x80) {
+    int lead = 0;
+    if (text_.n && tw(&fl, text_.p, text_.n, sc) > room) {
+        lead = tw(&fl, s_dots, sizeof(s_dots), sc);
+        while (from < text_.n && tw(&fl, text_.p + from, text_.n - from, sc) > room - lead) {
             from++;
+            while (from < text_.n && (text_.p[from] & 0xC0) == 0x80) {
+                from++;
+            }
         }
+        moy_ui_span_t dots = {s_dots, sizeof(s_dots)};
+        moy_ui_text_in(s, fl.id, 0, dots, tx, ty, tink);
     }
     moy_ui_span_t tt = {text_.p + from, (uint16_t)(text_.n - from)};
-    int w = tt.n ? moy_ui_text_in(s, fl.id, 0, tt, tx, ty, tink) : 0;
+    int w = tt.n ? moy_ui_text_in(s, fl.id, 0, tt, tx + lead, ty, tink) + lead : 0;
     if (!tt.n && hint.n && room > 0) {
-        // the placeholder, in the disabled ink, as far as it fits
-        int hc = moy_ui_disabled() >= 0 ? moy_ui_disabled() : tok(&d, MOY_UI_T_INK_DIM,
-                                                                  MOY_UI_T_CHROME_INK_DIM);
+        // the placeholder, in the disabled ink (an off field's: the dim
+        // ink), as far as it fits
+        int hc = moy_ui_disabled() >= 0 && !disabled
+                     ? moy_ui_disabled()
+                     : tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM);
         size_t hn = moy_text_fit_px(fl.id, hint.p, hint.n, room, sc);
         moy_ui_span_t ht = {hint.p, (uint16_t)hn};
         moy_ui_text_in(s, fl.id, 0, ht, tx + (focused ? 2 * d.fs : 0), ty, pal(&d, hc));

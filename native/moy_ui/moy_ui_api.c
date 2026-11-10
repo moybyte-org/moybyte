@@ -155,6 +155,8 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->card = 0;
     o->tag.p = NULL;
     o->tag.n = 0;
+    o->focus.p = NULL;
+    o->focus.n = 0;
 }
 
 int32_t mua_word(const uint8_t *w, int i) {
@@ -313,6 +315,16 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                     o->tag.n = (uint16_t)tn;
                     at += (size_t)tn;
                 }
+                if ((fl & MOY_UI_O_FOCUS) && n - at >= 4u) {
+                    int32_t fn = mua_word(w + at, 0);
+                    at += 4u;
+                    if (fn < 0 || (size_t)fn > n - at || fn > 0xffff) {
+                        return MOY_UI_BAD;
+                    }
+                    o->focus.p = w + at;
+                    o->focus.n = (uint16_t)fn;
+                    at += (size_t)fn;
+                }
             }
         }
     }
@@ -329,7 +341,7 @@ const moy_ui_over_t *mua_over(const moy_ui_over_t *o) {
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {NULL, 0},
                                        0, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0},
-                                       0, {NULL, 0}};
+                                       0, {NULL, 0}, {NULL, 0}};
     return o != NULL ? o : &none;
 }
 
@@ -1124,6 +1136,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     int n = c->n_prev;
 
     // A dialog drawn last frame takes the input: only its stops are kept.
+    uint32_t open_on = c->dlg_open;
+    c->dlg_open = 0;
     c->modal = 0;
     for (int i = 0; i < n && !c->modal; i++) {
         c->modal = (v[i].flags & STOP_MODAL) != 0;
@@ -1145,7 +1159,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             if (c->focus && !c->modal_from) {
                 c->modal_from = c->focus;
             }
-            int first = -1;
+            int first = open_on ? mua_find(v, n, open_on) : -1;
             for (int i = 0; i < n && first < 0; i++) {
                 if (!(v[i].flags & (STOP_PAGE | STOP_DLG_BTN))) {
                     first = i;

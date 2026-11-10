@@ -2363,7 +2363,7 @@ enum {
     OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
     OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
     OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_VALUES, OV_CHECK,
-    OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS, OV_CARD, OV_TAG, OV_COUNT
+    OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS, OV_CARD, OV_TAG, OV_FOCUS, OV_COUNT
 };
 
 // A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
@@ -2417,6 +2417,7 @@ static int over_slot(qstr q) {
         case MP_QSTR_marks: return OV_MARKS;
         case MP_QSTR_card: return OV_CARD;
         case MP_QSTR_tag: return OV_TAG;
+        case MP_QSTR_focus: return OV_FOCUS;
         default: return -1;
     }
 }
@@ -2587,6 +2588,10 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     v = vals[OV_TAG];
     if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
         out->tag = span_of(v);
+    }
+    v = vals[OV_FOCUS];
+    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
+        out->focus = span_of(v);
     }
 }
 
