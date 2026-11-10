@@ -482,6 +482,66 @@ def test_a_wasi_service_listens_and_its_alarm_rings_through_a_vm_stop(
     moy_evq.close(peer)
 
 
+def test_a_compiled_program_stops_its_app_s_services_through_a_vm_stop(
+        tmp_path, elf_built, wasi_built, fresh, monkeypatch):
+    """`service_stop` is the kernel's where a kernel tier runs the service
+    (native/os_calls.json, how "here"): with the VM down, a compiled
+    program's stop hangs up its app's ELF, WASI and Lua service on its own
+    task, each runs its own stop and ends, and `service_running` no longer
+    finds it. The next VM's scheduler ends each as a stop asked (moy_evq.h,
+    THE STOPS ASKED): exited 0, under a restart policy of "always" too,
+    started again by none."""
+    import moy_app
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    for built, name in ((elf_built, "elf_svc.moy"), (wasi_built, "wasi_svc.moy")):
+        shutil.copytree(built, str(carts / name))
+    _cart(carts, "t.tick", "service.lua", LUA_SVC)
+    from runtime.host_app import build_workstation
+    ws = build_workstation(str(carts))
+    if not all(t in ws.runtimes for t in ("elf", "wasm")) or S._svc() is None:
+        pytest.skip("no ELF, wasm or Lua tier on this host")
+    s = fresh
+    since = L.next()
+    lua = S.start_cart(ws, _shelf(ws, "t.tick"), s)
+    elf = S.start_cart(ws, _shelf(ws, "elf.svc"), s)
+    wasi = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+    for name in ("elf.svc", "wasi.svc", "t.tick"):
+        s.set_policy(name, S.ALWAYS)
+    assert _polled(s, lambda: all(any(t in ("listening", "started") for t in _texts(since, p))
+                                  for p in (elf, wasi)))
+    peer = L.spawn("peer")
+    rec, door = _stop(ws, s)
+    app = ws.app_abi
+    here = moy_app._lib.moy_app_role_here
+    here.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                     ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t]
+    here.restype = ctypes.c_int32
+    stop = moy_app.table().index("moybyte.service_stop")
+    running = moy_app.table().index("moybyte.service_running")
+    for name, pid in (("elf.svc", elf), ("wasi.svc", wasi), ("t.tick", lua)):
+        g = app.grant(name, [], run=True, owner=peer)
+        assert here(app._p, g, running, None, 0, None, 0) == pid, name
+        assert here(app._p, g, stop, None, 0, None, 0) == 1, name
+        assert here(app._p, g, running, None, 0, None, 0) == -9, name    # NEEDS_VM
+        assert here(app._p, g, stop, None, 0, None, 0) == -9, name
+        app.end(g)
+    t0 = time.monotonic()
+    while not (any(t.startswith("stop ") for t in _texts(since, elf))
+               and any(t.startswith("stopped after") for t in _texts(since, wasi))):
+        assert time.monotonic() - t0 < 5, "each runs its own stop during the VM stop"
+        _during(10, _lua_step)
+    s2, _started = _back(ws, rec, door, monkeypatch)
+    for p in (elf, wasi, lua):
+        assert _polled(s2, lambda: s2.procs[p].state == S.EXITED), p
+        assert s2.procs[p].code == 0, (p, _texts(since, p))
+        assert "stop" in _texts(since, p), "its end is a stop asked"
+    s2.tick()
+    assert [(r.pid, r.name) for r in s2.services() if r.state != S.EXITED
+            and r.name in ("elf.svc", "wasi.svc", "t.tick")] == [], \
+        "a stop asked restarts nothing"
+
+
 def test_a_compiled_program_s_alarm_needs_alarms(tmp_path, wasi_built, fresh):
     ws = _two_ws(tmp_path, [(wasi_built, "wasi_svc.moy", {"receives": ["wake"]})])
     since = L.next()

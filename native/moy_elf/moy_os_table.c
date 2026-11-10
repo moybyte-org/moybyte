@@ -249,7 +249,7 @@ int32_t moy_os_moy_service_start(void) {
 }
 
 int32_t moy_os_moy_service_stop(void) {
-    return moy_os_call(178u, MOY_OS_HOP, NULL, 0, NULL, 0u);   // moybyte.service_stop
+    return moy_os_call(178u, MOY_OS_HERE, NULL, 0, NULL, 0u);   // moybyte.service_stop
 }
 
 int32_t moy_os_moy_service_running(void) {

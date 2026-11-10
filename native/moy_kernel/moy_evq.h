@@ -241,6 +241,16 @@ uint32_t moy_evq_timers(uint32_t pid);
 // The due timers posted: the ms to the next one, UINT32_MAX for none.
 uint32_t moy_evq_timers_run(void);
 
+// THE STOPS ASKED: a service another process's `service_stop` hung up on
+// that process's own task (moy_app's service_stop row), its TERM given with
+// no VM; the console's scheduler takes each at its poll and stops it as its
+// own stop does (MOY_SERVICE_STOP_MS, then the KILL), so its end is a stop
+// asked, never a restart. moy_evq_term records `pid` (MOY_EVQ_PROCS kept at
+// most) and wants the poll; moy_evq_termed answers the next, oldest first, 0
+// for none.
+void moy_evq_term(uint32_t pid);
+uint32_t moy_evq_termed(void);
+
 // Every queue closed (a test's teardown).
 void moy_evq_reset(void);
 

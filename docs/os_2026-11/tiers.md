@@ -298,10 +298,10 @@ model's, below; `notify`, `award`, `progress`, `open_with` and `pick`, the
 console calls a native service posts on the VM's queue, their natives
 generated from the source; the wakes `every`, `after`, `at` and `cancel`;
 `log`; the files, `nav_open_app`, prefs, clipboard, device-handle (`dev_*`)
-and item rows, `service_running` and `share`, each its role table row for
+and item rows, `service_stop`, `service_running` and `share`, each its role table row for
 the grant the program's start made, run as a C program's is: hopped to the
 VM's task, or, for a row `how` "here" (the files, prefs and clipboard-write
-rows, the device handles, the wakes, `service_running`), run on the program's own task,
+rows, the device handles, the wakes, `service_stop`, `service_running`), run on the program's own task,
 hopped only where the kernel's half answers NEEDS_VM (`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its

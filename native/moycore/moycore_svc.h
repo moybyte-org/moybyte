@@ -183,6 +183,9 @@ int moycore_svc_reap(uint32_t h);
 // table's rows go in and out under the kernel's lock): moy_app's
 // service_running row (native/moy_app/moy_app.c, svc_row).
 uint32_t moycore_svc_of(const char *id, size_t n);
+// The same service's TERM asked (moycore_svc_stop's) from any task: its pid,
+// 0 for none (moy_app's service_stop row).
+uint32_t moycore_svc_term(const char *id, size_t n);
 // The rows' handles, in slot order (0 where empty).
 uint32_t moycore_svc_at(uint32_t slot);
 // Whether each service has a task of its own here (a board).

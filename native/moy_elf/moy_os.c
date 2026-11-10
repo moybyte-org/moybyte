@@ -3699,18 +3699,32 @@ static uint32_t services(moy_os_proc_t **out) {
     return n;
 }
 
-uint32_t moy_os_service_of(const char *id, size_t n) {
+static uint32_t service_find(const char *id, size_t n, bool term) {
     uint32_t pid = 0u;
     lock();
     for (uint32_t i = 0; i < MOY_OS_PROCS && pid == 0u; i++) {
         moy_os_proc_t *p = g_proc[i];
-        if (p != NULL && p->service && !p->hup && !p->ending && !p->reaped && p->argv != NULL
-            && strncmp(p->argv[0], id, n) == 0 && p->argv[0][n] == 0) {
+        if (p != NULL && p->service && !p->game && !p->hup && !p->ending && !p->reaped
+            && p->argv != NULL && strncmp(p->argv[0], id, n) == 0 && p->argv[0][n] == 0) {
             pid = p->pid;
+            if (term) {
+                p->hup = 1;
+            }
         }
     }
     unlock();
+    if (term && pid != 0u) {
+        moy_evq_kick(pid);
+    }
     return pid;
+}
+
+uint32_t moy_os_service_of(const char *id, size_t n) {
+    return service_find(id, n, false);
+}
+
+uint32_t moy_os_service_term(const char *id, size_t n) {
+    return service_find(id, n, true);
 }
 
 // THE WATCHDOG. Native code is not aborted where it stands by a timer: a

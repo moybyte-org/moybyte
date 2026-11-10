@@ -622,11 +622,19 @@ with `moybyte.service_start()`, `service_stop()` and `service_running()`,
 every tier's same rows (`native/os_calls.json`); the calls name no app, so
 they reach only the caller's own, and a start or a stop is asked and run by
 the shell at the next tick, never inside the caller's callback, the VM's
-queue or a compiled call (`runtime/system/scheduler.py`, AN APP'S OWN
+queue or a compiled call, a compiled program's stop of a kernel tier's
+service apart (below) (`runtime/system/scheduler.py`, AN APP'S OWN
 SERVICE; `docs/app_api_v1.md` §7 has the shape and the answers). A compiled
-program's `service_running` is the kernel's first, on its own task: the pid
-of a Lua, ELF or WASI service live under the app's id in its tier's table
-(`native/moy_app/moy_app.c`, svc_row), and the shell's answer otherwise.
+program's `service_running` and `service_stop` are the kernel's first, on
+its own task: running answers the pid of a Lua, ELF or WASI service live
+under the app's id in its tier's table (`native/moy_app/moy_app.c`,
+svc_row), and stop hangs that service up there (its TERM), VM or no VM, and
+names it to the scheduler, which ends it as a stop asked once a VM runs
+(`native/moy_kernel/moy_evq.h`, THE STOPS ASKED: its KILL past
+`MOY_SERVICE_STOP_MS`, no restart); the shell answers otherwise. A start
+stays the shell's, being consent, admission and policy: a compiled
+program's start during an S3's VM stop waits on the VM's queue and is
+answered once the VM is back (`native/moy_kernel/moy_vmq.h`, WITH NO VM).
 The install prompt says so: a service's lines, and an app's that declares
 its own service, end with "Runs in the background, and can do all of this
 with no window open"

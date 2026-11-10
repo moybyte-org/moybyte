@@ -184,6 +184,9 @@ moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id);
 // one not hung up, else 0. Any task may ask: moy_app's service_running row
 // (native/moy_app/moy_app.c, svc_row).
 uint32_t moy_wasi_service_of(const char *id, size_t n);
+// The same service hung up (moy_wasi_hangup's TERM) from any task: its pid,
+// 0 for none (moy_app's service_stop row).
+uint32_t moy_wasi_service_term(const char *id, size_t n);
 // Its stop, from any task: the event descriptor hangs up.
 void moy_wasi_hangup(moy_wasi_t *w);
 // Its run ended with `code` from any task, as proc_exit ends it, and its

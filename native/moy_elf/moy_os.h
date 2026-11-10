@@ -231,6 +231,9 @@ int moy_os_game_stop(uint32_t pid);
 // neither stopping nor ended, else 0. Any task may ask (under the table's
 // lock): moy_app's service_running row (native/moy_app/moy_app.c, svc_row).
 uint32_t moy_os_service_of(const char *id, size_t n);
+// The same service's event descriptor hung up (moy_os_stop's TERM, with no
+// wait) from any task: its pid, 0 for none (moy_app's service_stop row).
+uint32_t moy_os_service_term(const char *id, size_t n);
 
 // On the console's task, at the scheduler's poll (a board's runs when an end
 // or a kill wants the VM, moy_os_watch): every service that has ended swept -- main returned or exit called, or killed by the watchdog

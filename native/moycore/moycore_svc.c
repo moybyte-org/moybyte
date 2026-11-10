@@ -1323,7 +1323,7 @@ bool moycore_svc_tasks(void) {
     #endif
 }
 
-uint32_t moycore_svc_of(const char *id, size_t n) {
+static uint32_t svc_find(const char *id, size_t n, bool term) {
     uint32_t pid = 0u;
     if (n + 1u >= sizeof ((svc_t *)0)->id) {
         return 0u;
@@ -1337,12 +1337,26 @@ uint32_t moycore_svc_of(const char *id, size_t n) {
             && (s->state == MOYCORE_SVC_STARTING || s->state == MOYCORE_SVC_RUNNING)
             && strncmp(s->id + 1, id, n) == 0 && s->id[n + 1u] == 0) {
             pid = s->pid;
+            if (term) {
+                s->stop_req = 1;
+            }
         }
     }
     if (moy_lock_give != NULL) {
         moy_lock_give();
     }
+    if (term && pid != 0u) {
+        moy_evq_kick(pid);
+    }
     return pid;
+}
+
+uint32_t moycore_svc_of(const char *id, size_t n) {
+    return svc_find(id, n, false);
+}
+
+uint32_t moycore_svc_term(const char *id, size_t n) {
+    return svc_find(id, n, true);
 }
 
 uint32_t moycore_svc_step(uint32_t now_ms) {

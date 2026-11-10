@@ -322,16 +322,30 @@ static void svcs_lock(bool take) {
     }
 }
 
-uint32_t moy_wasi_service_of(const char *id, size_t n) {
+static uint32_t service_find(const char *id, size_t n, bool term) {
     uint32_t pid = 0u;
     svcs_lock(true);
     for (moy_wasi_t *w = s_svcs; w != NULL && pid == 0u; w = w->svc_next) {
         if (!w->hup && strncmp(w->argv[0], id, n) == 0 && w->argv[0][n] == 0) {
             pid = w->pid;
+            if (term) {
+                w->hup = 1;
+            }
         }
     }
     svcs_lock(false);
+    if (term && pid != 0u) {
+        moy_evq_kick(pid);
+    }
     return pid;
+}
+
+uint32_t moy_wasi_service_of(const char *id, size_t n) {
+    return service_find(id, n, false);
+}
+
+uint32_t moy_wasi_service_term(const char *id, size_t n) {
+    return service_find(id, n, true);
 }
 
 moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id) {

@@ -81,7 +81,7 @@ fields and calls `moy_os_call`, which runs it for the process's app run on the
 task that serves its session (the VM's), or reads what the look and the
 clipboard write where it is called, under the app ABI's seqlock, or runs a
 row `how` "here" names (the clipboard's write, the device handles,
-`moy_service_running`) where it
+`moy_service_stop`, `moy_service_running`) where it
 is called too, hopping only an answer of `MOY_APP_NEEDS_VM`. The run is a
 grant of the command's own, owned by its pid, over the roles its granted
 permissions name (`runtime/shell/sh_door.py`, as a service's is), handed to

@@ -58,7 +58,7 @@ _ROWS = ("damage.all", "damage.again",
          # moy_evq.h, moy_log.h) and its tiers' services, counted by nothing here
          "moybyte.send", "moybyte.on", "moybyte.every", "moybyte.after",
          "moybyte.cancel", "moybyte.log", "moybyte.recv", "moybyte.at",
-         "moybyte.service_running",
+         "moybyte.service_stop", "moybyte.service_running",
          # the crypto rows: native/moy_net/moy_crypto.h's, and the device
          # handles (native/moy_kernel/moy_dev.h), counted by nothing here
          "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256",

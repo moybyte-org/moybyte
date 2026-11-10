@@ -251,7 +251,7 @@ static int32_t w_os_service_start(wasm_exec_env_t e) {
 }
 
 static int32_t w_os_service_stop(wasm_exec_env_t e) {
-    return os_call(e, "moybyte.service_stop", NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_SERVICE_STOP, OS_HERE, NULL, 0, NULL, 0);
 }
 
 static int32_t w_os_service_running(wasm_exec_env_t e) {

@@ -27,6 +27,7 @@
 //   live()             the queues open
 //   timer(pid, ms, every=0) -> (rc, id)   a timer of its queue (TIMERS)
 //   alarm(pid, ms) -> (rc, id), woke() -> pid or 0      ALARMS
+//   termed() -> pid or 0               THE STOPS ASKED
 //   timer_cancel(pid, id) -> bool, timers(pid) -> n
 //   timers_run() -> ms to the next      the due ones posted
 //   want(bits), wanted(mask) -> bits    THE VM'S WAKE: bits wanted, and those
@@ -287,6 +288,11 @@ static mp_obj_t ev_woke(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_woke_obj, ev_woke);
 
+static mp_obj_t ev_termed(void) {
+    return mp_obj_new_int_from_uint(moy_evq_termed());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_termed_obj, ev_termed);
+
 static mp_obj_t ev_timer_cancel(mp_obj_t pid, mp_obj_t id) {
     return mp_obj_new_bool(moy_evq_timer_cancel((uint32_t)mp_obj_get_int(pid),
                                                 (uint32_t)mp_obj_get_int_truncated(id)));
@@ -382,6 +388,7 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_timer_cancel), MP_ROM_PTR(&ev_timer_cancel_obj) },
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&ev_alarm_obj) },
     { MP_ROM_QSTR(MP_QSTR_woke), MP_ROM_PTR(&ev_woke_obj) },
+    { MP_ROM_QSTR(MP_QSTR_termed), MP_ROM_PTR(&ev_termed_obj) },
     { MP_ROM_QSTR(MP_QSTR_timers), MP_ROM_PTR(&ev_timers_obj) },
     { MP_ROM_QSTR(MP_QSTR_timers_run), MP_ROM_PTR(&ev_timers_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_TIMER_ID), MP_ROM_INT(MOY_EVQ_TIMER_ID) },

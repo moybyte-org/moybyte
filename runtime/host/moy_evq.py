@@ -89,6 +89,7 @@ _SIGS = (
     ("moy_evq_timer_cancel", [_U32, _U32], ctypes.c_bool),
     ("moy_evq_alarm", [_U32, _U32, ctypes.POINTER(_U32)], _I),
     ("moy_evq_woke", [], _U32),
+    ("moy_evq_termed", [], _U32),
     ("moy_evq_clock", [ctypes.c_int64], None),
     ("moy_evq_timers", [_U32], _U32),
     ("moy_evq_timers_run", [], _U32),
@@ -284,6 +285,10 @@ def clock(step_ms):
 
 def woke():
     return _lib().moy_evq_woke()
+
+
+def termed():
+    return _lib().moy_evq_termed()
 
 
 def timer_cancel(pid, tid):

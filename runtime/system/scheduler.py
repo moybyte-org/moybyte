@@ -1067,6 +1067,7 @@ class Scheduler:
         if stepped and svc.svc_step(_ticks_ms()) == 0:
             self.svc_mail = True        # a service with more than a run's batch: the next frame's
         self._answer(svc, stepped)
+        self._termed()
         live = self._rows(svc, {})
         if _E.ready():
             self.wakes.queued = 1
@@ -1074,6 +1075,18 @@ class Scheduler:
         if not live and self._poll:
             self._drop_poll()
         self._radios(_E.listening("net") > 0 or _E.listening("ble") > 0)
+
+    def _termed(self):
+        """THE STOPS ASKED (native/moy_kernel/moy_evq.h): each service a
+        compiled program's `service_stop` hung up on its own task, maybe
+        through a VM stop, stopped as `stop` stops one, so its end is a stop
+        asked and its KILL comes MOY_SERVICE_STOP_MS after."""
+        pid = _E.termed()
+        while pid:
+            p = self.procs.get(pid)
+            if p is not None and p.kind == SERVICE and p.state not in (STOPPING, EXITED):
+                self.stop(pid)
+            pid = _E.termed()
 
     def _rows(self, svc, ends):
         """Each Lua and compiled service's row read: its figures, and where
@@ -1192,14 +1205,15 @@ class Scheduler:
     def services(self):
         return [p for p in self.procs.values() if p.kind == SERVICE]
 
-    def stop(self, pid):
+    def stop(self, pid, said=False):
         """The TERM: the service's `moy_stop()` under a guard of
         MOY_SERVICE_STOP_MS, the KILL if it is still running then. Either
         way the service ends. Answers whether `pid` was a live service."""
         p = self.procs.get(pid)
         if p is None or p.kind != SERVICE or p.state == EXITED:
             return False
-        _log(INFO, pid, "stop")
+        if not said:
+            _log(INFO, pid, "stop")
         p.state = STOPPING
         if p.native:
             _svc().svc_stop(p.native)
@@ -1458,7 +1472,9 @@ class Scheduler:
         the stop) and given its row, its grant (the same row of the app ABI,
         which the start kept for it) and what its console calls are answered
         with. One that ended during the stop gets its row and its end, which
-        its restart policy follows. Answers the pids taken back."""
+        its restart policy follows; one a compiled program stopped during it
+        (THE STOPS ASKED) is a stop asked, ended now or by `stop`. Answers
+        the pids taken back."""
         try:
             import app_perms
         except ImportError:  # host: the runtime package
@@ -1469,6 +1485,11 @@ class Scheduler:
         shelf = {c.get("path"): c for c in (carts.all if carts is not None else ())}
         attach(ws, self)
         ends = {}
+        asked = []
+        pid = _E.termed()
+        while pid:
+            asked.append(pid)
+            pid = _E.termed()
         for pid, path, native in kept:
             cart = shelf.get(path)
             got = prepared(ws, cart, True) if cart is not None else None
@@ -1482,6 +1503,9 @@ class Scheduler:
                 _log(ERR, pid, "taken back: a %s service does not run here" % tier)
                 continue
             p = self.adopt(pid, _svc_name(run), rt, run, native)
+            if pid in asked:
+                _log(INFO, pid, "stop")
+                p.state = STOPPING
             p.granted = tuple(app_perms.check(run, rec, have)[0])
             p.ws, p.origin, p.args = ws, cart, (rec, have, env)
             try:
@@ -1501,6 +1525,11 @@ class Scheduler:
                 continue
             if p.state != EXITED:
                 out.append(pid)
+        for pid in asked:
+            p = self.procs.get(pid)
+            if p is not None and p.state == STOPPING:
+                p.state = BACKGROUND
+                self.stop(pid, said=True)
         return out
 
     def reset(self):

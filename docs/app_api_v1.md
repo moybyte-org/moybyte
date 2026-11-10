@@ -505,7 +505,11 @@ From any process of the app, on every tier (the call table, §10):
 | `moybyte.service_running()` | its pid while it runs, else 0 |
 
 A start or a stop is ASKED: the console runs it at its next tick, as the
-shell, never inside the caller's call, and the last one asked wins. Each
+shell, never inside the caller's call, and the last one asked wins. A
+compiled program's stop of a Lua, ELF or WASI service is the kernel's: the
+service is hung up (its TERM) on the caller's task, with or without the VM,
+and the console ends it as a stop asked (`docs/os_2026-11/processes.md`
+§5); a compiled program's start during an S3's VM stop waits for the VM. Each
 answers `ABSENT` (`moybyte.ABSENT`, -8) where the caller's app declares no
 service: the calls name no app, so no app reaches another's, and a
 `"type": "service"` cart's own process is answered ABSENT too. They need no

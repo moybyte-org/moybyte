@@ -79,6 +79,8 @@ static uint32_t s_timer_n;          // the last timer id handed out, its bit apa
 static uint32_t s_timers;           // timers held, every queue's
 static uint32_t s_woke[8];          // the pids whose alarms went off, oldest first
 static uint32_t s_woke_n;
+static uint32_t s_term[MOY_EVQ_PROCS];  // THE STOPS ASKED, oldest first
+static uint32_t s_term_n;
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
 
 static void *mem(size_t n) {
@@ -707,8 +709,35 @@ uint32_t moy_evq_listening(const char *name) {
     return n;
 }
 
+void moy_evq_term(uint32_t pid) {
+    MOY_SYNC_LOCK(&s_lock);
+    bool kept = false;
+    for (uint32_t i = 0; i < s_term_n && !kept; i++) {
+        kept = s_term[i] == pid;
+    }
+    if (!kept && s_term_n < MOY_EVQ_PROCS) {
+        s_term[s_term_n++] = pid;
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
+    moy_evq_want(MOY_EVQ_WANT_POLL);
+}
+
+uint32_t moy_evq_termed(void) {
+    MOY_SYNC_LOCK(&s_lock);
+    uint32_t pid = 0;
+    if (s_term_n != 0u) {
+        pid = s_term[0];
+        memmove(s_term, s_term + 1, (size_t)(--s_term_n) * sizeof s_term[0]);
+    }
+    MOY_SYNC_UNLOCK(&s_lock);
+    return pid;
+}
+
 void moy_evq_reset(void) {
     close_all(0u);
+    MOY_SYNC_LOCK(&s_lock);
+    s_term_n = 0;
+    MOY_SYNC_UNLOCK(&s_lock);
     s_turn = 0;
     __atomic_store_n(&s_want, 0u, __ATOMIC_RELEASE);
 }
