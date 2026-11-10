@@ -129,6 +129,11 @@ def build(verbose=False):
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
 _U32 = ctypes.c_uint32
 
+class SvcChunk(ctypes.Structure):
+    """moycore_svc_chunk_t (native/moycore/moycore_svc.h)."""
+    _fields_ = [("src", ctypes.c_char_p), ("n", ctypes.c_size_t), ("name", ctypes.c_char_p)]
+
+
 class SvcInfo(ctypes.Structure):
     """moycore_svc_info_t (native/moycore/moycore_svc.h)."""
     _fields_ = [("state", ctypes.c_uint8), ("strikes", ctypes.c_uint8), ("exit", ctypes.c_int32),
@@ -137,8 +142,8 @@ class SvcInfo(ctypes.Structure):
 
 
 _SIGS = (
-    ("moycore_svc_start", [_U32, _C, _C, ctypes.c_size_t, _C, ctypes.c_size_t, _C,
-                           ctypes.POINTER(_U32)], _I),
+    ("moycore_svc_start", [_U32, _C, ctypes.POINTER(SvcChunk), ctypes.c_size_t, _C,
+                           ctypes.c_size_t, _C, ctypes.POINTER(_U32)], _I),
     ("moycore_svc_stop", [_U32], _I),
     ("moycore_svc_info", [_U32, ctypes.POINTER(SvcInfo)], _I),
     ("moycore_svc_reap", [_U32], _I),

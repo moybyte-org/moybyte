@@ -1150,7 +1150,10 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 
 // -- the Lua tier's services (moycore_svc.h) ---------------------------------
 //   svc_start(pid, name, src[, env[, app]]) -> h   svc_stop(h)   svc_reap(h)
-//                                 (app: its app's run, moy_app's `run()`)
+//                                 (src: its one script, or its scripts as
+//                                  (text, chunkname) pairs in load order,
+//                                  a None chunkname the service's own;
+//                                  app: its app's run, moy_app's `run()`)
 //   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why, wakes, mail), None when stale
 //   svc_tasks() -> bool   svc_step(now_ms) -> ms to the next deadline   svc_reset()
 
@@ -1164,8 +1167,23 @@ static void svc_check(int rc)
 
 static mp_obj_t mod_svc_start(size_t n_args, const mp_obj_t *args)
 {
-    size_t n;
-    const char *text = mp_obj_str_get_data(args[2], &n);
+    moycore_svc_chunk_t one;
+    moycore_svc_chunk_t *chunks = &one;
+    size_t count = 1;
+    if (mp_obj_is_str(args[2])) {
+        one.src = mp_obj_str_get_data(args[2], &one.n);
+        one.name = NULL;
+    } else {
+        mp_obj_t *items;
+        mp_obj_get_array(args[2], &count, &items);
+        chunks = m_new(moycore_svc_chunk_t, count);
+        for (size_t i = 0; i < count; i++) {
+            mp_obj_t *pair;
+            mp_obj_get_array_fixed_n(items[i], 2, &pair);
+            chunks[i].src = mp_obj_str_get_data(pair[0], &chunks[i].n);
+            chunks[i].name = pair[1] != mp_const_none ? mp_obj_str_get_str(pair[1]) : NULL;
+        }
+    }
     const char *env = NULL;
     size_t envn = 0;
     if (n_args > 3 && args[3] != mp_const_none) {
@@ -1173,8 +1191,12 @@ static mp_obj_t mod_svc_start(size_t n_args, const mp_obj_t *args)
     }
     const struct moy_app_run *app = n_args > 4 ? moycore_app_run(args[4]) : NULL;
     uint32_t h;
-    svc_check(moycore_svc_start((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
-                                text, n, env, envn, app, &h));
+    int rc = moycore_svc_start((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
+                               chunks, count, env, envn, app, &h);
+    if (chunks != &one) {
+        m_del(moycore_svc_chunk_t, chunks, count);
+    }
+    svc_check(rc);
     return mp_obj_new_int_from_uint(h);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_svc_start_obj, 3, 5, mod_svc_start);

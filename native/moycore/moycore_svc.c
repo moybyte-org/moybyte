@@ -103,7 +103,7 @@ typedef struct {
 
 typedef struct {
     lua_State *L;
-    char *src;
+    char *src;                  // its scripts, until its start loads them (pack_chunks)
     size_t n;
     char *env;                  // what the console hands it, until its start reads it
     size_t envn;
@@ -931,6 +931,69 @@ static void after(svc_t *s, int rc) {
     }
 }
 
+// A service's scripts as its start keeps them, one block: per script its
+// chunk's name (NUL-ended, empty for the service's own `=id`), its length
+// (4 bytes) and its text.
+static char *pack_chunks(const moycore_svc_chunk_t *chunks, size_t count, size_t *out) {
+    size_t n = 0;
+    for (size_t i = 0; i < count; i++) {
+        n += (chunks[i].name != NULL ? strlen(chunks[i].name) : 0u) + 1u + 4u + chunks[i].n;
+    }
+    char *p = mem_realloc(NULL, n + 1u);
+    if (p == NULL) {
+        return NULL;
+    }
+    char *at = p;
+    for (size_t i = 0; i < count; i++) {
+        size_t k = chunks[i].name != NULL ? strlen(chunks[i].name) : 0u;
+        memcpy(at, chunks[i].name != NULL ? chunks[i].name : "", k + 1u);
+        at += k + 1u;
+        uint32_t len = (uint32_t)chunks[i].n;
+        memcpy(at, &len, 4u);
+        at += 4u;
+        if (len) {
+            memcpy(at, chunks[i].src, len);
+        }
+        at += len;
+    }
+    *out = n;
+    return p;
+}
+
+// Runs the scripts it is handed, in order: every chunk's own locals stay its
+// own, and they share through globals, as a window's scripts do.
+static const char CHUNKS[] =
+    "local f = {...}\n"
+    "return function() for i = 1, #f do f[i]() end end\n";
+
+// Its scripts loaded: LUA_OK with the one function its start runs pushed,
+// else the error pushed.
+static int load_chunks(svc_t *s) {
+    int count = 0;
+    for (size_t at = 0; at < s->n; count++) {
+        const char *name = s->src + at;
+        at += strlen(name) + 1u;
+        uint32_t len;
+        memcpy(&len, s->src + at, 4u);
+        at += 4u;
+        if (!lua_checkstack(s->L, 2)) {
+            return LUA_ERRMEM;          // no error pushed: "it does not load"
+        }
+        if (count == 0 && at + len < s->n) {
+            int rc = luaL_loadbufferx(s->L, CHUNKS, sizeof CHUNKS - 1u, "=chunks", "t");
+            if (rc != LUA_OK) {
+                return rc;
+            }
+        }
+        int rc = luaL_loadbufferx(s->L, s->src + at, len, *name ? name : s->id, "t");
+        if (rc != LUA_OK) {
+            return rc;
+        }
+        at += len;
+    }
+    return count > 1 ? lua_pcall(s->L, count, 1, 0) : LUA_OK;
+}
+
 static void start(svc_t *s) {
     s->L = lua_newstate(svc_alloc, s);
     if (s->L == NULL) {
@@ -962,7 +1025,7 @@ static void start(svc_t *s) {
     }
     free(s->env);
     s->env = NULL;
-    if (luaL_loadbufferx(s->L, s->src, s->n, s->id, "t") != LUA_OK) {
+    if (load_chunks(s) != LUA_OK) {
         const char *m = lua_tostring(s->L, -1);
         snprintf(s->why, sizeof s->why, "%s", m != NULL ? m : "it does not load");
         end(s, MOYCORE_SVC_EXIT_CRASHED);
@@ -1182,9 +1245,12 @@ static uint32_t handle_of(uint32_t slot) {
     return s_row[slot] != NULL ? ((uint32_t)s_row[slot]->gen << 8) | (slot + 1u) : 0u;
 }
 
-int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
-                      const char *env, size_t envn, const struct moy_app_run *app,
-                      uint32_t *h) {
+int moycore_svc_start(uint32_t pid, const char *id, const moycore_svc_chunk_t *chunks,
+                      size_t count, const char *env, size_t envn,
+                      const struct moy_app_run *app, uint32_t *h) {
+    if (count == 0) {
+        return MOYCORE_SVC_BAD;
+    }
     uint32_t slot = 0;
     while (slot < MOYCORE_SVCS && s_row[slot] != NULL
            && !(s_row[slot]->orphan && s_row[slot]->done)) {
@@ -1197,7 +1263,8 @@ int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
         orphan_free(slot);
     }
     svc_t *s = mem_calloc(sizeof(svc_t));
-    char *copy = mem_copy(src, n);
+    size_t n = 0;
+    char *copy = pack_chunks(chunks, count, &n);
     char *envc = env != NULL ? mem_copy(env, envn) : NULL;
     if (s == NULL || copy == NULL || (env != NULL && envc == NULL)) {
         free(s);

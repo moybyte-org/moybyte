@@ -41,7 +41,9 @@ the timed lanes, which a board holds one of, are the newest compiled run's.
 
 **A Lua service is a state of its own** (`moycore_svc.h`, the `svc_*`
 verbs): no console, no row of the runs, its timers, message wakes and
-`moybyte` names, its own counting allocator in PSRAM. On a board each runs on
+`moybyte` names, its own counting allocator in PSRAM. Its start runs the
+scripts it is handed in order, each its own chunk (`moycore_svc_chunk_t`),
+sharing through globals as a window's scripts do. On a board each runs on
 its own task (pinned to the P4s' core 0, or to the S3s' core 1 with its stack
 in PSRAM); the host and the desktop MicroPython step them at the
 scheduler's poll (`runtime/system/scheduler.py`).

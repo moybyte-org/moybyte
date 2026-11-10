@@ -818,7 +818,7 @@ class Scheduler:
             p.state, p.code = EXITED, EXIT_CRASHED
             return None
         if tier == "lua":
-            return self._start_lua(p, cart.get("src") or "", env, roles)
+            return self._start_lua(p, lua_chunks(cart), env, roles)
         if "asyncio" in src_of(cart):
             _aio().install(self)
         ns = {"__name__": "__main__", "moybyte": _moybyte}
@@ -869,9 +869,10 @@ class Scheduler:
 
     # -- the Lua services -------------------------------------------------
 
-    def _start_lua(self, p, src, env=None, roles=()):
-        """Lua service `p` (native/moycore/moycore_svc.h): its own state, on a
-        task of its own on a board and at this scheduler's poll elsewhere,
+    def _start_lua(self, p, chunks, env=None, roles=()):
+        """Lua service `p` (native/moycore/moycore_svc.h) running `chunks`
+        (`lua_chunks`): its own state, on a task of its own on a board and
+        at this scheduler's poll elsewhere,
         handed `env` (its values as globals, its functions as console calls)
         and its app's run over `roles` (its role names, moy_app_lua.h);
         refused with no Lua runtime."""
@@ -890,7 +891,7 @@ class Scheduler:
             if svc is None:
                 raise OSError(EINVAL, "no Lua runtime")
             self._open(p.pid, False)
-            p.native = svc.svc_start(p.pid, p.name, src, _env_text(env), run)
+            p.native = svc.svc_start(p.pid, p.name, chunks, _env_text(env), run)
         except (TypeError, ValueError) as e:
             _log(ERR, p.pid, "what the console hands it is not JSON: %s" % e)
             p.state, p.code = EXITED, EXIT_CRASHED
@@ -1644,6 +1645,16 @@ def src_of(cart):
     return cart.get("src") or ""
 
 
+def lua_chunks(cart):
+    """Lua service `cart`'s scripts as moycore's svc_start takes them, in
+    load order: (text, chunkname) pairs, its main named after the service
+    (None) and the others after their files, as a window's are
+    (`lua_ext.cart_chunks`)."""
+    return ([(s, "@" + n) for n, s in cart.get("src_before") or ()]
+            + [(cart.get("src") or "", None)]
+            + [(s, "@" + n) for n, s in cart.get("src_after") or ()])
+
+
 def _svc_name(cart):
     """The name a service row of `cart` runs under: its cart's id."""
     return cart.get("id") or cart.get("title") or "service"
@@ -1679,8 +1690,10 @@ def as_service(cart):
     cart with its type SERVICE, its main the entry and its tier the entry's,
     its source the entry's text (a Python or Lua one, read from its folder),
     `entry` ENTRY, and its id, title, permissions, `receives` and path the
-    app's. None where
-    it declares no service or a Python or Lua entry does not read."""
+    app's. A Lua app's Lua entry runs after the app's SHARED scripts, the
+    ones its `sources` lists before its main (`src_before`, the entry itself
+    not among them), as its window does. None where it declares no service
+    or a Python or Lua entry does not read."""
     got = entry_of(cart)
     if got is None:
         return None
@@ -1689,7 +1702,9 @@ def as_service(cart):
     run["type"] = SERVICE
     run["entry"] = ENTRY                # an app's own service, not a service cart
     run["main"] = f
-    run["src_before"] = []
+    shared = cart.get("src_before") or ()
+    run["src_before"] = ([(n, s) for n, s in shared if n != f]
+                         if tier == "lua" and cart.get("runtime") == "lua" else [])
     run["src_after"] = []
     run["native"] = None
     if tier == "elf":

@@ -511,7 +511,14 @@ own: `.py` Python, `.lua` Lua, `.wasm` a WASI program (its `_start` is the
 loop, and a board runs its compiled form, `<stem>.<chip>.f<format>.aot`, as
 it does a cart's `main.wasm`), `.elf` a native module, which a board runs
 as `<stem>.<chip>.elf`, the chips those the folder carries. The app's own
-entry is `main`. An entry that does not read (another key, an absolute or
+entry is `main`. A Lua app's Lua entry runs after the app's SHARED scripts:
+the ones its manifest's `sources` (`docs/moy_cart_api.md`) lists before
+`main`, in that order, each its own chunk, as the window runs them. So the
+two halves keep one copy of what they share (Moy Mesh's `mesh.lua`: its id
+and its regions); what `sources` lists after `main` is the window's alone,
+and the entry never runs as a shared script, even where `sources` names it.
+A Lua `"type": "service"` cart runs its `sources` in order, as a window
+does. An entry that does not read (another key, an absolute or
 `..` path, another extension) is absent. A `"type": "service"` cart is still
 a service of its own, with its own id. `tools/wasm_cart.py` builds a `.wasm`
 entry from `src/<stem>.wat`, `.c` or `.rs`, and `tools/elf_cart.py` an `.elf`

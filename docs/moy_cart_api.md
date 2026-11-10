@@ -32,7 +32,9 @@ below is pre-injected as a global. (A cart can also be written in **Lua** —
 A Lua cart may be **more than one script**: the manifest lists them in `"sources"`
 and the console runs them in that order, each as its own chunk — so a `local` in one
 is invisible in the next and they share through globals. There is still no importing;
-the manifest declares the list and the console loads it (SPEC.md §4). A PICO-8 port is
+the manifest declares the list and the console loads it (SPEC.md §4). An app's Lua
+service runs the scripts listed before `main` ahead of its own entry, so the two halves
+share them (`docs/app_api_v1.md` §7). A PICO-8 port is
 the standing case, with its generated compat layer in `p8.lua` ahead of the `main.lua`
 a person opens — and one more script per PICO-8 tab after it, because tabs are where
 that cart's author put its structure.

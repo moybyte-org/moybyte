@@ -128,7 +128,7 @@ enum {
     MOYCORE_SVC_STALE = 1,      // no service by that handle
     MOYCORE_SVC_FULL = 2,       // every row is taken
     MOYCORE_SVC_NOMEM = 3,
-    MOYCORE_SVC_BAD = 4,        // a reap before its service has exited
+    MOYCORE_SVC_BAD = 4,        // a reap before its service has exited; a start of no scripts
 };
 
 // A service's states.
@@ -164,15 +164,25 @@ typedef struct {
     uint8_t mail;               // the messages queued on its event queue
 } moycore_svc_info_t;
 
-// Start service `pid` (the OS log's) running Lua source `src` of `n` bytes,
-// named `id`, with what the console hands it in `env` (envn bytes, the JSON
-// array [values, calls]; NULL for nothing) and its app's run `app` (copied;
-// NULL for none, no role names): OK with *h, FULL, NOMEM, BAD where this chip
-// runs none. The start itself runs on the service's task, or at the next step.
+// One script of a service: `n` bytes of Lua source `src`, and the name its
+// chunk runs under (`@mesh.lua`); NULL names it after the service (`=id`).
+typedef struct {
+    const char *src;
+    size_t n;
+    const char *name;
+} moycore_svc_chunk_t;
+
+// Start service `pid` (the OS log's) named `id`, running the `count` scripts
+// `chunks` in order, each its own chunk (an app's entry last, its cart's
+// shared scripts ahead of it: docs/app_api_v1.md section 7), with what the
+// console hands it in `env` (envn bytes, the JSON array [values, calls];
+// NULL for nothing) and its app's run `app` (copied; NULL for none, no role
+// names): OK with *h, FULL, NOMEM, BAD where this chip runs none or `count`
+// is 0. The start itself runs on the service's task, or at the next step.
 struct moy_app_run;
-int moycore_svc_start(uint32_t pid, const char *id, const char *src, size_t n,
-                      const char *env, size_t envn, const struct moy_app_run *app,
-                      uint32_t *h);
+int moycore_svc_start(uint32_t pid, const char *id, const moycore_svc_chunk_t *chunks,
+                      size_t count, const char *env, size_t envn,
+                      const struct moy_app_run *app, uint32_t *h);
 // The TERM: its `moy_stop` runs next on its task. OK, STALE.
 int moycore_svc_stop(uint32_t h);
 int moycore_svc_info(uint32_t h, moycore_svc_info_t *out);

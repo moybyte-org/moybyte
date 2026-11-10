@@ -103,6 +103,30 @@ def test_an_error_is_a_crash_with_its_line(sched):
     assert any("bad" in t for t in _texts(since, p.pid))
 
 
+def test_a_service_runs_its_scripts_in_order_each_its_own_chunk(sched):
+    """`src_before`, its main, `src_after` (scheduler.lua_chunks): globals
+    cross from one script to the next, a `local` does not, and an error
+    names the file it is in."""
+    since = L.next()
+    cart = _cart('print("main " .. SHARED .. " " .. tostring(hidden))\n'
+                 'moybyte.after(1, function() moybyte.exit(TAIL) end)')
+    cart["src_before"] = [("shared.lua", "SHARED = 41\nlocal hidden = 1")]
+    cart["src_after"] = [("tail.lua", "TAIL = 5")]
+    pid = sched.start(cart)
+    _run(sched, 30)
+    p = sched.procs[pid]
+    assert p.state == S.EXITED and p.code == 5
+    assert "main 41 nil" in _texts(since, pid)
+
+    since = L.next()
+    cart["src_before"] = [("shared.lua", "SHARED = 41\nerror('shared broke')")]
+    sched.start(cart)
+    _run(sched, 30)
+    p = sched.services()[-1]
+    assert p.code == S.EXIT_CRASHED
+    assert any("shared.lua:2: shared broke" in t for t in _texts(since, p.pid))
+
+
 BYTECODE = """
 local blob = string.dump(function() return 1 end)
 local ok = pcall(function() return load(blob, "x", "b") end)
@@ -438,6 +462,26 @@ def test_the_vm_a_board_runs_steps_its_services_alike(tmp_path):
 
 def test_the_vm_a_board_runs_routes_messages_and_console_calls(tmp_path):
     assert _vm(tmp_path, VM_MSG) == ["0 5", "(1, 1)", "(9, 'day', '[]')", "4 16", "False"]
+
+
+VM_CHUNKS = """
+import moycore
+h = moycore.svc_start(9, "t.vm", [("A = 2\\nlocal b = 1", "@a.lua"),
+                                  ("moybyte.every(1, function() moybyte.exit(A + (b or 0)) end)", None)])
+for t in (0, 1, 2):
+    moycore.svc_step(t)
+print(moycore.svc_info(h)[:2])
+moycore.svc_reap(h)
+h = moycore.svc_start(9, "t.vm", [("error('no')", "@a.lua"), ("x = 1", None)])
+moycore.svc_step(0)
+i = moycore.svc_info(h)
+print(i[1], i[5])
+moycore.svc_reap(h)
+"""
+
+
+def test_the_vm_a_board_runs_takes_a_services_scripts(tmp_path):
+    assert _vm(tmp_path, VM_CHUNKS) == ["(4, 2)", "1 a.lua:1: no"]
 
 
 RADIO = """

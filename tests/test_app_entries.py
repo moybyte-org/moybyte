@@ -250,6 +250,64 @@ def test_a_lua_app_starts_its_own_service(tmp_path, tier):
     assert ws.system.get(APP + "_heard") == [9]
 
 
+SHARED_LUA = 'ME = "local.both"\nPONG = 40\n'
+
+LUA_SVC_SHARED = '''
+function moy_start()
+    moybyte.on("ping", function(who, v)
+        prefs.set("heard", {PONG + v})
+        moybyte.send(ME, "pong", PONG + v)
+    end)
+end
+'''
+
+
+def test_a_lua_service_runs_its_apps_shared_scripts_first(tmp_path):
+    """A Lua app's Lua entry runs after the scripts its `sources` lists
+    before main, in order, as its window does; never main or what follows
+    it, and never the entry twice."""
+    if S._svc() is None:
+        pytest.skip("no Lua runtime on this host")
+    root = _cart(tmp_path, "service.lua", LUA_SVC_SHARED)
+    man = json.loads((root / "manifest.json").read_text())
+    man.update(runtime="lua", main="main.lua",
+               sources=["shared.lua", "service.lua", "main.lua", "tail.lua"])
+    (root / "manifest.json").write_text(json.dumps(man))
+    (root / "main.py").unlink()
+    (root / "shared.lua").write_text(SHARED_LUA)
+    (root / "main.lua").write_text(LUA_APP.replace('"local.both", "ping", 9', 'ME, "ping", 2'))
+    (root / "tail.lua").write_text("PONG = 100\n")     # the window's, after main
+    ws = build_ws(tmp_path)
+    S.attach(ws)
+    run = S.as_service(ws.carts.rehydrate(_shelf(ws)))
+    assert [n for n, _s in run["src_before"]] == ["shared.lua"]
+    assert run["src_after"] == []
+    assert [c for _s, c in S.lua_chunks(run)] == ["@shared.lua", None]
+
+    assert select_on_home(ws, "Both") is not None
+    ws.open()
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    drv = make_drv(ws)
+    for _ in range(6):
+        drv.frame(1 / 30)
+        S.SCHED.poll()
+    assert S.SCHED.find(APP) is not None
+    assert ws.system.get(APP + "_heard") == [42]
+
+
+def test_a_python_entry_takes_no_shared_lua_scripts(tmp_path):
+    root = _cart(tmp_path, "service.py", PY_SVC)
+    man = json.loads((root / "manifest.json").read_text())
+    man.update(runtime="lua", main="main.lua", sources=["shared.lua", "main.lua"])
+    (root / "manifest.json").write_text(json.dumps(man))
+    (root / "main.py").unlink()
+    (root / "shared.lua").write_text(SHARED_LUA)
+    (root / "main.lua").write_text(LUA_APP)
+    ws = build_ws(tmp_path)
+    run = S.as_service(ws.carts.rehydrate(_shelf(ws)))
+    assert run["runtime"] == "python" and run["src_before"] == []
+
+
 def test_the_last_ask_wins(tmp_path):
     ws = _ws(tmp_path, "python")
     cart = _shelf(ws)
