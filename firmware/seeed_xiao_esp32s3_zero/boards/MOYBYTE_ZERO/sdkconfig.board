@@ -164,3 +164,9 @@ CONFIG_LWIP_SNTP_STARTUP_DELAY=n
 CONFIG_LWIP_PPP_SUPPORT=n
 CONFIG_LWIP_PPP_PAP_SUPPORT=n
 CONFIG_LWIP_PPP_CHAP_SUPPORT=n
+
+# The log ceiling is the default level (ERROR, sdkconfig.base): nothing on this
+# board raises a tag's level at run time, so the INFO and WARN messages the
+# base's INFO ceiling compiled in were never printed.
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=n
+CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y
