@@ -413,7 +413,7 @@ def test_the_theme_font_is_installed(board):
 
 
 def test_the_font_set_is_the_tiers(board):
-    on_glass.the_font_set_is_the_tiers(board, 'handheld')
+    on_glass.the_font_set_is_the_tiers(board, 'lilygo_t_deck_plus_mainline')
 
 
 def test_the_glyph_lane_draws_the_hosts_bytes(board):

@@ -498,7 +498,7 @@ def test_the_theme_font_is_installed(board):
 
 
 def test_the_font_set_is_the_tiers(board):
-    on_glass.the_font_set_is_the_tiers(board, 'desktop')
+    on_glass.the_font_set_is_the_tiers(board, 'guition_jc8012p4a1c')
 
 
 def test_the_glyph_lane_draws_the_hosts_bytes(board):

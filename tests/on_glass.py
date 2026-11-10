@@ -1236,18 +1236,22 @@ def the_theme_font_is_installed(board):
     assert ids[0] != 0 and pf == ids[0], (ids, pf)
 
 
-def the_font_set_is_the_tiers(board, tier):
-    """The image carries its tier's font set (docs/history/look_2026-10.md step 3):
-    the faces set.json names for `tier`, each byte for byte the host's, with
+def the_font_set_is_the_tiers(board, board_dir):
+    """The image carries its font set (docs/history/look_2026-10.md step 3):
+    the faces set.json names for each tier the board's board.toml takes
+    (`tools/make_font.py`'s `board_fonts`), each byte for byte the host's, with
     its family's licence, and each one loads and measures as on the host."""
     import binascii
     import json
     import runtime  # noqa: F401  (registers the host's moy_ui)
     import moy_ui
     from runtime import appearance
-    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "native", "moy_ui", "fonts", "set.json")) as f:
-        want = json.load(f)["tiers"][tier]
+    from tools import make_font
+    tiers = make_font.board_fonts(str(ROOT / "firmware" / board_dir))
+    tiers = (tiers,) if isinstance(tiers, str) else tiers
+    with open(ROOT / "native" / "moy_ui" / "fonts" / "set.json") as f:
+        meta = json.load(f)["tiers"]
+    want = sorted({n for t in tiers for n in meta[t]})
     got = board.pyval("list(__import__('fontset').names())", strict=True)
     assert list(got) == want
     for n in want:
