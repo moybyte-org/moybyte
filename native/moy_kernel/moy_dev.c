@@ -55,12 +55,12 @@ typedef struct {
         moy_devbus_uart_t uart;
         moy_devbus_spi_t spi;
     } cfg;
-} dev_t;
+} dev_row_t;
 
 // MOY_DEV_HANDLES rows, PSRAM on a board, made at the first open and kept:
 // a boot whose programs open no device holds none of it, and a row's gen
 // outlives its close.
-static dev_t *s_dev;
+static dev_row_t *s_dev;
 
 static int32_t lease_rc(int rc) {
     switch (rc) {
@@ -215,7 +215,7 @@ static int32_t gpio_cfg(const char *cfg, size_t n, pin_cfg_t *c, bool edges) {
 
 // -- the table -----------------------------------------------------------------------
 
-static dev_t *row_of(uint32_t pid, int32_t h) {
+static dev_row_t *row_of(uint32_t pid, int32_t h) {
     if (!(h & MOY_DEV_BASE)) {
         return NULL;
     }
@@ -227,11 +227,11 @@ static dev_t *row_of(uint32_t pid, int32_t h) {
     return &s_dev[slot];
 }
 
-static int32_t handle_of(const dev_t *d) {
+static int32_t handle_of(const dev_row_t *d) {
     return (int32_t)(MOY_DEV_BASE | (uint32_t)d->gen << 8 | (uint32_t)(d - s_dev));
 }
 
-static dev_t *row_new(uint32_t pid, uint8_t kind) {
+static dev_row_t *row_new(uint32_t pid, uint8_t kind) {
     if (s_dev == NULL) {
         #ifdef DEV_PSRAM
         s_dev = heap_caps_calloc(MOY_DEV_HANDLES, sizeof *s_dev, MALLOC_CAP_SPIRAM);
@@ -241,7 +241,7 @@ static dev_t *row_new(uint32_t pid, uint8_t kind) {
         }
     }
     for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
-        dev_t *d = &s_dev[i];
+        dev_row_t *d = &s_dev[i];
         if (d->pid == 0) {
             uint8_t gen = (uint8_t)(d->gen + 1u);
             memset(d, 0, sizeof *d);
@@ -257,7 +257,7 @@ static dev_t *row_new(uint32_t pid, uint8_t kind) {
 
 // -- gpio<n> -----------------------------------------------------------------------
 
-static void edges_off(dev_t *d) {
+static void edges_off(dev_row_t *d) {
 #if MOY_DEV_EDGES
     moy_input_t *t = moy_input_kernel != NULL ? moy_input_kernel() : NULL;
     if (d->reader >= 0 && t != NULL) {
@@ -272,7 +272,7 @@ static void edges_off(dev_t *d) {
     d->trigger = 0;
 }
 
-static int32_t edges_on(dev_t *d, int trigger) {
+static int32_t edges_on(dev_row_t *d, int trigger) {
 #if !MOY_DEV_EDGES
     (void)d;
     (void)trigger;
@@ -316,7 +316,7 @@ static int32_t gpio_open(uint32_t pid, uint32_t perms, int pin, const char *cfg,
     if (!(perms & MOY_DEV_P_GPIO)) {
         return MOY_DEV_EDENIED;
     }
-    dev_t *d = row_new(pid, K_GPIO);
+    dev_row_t *d = row_new(pid, K_GPIO);
     if (d == NULL) {
         return MOY_DEV_EFULL;
     }
@@ -337,7 +337,7 @@ static int32_t gpio_open(uint32_t pid, uint32_t perms, int pin, const char *cfg,
     return handle_of(d);
 }
 
-static int32_t gpio_set(dev_t *d, const char *cfg, size_t n) {
+static int32_t gpio_set(dev_row_t *d, const char *cfg, size_t n) {
     pin_cfg_t c;
     int32_t rc = gpio_cfg(cfg, n, &c, true);
     if (rc == 0 && (c.mode >= 0 || c.pull >= 0)) {
@@ -364,7 +364,7 @@ static void put32(uint8_t *q, uint32_t v) {
 }
 
 // The edges since the last read, as many whole records as `cap` holds.
-static int32_t gpio_read(dev_t *d, uint8_t *out, size_t cap) {
+static int32_t gpio_read(dev_row_t *d, uint8_t *out, size_t cap) {
 #if !MOY_DEV_EDGES
     (void)d;
     (void)out;
@@ -410,7 +410,7 @@ static int32_t gpio_read(dev_t *d, uint8_t *out, size_t cap) {
 // Pin `pin` for the pins handle `d`: its process's lease of it, taken at its
 // first use (an output where `out`, else an input) and remembered as the
 // handle's to give back.
-static int32_t pins_take(dev_t *d, int pin, bool out) {
+static int32_t pins_take(dev_row_t *d, int pin, bool out) {
     uint32_t h = moy_lease_of_pin(pin);
     moy_lease_row_t r;
     if (h != 0) {
@@ -428,7 +428,7 @@ static int32_t pins_take(dev_t *d, int pin, bool out) {
     return lease_rc(moy_lease_pin_set(pin, out ? MOY_PIN_MODE_OUT : MOY_PIN_MODE_IN, -1, -1));
 }
 
-static int32_t pins_set(dev_t *d, const char *cfg, size_t n) {
+static int32_t pins_set(dev_row_t *d, const char *cfg, size_t n) {
     for (int pass = 0; pass < 2; pass++) {
         words_t it = { cfg, cfg + n };
         word_t w;
@@ -456,7 +456,7 @@ static int32_t pins_set(dev_t *d, const char *cfg, size_t n) {
     return 0;
 }
 
-static void pins_close(dev_t *d) {
+static void pins_close(dev_row_t *d) {
     for (int pin = 0; pin < PIN_MAX; pin++) {
         if (!(d->took & (1ull << pin))) {
             continue;
@@ -484,7 +484,7 @@ static int32_t pins_open(uint32_t pid, uint32_t perms, const char *cfg, size_t c
             return MOY_DEV_EBUSY;
         }
     }
-    dev_t *d = row_new(pid, K_PINS);
+    dev_row_t *d = row_new(pid, K_PINS);
     if (d == NULL) {
         return MOY_DEV_EFULL;
     }
@@ -603,7 +603,7 @@ static int32_t spi_cfg(const char *cfg, size_t n, moy_devbus_spi_t *c, bus_pins_
 }
 
 // The handle `d` with its lease taken of `pins`, for `open` to run on.
-static int32_t bus_lease(dev_t *d, uint8_t cls, uint8_t unit, uint64_t pins) {
+static int32_t bus_lease(dev_row_t *d, uint8_t cls, uint8_t unit, uint64_t pins) {
     uint32_t h;
     int32_t rc = lease_rc(moy_lease_take(d->pid, cls, unit, pins, 0, &h));
     if (rc == 0) {
@@ -621,7 +621,7 @@ static uint64_t bits_of(const bus_pins_t *p, int n) {
 }
 
 // uart<n> and spi<n>: a unit the board offers, under `lease:<row>`.
-static int32_t unit_open(dev_t *d, uint32_t perms, const char *name, size_t n,
+static int32_t unit_open(dev_row_t *d, uint32_t perms, const char *name, size_t n,
                          const char *cfg, size_t cn) {
     bool uart = d->kind == K_UART;
     bus_pins_t p = { { -1, -1, -1 } };
@@ -666,7 +666,7 @@ static int32_t unit_open(dev_t *d, uint32_t perms, const char *name, size_t n,
     return rc;
 }
 
-static int32_t i2c_open(dev_t *d, uint32_t perms, const char *cfg, size_t cn) {
+static int32_t i2c_open(dev_row_t *d, uint32_t perms, const char *cfg, size_t cn) {
     int64_t scl = -1, sda = -1, freq = 400000, addr = -1;
     words_t it = { cfg, cfg + cn };
     word_t w;
@@ -697,7 +697,7 @@ static int32_t i2c_open(dev_t *d, uint32_t perms, const char *cfg, size_t cn) {
     return rc;
 }
 
-static int32_t pwm_cfg(dev_t *d, const char *cfg, size_t n) {
+static int32_t pwm_cfg(dev_row_t *d, const char *cfg, size_t n) {
     words_t it = { cfg, cfg + n };
     word_t w;
     int got;
@@ -718,7 +718,7 @@ static int32_t pwm_cfg(dev_t *d, const char *cfg, size_t n) {
 }
 
 // pwm<n> and adc<n>: a pin of the gpio row, under `lease:gpio`.
-static int32_t pin_bus_open(dev_t *d, uint32_t perms, int pin, const char *cfg, size_t cn) {
+static int32_t pin_bus_open(dev_row_t *d, uint32_t perms, int pin, const char *cfg, size_t cn) {
     int32_t rc = 0;
     d->freq = 5000u;                    // machine.PWM's defaults
     d->duty = 32768u;
@@ -755,7 +755,7 @@ static int32_t pin_bus_open(dev_t *d, uint32_t perms, int pin, const char *cfg, 
 
 static int32_t bus_open(uint32_t pid, uint32_t perms, uint8_t kind, int pin, const char *name,
                         size_t n, const char *cfg, size_t cn) {
-    dev_t *d = row_new(pid, kind);
+    dev_row_t *d = row_new(pid, kind);
     if (d == NULL) {
         return MOY_DEV_EFULL;
     }
@@ -769,7 +769,7 @@ static int32_t bus_open(uint32_t pid, uint32_t perms, uint8_t kind, int pin, con
     return handle_of(d);
 }
 
-static void bus_close(dev_t *d) {
+static void bus_close(dev_row_t *d) {
     switch (d->kind) {
         case K_UART: moy_devbus_uart_close(d->unit); break;
         case K_SPI: moy_devbus_spi_close(d->unit); break;
@@ -780,7 +780,7 @@ static void bus_close(dev_t *d) {
     moy_lease_drop(d->lease);
 }
 
-static int32_t bus_read(dev_t *d, uint8_t *out, size_t cap) {
+static int32_t bus_read(dev_row_t *d, uint8_t *out, size_t cap) {
     switch (d->kind) {
         case K_UART: return moy_devbus_uart_read(d->unit, out, cap);
         case K_SPI: return cap ? moy_devbus_spi_xfer(d->unit, NULL, 0, out, cap) : 0;
@@ -791,7 +791,7 @@ static int32_t bus_read(dev_t *d, uint8_t *out, size_t cap) {
     }
 }
 
-static int32_t bus_write(dev_t *d, const uint8_t *data, size_t n) {
+static int32_t bus_write(dev_row_t *d, const uint8_t *data, size_t n) {
     switch (d->kind) {
         case K_UART: return moy_devbus_uart_write(d->unit, data, n);
         case K_SPI: return moy_devbus_spi_xfer(d->unit, data, 0, NULL, n);
@@ -801,7 +801,7 @@ static int32_t bus_write(dev_t *d, const uint8_t *data, size_t n) {
     }
 }
 
-static int32_t bus_xfer(dev_t *d, const uint8_t *data, size_t n, uint8_t *out, size_t cap) {
+static int32_t bus_xfer(dev_row_t *d, const uint8_t *data, size_t n, uint8_t *out, size_t cap) {
     if (d->kind == K_SPI) {
         return cap < n ? MOY_DEV_EFULL : moy_devbus_spi_xfer(d->unit, data, 0, out, n);
     }
@@ -818,7 +818,7 @@ static int32_t bus_xfer(dev_t *d, const uint8_t *data, size_t n, uint8_t *out, s
     return moy_devbus_i2c_write_read((uint8_t)d->addr, data, n, out, cap);
 }
 
-static int32_t bus_set(dev_t *d, const char *cfg, size_t n) {
+static int32_t bus_set(dev_row_t *d, const char *cfg, size_t n) {
     int32_t rc;
     switch (d->kind) {
         case K_UART: {
@@ -870,7 +870,7 @@ static int32_t bus_set(dev_t *d, const char *cfg, size_t n) {
     }
 }
 
-static int32_t bus_get(dev_t *d, const char *what, size_t n) {
+static int32_t bus_get(dev_row_t *d, const char *what, size_t n) {
     switch (d->kind) {
         case K_UART: return is(what, n, "any") ? moy_devbus_uart_any(d->unit) : MOY_DEV_EBAD;
         case K_I2C: return is(what, n, "addr") ? d->addr : MOY_DEV_EBAD;
@@ -884,7 +884,7 @@ static int32_t bus_get(dev_t *d, const char *what, size_t n) {
 
 // -- the rows ------------------------------------------------------------------------
 
-static void close_row(dev_t *d) {
+static void close_row(dev_row_t *d) {
     if (d->kind == K_GPIO) {
         edges_off(d);
         moy_lease_drop(d->lease);
@@ -943,7 +943,7 @@ int32_t moy_dev_open(uint32_t pid, uint32_t perms, const char *name, size_t n,
         return MOY_DEV_PASS;                        \
     }                                               \
     moy_lease_lock();                               \
-    dev_t *d = row_of((pid), (h));                  \
+    dev_row_t *d = row_of((pid), (h));                  \
     int32_t r = MOY_DEV_EABSENT;                    \
     if (d != NULL) {                                \
         body;                                       \
