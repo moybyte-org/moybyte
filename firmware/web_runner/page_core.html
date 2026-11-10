@@ -219,64 +219,81 @@ console.log("[moybyte] "+(assCart||"?")+" | recv "+(PERF.f/dt).toFixed(1)
 +"/"+PERF.mu.toFixed(1)+" ms mean/worst | fb "+(PERF.b/dt/1024).toFixed(0)+" KB/s");
 PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;
 PERF.mb=0;PERF.sb=0;PERF.mu=0;PERF.su=0;PERF.sn=0;}
-// Audio: play the console's FINISHED PCM (no JS synth).
-// Playback is ONE AudioWorklet pulling from a sample ring with CONTINUOUS
-// linear resampling (#170 round 4): the old per-chunk AudioBufferSource path
-// resampled every ~184-sample chunk independently and rounded each start() to
-// the context's sample grid -- a seam (click) at every chunk boundary, ~60/s
-// (owner: "still some clicking" after the cushion fix). The ring has no seams;
-// starvation DECAYS the last sample to zero instead of hard-cutting. The chunk
-// scheduler survives as the fallback (no AudioWorklet) and as the bridge until
-// the worklet module finishes loading -- the swap happens only at a stream gap,
-// because the two paths' clocks aren't aligned and a mid-stream swap would
-// itself click.
-var AUDIO_RATE=22050,actx=null,audioNext=0,audioBlocked=false;
-var awNode=null,awReady=false,awOn=false,awDepth=0;
+// Audio: play the console's FINISHED PCM (no JS synth, no resampling).
+// The AudioContext is made as the page loads (suspended until a gesture
+// resumes it), so its rate is known before the console boots: the init
+// message hands it to the worker and the console mixes at it, the MP3
+// decoder resampling once, in C (web_boot.audio_rate). The page plays samples
+// one for one.
+// THE SINK. The worker posts each frame's samples, {p: Int16Array, at, fresh},
+// straight to an AudioWorklet over a MessageChannel where the page has one (a
+// secure context), else to this page, which schedules each as an
+// AudioBufferSource at the end of the last (a board-served page over plain
+// HTTP). Either way they are played on arrival, never with the newest-frame
+// slot a frame's pixels ride, and the sink reports its counters to the worker
+// -- the samples it played, which the console's pull tops up to its target
+// depth from -- and to the page's state (`__moyState().sink`): got, played,
+// `under` (the queue ran dry under a stream that went on: the dry samples in
+// `dry`, played as silence after a 2 ms fade, never as stale audio), `gap`
+// and `dup` (samples a chunk's `at` skipped or repeated) and `over` (samples
+// a full ring refused). A chunk the console marks `fresh` starts a stream
+// after a silence, so the dry run before it is no underrun.
+var AUDIO_RATE=22050,actx=null,audioOut=null,audioBlocked=false;
+var SS={got:0,played:0,under:0,dry:0,gap:0,dup:0,over:0},schedNext=-1,schedEnd=0;
 var AW_SRC="class MoyPCM extends AudioWorkletProcessor{"+
-"constructor(){super();this.b=new Float32Array(1<<16);this.r=0;this.w=0;this.n=0;"+
-"this.pos=0;this.rate=22050;this.last=0;this.k=0;"+
-"this.port.onmessage=(e)=>{var d=e.data;if(d.rate){this.rate=d.rate;return;}"+
-"var a=d.p;for(var i=0;i<a.length;i++){if(this.n>=this.b.length)break;"+
-"this.b[this.w]=a[i];this.w=(this.w+1)%this.b.length;this.n++;}};}"+
-"process(ins,outs){var o=outs[0][0],st=this.rate/sampleRate;"+
+"constructor(){super();this.b=new Float32Array(1<<16);this.m=this.b.length-1;this.r=0;this.w=0;this.n=0;"+
+"this.last=0;this.k=0;this.d=0;this.next=-1;this.q=null;"+
+"this.s={got:0,played:0,under:0,dry:0,gap:0,dup:0,over:0};"+
+"this.port.onmessage=(e)=>{if(e.data.port){this.q=e.data.port;this.q.onmessage=(m)=>this.take(m.data);}};}"+
+"take(c){var a=c.p,n=a.length,s=this.s;"+
+"if(this.next>=0&&c.at!==this.next){if(c.at>this.next)s.gap+=c.at-this.next;else s.dup+=this.next-c.at;}"+
+"this.next=c.at+n;if(this.d>0){if(!c.fresh){s.under++;s.dry+=this.d;}this.d=0;}"+
+"for(var i=0;i<n;i++){if(this.n>this.m){s.over+=n-i;break;}"+
+"this.b[this.w]=a[i]/32768;this.w=(this.w+1)&this.m;this.n++;}s.got+=n;}"+
+"process(ins,outs){var o=outs[0][0],s=this.s;"+
 "for(var i=0;i<o.length;i++){"+
-"if(this.n>1){var v0=this.b[this.r],v1=this.b[(this.r+1)%this.b.length];"+
-"o[i]=v0+(v1-v0)*this.pos;this.last=o[i];this.pos+=st;"+
-"while(this.pos>=1&&this.n>1){this.pos-=1;this.r=(this.r+1)%this.b.length;this.n--;}}"+
-"else{this.last*=0.995;o[i]=this.last;}}"+
-"if(++this.k>=8){this.k=0;this.port.postMessage(this.n);}return true;}}"+
+"if(this.n>0){var v=this.b[this.r];this.r=(this.r+1)&this.m;this.n--;s.played++;o[i]=v;this.last=v;}"+
+"else{this.last=Math.abs(this.last)<1e-4?0:this.last*0.9;o[i]=this.last;if(s.got>0)this.d++;}}"+
+"if(++this.k>=8){this.k=0;if(this.q)this.q.postMessage(s);}return true;}}"+
 "registerProcessor('moy-pcm',MoyPCM);";
-function ensureAudio(){if(!actx){var AC=window.AudioContext||window.webkitAudioContext;
-if(AC){try{actx=new AC();}catch(e){actx=null;}}
-if(actx&&actx.audioWorklet&&window.URL&&window.Blob){
+function audioInit(){var AC=window.AudioContext||window.webkitAudioContext;
+if(!AC||actx)return;try{actx=new AC();}catch(e){actx=null;return;}
+AUDIO_RATE=actx.sampleRate;audioOut=actx.createGain();audioOut.connect(actx.destination);}
+audioInit();
+// The worker's sink, said once: a worklet's port, or this page.
+function audioSink(w){if(!actx)return;
+var rate=actx.sampleRate;
+if(actx.audioWorklet&&window.MessageChannel&&window.URL&&window.Blob){
 try{var u=URL.createObjectURL(new Blob([AW_SRC],{type:"application/javascript"}));
 actx.audioWorklet.addModule(u).then(function(){
-awNode=new AudioWorkletNode(actx,"moy-pcm",{numberOfInputs:0,outputChannelCount:[1]});
-awNode.port.onmessage=function(e){awDepth=e.data;};
-awNode.port.postMessage({rate:AUDIO_RATE});
-awNode.connect(actx.destination);awReady=true;}).catch(function(){});}catch(e){}}}
+var node=new AudioWorkletNode(actx,"moy-pcm",{numberOfInputs:0,outputChannelCount:[1]});
+node.connect(audioOut);var ch=new MessageChannel();
+node.port.postMessage({port:ch.port1},[ch.port1]);
+w.postMessage({t:"sink",port:ch.port2,rate:rate},[ch.port2]);
+}).catch(function(){w.postMessage({t:"sink",rate:rate});});return;}catch(e){}}
+w.postMessage({t:"sink",rate:rate});}
+function ensureAudio(){if(!actx){audioInit();if(actx&&WORKER)audioSink(WORKER);}
 if(actx&&actx.state==="suspended")actx.resume();}
-// Seconds of PCM still queued for playback -- the runner reports this to the
-// console each frame so the synth tops the cushion back up (the crackle fix).
-// Between the worklet's periodic depth reports playPCM adds pushes optimistically.
-function audioQueuedSecs(){if(!actx||actx.state!=="running")return -1;
-if(awOn)return awDepth/AUDIO_RATE;
-return Math.max(0,audioNext-actx.currentTime);}
-// Audio frames that arrive while the context is blocked by the browser's autoplay
-// policy used to be dropped SILENTLY -- undiagnosable on a phone. Surface the state
-// in the status chip instead, and self-heal once a gesture unlocks the context.
-function playPCM(b64){if(!b64)return;
-if(!actx||actx.state!=="running"){if(!audioBlocked){audioBlocked=true;
-sEl.textContent="tap screen to enable sound";sEl.style.color="#ffa300";}return;}
-if(audioBlocked){audioBlocked=false;ok=false;}
-var bin=atob(b64),n=bin.length>>1;if(n<=0)return;
-var f=new Float32Array(n);
-for(var i=0;i<n;i++){var v=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);if(v>=32768)v-=65536;f[i]=v/32768;}
-if(awReady&&!awOn&&audioNext<=actx.currentTime)awOn=true;   // swap at a gap
-if(awOn){awDepth+=n;awNode.port.postMessage({p:f},[f.buffer]);return;}
-var buf=actx.createBuffer(1,n,AUDIO_RATE);buf.getChannelData(0).set(f);
-var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
-var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
+// The page's sink: the samples it has played are those it got less those
+// still scheduled.
+function audioPlayed(){if(actx&&schedNext>actx.currentTime)
+return SS.got-Math.round((schedNext-actx.currentTime)*AUDIO_RATE);return SS.got;}
+// A frame that carried samples while the browser's autoplay policy holds the
+// context: the status chip says so, and heals once a gesture resumes it.
+function audioWanted(){if(!actx)return;
+if(actx.state!=="running"&&!audioBlocked){audioBlocked=true;
+sEl.textContent="tap screen to enable sound";sEl.style.color="#ffa300";}
+else if(actx.state==="running"&&audioBlocked){audioBlocked=false;ok=false;}}
+function playPCM(c){var a=c.p,n=a.length;if(!actx||n<=0)return;
+if(schedEnd>0&&c.at!==schedEnd){if(c.at>schedEnd)SS.gap+=c.at-schedEnd;else SS.dup+=schedEnd-c.at;}
+schedEnd=c.at+n;
+var now=actx.currentTime,t=schedNext;
+if(t<now+0.005){if(t>=0&&!c.fresh){SS.under++;SS.dry+=Math.round((now+0.02-t)*AUDIO_RATE);}
+t=now+0.02;}
+var buf=actx.createBuffer(1,n,AUDIO_RATE),f=buf.getChannelData(0);
+for(var i=0;i<n;i++)f[i]=a[i]/32768;
+var src=actx.createBufferSource();src.buffer=buf;src.connect(audioOut);src.start(t);
+schedNext=t+n/AUDIO_RATE;SS.got+=n;}
 var fitSent=-1;
 function fit(){/* Fill the available viewport without the old integer-scale
 cliff (e.g. 1.95x used to collapse all the way to 1x on an ultrawide). Sized off
@@ -332,7 +349,7 @@ rgba32=new Uint32Array(rgba.buffer,rgba.byteOffset,W*H);}
 fit();}
 function getA(){return fetchAssets().then(function(a){
 W=a.w;H=a.h;assCart=a.cart;
-if(a.audio_rate){AUDIO_RATE=a.audio_rate;if(awNode)awNode.port.postMessage({rate:AUDIO_RATE});}
+if(a.audio_rate)AUDIO_RATE=a.audio_rate;
 INPUT=a.input||null;applyInputHint();
 // The framebuffer's byte order is REPORTED by the console rather than assumed
 // (see web_boot.assets_json); rebuild the table only when it actually changes.
@@ -533,7 +550,7 @@ if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}
 var fi=f.input||null;
 if(JSON.stringify(fi)!==JSON.stringify(INPUT)){INPUT=fi;applyInputHint();}
 if(fb)blit(fb);
-if(f.audio)playPCM(f.audio);
+if(f.pcm)audioWanted();
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();
 if(!ok){ok=true;sEl.textContent="live";sEl.style.color="#00e436";}}

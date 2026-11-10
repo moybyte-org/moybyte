@@ -24,6 +24,24 @@
 #if defined(MOY_AUDIO_STEREO) && MOY_AUDIO_STEREO
 #define AUD_STEREO 1
 #endif
+#if defined(AUD_STEREO) || !MOY_AUD_BOARD
+#define AUD_UP2 1
+#endif
+
+#if !MOY_AUD_BOARD
+#define OUT_PIECE 64            // the output-rate render's upsampled source, frames
+// The output-rate render (moy_aud_render_out): the sessions' mix upsampled
+// 2x, then carried linearly to the output's rate, `pos` the place between
+// `prev` and `cur` in Q16 of a source frame.
+typedef struct {
+    int rate;                   // the output's, 0: the mix's own
+    moy_aud_up_t up;
+    int16_t src[OUT_PIECE];
+    int have, at;
+    uint32_t pos;
+    int16_t prev, cur;
+} aud_out_t;
+#endif
 
 typedef struct {
     const int16_t *pcm;         // a clip's frames, or NULL: idle
@@ -68,9 +86,13 @@ typedef struct {
 #ifdef AUD_STEREO
     moy_aud_up_t up;            // the stereo output's upsampler
 #endif
+#if !MOY_AUD_BOARD
+    aud_out_t out;
+#endif
 } aud_t;
 
 static aud_t A = {.rate = 22050, .console = 7};
+#define ONE16 65536u
 
 // -- memory: PSRAM on a board, the C heap elsewhere ----------------------------
 
@@ -697,7 +719,7 @@ void moy_aud_render(int16_t *out, int n) {
     render_done(out, n, n);
 }
 
-#ifdef AUD_STEREO
+#ifdef AUD_UP2
 
 // The interpolated phase's taps, one side, nearest first: sinc at half an
 // input frame and on, under a Kaiser window (beta 7.5) 2 x MOY_AUD_UP_TAPS
@@ -729,6 +751,10 @@ void moy_aud_up2(moy_aud_up_t *u, const int16_t *in, int n, int16_t *out) {
     }
 }
 
+#endif
+
+#ifdef AUD_STEREO
+
 #define ST_PIECE 64             // output frames rendered under one hold of the lock
 
 void moy_aud_render_st(int16_t *out, int n) {
@@ -751,6 +777,67 @@ void moy_aud_render_st(int16_t *out, int n) {
         }
         render_done(o, 2 * k, k);
     }
+}
+
+#endif
+
+#if !MOY_AUD_BOARD
+
+void moy_aud_out_rate_set(int rate) {
+    moy_aud_lock();
+    A.out.rate = rate > 0 && rate != A.rate ? rate : 0;
+    memset(&A.out.up, 0, sizeof(A.out.up));
+    A.out.have = A.out.at = 0;
+    A.out.pos = 0;
+    A.out.prev = A.out.cur = 0;
+    moy_aud_unlock();
+}
+
+int moy_aud_out_rate_get(void) {
+    return A.out.rate > 0 ? A.out.rate : A.rate;
+}
+
+// The next frame of the sessions' mix at twice its rate.
+static int16_t out_src(aud_sess_t *r) {
+    aud_out_t *o = &A.out;
+    if (o->at >= o->have) {
+        int16_t mono[OUT_PIECE / 2];
+        render_sessions(r, mono, OUT_PIECE / 2);
+        moy_aud_up2(&o->up, mono, OUT_PIECE / 2, o->src);
+        o->have = OUT_PIECE;
+        o->at = 0;
+    }
+    return o->src[o->at++];
+}
+
+void moy_aud_render_out(int16_t *out, int n) {
+    if (A.out.rate == 0) {
+        moy_aud_render(out, n);
+        return;
+    }
+    if (n <= 0) {
+        return;
+    }
+    render_lock();
+    aud_out_t *o = &A.out;
+    aud_sess_t *r = A.focus;
+    uint32_t step = (uint32_t)(((uint64_t)(2u * (uint32_t)A.rate) << 16) / (uint32_t)o->rate);
+    for (int i = 0; i < n; i++) {
+        while (o->pos >= ONE16) {
+            o->prev = o->cur;
+            o->cur = out_src(r);
+            o->pos -= ONE16;
+        }
+        out[i] = (int16_t)(o->prev + (int32_t)(((int64_t)(o->cur - o->prev) * o->pos) >> 16));
+        o->pos += step;
+    }
+    if (A.pcm_on) {
+        moy_stream_mix(&A.pcm, out, n, o->rate, r != NULL ? effective(r) : A.console);
+    }
+    if (A.bg != NULL) {
+        A.bg(out, n, A.console, r != NULL && sounding(r));
+    }
+    render_done(out, n, n);
 }
 
 #endif

@@ -492,7 +492,11 @@ int moy_aud_out_start(void) {
 }
 
 int moy_aud_out_rate(void) {
+#if MOY_AUD_BOARD
     return moy_aud_rate();
+#else
+    return moy_aud_out_rate_get();
+#endif
 }
 
 int moy_aud_out_channels(void) {

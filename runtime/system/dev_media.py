@@ -42,7 +42,10 @@ permission is a client of.
                      run's bytes in internal SRAM (the decoder's state and
                      its task's stack, 0 where they took PSRAM) and `dec_us`
                      a frame's mean decode in microseconds over the last 256
-                     (0 before the first 256, and on a host)
+                     (0 before the first 256, and on a host); the decoded
+                     ring's counts since open, in frames at the output's
+                     rate: `decoded`, `pulled` by the mix and `starved`
+                     (the mix found it empty while it played: silence)
   stamp() -> int | None  one small int that moves when what now() shows
                      does (its place by the second): a poll that finds it
                      still reads nothing else and allocates nothing
@@ -666,6 +669,7 @@ def now():
         "who": _N.text(_N.T_WHO), "label": _N.text(_N.T_LABEL),
         "at": st[_AT_MS] // 1000 if fed else 0, "len": st[_LEN_MS] // 1000 if fed else 0,
         "sram": st[_SRAM], "dec_us": st[_DEC_US],
+        "decoded": st[_DEC], "pulled": st[_PLAYED], "starved": st[_STARVED],
     }
 
 

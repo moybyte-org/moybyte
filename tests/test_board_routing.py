@@ -845,7 +845,7 @@ def test_web_runner_audio_pulls_the_kernels_mix():
     assert not (web / "moy_audio_micropython.mk").exists()
     assert "moy_audio_micropython.mk" not in build
     assert "class _RunnerPump(PcmPump):" in boot
-    assert "na.render(buf, n)" in boot
+    assert "na.render_out(" in boot
     assert "audio_out=_RunnerPump()" in boot
     for gone in (".voice_set(", ".voice_read(", "._advance_music(", "bank_load("):
         assert gone not in boot, gone

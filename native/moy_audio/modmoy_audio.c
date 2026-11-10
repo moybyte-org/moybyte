@@ -206,6 +206,32 @@ static mp_obj_t mod_render(mp_obj_t buf, mp_obj_t nobj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_render_obj, mod_render);
 
+#if !MOY_AUD_BOARD
+// set_out_rate(rate): the output's rate where no feeder runs (moy_aud.h, THE
+// OUTPUT RATE), the browser's AudioContext's; render_out(buf, n) -> frames:
+// the next `n` frames of the mix at it.
+static mp_obj_t mod_set_out_rate(mp_obj_t rate) {
+    moy_aud_out_rate_set((int)mp_obj_get_int(rate));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_set_out_rate_obj, mod_set_out_rate);
+
+static mp_obj_t mod_render_out(mp_obj_t buf, mp_obj_t nobj) {
+    mp_buffer_info_t bi;
+    mp_int_t n = mp_obj_get_int(nobj);
+    mp_get_buffer_raise(buf, &bi, MP_BUFFER_WRITE);
+    if ((size_t)n * 2u > bi.len) {
+        n = (mp_int_t)(bi.len / 2u);
+    }
+    if (n <= 0) {
+        return MP_OBJ_NEW_SMALL_INT(0);
+    }
+    moy_aud_render_out((int16_t *)bi.buf, (int)n);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_render_out_obj, mod_render_out);
+#endif
+
 // dump(h, buf, n) -> frames: the self-dump, `n` frames of an unfocused
 // session's synth alone into `buf` (signed 16-bit mono), no speaker involved.
 static mp_obj_t mod_dump(mp_obj_t h, mp_obj_t buf, mp_obj_t nobj) {
@@ -389,6 +415,10 @@ static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_rate),     MP_ROM_PTR(&mod_set_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_rate),         MP_ROM_PTR(&mod_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_render),       MP_ROM_PTR(&mod_render_obj) },
+#if !MOY_AUD_BOARD
+    { MP_ROM_QSTR(MP_QSTR_set_out_rate), MP_ROM_PTR(&mod_set_out_rate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_render_out),   MP_ROM_PTR(&mod_render_out_obj) },
+#endif
     { MP_ROM_QSTR(MP_QSTR_dump),         MP_ROM_PTR(&mod_dump_obj) },
     { MP_ROM_QSTR(MP_QSTR_start),        MP_ROM_PTR(&mod_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_out),          MP_ROM_PTR(&mod_out_obj) },

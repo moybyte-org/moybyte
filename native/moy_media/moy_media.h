@@ -3,9 +3,9 @@
 // stream (ICY metadata read, the station's now-playing text) or a file, each
 // an entry of a list an M3U or PLS playlist fills. MP3 is decoded (minimp3.h,
 // vendored) and resampled to the output's rate and channels (moy_aud_out_rate
-// and _channels: 44.1 kHz stereo on a P4, its stream's channels kept; 22.05
-// kHz mono elsewhere, a stereo stream mixed down, the browser's page among
-// them), and the mix (native/moy_audio/moy_aud.h's background stream) pulls
+// and _channels: 44.1 kHz stereo on a P4, its stream's channels kept; mono
+// elsewhere, a stereo stream mixed down, at 22.05 kHz on the S3s and the host
+// and at its AudioContext's rate in the browser's page), and the mix (native/moy_audio/moy_aud.h's background stream) pulls
 // it, ducked under the focused session. play() is the whole of starting one:
 // the Music app, the shell's `media` and the browser's page all start through
 // it (runtime/system/dev_media.py, the face, checks the permissions first).

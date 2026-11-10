@@ -57,32 +57,7 @@ def _long_tone():
 
 LONG = _long_tone()
 
-# What the page's audio path saw: a spy on the worker's frames, counting the
-# ones that carry PCM, the loudest sample, and the tone's zero crossings
-# (a 1 kHz tone crosses zero about 2,000 times a second of what sounded, at
-# the page's mix rate, which the spy reads from the page).
-_SPY = """(() => {
-  const was = onWorker;
-  window.__pcm = {frames: 0, peak: 0, n: 0, cross: 0, last: 0, rate: AUDIO_RATE};
-  onWorker = function (m) {
-    if (m.t === 'frame' && m.s) {
-      const a = JSON.parse(m.s).audio;
-      if (a) {
-        const b = atob(a), p = window.__pcm; p.frames++;
-        for (let i = 0; i + 1 < b.length; i += 2) {
-          let v = b.charCodeAt(i) | (b.charCodeAt(i + 1) << 8);
-          if (v >= 32768) v -= 65536;
-          if (!v) continue;
-          p.n++; p.peak = Math.max(p.peak, Math.abs(v));
-          if ((v < 0) !== (p.last < 0) && p.last) p.cross++;
-          p.last = v;
-        }
-      }
-    }
-    return was(m);
-  };
-  return 'spying';
-})()"""
+_SPY = web_e2e.PCM_SPY
 _PCM = "'PCM ' + JSON.stringify(window.__pcm)"
 _MEDIA = "__moyState().then(s => 'MEDIA ' + JSON.stringify(s.media))"
 _LAST = "__moyState().then(s => 'LAST ' + JSON.stringify(s.media_last))"

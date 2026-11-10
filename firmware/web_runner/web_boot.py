@@ -61,51 +61,90 @@ from input import InputState
 from audio_session import PcmPump
 
 _S = {}          # the runner singletons: ws / canvas / driver / sink
-# The rate the page's worklet resamples from: the mix is made at it.
-_AUDIO_RATE_HZ = 22050
+# The output's rate: the page's AudioContext's (audio_rate), so the page plays
+# the samples one for one. The sessions mix at _MIX_RATE_HZ, as on every
+# board, and the C upsamples that mix once to the output's rate
+# (moy_aud_render_out); an MP3 is resampled once, in C, to it.
+_MIX_RATE_HZ = 22050
+_AUDIO_RATE_HZ = [_MIX_RATE_HZ]
+_AUDIO_RATE_MIN, _AUDIO_RATE_MAX = 8000, 192000
 
 
-# The page keeps ~this many seconds of PCM scheduled ahead of the audio clock.
-# Deep enough to ride out a late frame (wasm GC pause, phone jank -- the 20ms
-# scheduling margin alone was the owner-reported crackle), shallow enough that
-# a game sfx mixed into the stream isn't noticeably late.
-_AUDIO_TARGET = 0.12
+def audio_rate(hz):
+    """The page's AudioContext's sample rate, before boot: the output is made
+    at it. 0 (no Web Audio) keeps the default."""
+    hz = int(hz)
+    if _AUDIO_RATE_MIN <= hz <= _AUDIO_RATE_MAX:
+        _AUDIO_RATE_HZ[0] = hz
+
+
+# The depth the page's sink is kept at: deep enough to ride out a late frame
+# (wasm GC pause, phone jank) and the lag of the sink's count, shallow enough
+# that a game sfx mixed into the stream isn't noticeably late.
+_AUDIO_TARGET = 0.15
 _AUDIO_MAX_STEP = 0.20      # bound one frame's top-up render (seconds)
 
 
 class _RunnerPump(PcmPump):
-    """The page's pull of the kernel's mix (#170 round 3 -- the owner's
-    "crackle and slowdown" report): the page reports how many seconds of PCM
-    it still has scheduled (step_frame_json's audio_ahead), and tick() renders
-    whatever refills that to _AUDIO_TARGET instead of exactly rate*dt, so one
-    late frame eats cushion, not the stream. Without the report (ahead < 0)
-    it renders rate*dt. Nothing is rendered while nothing sounds, so a silent
-    frame ships no audio. step_frame_json drains take_pcm() into the frame
-    payload and the page's playPCM plays the finished samples."""
+    """The page's pull of the kernel's mix, by count: the page's sink reports
+    the samples it has played (`played`, step_frame_json's), the pull knows
+    the ones it sent, and tick() renders what tops the difference up to
+    _AUDIO_TARGET, so the stream is taken at the sink's own rate, a late
+    frame eats depth and never the stream. Every sample rendered is sent, in
+    order (`at` counts them), so the sink can tell an underrun from a gap.
+    With no sink (`played` < 0) it renders rate*dt and sends nothing.
+    Nothing is rendered while nothing sounds; the first chunk after that is
+    `fresh`, a stream starting, not one the sink ran dry under. A frame's
+    samples wait in `_buf` (`n` of them) for step_frame_json to hand the
+    worker their address."""
 
     def __init__(self):
-        PcmPump.__init__(self, _AUDIO_RATE_HZ)
-        self.ahead = -1.0
+        PcmPump.__init__(self, _MIX_RATE_HZ)
+        out = _AUDIO_RATE_HZ[0]
+        if self._na is not None:
+            self._na.set_out_rate(out)
+        self.rate = out
+        self.played = -1
+        self.sent = 0
+        self.n = 0
+        self.idle = True
+        self.fresh = False
         self._buf = bytearray(int(self.rate * _AUDIO_MAX_STEP) * 2 + 64)
 
     def tick(self, dt):
-        if self.ahead >= 0.0:
-            want = _AUDIO_TARGET - self.ahead
-            if want > _AUDIO_MAX_STEP:
-                want = _AUDIO_MAX_STEP
-            n = int(self.rate * want) if want > 0 else 0
-        else:
-            n = int(self.rate * dt) if dt > 0 else 0
-        cap = len(self._buf) // 2
-        if n > cap:
-            n = cap
         na = self._na
-        if n <= 0 or na is None or not (na.active() or _media_open()):
+        if na is None or not (na.active() or _media_open()):
+            self.idle = True
             return
-        buf = memoryview(self._buf)[:n * 2]
-        na.render(buf, n)
-        self.last_pcm = bytes(buf)
+        if self.played >= 0:
+            n = int(self.rate * _AUDIO_TARGET) - (self.sent + self.n - self.played)
+            cap = int(self.rate * _AUDIO_MAX_STEP)
+            if n > cap:
+                n = cap
+        else:
+            n = self.frames(dt)
+        room = len(self._buf) // 2 - self.n
+        if n > room:
+            n = room
+        if n <= 0:
+            return
+        if self.idle:
+            self.idle = False
+            self.fresh = True
+        na.render_out(memoryview(self._buf)[self.n * 2:(self.n + n) * 2], n)
+        self.n += n
         self.rendered += n
+
+    def take(self):
+        """This frame's samples for the sink: (count, first's index, fresh),
+        None when there are none or no sink."""
+        n, self.n = self.n, 0
+        if n <= 0 or self.played < 0:
+            return None
+        at = self.sent
+        self.sent += n
+        fresh, self.fresh = self.fresh, False
+        return n, at, fresh
 
 
 _MEDIA = []
@@ -872,7 +911,7 @@ def _cart_title():
 
 
 def _audio_rate():
-    return _AUDIO_RATE_HZ
+    return _AUDIO_RATE_HZ[0]
 
 
 def assets_json():
@@ -941,24 +980,25 @@ def fb_len():
     return len(_S["canvas"]._buf)
 
 
-def step_frame_json(dt, audio_ahead=-1.0):
+def step_frame_json(dt, played=-1):
     """Advance the console one frame.
 
     Returns "" when the console skipped the redraw (#44 dirty gate: nothing
-    moved) and there is no audio to ship -- the page then simply keeps the
+    moved) and there are no samples to ship -- the page then simply keeps the
     pixels it already has. Otherwise a small JSON string carrying what does not
-    live in the framebuffer: whether it painted, the cart title, the input hint,
-    and this frame's finished PCM. `audio_ahead` is the page's scheduled-ahead
-    audio depth in seconds (-1 = not reported): _RunnerPump tops the cushion
-    back up to target each frame (the crackle fix, #170).
+    live in the framebuffer: whether it painted, the cart title, the input
+    hint, and this frame's samples: `pcm` of them at heap address `pa`, `at`
+    the first's index in the stream and `fresh` whether it starts one
+    (_RunnerPump.take). `played` is the page's sink's count of samples
+    played (-1 = no sink): _RunnerPump tops its depth up from it.
 
-    The PIXELS are not in here. The worker reads them from fb_addr()/fb_len()
-    when `paint` is set.
+    The PIXELS and the SAMPLES are not in here. The worker reads them from
+    fb_addr()/fb_len() when `paint` is set, and from `pa` when `pcm` is.
     """
     ws = _S["ws"]
     au = getattr(ws, "audio_out", None)
-    if au is not None and hasattr(au, "ahead"):
-        au.ahead = float(audio_ahead)
+    if au is not None and hasattr(au, "played"):
+        au.played = int(played)
     painted_before = ws.frame_state.frames_drawn
     pulled = au.rendered if au is not None and hasattr(au, "rendered") else None
     _feed_events()
@@ -968,21 +1008,20 @@ def step_frame_json(dt, audio_ahead=-1.0):
         # The media stream sounds with no Player pulling the mix (the shell,
         # an app): a board's feeder task pulls it, the page's frame here.
         au.tick(dt)
-    # Drain the engine's FINISHED PCM (rendered by _RunnerPump.tick during the
-    # frame) -- the page plays it through its AudioWorklet ring.
-    pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
-    audio_b64 = ""
-    if pcm and any(pcm):
-        import binascii
-        audio_b64 = binascii.b2a_base64(pcm).decode().strip()
-    if not painted and not audio_b64:
+    took = au.take() if (au is not None and hasattr(au, "take")) else None
+    if not painted and took is None:
         return ""
-    return json.dumps({
+    out = {
         "paint": 1 if painted else 0,
         "cart": _cart_title(),
-        "audio": audio_b64,
         "input": web_input.effective_input_kinds(ws),
-    })
+    }
+    if took is not None:
+        import uctypes
+        out["pcm"], out["at"] = took[0], took[1]
+        out["fresh"] = 1 if took[2] else 0
+        out["pa"] = uctypes.addressof(au._buf)
+    return json.dumps(out)
 
 
 def _edit_state(ws):
@@ -1029,7 +1068,8 @@ def state_json():
     every on-glass suite reads -- plus this page's sample stream
     (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
     audio pull mixed, frames it found none, the room, whether it is open, its
-    depth) and
+    depth), the page's pull (`pcm`: its rate, the samples it sent the
+    page's sink and the sink's count of those it played), and
     the running cart's first eight pmem slots, the earned badges' ids, the
     Settings rows as the console holds them, whether the FPS chip shows and
     the store's sync (`sync`: the batches its far end has taken, and whether
@@ -1054,6 +1094,9 @@ def state_json():
     except (ImportError, AttributeError):
         sc = None
     st["snd"] = list(sc) if sc is not None else None
+    au = getattr(_S["ws"], "audio_out", None)
+    st["pcm"] = {"rate": au.rate, "sent": au.sent, "played": au.played} \
+        if hasattr(au, "sent") else None
     try:
         import dev_media
         st["media"] = dev_media.now()

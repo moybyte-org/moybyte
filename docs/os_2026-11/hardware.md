@@ -544,8 +544,10 @@ running thing tier for media; it has no speaker, and its image denies the
 module).
 
 **The output format (owner, 2026-11-03; two rates, 2026-11-04)**: 44.1 kHz
-stereo on the P4s, 22.05 kHz mono on the S3s, the host and the browser's
-page (`web_boot._AUDIO_RATE_HZ`). Every
+stereo on the P4s, 22.05 kHz mono on the S3s and the host, and mono at its
+AudioContext's rate in the browser's page (`web_boot.audio_rate`, the sessions'
+mix upsampled once by `moy_aud_render_out`: the P4's 2x, carried on linearly
+where the context is not 44.1 kHz). Every
 board's sessions (the synth and the sample voices) mix at 22,050 Hz mono, so
 a cart sounds the same everywhere; on a P4 the feeder upsamples that mix
 once, 2× (`moy_aud_render_st` and `moy_aud_up2`, `native/moy_audio/moy_aud.h`:

@@ -305,6 +305,34 @@ def serve(site, port):
     pytest.fail("serve.py never answered")
 
 
+# What the page's audio played: a tap on its output after the sink
+# (page_core.html, THE SINK) into `window.__pcm`, counting the blocks that
+# carried sound, the loudest sample, and the zero crossings (a 1 kHz tone
+# crosses zero about 2,000 times a second of what sounded, at the context's
+# rate, which the console's output is made at). A context runs only after a
+# gesture: a scenario without one launches Chrome with AUTOPLAY.
+PCM_SPY = """(() => {
+  const sp = actx.createScriptProcessor(4096, 1, 1);
+  window.__pcm = {frames: 0, peak: 0, n: 0, cross: 0, last: 0, rate: actx.sampleRate};
+  sp.onaudioprocess = (e) => {
+    const d = e.inputBuffer.getChannelData(0), p = window.__pcm;
+    let any = false;
+    for (let i = 0; i < d.length; i++) {
+      const v = Math.round(d[i] * 32768);
+      if (!v) continue;
+      any = true; p.n++; p.peak = Math.max(p.peak, Math.abs(v));
+      if ((v < 0) !== (p.last < 0) && p.last) p.cross++;
+      p.last = v;
+    }
+    if (any) p.frames++;
+  };
+  audioOut.connect(sp); sp.connect(actx.destination);
+  window.__spy = sp;
+  return 'spying';
+})()"""
+AUTOPLAY = {"MOY_CHROME_ARGS": json.dumps(["--autoplay-policy=no-user-gesture-required"])}
+
+
 def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000,
         device=None, scheme=None):
     """One browsershot scenario against `base` in the Chrome profile

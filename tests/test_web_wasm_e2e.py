@@ -12,7 +12,7 @@ What it proves, in real Chrome against the built dist/:
     own file through `read`, a config value through `cfg`, verbs over the
     frame -- shows the frame the host shows, pixel for pixel
     (tests/tier_frame.py's golden); its `snd` samples are drained by the
-    page's audio pull and reach the page in the frames; and button A's trap
+    page's audio pull and reach the page's audio output; and button A's trap
     ends it on the console's own error panel;
   * Jet Teapot and ESP 88, built by tools/jet_cart.py as the carts' recipe
     builds them, play;
@@ -100,28 +100,10 @@ def _site(tmp_path, carts=(), index=None):
     return site
 
 
-# The console's `state`, and what the page's audio path saw: a spy on the
-# worker's frames, counting the ones that carry PCM and the loudest sample.
+# The console's `state`, and what the page's audio played (web_e2e.PCM_SPY).
 _STATE = ("__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, "
           "notice: s.notice, snd: s.snd}))")
-_SPY = """(() => {
-  const was = onWorker; window.__pcm = {frames: 0, peak: 0};
-  onWorker = function (m) {
-    if (m.t === 'frame' && m.s) {
-      const a = JSON.parse(m.s).audio;
-      if (a) {
-        const b = atob(a); window.__pcm.frames++;
-        for (let i = 0; i + 1 < b.length; i += 2) {
-          let v = b.charCodeAt(i) | (b.charCodeAt(i + 1) << 8);
-          if (v >= 32768) v -= 65536;
-          window.__pcm.peak = Math.max(window.__pcm.peak, Math.abs(v));
-        }
-      }
-    }
-    return was(m);
-  };
-  return 'spying';
-})()"""
+_SPY = web_e2e.PCM_SPY
 _PCM = "JSON.stringify(window.__pcm)"
 _CANVAS = """(() => {
   const c = document.getElementById('cv');
@@ -158,7 +140,8 @@ def _digest(shot):
 def _play(tmp_path, site, name, query, steps):
     server, base = web_e2e.serve(site, web_e2e.free_port())
     try:
-        return web_e2e.run(tmp_path, name, query, steps, base, tmp_path / ("chrome_" + name))
+        return web_e2e.run(tmp_path, name, query, steps, base, tmp_path / ("chrome_" + name),
+                           env=web_e2e.AUTOPLAY)
     finally:
         server.terminate()
         server.wait(timeout=10)

@@ -76,7 +76,11 @@ const profile = process.env.MOY_PROFILE
 // debug port" and would be a red run about the runner, not about the console.
 // The page under test is served from 127.0.0.1 out of our own dist/, so the
 // sandbox is not what is keeping anything out.
-const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean);
+// MOY_CHROME_ARGS is a scenario's own: a JSON list, one flag an item, spaces
+// kept (`--host-resolver-rules=MAP board.test 127.0.0.1` serves a page from a
+// name that is not localhost, so it has no secure context, as a board's does).
+const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean)
+    .concat(JSON.parse(process.env.MOY_CHROME_ARGS || "[]"));
 // A Chrome still running when the wait ends gets one more launch with a longer
 // wait: on the Pages runners it prints D-Bus warnings and then takes over 20 s
 // to report its port (every stable-site build from 2026-11-05 16:50). A Chrome

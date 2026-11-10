@@ -51,7 +51,7 @@ A frame reaches the canvas as every non-board frame does: `blit` and
 `blit565` write moycore's canvas, which the worker ships to the page. A
 cart's `snd` goes to `moy_audio`'s stream (`moy_audio_snd.h`), which the web
 runner's per-frame `render()` mixes after the synth, so the samples ride the
-same finished PCM the page plays through its AudioWorklet.
+same finished PCM the page's sink plays (page_core.html, THE SINK).
 
 ## A WASI command here
 

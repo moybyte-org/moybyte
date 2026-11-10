@@ -18,11 +18,15 @@
 // JS replayer, the wire protocol and the per-surface delta are gone.
 //
 // Protocol -- main -> worker:
-//   {t:"init", search, coarse, channel, scheme}  boot the console; `search` is
+//   {t:"init", search, coarse, channel, scheme, rate}  boot the console; `search` is
 //                        location.search (tier + cart), `coarse` the page's
-//                        (pointer: coarse), `channel` its MOY_CHANNEL
+//                        (pointer: coarse), `channel` its MOY_CHANNEL, `rate`
+//                        its AudioContext's sample rate (0: none), the output's
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
-//   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
+//   {t:"sink", port?}    where a frame's samples go: the worklet's MessagePort,
+//                        which reports its counters back on it, or (no port)
+//                        the page, which reports them as {t:"played", s}
+//   {t:"played", s}      the page's sink's counters (page_core.html, THE SINK)
 //   {t:"state"}          the console's `state` (web_boot.state_json), for a harness
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
@@ -43,6 +47,8 @@
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
 //   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
+//   {t:"pcm", p, at, fresh}  a frame's samples (Int16Array, TRANSFERRED) for the
+//                        page's sink; to a worklet sink the same over its port
 //   {t:"error", s, msg}  fatal: the page shows it and stops. msg is the
 //                        thrown value's String() (an abort's reason, a
 //                        traceback), s that plus the stack's frames
@@ -227,7 +233,26 @@ const PERSIST_GIVE_UP = 3;
 // silent kind. `sitePartial` is the seed tally's "some roots had no OPFS", kept
 // so a later batch cannot quietly upgrade a partial store's sentence.
 let keep = null, sitePartial = false;
-let running = false, ahead = -1, inbox = [];
+let running = false, inbox = [];
+// The audio sink (page_core.html, THE SINK): null before the page names it,
+// "page", or the worklet's port; `played` its count of samples played, -1
+// with no sink, which the console's pull tops its depth up from.
+let sink = null, sinkStats = null, played = -1;
+function sinkSet(port) {
+    sink = port || "page";
+    played = 0;
+    if (port) port.onmessage = (e) => { sinkStats = e.data; played = e.data.played; };
+}
+// A frame's samples, read out of the wasm heap where the pull rendered them,
+// to the sink.
+function shipPCM(f) {
+    if (!sink) return;
+    const n = f.pcm, b = new Int16Array(n);
+    new Uint8Array(b.buffer).set(mp._module.HEAPU8.subarray(f.pa, f.pa + 2 * n));
+    const c = { p: b, at: f.at, fresh: f.fresh };
+    if (sink === "page") self.postMessage(Object.assign({ t: "pcm" }, c), [b.buffer]);
+    else sink.postMessage(c, [b.buffer]);
+}
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
 // posts the buffer back once it has blitted, and we reuse it. Allocating a
@@ -1266,7 +1291,7 @@ function crashMessage(e) {
              s: !stack ? msg : stack.startsWith(msg) ? stack : msg + "\n" + stack };
 }
 
-async function init(search, coarse, channel, scheme, signin) {
+async function init(search, coarse, channel, scheme, signin, rate) {
     opfsNav = store.channelNav(navigator, channel);
     const qs = new URLSearchParams(search || "");
     if (signin) auth = Object.assign(auth, signin, { keys: Object.assign({}, signin.keys) });
@@ -1362,6 +1387,8 @@ async function init(search, coarse, channel, scheme, signin) {
         // The console this page's address asks for: its tier, size and cart
         // (web_boot.page_boot), on the page's pointer and colour scheme
         // (page_tail.js: ?scheme= or prefers-color-scheme).
+        // The output's rate: the page's AudioContext's (web_boot.audio_rate).
+        + "web_boot.audio_rate(" + Math.round(rate) + ")\n"
         + "web_boot.page_boot(" + JSON.stringify(VFS.carts) + ", "
         + JSON.stringify(JSON.stringify(Object.fromEntries(qs))) + ", "
         + (coarse ? "True" : "False") + ", " + JSON.stringify(scheme || "") + ")\n"
@@ -2273,7 +2300,7 @@ function loop() {
             WP.inp += performance.now() - _i0; WP.inpN++;
         }
         const _t0 = performance.now();
-        const s = step(dt, ahead);
+        const s = step(dt, played);
         const _d = performance.now() - _t0;
         // WORKER-SIDE PERF: the page's `recv` fps says the worker is behind but
         // not WHY. Track step cost + the worst offender's payload so the HUD
@@ -2282,7 +2309,10 @@ function loop() {
         WP.n++; WP.sum += _d; if (_d > WP.max) { WP.max = _d; WP.maxB = s ? s.length : 0; }
         if (_d > 20) WP.slow++;
         if (s) { WP.painted++; WP.bytes += s.length; }
-        if (s) shipFrame(s);
+        if (s) {
+            if (s.indexOf('"pcm"') >= 0) shipPCM(JSON.parse(s));
+            shipFrame(s);
+        }
         // GC scheduling (see the constants above). A painted frame re-arms the
         // idle collect; the periodic guard fires regardless of quiet.
         framesSinceCollect++;
@@ -2312,17 +2342,20 @@ self.onmessage = async (ev) => {
     const m = ev.data;
     try {
         if (m.t === "init") {
-            await init(m.search, !!m.coarse, m.channel || "", m.scheme, m.auth);
+            await init(m.search, !!m.coarse, m.channel || "", m.scheme, m.auth, +m.rate || 0);
         } else if (m.t === "password") {
             // The pairing prompt's password: a pairing reloads the page (its
             // {t:"key"}), anything else asks again with why.
             if (!(await pairPassword(m.pw, m.name))) askToPair();
         } else if (m.t === "input") {
             inbox.push(m.json);
-        } else if (m.t === "ahead") {
-            ahead = m.v;
+        } else if (m.t === "sink") {
+            sinkSet(m.port);
+        } else if (m.t === "played") {
+            sinkStats = m.s;
+            played = m.s.played;
         } else if (m.t === "state") {
-            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null" });
+            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null", sink: sinkStats });
         } else if (m.t === "run") {
             // lastStep too: a (re)start must begin with a clean 1/60 dt, not a
             // clamped jump measured from whenever the loop last ran.

@@ -147,6 +147,8 @@ def _load(path):
         ("moy_aud_set_rate", [i], None),
         ("moy_aud_rate", [], i),
         ("moy_aud_render", [p, i], None),
+        ("moy_aud_out_rate_set", [i], None),
+        ("moy_aud_render_out", [p, i], None),
         ("moy_aud_stats", [C.POINTER(u32 * 13)], None),
         ("moy_aud_dump", [u32, p, i], i),
         ("moy_aud_stats_reset_max", [], None),
@@ -273,6 +275,17 @@ class Module:
             return 0
         cbuf = (self._C.c_char * (2 * n)).from_buffer(buf)
         self._d.moy_aud_render(cbuf, n)
+        return n
+
+    def set_out_rate(self, rate):
+        self._d.moy_aud_out_rate_set(int(rate))
+
+    def render_out(self, buf, n):
+        n = min(int(n), len(buf) // 2)
+        if n <= 0:
+            return 0
+        cbuf = (self._C.c_char * (2 * n)).from_buffer(buf)
+        self._d.moy_aud_render_out(cbuf, n)
         return n
 
     def dump(self, h, buf, n):

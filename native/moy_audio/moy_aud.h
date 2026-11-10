@@ -141,6 +141,18 @@ typedef struct {
     uint32_t at;
 } moy_aud_up_t;
 void moy_aud_up2(moy_aud_up_t *u, const int16_t *in, int n, int16_t *out);
+// THE OUTPUT RATE WHERE NO FEEDER RUNS (the host, the browser's page, whose
+// AudioContext names it): the sessions still mix at the mix's rate, so a cart
+// sounds as it does on every board, and moy_aud_render_out upsamples that mix
+// once -- 2x through moy_aud_up2, then linearly to `rate` (exactly the 2x at
+// twice the mix's rate) -- before the render-ahead stream and the background
+// stream are added at `rate`. moy_aud_out_rate() is then `rate`, which the
+// media service resamples to. 0, or the mix's own rate: render_out is
+// moy_aud_render. Set before a stream opens; setting it starts the
+// upsampler from silence. Absent on a board, whose feeder is the output.
+void moy_aud_out_rate_set(int rate);
+int moy_aud_out_rate_get(void);
+void moy_aud_render_out(int16_t *out, int n);
 
 // The self-dump: `n` frames of session `s`'s synth alone, rendered from its
 // state into `out` without the speaker's mix. STALE, or BAD for the focused

@@ -70,7 +70,9 @@ else if(m.t==="pick"){pkAsk(m);}
 else if(m.t==="unpick"){pkDone(m.id);}
 else if(m.t==="installed"){window.__moyInstalled=m.folder;}
 else if(m.t==="state"){var sw=stateWait;stateWait=[];
-for(var si=0;si<sw.length;si++)sw[si](JSON.parse(m.json));}
+var so=JSON.parse(m.json);if(so&&typeof so==="object")so.sink=m.sink||null;
+for(var si=0;si<sw.length;si++)sw[si](so);}
+else if(m.t==="pcm"){playPCM(m);}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 // THE SEAM the pump that sees failures calls. Nothing counts failures yet --
 // the sync push still requeues forever on a board that has gone -- and when
@@ -255,7 +257,7 @@ PKI.value="";});
 if(PKX)PKX.addEventListener("click",function(){if(!WORKER||pkId===null)return;var id=pkId;
 pkDone(id);WORKER.postMessage({t:"picked",id:id,cancel:1});});
 // The loader module hands the worker over once constructed.
-window.__moyAttach=function(w){WORKER=w;w.onmessage=function(e){onWorker(e.data);};};
+window.__moyAttach=function(w){WORKER=w;w.onmessage=function(e){onWorker(e.data);};audioSink(w);};
 // ?pad=1 forces the touch controls on ANY device (desktop demos, touch laptops).
 // Phones show them automatically -- the core's media query hides them only on
 // hover-capable fine-pointer (i.e. mouse) devices; per-cart input hints still
@@ -269,12 +271,8 @@ if(!q.length||!WORKER)return;var b=q;q=[];
 WORKER.postMessage({t:"input",json:JSON.stringify({events:b})});}
 function tick(ts){requestAnimationFrame(tick);
 pump();
-// Report the queued audio depth (worklet ring or legacy schedule -- PAGE_CORE's
-// audioQueuedSecs abstracts both) so the console tops the cushion back up to
-// target each frame (the crackle fix, #170) instead of rendering blind rate*dt.
-// -1 = context not running yet -> the legacy per-dt render.
-if(WORKER)WORKER.postMessage({t:"ahead",
-v:(typeof audioQueuedSecs==="function")?audioQueuedSecs():-1});
+// The page's sink reports what it played (a worklet reports its own).
+if(WORKER&&schedNext>=0){SS.played=audioPlayed();WORKER.postMessage({t:"played",s:SS});}
 var f=pendingFrame,fb=pendingFB;pendingFrame=null;pendingFB=null;
 if(f){PERF.f++;if(fb)PERF.b+=fb.byteLength;HUD.kb=fb?fb.byteLength/1024:HUD.kb;
 df(JSON.parse(f),fb);
@@ -433,6 +431,7 @@ try {
   window.__moyAttach(w);
   // A coarse pointer is a finger: the console's hints start on touch.
   w.postMessage({ t: "init", search: location.search, channel: MOY_CHANNEL, auth: auth,
+                  rate: actx ? actx.sampleRate : 0,
                   coarse: !!(window.matchMedia && matchMedia("(pointer: coarse)").matches),
                   scheme: moyScheme() });
   // Leaving the page ends the VM with it. A page the back-forward cache keeps

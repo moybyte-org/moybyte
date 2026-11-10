@@ -386,7 +386,22 @@ nor those docs will warn you about:
 - **Trust zepto8 for p8 semantics, not the wiki**: the pattern-length rule is the
   first non-looping channel, and all-looping means the SLOWEST channel — the
   wiki's "all-looping loops forever" is WRONG.
-- Web audio ships per-frame FINISHED PCM through ONE AudioWorklet ring
-  (continuous resample, seam-free; starvation decays instead of hard-cutting),
-  with the runner topping a cushion via the page-reported queue depth.
+- **Web audio is FINISHED PCM at the page's AudioContext's rate, and the
+  samples never ride the frame slot** (page_core.html, THE SINK). The context
+  is made as the page loads, so its rate reaches the console before boot: the
+  sessions mix at 22.05 kHz as on every board and the C upsamples that mix
+  once to it (`moy_aud_render_out`), the MP3 decoder resampling to it too, so
+  the page plays the samples one for one and its JS converts nothing. The
+  worker posts each frame's samples straight to the sink -- an AudioWorklet
+  over a MessageChannel in a secure context, the page's own AudioBufferSource
+  schedule on a board-served page over plain HTTP, which has no worklet --
+  because the page keeps only the NEWEST frame: samples that rode a frame
+  were dropped with every frame a newer one superseded, and the pull, steered
+  by a depth that did not count them, drained a live stream faster than real
+  time until the decoder starved (the owner's stutter on the P4-served desk,
+  2026-11-10). The pull tops the sink's depth up by COUNT (`_RunnerPump`:
+  samples sent against the sink's `played`); a dry sink plays silence and
+  counts it (`__moyState().sink`: `under`, `dry`, `gap`, `dup`, `over`);
+  `tests/test_web_audio_stream_e2e.py` plays a live station a minute on both
+  sinks.
 
