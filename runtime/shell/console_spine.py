@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   SpineVerbs                the run and exit verbs, apps, the WiFi lease, as a mixin
+#   SpineVerbs.load_system    read the system settings and apply them
+#   SpineVerbs.play           show the front run's cart, recording its caller
+#   SpineVerbs.exit           the taskbar app's X: back toward the launcher
+#   SpineVerbs.register_app   a system app into the registry
+#   SpineVerbs.open_app       the one app-launch dispatch
+#   SpineVerbs.wifi_hold      take a radio hold by tag (and pid)
+#   SpineVerbs.wifi_release   let a hold go
+#   SpineVerbs.wifi_settle    the service's view let go when nothing holds
 """The kernel spine's half of the Workstation (docs/history/kernel_spine_2026-10.md):
 the run and exit verbs, app registration and resolution, the WiFi lease and
 the settings wiring, as a mixin over `self`.
