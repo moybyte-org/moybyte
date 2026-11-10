@@ -515,9 +515,9 @@ void moy_wifi_book(uint32_t mask) {
     uint32_t was = s_book;
     s_book = mask;
     if (mask != 0u && was == 0u) {
-        uint8_t on = s_st.on;
-        if (moy_wifi_on() == ESP_OK) {
-            s_book_on = !on;
+        s_book_on = !s_st.on;
+        if (s_book_on) {
+            moy_wifi_on();
         }
     } else if (mask == 0u && was != 0u) {
         if (s_book_on) {

@@ -404,7 +404,8 @@ MP_DEFINE_CONST_OBJ_TYPE(moy_net_link_type, MP_QSTR_Link, MP_TYPE_FLAG_NONE,
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
 
 // The WiFi driver's face (moy_wifi.c): device/device_wifi.py's service and
-// the link call these; the spine's lease is what calls wifi_on and wifi_off.
+// the link call these. wifi_on starts only a station that is down
+// (moy_net.h's THE BOOK: the book's start is the one).
 
 static void wcheck(int err) {
     if (err != 0) {
@@ -413,7 +414,11 @@ static void wcheck(int err) {
 }
 
 static mp_obj_t mod_wifi_on(void) {
-    wcheck(moy_wifi_on());
+    moy_wifi_state_t st;
+    moy_wifi_state(&st);
+    if (!st.on) {
+        wcheck(moy_wifi_on());
+    }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_on_obj, mod_wifi_on);
