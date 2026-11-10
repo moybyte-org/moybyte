@@ -9,8 +9,6 @@
 #   sweep                    a process's end closes every handle it held
 #   words                    a cfg string of `key=value` words as a dict
 #   _Handle                  the base every handle's verbs default from
-#   _Ring                    the base of the event-ring devices
-#   _Ble                     ble: GATT by handle
 #   _Camera                  camera: a picture per read
 #   _media_roots             the folders a process's media handle plays from
 #   _Media                   media: the media service's stream by handle
@@ -20,11 +18,11 @@ WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
 `moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
 pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora,
-mic, midi, http and usb on the calling program's own task (native/moy_kernel/moy_dev.h,
+mic, midi, http, usb and ble on the calling program's own task (native/moy_kernel/moy_dev.h,
 which says what they answer); the other device APIs are served here, by the door's Python half as the calling
 process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
-  open(name, cfg) -> h      a device API ("ble", "camera", "media", "net"),
+  open(name, cfg) -> h      a device API ("camera", "media", "net"),
                             configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
@@ -37,21 +35,6 @@ process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 address, a UUID, a name and bytes (in hex) stay text. What each handle
 answers:
 
-  ble       set: one action a set, its outcome a record --
-            scan=<ms>, connect=aa:bb:cc:dd:ee:ff | off, find=<uuid> (16-bit
-            hex, 0x.. or not, or the 128-bit string), read=<handle>,
-            subscribe=<handle>, unsubscribe=<handle>, advertise=<name> |
-            off (with data=<hex>, the manufacturer data, and interval=<ms>);
-            write=<handle> (with response=0|1) names where a write goes;
-            write: to it; get connected; read: the BLE face's events since
-            the last read, whole records only (FULL where the next does not
-            fit, which waits): a 12-byte head, the event (u16, moy_gatt.h's
-            MOY_GATT_EV_*: 1 ADV, 2 SCAN_DONE, 3 CONNECTED, 4 DISCONNECTED,
-            5 FOUND, 6 READ, 7 WRITTEN, 8 NOTIFY, 9 ADVERTISING), n (u16),
-            a and b (i32, the driver's: a status is 0 or -errno), then n
-            bytes -- ADV's the address (6 bytes, as printed) and the name
-            (a the device's index, b its RSSI), READ's the value read,
-            NOTIFY's the notification's (a its handle, b its length)
   camera    read: the latest frame, w * h RGB565 pixels big-endian (the
             glass's byte order), whole (FULL where `into` cannot hold it),
             0 bytes before the first; get w, h
@@ -118,11 +101,6 @@ try:
 except ImportError:  # host: the runtime package
     from runtime import moybyte as _moybyte
 
-try:
-    from array import array as _array
-except ImportError:  # pragma: no cover
-    _array = None
-
 # moy_app.h's codes, negated: what a row answers when it fails.
 STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = -1, -2, -3, -4, -7, -8, -6, -11
 
@@ -133,8 +111,6 @@ EPROTONOSUPPORT = 93        # the media service's https where nothing verifies
 _CODE = {EPERM: DENIED, EACCES: DENIED, EBUSY: BUSY, EINVAL: BAD, ENODEV: ABSENT,
          ENOENT: ABSENT, EBADF: ABSENT, ENOMEM: NOMEM, ENOSPC: FULL, ENOTCONN: ABSENT,
          EPROTONOSUPPORT: BAD}
-
-_BATCH = 8                  # events a read takes from the input table at a time
 
 HANDLES = {}                # pid -> {h: its handle}
 _NEXT = [1]
@@ -180,22 +156,6 @@ def words(cfg):
     return out
 
 
-def _hex(v, n=None):
-    try:
-        import binascii
-    except ImportError:  # pragma: no cover
-        import ubinascii as binascii
-    if v.startswith("0x"):
-        v = v[2:]
-    try:
-        b = binascii.unhexlify(v)
-    except (ValueError, TypeError):
-        raise OSError(EINVAL, "not hex: %r" % v)
-    if n is not None and len(b) != n:
-        raise OSError(EINVAL, "%r is not %d bytes" % (v, n))
-    return b
-
-
 def _int(v, lo, hi, what):
     if not isinstance(v, int) or not lo <= v <= hi:
         raise OSError(EINVAL, "%s=%r" % (what, v))
@@ -233,190 +193,6 @@ class _Handle:
 
     def close(self, pid):
         pass
-
-
-HEAD = 12                   # a record's head: event, n (u16), a, b (i32)
-BLE_HEAD = HEAD
-
-
-def _record(ev, a, b, body=b""):
-    return (ev.to_bytes(2, "little") + len(body).to_bytes(2, "little") + _u32(a) + _u32(b)
-            + body)
-
-
-class _Ring(_Handle):
-    """A handle reading its driver's ring through a reader of its own (only
-    its source, only its KIND), whole records only: what `_body` makes of
-    each event waits in `pend` until a read has room for it."""
-
-    KIND = 0
-    reader = -1
-
-    def _reader(self, src):
-        t = _moybyte.WAKES.table
-        if t is None:
-            raise OSError(ENODEV, "no input table")
-        self.reader = t.reader(1 << self.KIND, src)
-        self.buf = _array("i", [0] * (_moybyte.EV_FIELDS * _BATCH))
-        self.pend = []
-
-    def _free(self):
-        t = _moybyte.WAKES.table
-        if t is not None and self.reader >= 0:
-            t.reader_free(self.reader)
-        self.reader = -1
-
-    def _body(self, ev, a, b):
-        return b""
-
-    def _rec(self, ev, a, b):
-        """The record event (ev, a, b) reads as, None for none."""
-        return _record(ev, a, b, self._body(ev, a, b))
-
-    def _pull(self):
-        t = _moybyte.WAKES.table
-        n = t.events(self.buf, self.reader) if t is not None and self.reader >= 0 else 0
-        F, K, ID, A, B = (_moybyte.EV_FIELDS, _moybyte.EV_KIND, _moybyte.EV_ID, _moybyte.EV_A,
-                          _moybyte.EV_B)
-        for i in range(n):
-            k = i * F
-            if self.buf[k + K] != self.KIND:
-                continue
-            r = self._rec(self.buf[k + ID], self.buf[k + A], self.buf[k + B])
-            if r is not None:
-                self.pend.append(r)
-        return n
-
-    def read(self, cap):
-        out = bytearray()
-        while True:
-            if not self.pend:
-                if not self._pull():
-                    break
-                continue
-            r = self.pend[0]
-            if len(out) + len(r) > cap:
-                break
-            out += r
-            self.pend.pop(0)
-        if not out and self.pend:
-            return FULL
-        return bytes(out)
-
-
-_BLE_ACTS = ("scan", "connect", "find", "read", "subscribe", "unsubscribe", "advertise")
-
-
-def _gatt(v):
-    return _int(v, 1, 0xFFFF, "handle")
-
-
-def _addr(v):
-    parts = v.split(":") if isinstance(v, str) else ()
-    if len(parts) != 6 or not all(len(p) == 2 for p in parts):
-        raise OSError(EINVAL, "an address is aa:bb:cc:dd:ee:ff")
-    _hex("".join(parts))
-    return v.lower()
-
-
-def _uuid(v):
-    s = v[2:] if v.startswith("0x") else v
-    if len(s) <= 4:
-        return int.from_bytes(_hex(("0000" + s)[-4:]), "big")
-    _hex(s.replace("-", ""), 16)
-    return s
-
-
-class _Ble(_Ring):
-    KIND = _moybyte.BLE
-
-    def __init__(self, cfg):
-        f = _face("ble")
-        if _moybyte.WAKES.table is None:
-            raise OSError(ENODEV, "no input table")
-        f.open()
-        try:
-            self._reader(f.source())
-        except BaseException:
-            f.close()
-            raise
-        self.f = f
-        self.target = None
-        self.response = True
-        if cfg:
-            try:
-                self.set(cfg)
-            except BaseException:
-                self._free()
-                f.close()
-                raise
-
-    def set(self, cfg):
-        _only(cfg, _BLE_ACTS + ("data", "interval", "write", "response"))
-        acts = [k for k in _BLE_ACTS if k in cfg]
-        if len(acts) > 1:
-            raise OSError(EINVAL, "one action a set")
-        if ("data" in cfg or "interval" in cfg) and "advertise" not in cfg:
-            raise OSError(EINVAL, "data and interval are advertise's")
-        if "write" in cfg:
-            self.target = _gatt(cfg["write"])
-        if "response" in cfg:
-            self.response = bool(_int(cfg["response"], 0, 1, "response"))
-        if not acts:
-            return 0
-        act, v, f = acts[0], cfg[acts[0]], self.f
-        if act == "scan":
-            f.scan(_int(v, 1, 60000, "scan"))
-        elif act == "connect":
-            if v == "off":
-                f.disconnect()
-            else:
-                f.connect(_addr(v))
-        elif act == "find":
-            f.find(_uuid(v))
-        elif act == "read":
-            f.read(_gatt(v))
-        elif act in ("subscribe", "unsubscribe"):
-            f.subscribe(_gatt(v), act == "subscribe")
-        elif v == "off":
-            f.stop_advertising()
-        else:
-            f.advertise(v, _hex(cfg.get("data", "")),
-                        _int(cfg.get("interval", 200), 20, 10240, "interval"))
-        return 0
-
-    def write(self, data):
-        if self.target is None:
-            raise OSError(EINVAL, "set write=<handle> first")
-        self.f.write(self.target, data, self.response)
-        return len(data)
-
-    def get(self, what):
-        if what != "connected":
-            raise OSError(EINVAL, "no %s" % what)
-        return int(self.f.connected())
-
-    def _body(self, ev, a, b):
-        f = self.f
-        if ev == f.EV_ADV:
-            seen = f.devices()
-            if not 0 <= a < len(seen):
-                return b""
-            addr, _rssi, name = seen[a]
-            return _hex(addr.replace(":", "")) + name.encode()
-        if ev == f.EV_READ and b == 0 and a > 0:
-            into = bytearray(a)
-            return bytes(into[:f.value(into)])
-        if ev == f.EV_NOTIFY:
-            into = bytearray(244)                   # MOY_GATT_VALUE
-            got = f.notified(into)
-            return bytes(into[:got[0]]) if got else b""
-        return b""
-
-    def close(self, pid):
-        self._free()
-        self.f.sweep(pid)
-
 
 
 class _Camera(_Handle):
@@ -683,10 +459,9 @@ class _Net(_Handle):
         self._let_go(_link()[0], pid)
 
 
-_DEVICES = {"ble": _Ble, "camera": _Camera,
-            "media": _Media, "net": _Net}
+_DEVICES = {"camera": _Camera, "media": _Media, "net": _Net}
 # A device with one holder: a process opens it once.
-_ONE = ("ble", "camera", "media")
+_ONE = ("camera", "media")
 # The permissions a device needs, one of them, where they are not its name.
 _PERMS = {"media": ("media", "media:url"), "net": ("multiplayer",)}
 

@@ -19,7 +19,7 @@ _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
-PART = native_build.Part("gatt", ("moy_gatt.h", "moy_gatt.c", "moy_scan.h", "moy_scan.c"),
+PART = native_build.Part("gatt", ("moy_gatt.h", "moy_gatt.c", "moy_gatt_dev.c", "moy_scan.h", "moy_scan.c"),
                         (_INPUT, _SPINE, _KERNEL))
 
 (EV_ADV, EV_SCAN_DONE, EV_CONNECTED, EV_DISCONNECTED, EV_FOUND, EV_READ, EV_WRITTEN,

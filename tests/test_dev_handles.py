@@ -507,6 +507,8 @@ def test_an_http_handle_that_got_no_response_reads_io(web):
 
 HRM = "c0:ff:ee:00:00:01"
 LAMP = "c0:ff:ee:00:00:02"
+BLE = 1 << 4                            # moy_dev.h's MOY_DEV_P_BLE
+HEAD = 12                               # a record's head: event, n (u16), a, b (i32)
 
 
 @pytest.fixture
@@ -523,9 +525,8 @@ def air():
     was = moybyte.WAKES.table
     moybyte.bind(mi.kernel())
     yield gatt_sim
-    for pid in list(H.HANDLES):
-        moybyte.end(pid)
-    while moy_gatt.owner():
+    _K().moy_dev_reset()
+    if moy_gatt.owner():
         moybyte.end(moy_gatt.owner())
     devices.grants = None
     gatt_sim.remove()
@@ -543,13 +544,13 @@ def _records(b):
     out, k = [], 0
     while k < len(b):
         ev, n, a, st = struct.unpack_from("<HHii", b, k)
-        out.append((ev, a, st, bytes(b[k + H.BLE_HEAD:k + H.BLE_HEAD + n])))
-        k += H.BLE_HEAD + n
+        out.append((ev, a, st, bytes(b[k + HEAD:k + HEAD + n])))
+        k += HEAD + n
     return out
 
 
 def _ble(pid, h, cap=512):
-    got = _as(pid, lambda: H.read(pid, h, cap))
+    got = _kread(pid, h, cap)
     assert not isinstance(got, int), got
     return _records(got)
 
@@ -557,33 +558,33 @@ def _ble(pid, h, cap=512):
 def test_a_ble_handle_scans_connects_finds_reads_writes_and_hears_notifications(air):
     from runtime import dev_ble as B
     pid = L.spawn("t.ble")
-    h = _open(pid, "ble")
+    h = _kopen(pid, "ble", "", BLE)
     assert h > 0 and _ble(pid, h) == []
-    set_ = lambda cfg: _as(pid, lambda: H.set(pid, h, cfg))  # noqa: E731
+    set_ = lambda cfg: _kset(pid, h, cfg)  # noqa: E731
     assert set_("scan=500") == 0
-    assert _as(pid, lambda: H.read(pid, h, 8)) == H.FULL      # the first record waits
+    assert _kread(pid, h, 8) == H.FULL      # the first record waits
     assert _ble(pid, h) == [(B.EV_ADV, 0, -48, bytes.fromhex("c0ffee000001") + b"Pulse"),
                             (B.EV_ADV, 1, -71, bytes.fromhex("c0ffee000002") + b"Lamp"),
                             (B.EV_SCAN_DONE, 2, 0, b"")]
     assert set_("connect=" + HRM) == 0 and set_("find=2a19") == 0
     assert _ble(pid, h) == [(B.EV_CONNECTED, 1, 0, b""), (B.EV_FOUND, 0x20, 0, b"")]
-    assert _get(pid, h, "connected") == 1
+    assert _kget(pid, h, "connected") == 1
     assert set_("read=0x20") == 0
     assert _ble(pid, h) == [(B.EV_READ, 1, 0, b"\x5a")]
     assert set_("subscribe=0x10") == 0
     assert air.notify(HRM, 0x10, b"\x00\x4c") and air.notify(HRM, 0x10, b"\x00\x4d")
-    assert _ble(pid, h, H.BLE_HEAD) == [(B.EV_WRITTEN, 0, 0, b"")]     # its CCCD
-    one = H.BLE_HEAD + 2
+    assert _ble(pid, h, HEAD) == [(B.EV_WRITTEN, 0, 0, b"")]     # its CCCD
+    one = HEAD + 2
     assert _ble(pid, h, one) == [(B.EV_NOTIFY, 0x10, 2, b"\x00\x4c")]
     assert _ble(pid, h, one) == [(B.EV_NOTIFY, 0x10, 2, b"\x00\x4d")]
-    assert _as(pid, lambda: H.write(pid, h, b"x")) == H.BAD   # no write= yet
+    assert _kwrite(pid, h, b"x") == H.BAD   # no write= yet
     assert set_("write=0x20 response=1") == 0
-    assert _as(pid, lambda: H.write(pid, h, b"\x07")) == 1
+    assert _kwrite(pid, h, b"\x07") == 1
     assert air.written(HRM, 0x20) == b"\x07"
     assert _ble(pid, h) == [(B.EV_WRITTEN, 0, 0, b"")]
     assert set_("find=0x9999") == 0
     assert _ble(pid, h) == [(B.EV_FOUND, 0, -errno.ENOENT, b"")]
-    assert set_("connect=off") == 0 and _get(pid, h, "connected") == 0
+    assert set_("connect=off") == 0 and _kget(pid, h, "connected") == 0
     assert _ble(pid, h)[-1][0] == B.EV_DISCONNECTED
     assert set_("read=0x20") == H.ABSENT                    # no connection
     for bad in ("scan=1 find=2a19", "connect=c0:ff", "find=2a1g", "find=6e40-00", "read=0", "data=00",
@@ -594,37 +595,49 @@ def test_a_ble_handle_scans_connects_finds_reads_writes_and_hears_notifications(
 def test_a_ble_handle_finds_by_128_bit_uuid_and_advertises(air):
     from runtime import dev_ble as B
     pid = L.spawn("t.ble")
-    h = _open(pid, "ble", "connect=" + LAMP)
-    assert _as(pid, lambda: H.set(pid, h, "find=6e400002-b5a3-f393-e0a9-e50e24dcca9e")) == 0
+    h = _kopen(pid, "ble", "connect=" + LAMP, BLE)
+    assert _kset(pid, h, "find=6e400002-b5a3-f393-e0a9-e50e24dcca9e") == 0
     assert _ble(pid, h)[-1] == (B.EV_FOUND, 0x30, 0, b"")
-    assert _as(pid, lambda: H.set(pid, h, "write=0x30 response=0")) == 0
-    assert _as(pid, lambda: H.write(pid, h, b"on")) == 2 and air.written(LAMP, 0x30) == b"on"
-    assert _as(pid, lambda: H.set(pid, h, "advertise=moy data=ffff0102 interval=100")) == 0
+    assert _kset(pid, h, "write=0x30 response=0") == 0
+    assert _kwrite(pid, h, b"on") == 2 and air.written(LAMP, 0x30) == b"on"
+    assert _kset(pid, h, "advertise=moy data=ffff0102 interval=100") == 0
     assert air.advertised() == bytes([2, 1, 6, 4, 9]) + b"moy" + bytes([5, 0xff]) + \
         b"\xff\xff\x01\x02"
-    assert _as(pid, lambda: H.set(pid, h, "advertise=off")) == 0 and air.advertised() == b""
+    assert _kset(pid, h, "advertise=off") == 0 and air.advertised() == b""
 
 
 def test_one_ble_holder_its_permission_and_its_end(air):
     from runtime import dev_ble as B
     from runtime import moy_gatt
     a, b = L.spawn("t.a"), L.spawn("t.b")
-    h = _open(a, "ble", "connect=" + HRM)
+    h = _kopen(a, "ble", "connect=" + HRM, BLE)
     assert moy_gatt.owner() == a and moy_gatt.state() == moy_gatt.CONNECTED
-    assert _open(a, "ble") == H.BUSY                         # one handle on the one radio
-    assert _open(b, "ble") == H.BUSY
+    assert _kopen(a, "ble", "", BLE) == H.BUSY               # one handle on the one radio
+    assert _kopen(b, "ble", "", BLE) == H.BUSY
     with pytest.raises(OSError) as e:
         _as(b, B.scan)                                       # Python's face too
     assert e.value.errno == errno.EBUSY
-    moybyte.end(a)
-    assert moy_gatt.owner() == 0 and moy_gatt.state() == 0 and a not in H.HANDLES
-    assert _get(a, h, "connected") == H.ABSENT
-    assert _open(b, "ble", "scan=0") == H.BAD and moy_gatt.owner() == 0   # nothing kept
-    devices.grants = lambda p: ()
-    assert _open(b, "ble") == H.DENIED
-    devices.grants = None
+    _end(a)
+    assert moy_gatt.owner() == 0 and moy_gatt.state() == 0 and _K().moy_dev_count() == 0
+    assert _kget(a, h, "connected") < 0
+    assert _kopen(b, "ble", "scan=0", BLE) == H.BAD and moy_gatt.owner() == 0   # nothing kept
+    assert _kopen(b, "ble", "", 0) == H.DENIED
     air.remove()
-    assert _open(b, "ble") == H.ABSENT
+    assert _kopen(b, "ble", "", BLE) == H.ABSENT
+
+
+def test_a_ble_handle_keeps_its_connection_through_a_vm_stop(air):
+    from runtime import dev_ble as B
+    from runtime import moy_gatt
+    pid = L.spawn("t.ble")
+    h = _kopen(pid, "ble", "connect=" + HRM, BLE)
+    assert _kset(pid, h, "subscribe=0x10") == 0 and _ble(pid, h)
+    assert N.vm_stop() == 0
+    assert moy_gatt.owner() == pid and moy_gatt.state() == moy_gatt.CONNECTED
+    assert air.notify(HRM, 0x10, b"\x00\x50")
+    assert _ble(pid, h) == [(B.EV_NOTIFY, 0x10, 2, b"\x00\x50")]
+    _end(pid)
+    assert moy_gatt.owner() == 0
 
 
 # -- LoRaWAN ----------------------------------------------------------------------------

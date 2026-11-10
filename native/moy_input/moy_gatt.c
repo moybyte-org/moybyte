@@ -81,7 +81,7 @@ static int held(uint32_t owner) {
     return owner != 0 && G != NULL && owner == G->owner;
 }
 
-int moy_gatt_open(uint32_t owner) {
+static int open_(uint32_t owner) {
     if (owner == 0 || !moy_gatt_present()) {
         return -MOY_GATT_ENODEV;
     }
@@ -127,7 +127,7 @@ int moy_gatt_open(uint32_t owner) {
     return 0;
 }
 
-int moy_gatt_close(uint32_t owner) {
+static int close_(uint32_t owner) {
     if (!held(owner)) {
         return -MOY_GATT_EBADF;
     }
@@ -143,6 +143,23 @@ int moy_gatt_close(uint32_t owner) {
     G->state = MOY_GATT_IDLE;
     moy_lease_let(owner, MOY_LEASE_BLE);
     return 0;
+}
+
+// Open and close hold the lease table's lock, so the face on the VM's task
+// and a compiled program's handle on its own (moy_gatt_dev.c) share the one
+// holder.
+int moy_gatt_open(uint32_t owner) {
+    moy_lease_lock();
+    int r = open_(owner);
+    moy_lease_unlock();
+    return r;
+}
+
+int moy_gatt_close(uint32_t owner) {
+    moy_lease_lock();
+    int r = close_(owner);
+    moy_lease_unlock();
+    return r;
 }
 
 void moy_gatt_lease_end(uint32_t owner) {

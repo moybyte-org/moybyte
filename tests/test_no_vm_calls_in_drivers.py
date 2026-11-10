@@ -108,7 +108,7 @@ INPUT_BINDING = {"modmoy_input.c", "modmoy_gatt.c", "modmoy_midi.c", "fuzz_input
 INPUT_DRIVERS = ("moy_input.c", "moy_input.h", "moy_kbd.c", "moy_touchdev.c", "moy_touch.c",
                  "moy_touch.h", "moy_drivers.h", "moy_input_task.c", "moy_hid.c", "moy_hid.h",
                  "moy_ble_task.c", "moy_ble.h", "moy_event.h", "moy_edge.c", "moy_edge.h",
-                 "moy_gatt.c", "moy_gatt.h", "moy_gatt_task.c", "moy_scan.c", "moy_scan.h",
+                 "moy_gatt.c", "moy_gatt.h", "moy_gatt_dev.c", "moy_gatt_task.c", "moy_scan.c", "moy_scan.h",
                  "moy_midi.c", "moy_midi.h", "moy_midi_dev.c")
 
 

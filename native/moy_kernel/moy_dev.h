@@ -105,6 +105,25 @@
 //            kept body's), ended (a window's); BAD for a URL that does not
 //            parse and for https where nothing verifies it, FULL with every
 //            request of the client's taken. Many handles a process
+//   ble      general Bluetooth LE (native/moy_input/moy_gatt.h; its one holder
+//            the lease table's MOY_LEASE_BLE, shared with the process's
+//            `moybyte.ble`, BUSY while another process holds it, kept
+//            through the VM's end): set, one action a set, its outcome a
+//            record -- scan=<ms>, connect=aa:bb:cc:dd:ee:ff | off,
+//            find=<uuid> (16-bit hex, 0x.. or not, or the 128-bit string),
+//            read=<handle>, subscribe=<handle>, unsubscribe=<handle>,
+//            advertise=<name> | off (with data=<hex>, the manufacturer
+//            data, and interval=<ms>); write=<handle> (with response=0|1)
+//            names where a write goes; cfg the same; write: to it (BAD
+//            before a write=); get connected; read: the driver's events,
+//            whole records (FULL where the next does not fit, which waits):
+//            a 12-byte head -- the event (u16, MOY_GATT_EV_*: 1 ADV, 2
+//            SCAN_DONE, 3 CONNECTED, 4 DISCONNECTED, 5 FOUND, 6 READ, 7
+//            WRITTEN, 8 NOTIFY, 9 ADVERTISING), n (u16), a and b (i32, the
+//            driver's: a status is 0 or -errno) -- then n bytes: ADV's the
+//            address (6 bytes, as printed) and the name (a the device's
+//            index, b its RSSI), READ's the value read, NOTIFY's the
+//            notification's (a its handle, b its length)
 //   usb      the USB host's devices (native/p4/moy_usb/moy_usb.h; its one
 //            holder shared with the process's `moybyte.usb`, BUSY while
 //            another process holds it; a device is its bus address, 1..127):
