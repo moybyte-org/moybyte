@@ -15,6 +15,7 @@ from runtime import moy_log as L
 from runtime import moybyte
 from runtime import scheduler as S
 from runtime import wallclock as wc
+from test_scheduler import _clear
 
 BELGRADE = "CET-1CEST,M3.5.0,M10.5.0/3"
 
@@ -33,6 +34,9 @@ class _Clock:
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
+    # The tests name their own pids (`_pid`), so they start from an empty
+    # registry: a wake another test left on a pid would be counted as theirs.
+    _clear(moybyte.WAKES)
     monkeypatch.setattr(wc, "_kernel", [None, True])        # synced past 2020
     before = set(moybyte.WAKES.by_id)
     yield

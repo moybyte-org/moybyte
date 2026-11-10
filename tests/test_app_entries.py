@@ -144,13 +144,25 @@ def _ticks(n=3):
         S.SCHED.poll()
 
 
+def _holders():
+    w = moybyte.WAKES
+    return {r[1] for r in w.list + w.mail}
+
+
 @pytest.fixture(autouse=True)
 def _ended():
+    """The app's service stops and every process the test made ends: the
+    app's run keeps its `moybyte.on` wake until its end, and a later test that
+    takes the same pid would hold it."""
+    held = _holders()
     yield
     for p in list(S.SCHED.services()):
         if p.name == APP and p.state != S.EXITED:
             S.SCHED.stop(p.pid)
     S.SCHED.asked.clear()
+    for pid in _holders() - held:
+        if pid > L.SHELL:
+            moybyte.end(pid)
 
 
 def test_the_shelf_reads_the_entry_and_its_service_is_the_apps(tmp_path, tier):
