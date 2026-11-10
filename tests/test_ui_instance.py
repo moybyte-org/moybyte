@@ -90,7 +90,7 @@ SHARED = {
     ("moy_theme.c", "looks"): "the loader's scratch: the console's calls alone",
 }
 for _n in ("s_gen", "s_gen_serial", "s_ctx", "s_tick", "s_serial", "s_live",
-           "s_tp_on", "s_tp_clip", "s_wl"):
+           "s_tp_on", "s_tp_clip", "s_tp_in", "s_wl"):
     SHARED[("moy_ui_wasm.c", _n)] = "the console's one compiled run, on the main instance"
 
 _DECL = re.compile(r"^(?!(?:return|typedef|extern|enum|union|goto|break|continue|case|default)\b)"
