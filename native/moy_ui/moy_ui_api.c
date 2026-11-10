@@ -104,6 +104,14 @@ int mua_row_h(const moy_ui_ctx_t *c) {
     return metric(c->cls ? MOY_UI_M_ROW_STACK_DESK : MOY_UI_M_ROW_STACK) * c->fs;
 }
 
+// A value row's height (an info, a link, a toggle, a slider, a cycle, a seg,
+// swatches, tabs): the stacked row's, MOY_UI_TAP_ROW at least under the board's tap
+// floor, as a list's rows are, so a card's rows keep one rhythm.
+static int vrow_h(const moy_ui_ctx_t *c) {
+    int h = mua_row_h(c);
+    return c->tap && h < MOY_UI_TAP_ROW ? MOY_UI_TAP_ROW : h;
+}
+
 int mua_inside(moy_ui_box_t b, int x, int y) {
     return x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h;
 }
@@ -3157,7 +3165,7 @@ int moy_ui_api_toggle(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                       const moy_ui_over_t *o) {
     o = mua_over(o);
     int stacked;
-    moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
+    moy_ui_box_t b = mua_place(c, vrow_h(c), &stacked);
     int st = mua_vrow_stop(c, mua_id_of(c, o, label), b, 0, o, label);
     on = on ? 1 : 0;
     if (st & MOY_UI_ST_ACTIVATED) {
@@ -3179,7 +3187,7 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         hi = t;
     }
     int stacked;
-    moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
+    moy_ui_box_t b = mua_place(c, vrow_h(c), &stacked);
     uint32_t id = mua_id_of(c, o, label);
     int st = mua_vrow_stop(c, id, b, STOP_KEEP_LR, o, label);
     if ((st & MOY_UI_ST_FOCUS) && c->step_x) {
@@ -3274,7 +3282,7 @@ int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_s
         kind = MOY_UI_V_INFO;
     }
     int stacked;
-    moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
+    moy_ui_box_t b = mua_place(c, vrow_h(c), &stacked);
     int st = kind == MOY_UI_V_LINK ? mua_vrow_stop(c, mua_id_of(c, o, label), b, 0, o, label) : 0;
     moy_ui_vrow_t r;
     mua_vrow_init(c, &r, label);
@@ -3306,7 +3314,7 @@ int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy
         n = 255;
     }
     int stacked;
-    moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
+    moy_ui_box_t b = mua_place(c, vrow_h(c), &stacked);
     int st = mua_vrow_stop(c, mua_id_of(c, o, label), b, STOP_KEEP_LR, o, label);
     moy_ui_vrow_t r;
     mua_vrow_init(c, &r, label);

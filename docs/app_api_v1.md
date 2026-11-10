@@ -511,8 +511,9 @@ ui.scroll()
 ```
 
 **A finger's rows come by themselves.** On a board whose tap floor stands
-(the Guition S3's 3.5-inch glass), a `ui.list` row is 36 px tall and a
-bubble takes larger pads and faces; the app's code is the same on every
+(the Guition S3's 3.5-inch glass), a `ui.list` row and an info, link,
+toggle, slider, cycle, seg, swatch or tabs row are 36 px tall and a bubble takes larger
+pads and faces; the app's code is the same on every
 board (`docs/ui_api_2026-10.md`, the tap floor).
 
 **Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",

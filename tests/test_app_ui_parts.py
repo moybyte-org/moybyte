@@ -375,3 +375,16 @@ def test_the_desks_card_rings_its_rows(pages):
     rule = at(w // 2, _rules(pages, "desk", 7)[0])
     edge = [x for x in range(24) if all(at(x, y) == rule for y in range(12, 4 * 42 - 12))]
     assert edge and rule != ground, edge
+
+
+@pytest.mark.parametrize("console,pitch", (("guition", 36), ("tdeck", None)))
+def test_the_tap_floor_lifts_info_and_link_rows(pages, console, pitch):
+    """Under the Guition's tap floor an info row is 36 px tall
+    (MOY_UI_TAP_ROW), as a list's row is: the rules between page 3's info
+    rows lie that far apart; the T-Deck's keep their own height."""
+    rules = _rules(pages, console, 3)
+    gaps = [b - a for a, b in zip(rules, rules[1:])][:2]     # the card's top, two rules
+    if pitch is None:
+        assert gaps and max(gaps) < 36, rules
+    else:
+        assert gaps == [pitch, pitch], rules

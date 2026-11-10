@@ -135,7 +135,7 @@
   },
   "guition_tapfloor_dark": {
     "about": [9, 6],
-    "app_appearance": [45, 24],
+    "app_appearance": [33, 20],
     "app_artwork": [29, 15],
     "app_calc": [22, 22],
     "app_files": [4, 1],
@@ -151,7 +151,7 @@
     "app_storybook": [3, 6],
     "app_terminal": [9, 7],
     "editor_blocks": [1, 0],
-    "editor_cards": [36, 13],
+    "editor_cards": [37, 13],
     "editor_code": [6, 1],
     "editor_map": [26, 16],
     "editor_music": [1, 0],
@@ -166,7 +166,7 @@
     "settings_licence": [8, 16],
     "settings_licences": [7, 3],
     "settings_log": [2, 0],
-    "settings_permissions": [54, 22],
+    "settings_permissions": [37, 17],
     "unlock_banner": [63, 16],
     "web_console": [294, 8]
   },

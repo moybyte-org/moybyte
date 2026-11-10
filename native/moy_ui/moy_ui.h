@@ -852,7 +852,8 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // it lies on a popover's panel, whose ground is the panel part's field.
 // MOY_UI_TAP: the board's tap floor -- its chrome stands over its font scale
 // so a bar icon is chrome.MIN_TAP_MM across on its glass (the Guition S3) --
-// so the rows a finger aims at meet it: a list's rows are MOY_UI_TAP_ROW tall
+// so the rows a finger aims at meet it: a list's rows and the value rows (an
+// info, a link, a toggle, a slider, a cycle, a seg, swatches, tabs) are MOY_UI_TAP_ROW tall
 // at least, a bubble takes its tap metrics and faces (MOY_UI_FONT_TAP_*).
 // MOY_UI_CARDED: on the desk, a group's card (ui.group's `card`) is a ring
 // round its rows, as the handheld's card is, not rules alone.
