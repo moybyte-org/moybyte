@@ -221,19 +221,29 @@ def test_a_touch_takes_the_keys_off_the_row_and_the_bar(tmp_path):
     assert home_hints.modal_keys(ws) is None
 
 
-def test_the_trackball_rolls_off_the_tabs_onto_the_bar_and_back(tmp_path):
+def test_the_trackball_rolls_off_the_tabs_onto_the_bar_and_back(tmp_path, monkeypatch):
+    """The roll's clock is the frames', not the wall's: under a loaded
+    suite two frames can span the roll's idle window."""
+    from runtime import console_input
     ws, drv = _home(tmp_path)
     _press(drv, "up")
     while _at(ws) != "make":
         _press(drv, "right")
+    clock = [1000]
+    monkeypatch.setattr(console_input, "_ticks_ms", lambda: clock[0])
+
+    def frame():
+        clock[0] += 33
+        drv.frame(1 / 30)
 
     def roll(dx):
         drv.pan(dx, 0)
         for _ in range(2):
-            drv.frame(1 / 30)
+            frame()
         drv.pan(0, 0)
         for _ in range(4):
-            drv.frame(1 / 30)
+            frame()
+        clock[0] += ws.BALL_IDLE_MS + 1
     roll(1)
     assert _at(ws) == "cluster"
     roll(-1)
