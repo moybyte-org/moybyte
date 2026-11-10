@@ -996,6 +996,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->cls = (uint8_t)((flags & MOY_UI_DESK) ? 1 : 0);
     c->win = (uint8_t)((flags & MOY_UI_WINDOW) ? 1 : (flags & MOY_UI_PANEL) ? 2 : 0);
     c->elsewhere = (uint8_t)((flags & MOY_UI_ELSEWHERE) ? 1 : 0);
+    c->tap = (uint8_t)((flags & MOY_UI_TAP) ? 1 : 0);
     c->tp_id = 0;                       // the parts a last frame left open are done
     c->tp_open = 0;
     c->scope = 0;
@@ -3273,6 +3274,9 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         count++;
     }
     int rh = mua_row_h(c);
+    if (c->tap && rh < MOY_UI_TAP_ROW) {
+        rh = MOY_UI_TAP_ROW;        // a row a finger aims at meets the board's floor
+    }
     int placed = c->has_at;
     if (label.n && !placed) {
         moy_ui_api_label(c, s, label, NULL);

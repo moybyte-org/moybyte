@@ -947,6 +947,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         s = lib.moy_theme_installed()
         return None if s is None else s.decode()
 
+    _TAP_FONTS = ("tap", "tap_caption")
     font_roles = _names(lib, "moy_theme_font_roles",
                         c.c_int.in_dll(lib, "moy_theme_n_font_roles").value)
 
@@ -1189,6 +1190,8 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return tuple(out[:6])
 
     def font_role(role):
+        if role in _TAP_FONTS:          # moy_ui.h's MOY_UI_FONT_TAP_*, past the theme's
+            return len(font_roles) + _TAP_FONTS.index(role)
         if role not in font_roles:
             raise ValueError("font role")
         return font_roles.index(role)

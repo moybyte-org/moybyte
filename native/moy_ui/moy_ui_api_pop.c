@@ -327,7 +327,7 @@ void moy_ui_api_bubble(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t te
                                                 (int16_t)(c->page.w - 2 * g), 0};
     moy_ui_box_t box;
     int cut = 0;
-    int h = moy_ui_bubble(s, room, &bb, c->fs, mua_ground_of(c), 0, &box, &cut);
+    int h = moy_ui_bubble(s, room, &bb, c->fs, mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0), 0, &box, &cut);
     int gap = (c->cls ? 6 : 4) * c->fs - mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_STACK_GAP) * c->fs;
     int stacked;
     moy_ui_box_t b = mua_place(c, placed ? h : h + (gap > 0 ? gap : 0), &stacked);
@@ -338,7 +338,7 @@ void moy_ui_api_bubble(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t te
     bb.flags = mua_mark_flags(st, o) | (v[MOY_UI_BBO_ANCHOR] ? MOY_UI_BUBBLE_ANCHOR : 0);
     clip_t k;
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        moy_ui_bubble(s, room, &bb, c->fs, mua_ground_of(c), 1, NULL, NULL);
+        moy_ui_bubble(s, room, &bb, c->fs, mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0), 1, NULL, NULL);
         mua_clip_out(&k);
     }
     out[0] = box.x;

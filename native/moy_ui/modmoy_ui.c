@@ -859,6 +859,12 @@ static int font_role(mp_obj_t name) {
             return i;
         }
     }
+    if (strcmp(r, "tap") == 0) {
+        return MOY_UI_FONT_TAP_UI;
+    }
+    if (strcmp(r, "tap_caption") == 0) {
+        return MOY_UI_FONT_TAP_CAPTION;
+    }
     mp_raise_ValueError(MP_ERROR_TEXT("font role"));
 }
 

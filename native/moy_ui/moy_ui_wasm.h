@@ -62,11 +62,12 @@ enum {
 };
 // The face word's bits: the surface is a window's body (the page's ground is
 // the window's), the frame lays out on the desk's rows (MOY_UI_DESK), it is a
-// responsive app's (the shell's look), and from FS_SHIFT the font scale its
-// text draws at (0: 1). A game's is its window bit alone.
+// responsive app's (the shell's look), the board's tap floor stands
+// (moy_ui.h's MOY_UI_TAP), and from FS_SHIFT the font scale its text draws at
+// (0: 1). A game's is its window bit alone.
 enum {
     MOYCORE_UI_FACE_WINDOW = 1, MOYCORE_UI_FACE_DESK = 2, MOYCORE_UI_FACE_LOOK = 4,
-    MOYCORE_UI_FACE_FS_SHIFT = 8
+    MOYCORE_UI_FACE_TAP = 8, MOYCORE_UI_FACE_FS_SHIFT = 8
 };
 
 // The verbs over `target`, a libmoy moy_canvas (NULL: -MOY_UI_STALE). 0 or a

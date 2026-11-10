@@ -70,7 +70,7 @@ def test_the_byte_map_is_the_readers():
 
 def test_the_set_is_every_themes_roles_and_the_mono():
     faces, tiers = make_font.faces()
-    assert set(tiers) == {"handheld", "desktop"}
+    assert set(tiers) == {"handheld", "desktop", "tap"}
     for tier, names in tiers.items():
         assert "jbmono-11-400-2" in names
         for fam in ("daysans", "inter", "atkinson"):

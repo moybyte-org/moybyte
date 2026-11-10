@@ -669,6 +669,16 @@
    "inter-28-600-4",
    "jbmono-11-400-2",
    "jbmono-11-700-2"
+  ],
+  "tap": [
+   "atkinson-13-700-2",
+   "atkinson-15-500-4",
+   "atkinson-15-600-4",
+   "daysans-13-600-2",
+   "daysans-15-500-4",
+   "inter-13-600-2",
+   "inter-15-500-4",
+   "jbmono-11-400-2"
   ]
  }
 }

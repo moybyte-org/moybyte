@@ -210,9 +210,8 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
 // An app's input words: the pointer's x and y on the screen, its state
 // (lua_ext.snap_shared's flags, 0 none), the key typed this frame (0 none),
 // how its ui frame draws (native/moy_ui/moy_ui_wasm.h's MOYCORE_UI_FACE_*:
-// a window's body, the desk's rows, the shell's look, the font scale),
-// whether the console's RGB565 words
-// are byte-swapped (its canvas's swapped565), the rect its ui frame lies
+// a window's body, the desk's rows, the shell's look, the tap floor, the
+// font scale), whether the console's RGB565 words are byte-swapped (its canvas's swapped565), the rect its ui frame lies
 // in, its content_rect() (x, y, w, h: the screen less the host's bars), and
 // the surface a responsive app lays out for, its `_layout`'s (w, h, fs): the
 // window's or the screen's size and the font scale (0, 0, 0 for a game).

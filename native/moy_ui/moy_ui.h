@@ -179,6 +179,12 @@ enum {
     MOY_UI_FONT_UI = 0, MOY_UI_FONT_TITLE = 1, MOY_UI_FONT_MONO = 2, MOY_UI_FONT_CAPTION = 3,
     MOY_UI_FONT_KEY = 4, MOY_UI_FONT_OP = 5, MOY_UI_FONT_RESULT = 6
 };
+// Past the theme's roles, the console's own two: the tap floor's (MOY_UI_TAP)
+// body and caption faces, a bubble's words and head on a 3.5-inch glass read
+// at arm's length (the console installs them where the floor stands, from
+// the look's family: fontset.TAP_ROLES). Uninstalled, each draws in `ui`'s
+// and `caption`'s.
+enum { MOY_UI_FONT_TAP_UI = MOY_THEME_FONT_ROLES, MOY_UI_FONT_TAP_CAPTION, MOY_UI_FONT_ROLES };
 // Install `font` (an id moy_font_load gave, or 0 for petme128) for `role`:
 // 1, or 0 for an unknown role or font, which installs nothing.
 int moy_ui_font_use(int role, uint32_t font);
@@ -844,7 +850,12 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // The page's ground and the hints take MOY_UI_WINDOW in `desk` beside the
 // size class (MOY_UI_DESK): the page lies in a window's body; MOY_UI_PANEL:
 // it lies on a popover's panel, whose ground is the panel part's field.
-enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2, MOY_UI_PANEL = 32 };
+// MOY_UI_TAP: the board's tap floor -- its chrome stands over its font scale
+// so a bar icon is chrome.MIN_TAP_MM across on its glass (the Guition S3) --
+// so the rows a finger aims at meet it: a list's rows are MOY_UI_TAP_ROW tall
+// at least, a bubble takes its tap metrics and faces (MOY_UI_FONT_TAP_*).
+enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2, MOY_UI_TAP = 8, MOY_UI_PANEL = 32 };
+#define MOY_UI_TAP_ROW 36
 // moy_ui_api_begin's: the keys are another surface's this frame (a cart's
 // editor handle holds them), so no stop holds focus.
 #define MOY_UI_ELSEWHERE 4
@@ -1258,7 +1269,7 @@ void moy_ui_font_reset(void);
 // the icon set's two masks), copy side: an install's fonts are the
 // console's ids, which a copy replaces with fonts of its own
 // (moy_ui_api.h's instance `font_pull`). Answers how many, into ids.
-#define MOY_UI_THEME_FONTS (MOY_THEME_FONT_ROLES + 2)
+#define MOY_UI_THEME_FONTS (MOY_UI_FONT_ROLES + 2)
 int moy_ui_theme_font_ids(uint32_t *ids[MOY_UI_THEME_FONTS]);
 // A block installed: MOY_UI_OK; MOY_UI_BAD for one cut short or of another
 // layout (a toolkit built otherwise), which installs nothing.

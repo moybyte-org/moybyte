@@ -390,6 +390,7 @@ typedef struct {
     uint8_t keys, reveal, cls, fs;
     uint8_t win;                    // the page lies in a window's body (1), on a panel (2)
     uint8_t elsewhere;              // the keys are another surface's: no focus
+    uint8_t tap;                    // the board's tap floor (moy_ui.h's MOY_UI_TAP)
     uint8_t app;                    // its buttons' row of app_buttons + 1, 0 none
     uint8_t n_prev, n_cur, has_at, gesture;    // gesture: 0 none, 1 down, 2 a scroll, 3 sideways
     moy_ui_stop_t prev[MOY_UI_API_STOPS], cur[MOY_UI_API_STOPS];

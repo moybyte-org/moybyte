@@ -39,6 +39,11 @@ ROLES = {"ui": ((12, 500, 2), (15, 500, 4)),
          "title": ((14, 600, 4), (15, 600, 4)),
          "caption": ((11, 600, 2), (12, 600, 4)),
          "hero": ((19, 700, 4), None)}
+# The tap floor's two faces (moy_ui.h's MOY_UI_FONT_TAP_*), the handheld's
+# alone, where the board's floor stands (the Guition S3, firmware's
+# `font_tier` "tap"): a bubble's words in the desk's `ui` size and its head one
+# step over the desk's `caption`, read at arm's length on 3.5-inch glass.
+TAP_ROLES = {"tap": (15, 500, 4), "tap_caption": (13, 600, 2)}
 # The display's roles, the same way: `key` and `op` the faces a button
 # kind's `font` leaf names (a theme's `buttons[kind].font`: Calc's keys and
 # operators) and `result` a display's figure (Calc's). Each is a Calc
@@ -145,6 +150,8 @@ def icon_file(name):
 def role_face(fam, role, desk, steps=None, sizes=None):
     sized = ROLES.get(role) or CALC_ROLES.get(role)
     sized = sized[1 if desk else 0] if sized is not None else None
+    if role in TAP_ROLES:
+        sized = None if desk else TAP_ROLES[role]
     if sized is None or type(fam) is not str or not fam.isalpha():
         return None
     size, weight, bpp = sized

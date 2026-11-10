@@ -164,7 +164,7 @@ except ImportError:                     # host: the runtime package
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
 # The words of `ui_face` (native/moy_ui/moy_ui_wasm.h's MOYCORE_UI_FACE_*).
-_FACE_WINDOW, _FACE_DESK, _FACE_LOOK, _FACE_FS_SHIFT = 1, 2, 4, 8
+_FACE_WINDOW, _FACE_DESK, _FACE_LOOK, _FACE_TAP, _FACE_FS_SHIFT = 1, 2, 4, 8, 8
 
 try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
@@ -1304,8 +1304,9 @@ class Player(PlayerDiag):
         run's snapshot carries, so its verbs draw what this Player's
         `_ui_begin` draws for a Python app: whether the surface is a window's
         body, whether the frame lays out on the desk's rows, whether it is a
-        responsive app's (the shell's look, its faces and colours), and the
-        font scale of the canvas it draws on. A game's is its window bit
+        responsive app's (the shell's look, its faces and colours), whether
+        the board's tap floor stands (`ui_draw.tap_floor`), and the font
+        scale of the canvas it draws on. A game's is its window bit
         alone: the cart's look at scale 1."""
         ws = self.ws
         f = _FACE_WINDOW if ws.windowed_chrome else 0
@@ -1316,6 +1317,8 @@ class Player(PlayerDiag):
             f |= _FACE_DESK
         if self._responsive:
             f |= _FACE_LOOK
+        if _ui_draw.tap_floor():
+            f |= _FACE_TAP
         fs = getattr(run.canvas, "font_scale", 1)
         return f | (fs if fs > 1 else 1) << _FACE_FS_SHIFT
 

@@ -1673,6 +1673,7 @@ _WINDOW = 2                             # ... and MOY_UI_WINDOW
 _PANEL = 32                             # ... and MOY_UI_PANEL
 _ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
 _KEY_EDGE = 16                          # ... and MOY_UI_KEY_EDGE
+_TAP = 8                                # ... and MOY_UI_TAP
 _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
 
@@ -1996,6 +1997,22 @@ def on_bar(on=None):
     return _ON_BAR[0]
 
 
+# The board's tap floor (#203): its chrome stands over its font scale on the
+# handheld's metrics, so a bar icon is chrome.MIN_TAP_MM across on its glass
+# (the Guition S3). Every frame begins with it (moy_ui.h's MOY_UI_TAP; an app
+# run's face word carries it, `Player.ui_face`): a list's rows meet the floor
+# and a bubble takes its tap metrics and faces.
+_TAP_FLOOR = [False]
+
+
+def tap_floor(on=None):
+    """Whether the board's tap floor stands; `on` sets it first (the
+    console, at every relayout)."""
+    if on is not None:
+        _TAP_FLOOR[0] = bool(on)
+    return _TAP_FLOOR[0]
+
+
 def bar_or(items):
     """`items`, or `BAR_KEYS` while the keys are on the bar (`on_bar`)."""
     return BAR_KEYS if _ON_BAR[0] else items
@@ -2022,6 +2039,7 @@ def console_reset():
     _KEYS_HOST[0] = None
     _EDGE[0] = False
     _ON_BAR[0] = False
+    _TAP_FLOOR[0] = False
 
 
 console_reset()

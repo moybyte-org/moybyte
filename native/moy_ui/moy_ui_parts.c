@@ -14,7 +14,7 @@ typedef struct {
     const moy_ui_sink_t *s;
     moy_canvas_row_t *row;
     moy_text_target_t t;
-    int look, run, fs, desk, win;
+    int look, run, fs, desk, win, tap;
 } pd_t;
 
 static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
@@ -36,6 +36,7 @@ static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
     d->run = s->kind == MOY_UI_SINK_RUN;
     d->fs = fs < 1 ? 1 : fs;
     d->desk = (desk & MOY_UI_DESK) != 0;
+    d->tap = !d->desk && (desk & MOY_UI_TAP) != 0;
     d->win = (desk & MOY_UI_WINDOW) ? 1 : (desk & MOY_UI_PANEL) ? 2 : 0;
 }
 
@@ -223,8 +224,10 @@ static pf_t font_of(const pd_t *d, int role) {
         f.line = fi.line;
         f.ascent = fi.ascent;
         f.deep = fi.h;
-        if (role == MOY_UI_FONT_CAPTION && f.id == MOY_FONT_PETME128) {
-            f.id = moy_ui_font(d->s->cart, MOY_UI_FONT_UI, &fi);
+        if ((role == MOY_UI_FONT_CAPTION || role == MOY_UI_FONT_TAP_CAPTION)
+            && f.id == MOY_FONT_PETME128) {
+            f.id = moy_ui_font(d->s->cart, role == MOY_UI_FONT_CAPTION ? MOY_UI_FONT_UI
+                                                                       : MOY_UI_FONT_TAP_UI, &fi);
             f.line = fi.line;
             f.ascent = fi.ascent;
             f.deep = fi.h;
@@ -1612,14 +1615,18 @@ static void rrect_sq(pd_t *d, int x, int y, int w, int h, int r, int square, int
 }
 
 void moy_ui_signal_size(int fs, int desk, int *w, int *h) {
-    int k = fs < 1 ? 1 : fs;
-    *w = 11 * k;
-    *h = ((desk & MOY_UI_DESK) ? 10 : 9) * k;
+    int k = fs < 1 ? 1 : fs, tap = !(desk & MOY_UI_DESK) && (desk & MOY_UI_TAP);
+    *w = (tap ? 15 : 11) * k;
+    *h = ((desk & MOY_UI_DESK) ? 10 : tap ? 12 : 9) * k;
+}
+
+static int pd_flags(const pd_t *d) {
+    return (d->desk ? MOY_UI_DESK : 0) | (d->tap ? MOY_UI_TAP : 0);
 }
 
 static int signal_d(pd_t *d, int x, int foot, int n, uint16_t under) {
     int sw, sh;
-    moy_ui_signal_size(d->fs, d->desk ? MOY_UI_DESK : 0, &sw, &sh);
+    moy_ui_signal_size(d->fs, pd_flags(d), &sw, &sh);
     int bw = (sw - 3 * d->fs) / 4, step = bw + d->fs;
     int ci = tok(d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
     uint16_t lit = pal(d, ci), unlit = mix(under, lit, dark(d) ? 100 : 130);
@@ -1643,9 +1650,11 @@ int moy_ui_bubble(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_bubble_t 
     pd_t d;
     open_pd(s, &d, fs, desk);
     int sc = tscale(s), k = d.fs;
-    int pad = (d.desk ? 10 : 6) * k, pady = (d.desk ? 5 : 3) * k, r = (d.desk ? 10 : 7) * k;
-    int notgap = (d.desk ? 2 : 1) * k;
-    pf_t fu = font_of(&d, MOY_UI_FONT_UI), fc = font_of(&d, MOY_UI_FONT_CAPTION);
+    int pad = (d.desk ? 10 : d.tap ? 8 : 6) * k, pady = (d.desk ? 5 : d.tap ? 6 : 3) * k;
+    int r = (d.desk ? 10 : d.tap ? 9 : 7) * k, minh = d.tap ? 32 * k : 0;
+    int notgap = (d.desk || d.tap ? 2 : 1) * k;
+    pf_t fu = font_of(&d, d.tap ? MOY_UI_FONT_TAP_UI : MOY_UI_FONT_UI);
+    pf_t fc = font_of(&d, d.tap ? MOY_UI_FONT_TAP_CAPTION : MOY_UI_FONT_CAPTION);
     int share = bb->max > 0 && bb->max <= 100 ? bb->max : 75;
     int room = b.w * share / 100 - 2 * pad;
     room = room < 8 * k ? 8 * k : room;
@@ -1678,7 +1687,7 @@ int moy_ui_bubble(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_bubble_t 
     int in = bb->side == 0, sw = 0, sh = 0, headh = 0, hroom = room;
     if (in && bb->head.n > 0) {
         if (bb->signal >= 0) {
-            moy_ui_signal_size(d.fs, d.desk ? MOY_UI_DESK : 0, &sw, &sh);
+            moy_ui_signal_size(d.fs, pd_flags(&d), &sw, &sh);
             hroom = room - 4 * k - sw;
         }
         int ell = 0;
@@ -1690,6 +1699,7 @@ int moy_ui_bubble(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_bubble_t 
     }
     int w = wmax + 2 * pad;
     int h = 2 * pady + headh + (shown - 1) * fu.line * sc + fu.ascent * sc + 3 * k;
+    h = h < minh ? minh : h;
     moy_ui_box_t box = {(int16_t)(in ? b.x : b.x + b.w - w), b.y, (int16_t)w, (int16_t)h};
     if (out != NULL) {
         *out = box;

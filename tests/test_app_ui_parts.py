@@ -2,9 +2,10 @@
 (docs/ui_api_2026-10.md section 1, docs/app_api_v1.md section 3), each a
 page of one fixture app per tier -- tests/fixtures/app_ui/parts_py.moy,
 parts_lua.moy and parts_wasm.moy (a compiled app) -- held to the same pixels
-on the T-Deck's 320x240 console (Moy light) and in a window on the P4's
-desk as shipped (Moy dark). pmem 0
-names the page each app draws:
+on the T-Deck's 320x240 console (Moy light), on the Guition S3's 480x320
+under its tap floor (Moy dark: chrome scale 2 over font scale 1, so a list's
+rows and a bubble take the floor's metrics and faces) and in a window on the
+P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
 
   1  ui.empty: an empty page's head and its one verb.
   2  ui.bubble: an "in" bubble with its head and signal glyph, an "out"
@@ -35,7 +36,7 @@ TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
 PAGES = (1, 2, 3, 4, 5)
-CONSOLES = ("tdeck", "desk")
+CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 
 
@@ -62,9 +63,10 @@ def _install(tier, root):
     return True
 
 
-def _open(tier, base, desk):
-    """The fixture app of `tier` running on a fresh T-Deck console, or in a
-    window on a fresh desk; None where the host has no such tier."""
+def _open(tier, base, console):
+    """The fixture app of `tier` running on a fresh console: the T-Deck, the
+    Guition S3 under its tap floor, or a window on a desk; None where the
+    host has no such tier."""
     from runtime import host_app
     root = str(base / "carts")
     host_app.moy_carts.ensure_dirs(root)
@@ -72,9 +74,15 @@ def _open(tier, base, desk):
         return None
     # the P4 as shipped (font scale 1 on its 7-inch glass), in the dark
     # variant; the T-Deck in the light one
-    ws = (build_desktop_ws(base, font_scale=1, panel_diagonal_in=7.0) if desk
-          else host_app.build_workstation(root))
-    ws.look.set_theme("moy", persist=False, variant="dark" if desk else "light")
+    desk = console == "desk"
+    if desk:
+        ws = build_desktop_ws(base, font_scale=1, panel_diagonal_in=7.0)
+    elif console == "guition":
+        ws = host_app.build_workstation(root, sys_size=(480, 320), font_scale=1,
+                                        windowed=False, panel_diagonal_in=3.5)
+    else:
+        ws = host_app.build_workstation(root)
+    ws.look.set_theme("moy", persist=False, variant="light" if console == "tdeck" else "dark")
     ws.pointer.visible = False
     ws.bar_layer._clock_text = lambda: "10:30"
     if desk:
@@ -147,8 +155,7 @@ def pages(tmp_path_factory):
     out = {}
     for console in CONSOLES:
         for tier in TIERS:
-            ws = _open(tier, tmp_path_factory.mktemp("%s_%s" % (console, tier)),
-                       console == "desk")
+            ws = _open(tier, tmp_path_factory.mktemp("%s_%s" % (console, tier)), console)
             if ws is None:
                 continue
             drv = make_drv(ws)
@@ -184,3 +191,21 @@ def test_the_pages_differ(pages, console):
     blank = bytes(len(pages[(console, "python", PAGES[0])][1]))
     for page in PAGES:
         assert pages[(console, "python", page)][1] != blank
+
+
+def test_the_tap_floor_lifts_a_lists_rows(pages):
+    """Under the Guition's tap floor a list's current row is a 36 px band
+    (MOY_UI_TAP_ROW); the T-Deck's keeps its own height."""
+    def bands(console):
+        (w, h), px = pages[(console, "python", 5)]
+        x = w // 2
+        col = [px[2 * (y * w + x):2 * (y * w + x) + 2] for y in range(h)]
+        ground = max(set(col), key=col.count)
+        runs, n = [], 0
+        for i, c in enumerate(col):
+            n = n + 1 if c != ground and i and c == col[i - 1] else (1 if c != ground else 0)
+            if n and (i + 1 == h or col[i + 1] != c):
+                runs.append(n)
+        return runs
+    assert max(bands("guition")) == 36, bands("guition")
+    assert max(bands("tdeck")) < 36, bands("tdeck")

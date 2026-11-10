@@ -212,7 +212,8 @@ def _theme_reset():
     ui_draw.use_depth(None, False)
     ui_draw.theme_uninstall()
     ui_draw.cart_text(False)
-    for role in ("ui", "title", "mono", "caption", "key", "op", "result"):
+    for role in ("ui", "title", "mono", "caption", "key", "op", "result", "tap",
+                 "tap_caption"):
         ui_draw.use_font(role, 0)
     ui_draw.use_hero(0)
     ui_draw.print_font(0)

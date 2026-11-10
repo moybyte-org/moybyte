@@ -546,11 +546,11 @@ const moy_ui_shape_t *moy_ui_shape(void) {
 
 // -- the fonts the roles draw in --------------------------------------------------
 
-static uint32_t s_font[MOY_THEME_FONT_ROLES];   // 0, petme128, where none is installed
+static uint32_t s_font[MOY_UI_FONT_ROLES];      // 0, petme128, where none is installed
 
 static int moy_ui_font_use_w(int role, uint32_t font) {
     moy_font_info_t fi;
-    if (role < 0 || role >= MOY_THEME_FONT_ROLES || !moy_font_info(font, &fi)) {
+    if (role < 0 || role >= MOY_UI_FONT_ROLES || !moy_font_info(font, &fi)) {
         return 0;
     }
     s_font[role] = font;
@@ -621,8 +621,11 @@ int64_t moy_ui_print_font(uint32_t font) {
 }
 
 uint32_t moy_ui_font(int cart, int role, moy_font_info_t *out) {
-    uint32_t id = !cart && role >= 0 && role < MOY_THEME_FONT_ROLES ? s_font[role]
-                                                                      : MOY_FONT_PETME128;
+    if (role >= MOY_THEME_FONT_ROLES && role < MOY_UI_FONT_ROLES && s_font[role] == 0) {
+        role = role == MOY_UI_FONT_TAP_UI ? MOY_UI_FONT_UI : MOY_UI_FONT_CAPTION;
+    }
+    uint32_t id = !cart && role >= 0 && role < MOY_UI_FONT_ROLES ? s_font[role]
+                                                                  : MOY_FONT_PETME128;
     if (!moy_font_info(id, out)) {
         id = MOY_FONT_PETME128;
         moy_font_info(id, out);
@@ -1046,7 +1049,7 @@ void moy_ui_font_reset(void) {
 
 int moy_ui_theme_font_ids(uint32_t *ids[MOY_UI_THEME_FONTS]) {
     int n = 0;
-    for (int i = 0; i < MOY_THEME_FONT_ROLES; i++) {
+    for (int i = 0; i < MOY_UI_FONT_ROLES; i++) {
         ids[n++] = &s_font[i];
     }
     ids[n++] = &s_icon_font[0];

@@ -424,6 +424,11 @@ region = ui.list("Region", {"EU_868", "US"}, region,
                  {values = {"Europe", "United States"}, check = true})
 ```
 
+**A finger's rows come by themselves.** On a board whose tap floor stands
+(the Guition S3's 3.5-inch glass), a `ui.list` row is 36 px tall and a
+bubble takes larger pads and faces; the app's code is the same on every
+board (`docs/ui_api_2026-10.md`, the tap floor).
+
 **Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
 "Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
 `cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,

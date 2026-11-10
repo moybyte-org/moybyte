@@ -19,6 +19,10 @@ name    = "guition_jc3248w535"
 chip    = "esp32s3"
 ota     = "guition_s3"      # the board id inside a signed OTA manifest (#53)
 tier    = "handheld"
+# The handheld's faces and the tap floor's (tools/make_font.py's TAP): the
+# floor stands on this glass (the [panel] diagonal below), and a bubble reads
+# in them (runtime/toolkit/fontset.py's TAP_ROLES).
+font_tier = ["handheld", "tap"]
 tier_why = """
 Fullscreen tier, like the T-Deck, but with TWO canvases: the system surface is
 the LANDSCAPE 480x320 glass (the panel is portrait-native with a dead MADCTL

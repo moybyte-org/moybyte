@@ -101,7 +101,10 @@ MONO = ("jbmono", 11, 400, 2)     # the Code tab: a 7 px cell, on every tier
 # regular its text view draws in (Appearance.note_font), and the bolds.
 NOTE = {"handheld": (("jbmono", 11, 700, 2),),
         "desktop": (("jbmono", 11, 700, 2), ("jbmono", 15, 400, 4), ("jbmono", 15, 700, 4))}
-TIERS = {"handheld": HANDHELD, "desktop": DESKTOP}
+# The tap floor's faces (runtime/toolkit/fontset.py's TAP_ROLES), which a
+# handheld whose floor stands takes beside its own (`font_tier`).
+TAP = {"tbody": (15, "med", 4), "thead": (13, "semi", 2)}
+TIERS = {"handheld": HANDHELD, "desktop": DESKTOP, "tap": TAP}
 
 CALC = "0123456789.,−×÷+%=CE"
 # Each stand-in a family that lacks the glyph draws instead (the byte map's
@@ -404,10 +407,11 @@ def render_module(tier):
 
 
 def board_fonts(board_dir):
-    """The font tier a board's board.toml declares: `font_tier` where the
-    board's own `tier` names no class of the set -- the browser's, a list of
-    the two, since it lays out on the handheld's metrics in one arrangement
-    and the desk's in the other -- else its `tier`. A list answers a tuple."""
+    """The font tier a board's board.toml declares: `font_tier` where its
+    `tier` alone is not its set -- the browser's, a list of the handheld and
+    the desktop, since it lays out on the handheld's metrics in one
+    arrangement and the desk's in the other; the Guition S3's, the handheld
+    and the tap floor's -- else its `tier`. A list answers a tuple."""
     sys.path.insert(0, HERE)
     import board_config
     b = board_config.load(board_dir)["board"]

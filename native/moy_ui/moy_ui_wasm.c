@@ -163,7 +163,8 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
         if (snap != NULL) {
             int32_t face = snap[MOYCORE_UI_SNAP_FACE];
             flags = ((face & MOYCORE_UI_FACE_WINDOW) ? MOY_UI_WINDOW : 0)
-                    | ((face & MOYCORE_UI_FACE_DESK) ? MOY_UI_DESK : 0);
+                    | ((face & MOYCORE_UI_FACE_DESK) ? MOY_UI_DESK : 0)
+                    | ((face & MOYCORE_UI_FACE_TAP) ? MOY_UI_TAP : 0);
             in[MOY_UI_IN_BTN] = snap[MOYCORE_UI_SNAP_BTN];
             in[MOY_UI_IN_BTNP] = snap[MOYCORE_UI_SNAP_BTNP];
             in[MOY_UI_IN_X] = snap[MOYCORE_UI_SNAP_X];
