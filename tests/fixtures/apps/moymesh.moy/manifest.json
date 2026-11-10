@@ -9,7 +9,7 @@
     "mesh.lua",
     "main.lua"
   ],
-  "description": "Text messages on the LoRa radio, on the default LongFast channel. Works with Meshtastic.",
+  "description": "Text messages on the LoRa radio: Meshtastic's channels, and direct messages to a node under its key. Works with Meshtastic.",
   "moybyte": {
     "type": "app",
     "permissions": [

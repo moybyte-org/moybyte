@@ -27,9 +27,11 @@ and a Lua service answering a message (`tests/fixtures/apps/echo_lua.moy`).
 `system_carts/moybyte.notes.moy` is the full-size app. Moy Mesh, an
 installable app in moybyte-org/carts (`carts/moymesh/`, `pkg install
 moymesh`), is the whole app in Lua: a window over a service that holds the
-LoRa radio by handle and wakes on it (text on Meshtastic's default channel,
-so it works with Meshtastic); its copy `tests/fixtures/apps/moymesh.moy`
-runs in `tests/test_moymesh_app.py`.
+LoRa radio by handle and wakes on it, a Meshtastic node of its own (the
+channels and presets a Meshtastic setup names, its NodeInfo under the
+console's name from `moybyte.name()`, direct messages under the nodes' X25519
+keys); its copy `tests/fixtures/apps/moymesh.moy` runs in
+`tests/test_moymesh_app.py`.
 
 ---
 
@@ -579,8 +581,8 @@ as `<stem>.<chip>.elf`, the chips those the folder carries. The app's own
 entry is `main`. A Lua app's Lua entry runs after the app's SHARED scripts:
 the ones its manifest's `sources` (`docs/moy_cart_api.md`) lists before
 `main`, in that order, each its own chunk, as the window runs them. So the
-two halves keep one copy of what they share (Moy Mesh's `mesh.lua`: its id
-and its regions); what `sources` lists after `main` is the window's alone,
+two halves keep one copy of what they share (Moy Mesh's `mesh.lua`: its id,
+its regions and presets, the radio's setup and its channel links); what `sources` lists after `main` is the window's alone,
 and the entry never runs as a shared script, even where `sources` names it.
 A Lua `"type": "service"` cart runs its `sources` in order, as a window
 does. An entry that does not read (another key, an absolute or
