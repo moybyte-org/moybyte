@@ -1005,8 +1005,20 @@ def _edit_state(ws):
         lay = getattr(ws, "code_layout", None)
         if lay is not None and out["tab"] == "code":
             out["autoscroll"] = ws.code_layer.autoscrolling()
-            # where the text lies on the glass: x of column 0, y of the top row
-            out["grid"] = [ws.code_layer._text_x0(lay, ed), lay.y0, lay.cell, lay.lh]
+            # where the text lies on the glass: x of column 0, y of the top
+            # row. On the desk the Code tab lays out in its pane's body
+            # (EditorDesk.laid_out), the pane in the Editor window's content.
+            ox = oy = 0
+            desk = getattr(ws, "_editor_desk", None)
+            got = desk.laid_out("code") if desk is not None else None
+            if got is not None:
+                (ox, oy, _w, _h), lay = got
+                win = getattr(getattr(ws, "wm", None), "_wins", {}).get("menu")
+                if win is not None:
+                    cx, cy = win.content_rect()[:2]
+                    ox, oy = ox + cx, oy + cy
+            out["grid"] = [ox + ws.code_layer._text_x0(lay, ed), oy + lay.y0,
+                           lay.cell, lay.lh]
     return out
 
 

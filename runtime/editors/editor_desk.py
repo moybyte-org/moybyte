@@ -497,6 +497,21 @@ class EditorDesk(Layer):
 
     # -- a tab in a pane ----------------------------------------------------------
 
+    def laid_out(self, tab):
+        """(body, layout) of the pane on show whose content is tab `tab`'s
+        surface, in the window's content space, as its draw and its pointer
+        lay it out (`_in_pane`), else None."""
+        alone = self.alone()
+        for pane, r, _path in self.panes():
+            if alone is not None:
+                if pane != alone:
+                    continue
+                r = self._area()
+            if P.CONTENTS[self.tab_of(pane)][2] == tab:
+                body = self._body(r, self._unit(), pane)
+                return body, self._pane_layout(tab, body)
+        return None
+
     def _pane_layout(self, tab, r):
         """The layout tab `tab`'s surface takes in a pane `r` big: built by
         its own `relayout` at that size with no bar, once per size (and for
