@@ -55,6 +55,7 @@ int32_t moy_notes_system(const char *summary, size_t sn, const char *body, size_
 #endif
 #ifdef MEDIA_BOARD
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
@@ -146,8 +147,11 @@ typedef struct {
     volatile uint32_t in_w, in_r;
     uint8_t in[MOY_MEDIA_IN_BYTES];
 
-    // the decoder
-    mp3dec_t dec;
+    // the decoder: its state internal SRAM where open() could take it (sram)
+    mp3dec_t *dec;
+    uint32_t sram;                  // the run's bytes in internal SRAM: the state, the stack
+    uint32_t dec_n, dec_sum;        // the meter's window: frames, their decode µs
+    volatile uint32_t dec_us;       // the last full window's mean decode, µs
     uint32_t win_off, win_n;
     uint8_t win[MOY_MEDIA_WIN_BYTES];
     int16_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
@@ -180,7 +184,7 @@ typedef struct {
     SemaphoreHandle_t mtx;
     TaskHandle_t task;
     StaticTask_t *tcb;                  // internal, as a TCB must be
-    StackType_t *stack;                 // PSRAM, MOY_MEDIA_STACK
+    StackType_t *stack;                 // MOY_MEDIA_STACK, internal SRAM where open() could take it
 #elif !defined(__EMSCRIPTEN__)
     pthread_mutex_t mtx;                // a client's task beside the frame's job
 #endif
@@ -246,12 +250,36 @@ static void block_free(void *p) {
 #endif
 }
 
+// `n` zeroed bytes of internal SRAM, counted in the run's `sram`, where the heap
+// keeps MOY_MEDIA_SRAM_FLOOR free beside them; NULL where it cannot (the
+// caller takes PSRAM) and on a build with no board heap.
+static void *sram_take(media_t *m, size_t n) {
+#ifdef MEDIA_BOARD
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < n + MOY_MEDIA_SRAM_FLOOR) {
+        return NULL;
+    }
+    void *p = heap_caps_calloc(1, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (p != NULL) {
+        m->sram += (uint32_t)n;
+    }
+    return p;
+#else
+    (void)m;
+    (void)n;
+    return NULL;
+#endif
+}
+
 static uint32_t share_of(int ch) {
     return (uint32_t)sizeof(media_t) + MOY_MEDIA_PCM_FRAMES * (uint32_t)ch * sizeof(int16_t)
-           + MOY_MEDIA_STACK + MOY_MEDIA_CONN;
+           + (uint32_t)sizeof(mp3dec_t) + MOY_MEDIA_STACK + MOY_MEDIA_CONN;
 }
 
 uint32_t moy_media_share(void) {
+    media_t *m = s_m;
+    if (m != NULL) {
+        return m->share;
+    }
 #ifdef MEDIA_BOARD
     return share_of(moy_aud_out_channels());
 #else
@@ -1238,6 +1266,8 @@ int moy_media_status(moy_media_status_t *st) {
     st->err = m->err;
     st->text_gen = m->text_gen;
     st->idle = m->idle;
+    st->sram = m->sram;
+    st->dec_us = LOAD(&m->dec_us);
     uint32_t size = m->e_size;
     UNLOCK(m);
     uint32_t dec = m->e_dec, used = m->e_used;
@@ -1475,7 +1505,7 @@ static void begin(media_t *m) {
     m->win_off = 0;
     m->win_n = 0;
     m->rs_hz = 0;
-    mp3dec_init(&m->dec);
+    mp3dec_init(m->dec);
     if (!soft) {
         STORE(&m->flush_at, LOAD(&m->out_w));
         STORE(&m->flush_gen, m->flush_gen + 1u);
@@ -1763,7 +1793,20 @@ static int decode_one(media_t *m) {
         return 0;
     }
     mp3dec_frame_info_t info;
-    int s = mp3dec_decode_frame(&m->dec, w, (int)m->win_n, m->pcm, &info);
+#ifdef MEDIA_BOARD
+    int64_t t0 = esp_timer_get_time();
+#endif
+    int s = mp3dec_decode_frame(m->dec, w, (int)m->win_n, m->pcm, &info);
+#ifdef MEDIA_BOARD
+    if (s > 0) {
+        m->dec_sum += (uint32_t)(esp_timer_get_time() - t0);
+        if (++m->dec_n == MOY_MEDIA_METER_FRAMES) {
+            STORE(&m->dec_us, m->dec_sum / MOY_MEDIA_METER_FRAMES);
+            m->dec_n = 0;
+            m->dec_sum = 0;
+        }
+    }
+#endif
     if (info.frame_bytes <= 0) {
         consume(m, m->win_n);
         return last ? -1 : 1;
@@ -2223,9 +2266,31 @@ static int media_open(uint32_t pid, int rate, int channels) {
     m->state = MOY_MEDIA_IDLE;
     m->seek_req = NO_SEEK;
     m->keys_r = -1;
-    mp3dec_init(&m->dec);
+#ifdef MEDIA_BOARD
+    m->stack = sram_take(m, MOY_MEDIA_STACK);
+    if (m->stack == NULL) {
+        m->stack = heap_caps_malloc(MOY_MEDIA_STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+#endif
+    m->dec = sram_take(m, sizeof(mp3dec_t));
+    if (m->dec == NULL) {
+        m->dec = block_alloc(sizeof(mp3dec_t));
+    }
+    if (m->dec == NULL) {
+#ifdef MEDIA_BOARD
+        heap_caps_free(m->stack);
+#endif
+        block_free(m);
+        moy_share_give(MOY_SHARE_MEDIA, share);
+        return -MOY_MEDIA_ENOMEM;
+    }
+    mp3dec_init(m->dec);
     LIFE_MAKE();
     if (moy_loop_job == NULL || !moy_loop_job(media_job, NULL)) {
+#ifdef MEDIA_BOARD
+        heap_caps_free(m->stack);
+#endif
+        block_free(m->dec);
         block_free(m);
         moy_share_give(MOY_SHARE_MEDIA, share);
         return moy_loop_job == NULL ? -MOY_MEDIA_ENODEV : -MOY_MEDIA_EBUSY;
@@ -2233,7 +2298,6 @@ static int media_open(uint32_t pid, int rate, int channels) {
 #ifdef MEDIA_BOARD
     m->mtx = xSemaphoreCreateMutexStatic(&m->mtx_buf);
     m->tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    m->stack = heap_caps_malloc(MOY_MEDIA_STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (m->tcb != NULL && m->stack != NULL) {
         m->task = xTaskCreateStaticPinnedToCore(task, "moy_media", MOY_MEDIA_STACK / sizeof(StackType_t),
                                                 m, MOY_MEDIA_PRIO, m->stack, m->tcb, 0);
@@ -2244,6 +2308,7 @@ static int media_open(uint32_t pid, int rate, int channels) {
         }
         heap_caps_free(m->tcb);
         heap_caps_free(m->stack);
+        block_free(m->dec);
         block_free(m);
         moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
@@ -2251,6 +2316,9 @@ static int media_open(uint32_t pid, int rate, int channels) {
 #elif !defined(__EMSCRIPTEN__)
     pthread_mutex_init(&m->mtx, NULL);
 #endif
+    // the row counts PSRAM: what internal SRAM holds goes back to it
+    moy_share_give(MOY_SHARE_MEDIA, m->sram);
+    m->share -= m->sram;
 #if MOY_MEDIA_MIX
     moy_aud_lock();
     s_m = m;
@@ -2319,6 +2387,7 @@ static void reap(media_t *m) {
     keys_close(m);
     conn_close(m);
     file_close(m, 0);
+    block_free(m->dec);
     block_free(m);
     moy_share_give(MOY_SHARE_MEDIA, share);
     moy_lease_let(pid, MOY_LEASE_MEDIA);    // STALE where the row's drop ended the run

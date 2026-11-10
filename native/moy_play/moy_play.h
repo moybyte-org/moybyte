@@ -164,8 +164,9 @@ enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 //          stack and heap), counted at a service's start and at a game's
 //          admission. On the S3s it is the cart's floor above; on the P4s what a desk keeps free beside its
 //          Python heap's room to grow with a game running;
-//   MEDIA  the media service: its stream buffer, its decoder and its task's
-//          PSRAM stack;
+//   MEDIA  the media service: its stream buffer, its decoded ring, and its
+//          decoder's state and task stack where internal SRAM could not take
+//          them (native/moy_media/moy_media.h, THE MEMORY);
 //   RINGS  every ring a task writes (an ISR's ring is internal, under the
 //          kernel's internal cap): the input table's event rings
 //          (native/moy_input/moy_input.c) and the render-ahead audio rings;

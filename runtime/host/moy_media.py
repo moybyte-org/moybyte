@@ -36,7 +36,8 @@ URL, FEED, FILE = 1, 2, 3
 T_SRC, T_TITLE, T_STATION, T_ENTRY, T_SONG, T_ARTIST, T_WHO, T_LABEL = range(8)
 FIELDS = ("state", "paused", "pid", "gen", "entry", "entries", "kind", "armed", "rate",
           "channels", "kbps", "volume", "in_bytes", "in_room", "pcm_frames", "decoded",
-          "played", "starved", "err", "text_gen", "idle", "at_ms", "len_ms", "feed_at", "client")
+          "played", "starved", "err", "text_gen", "idle", "at_ms", "len_ms", "feed_at", "client",
+          "sram", "dec_us")
 
 _U32, _I, _P, _SZ = ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t
 
@@ -48,7 +49,7 @@ class _St(ctypes.Structure):
                 ("in_bytes", _U32), ("in_room", _U32), ("pcm_frames", _U32),
                 ("decoded", _U32), ("played", _U32), ("starved", _U32),
                 ("err", _I), ("text_gen", _U32), ("idle", _I), ("at_ms", _U32),
-                ("len_ms", _U32), ("feed_at", _U32)]
+                ("len_ms", _U32), ("feed_at", _U32), ("sram", _U32), ("dec_us", _U32)]
 
 
 class _End(ctypes.Structure):

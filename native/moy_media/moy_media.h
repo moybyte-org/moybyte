@@ -53,13 +53,19 @@
 // THE MEMORY is the MEDIA row of THE SHARES (native/moy_play/moy_play.h):
 // open() takes moy_media_share() from it and refuses with -ENOSPC where the
 // row is absent or full, before anything is allocated. The service's state,
-// its buffers and its decoder are one PSRAM block, the task's stack is PSRAM
-// and the URL's client buffers are kernel memory (moy_ota.h); the run's end
-// frees all of it and gives the row back. An S3's VM stop counts what the row
-// holds (moy_play_stop.c: a game that fits only without the music is the
-// verdict MOY_PLAY_KEEP_MEDIA, and the console asks first). Nothing is static
-// but two pointers (the service, the media keys' table), the last run's end
-// and the life gate's mutex.
+// its buffers and its decoded ring are one PSRAM block, and the URL's client
+// buffers are kernel memory (moy_ota.h). The task's stack, which carries
+// minimp3's ~16.7 KB scratch through every frame's decode, and the decoder's
+// state are internal SRAM where the heap keeps MOY_MEDIA_SRAM_FLOOR free
+// beside them, else PSRAM: a decode that keeps them off the PSRAM cache and
+// bus slows the other core's frame less (#66). What internal SRAM holds goes back to the row, so the row
+// counts the run's PSRAM, and status() names the internal bytes (`sram`).
+// The run's end frees all of it and gives the row back; nothing is held
+// while no stream runs. An S3's VM stop counts what the row holds
+// (moy_play_stop.c: a game that fits only without the music is the verdict
+// MOY_PLAY_KEEP_MEDIA, and the console asks first). Nothing is static but two
+// pointers (the service, the media keys' table), the last run's end and the
+// life gate's mutex.
 //
 // WHO RUNS WHAT. The VM's thread opens, closes, commands and feeds; the
 // frame's job reads a file on that same thread, so a store op never runs on
@@ -118,7 +124,9 @@
 #define MOY_MEDIA_WIN_BYTES (16u * 1024u)   // the decoder's window
 #define MOY_MEDIA_WIN_MIN (8u * 1024u)      // a frame is decoded with this much ahead
 #define MOY_MEDIA_PCM_FRAMES 16384u         // decoded, in the output's rate and channels
-#define MOY_MEDIA_STACK (24u * 1024u)       // the task's stack: a frame's decode takes 16.7 KB
+#define MOY_MEDIA_STACK (20u * 1024u)       // the task's stack: a frame's decode takes 16.7 KB of it
+#define MOY_MEDIA_SRAM_FLOOR (16u * 1024u)  // internal SRAM open() leaves free beside the stack and state
+#define MOY_MEDIA_METER_FRAMES 256u         // the decode meter's window, frames
 #define MOY_MEDIA_CONN (20u * 1024u)        // a URL's client: its head and URL buffers
 #define MOY_MEDIA_ENTRIES 32
 #define MOY_MEDIA_LIST_BYTES 8192u
@@ -193,6 +201,8 @@ typedef struct {
     uint32_t at_ms;                         // the current entry heard, ms
     uint32_t len_ms;                        // a file's length, ms; 0 unknown (a stream)
     uint32_t feed_at;                       // the byte the face's feed of `gen` starts at
+    uint32_t sram;                          // the run's bytes in internal SRAM, 0 all PSRAM
+    uint32_t dec_us;                        // a frame's mean decode over the last window, µs; 0 none
 } moy_media_status_t;
 
 // What probe() reads of a file: its length in seconds (0 unknown) and its
@@ -203,8 +213,9 @@ typedef struct {
     char artist[MOY_MEDIA_TEXT_MAX];
 } moy_media_probe_t;
 
-// The bytes open() takes from the MEDIA row on this image (a stereo output's
-// decoded ring is twice a mono one's).
+// The bytes the run holds of the MEDIA row, or with none running what open()
+// takes from it on this image (a stereo output's decoded ring is twice a mono
+// one's).
 uint32_t moy_media_share(void);
 // Whether this image plays a stream: its output exists (a board's speaker, or
 // the host's and the browser's per-frame pull).

@@ -398,9 +398,14 @@ def test_the_stream_is_ducked_while_the_focused_session_sounds(media):
 
 def test_the_media_row_is_taken_given_back_and_absent_on_the_guition_s3(media):
     mp.share_use("tdeck")
+    full = N.share()                                     # with no run: what open() takes
     pid = L.spawn("t.share")
     _as(pid, lambda: moybyte.media.play(str(TONE)))
-    assert mp.share_held(mp.SHARE_MEDIA) == N.share() <= mp.shares("tdeck")[mp.SHARE_MEDIA]
+    # The row counts the run's PSRAM: its internal SRAM went back (a host has none).
+    n = moybyte.media.now()
+    assert n["sram"] == 0 and n["dec_us"] == 0
+    assert mp.share_held(mp.SHARE_MEDIA) == N.share() == full - n["sram"]
+    assert N.share() <= mp.shares("tdeck")[mp.SHARE_MEDIA]
     _as(pid, moybyte.media.stop)
     assert N.pid() == 0 and mp.share_held(mp.SHARE_MEDIA) == 0
     mp.share_use("guition_s3")

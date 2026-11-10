@@ -199,7 +199,7 @@ static mp_obj_t media_status(void) {
     if (!moy_media_status(&s)) {
         return mp_const_none;
     }
-    mp_obj_t t[25] = {
+    mp_obj_t t[27] = {
         MP_OBJ_NEW_SMALL_INT(s.state), MP_OBJ_NEW_SMALL_INT(s.paused),
         mp_obj_new_int_from_uint(s.pid), mp_obj_new_int_from_uint(s.gen),
         MP_OBJ_NEW_SMALL_INT(s.entry), MP_OBJ_NEW_SMALL_INT(s.entries),
@@ -212,9 +212,10 @@ static mp_obj_t media_status(void) {
         MP_OBJ_NEW_SMALL_INT(s.err), mp_obj_new_int_from_uint(s.text_gen),
         MP_OBJ_NEW_SMALL_INT(s.idle), mp_obj_new_int_from_uint(s.at_ms),
         mp_obj_new_int_from_uint(s.len_ms), mp_obj_new_int_from_uint(s.feed_at),
-        mp_obj_new_int_from_uint(s.client),
+        mp_obj_new_int_from_uint(s.client), mp_obj_new_int_from_uint(s.sram),
+        mp_obj_new_int_from_uint(s.dec_us),
     };
-    return mp_obj_new_tuple(25, t);
+    return mp_obj_new_tuple(27, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_status_obj, media_status);
 

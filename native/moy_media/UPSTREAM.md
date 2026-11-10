@@ -7,7 +7,9 @@ authors dedicated it to the public domain (CC0 1.0, in the file's header).
 
 `moy_mp3.c` compiles its implementation, MPEG layer 3 only and without SIMD;
 `moy_media.c` (the media service, `moy_media.h`) calls `mp3dec_decode_frame`
-from its task, whose stack holds the decoder's 16.7 KB scratch.
+from its task, whose stack holds the decoder's 16.7 KB scratch (minimp3 takes
+no caller's scratch), so the stack is what goes to internal SRAM with it
+(`moy_media.h`, THE MEMORY).
 
 Do not edit the copy: a fix is a new copy of upstream's file, its hash
 recorded here.

@@ -38,7 +38,11 @@ permission is a client of.
                      run), client (the process whose play() set what plays),
                      who (its name), label (its label), and a file's place
                      and length heard, `at` and `len` in seconds (0 for a
-                     stream, and `len` 0 until a frame decodes)
+                     stream, and `len` 0 until a frame decodes); `sram` the
+                     run's bytes in internal SRAM (the decoder's state and
+                     its task's stack, 0 where they took PSRAM) and `dec_us`
+                     a frame's mean decode in microseconds over the last 256
+                     (0 before the first 256, and on a host)
   stamp() -> int | None  one small int that moves when what now() shows
                      does (its place by the second): a poll that finds it
                      still reads nothing else and allocates nothing
@@ -134,7 +138,7 @@ _HOST = _N is not None and hasattr(_N, "PART")
 _STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the C's job runs the loop
 (_STATE, _PAUSED, _PID, _GEN, _ENTRY, _ENTRIES, _KIND, _ARMED, _RATE, _CH, _KBPS,
  _VOL, _INB, _INR, _PCM, _DEC, _PLAYED, _STARVED, _ERR, _TGEN, _IDLE, _AT_MS,
- _LEN_MS, _FEED_AT, _CLIENT) = range(25)
+ _LEN_MS, _FEED_AT, _CLIENT, _SRAM, _DEC_US) = range(27)
 
 # The run the face follows and what the face's wake holds for it.
 _s = {"pid": 0, "wake": None, "every": 0, "file": None, "gen": 0, "eof": False,
@@ -661,6 +665,7 @@ def now():
         "err": st[_ERR], "pid": st[_PID], "client": st[_CLIENT],
         "who": _N.text(_N.T_WHO), "label": _N.text(_N.T_LABEL),
         "at": st[_AT_MS] // 1000 if fed else 0, "len": st[_LEN_MS] // 1000 if fed else 0,
+        "sram": st[_SRAM], "dec_us": st[_DEC_US],
     }
 
 
