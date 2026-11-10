@@ -23,12 +23,13 @@
 // here takes each pointer and length its signature marks `*~` as a copy in
 // this VM, the bytes it changed copied back (moy_web_cmd_row). The rows
 // served are those served where they are called (moy_wasi_os_rows.h's
-// MOY_WASI_OS_HERE: the files, prefs, clipboard, timers, send and log, the
-// device handles and the crypto rows), in place, the page's one thread being
-// the VM's. The rest go through the VM's queue (moy_vmq.h: the console calls,
-// the rows the door's Python half serves, the screen), which a run holding
-// that thread cannot wait on: each answers NOSYS, and a module importing
-// them still runs.
+// MOY_WASI_OS_HERE: the files, prefs, clipboard, timers, on and at, send and
+// log, the notifications and status items, the items handed, service_stop,
+// the device handles and the crypto rows), in place, the page's one thread
+// being the VM's. The rest go through the VM's queue (moy_vmq.h: the console
+// calls, the rows the door's Python half serves, the screen), which a run
+// holding that thread cannot wait on: each answers NOSYS, and a module
+// importing them still runs.
 
 #ifndef MOY_WASI_WEB_H
 #define MOY_WASI_WEB_H

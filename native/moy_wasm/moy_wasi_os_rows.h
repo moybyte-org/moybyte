@@ -78,6 +78,8 @@
     X(aes_gcm_open) \
     X(aes_gcm_seal) \
     X(after) \
+    X(at) \
+    X(award) \
     X(cancel) \
     X(clipboard_kind) \
     X(clipboard_put_text) \
@@ -105,14 +107,23 @@
     X(files_rename) \
     X(files_save) \
     X(hmac_sha256) \
+    X(item_read) \
+    X(item_write) \
     X(log) \
+    X(notify) \
+    X(on) \
     X(prefs_clear) \
     X(prefs_get) \
     X(prefs_set) \
+    X(progress) \
     X(random) \
     X(send) \
     X(service_running) \
+    X(service_stop) \
     X(sha256) \
+    X(status_remove) \
+    X(status_show) \
+    X(status_state) \
     X(x25519) \
 
 #endif // MOY_WASI_OS_ROWS_H

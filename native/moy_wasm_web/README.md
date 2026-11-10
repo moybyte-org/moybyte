@@ -94,9 +94,10 @@ this VM, whose changed bytes go back after it (the C hands the page the
 row's signature: `moy_web_cmd_row`). Served are the rows served where they
 are called, `how` "here" or "seq" in `native/os_calls.json`
 (`MOY_WASI_OS_HERE`, generated): the files, prefs and clipboard rows, the
-timers, `send` and `log`, the device handles and the crypto rows, in place,
-the page's one thread being the VM's. The rows that hop (the console calls,
-the door's Python half's, the status items, `on`, `at`, the screen) go
+timers, `on` and `at`, `send` and `log`, the notifications, badges and status
+items, the items a program was handed, `service_stop`, the device handles and
+the crypto rows, in place, the page's one thread being the VM's. The rows
+that hop (the console calls, the door's Python half's, the screen) go
 through the VM's queue (`moy_vmq.h`), which a run holding that thread cannot
 wait on: each answers NOSYS, and a module importing them still runs.
 
