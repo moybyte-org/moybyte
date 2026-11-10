@@ -155,6 +155,7 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->lead = moycore_ui_flag(L, i, "lead");
     o->bar = moycore_ui_flag(L, i, "bar");
     o->snap = (int8_t)(moycore_ui_flag(L, i, "snap") == 1);
+    o->flags2 = moycore_ui_flag(L, i, "follow") == 1 ? MOY_UI_O2_FOLLOW : 0;
     o->whole = (int8_t)(moycore_ui_flag(L, i, "whole") == 1);
     lua_getfield(L, i, "axis");
     if (lua_type(L, -1) == LUA_TSTRING) {

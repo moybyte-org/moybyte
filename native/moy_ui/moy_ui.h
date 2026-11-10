@@ -1052,9 +1052,13 @@ int moy_ui_note(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, int
                 const uint8_t *lines, size_t n, int fs, int desk, int draw);
 // The "More below" cue in the band a snapping page's foot leaves (its
 // left-out units' room): the band on the page's ground, a down chevron and
-// the words in the caption face's dim ink, centred. The band it needs.
-int moy_ui_more(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
+// the words in the caption face's dim ink, centred; `up`, a `follow` page's
+// "Older messages" cue in the gap its top leaves, an up chevron. The band
+// the foot's needs, and the gap the top's needs (the caption face's ascent
+// and 2 px at the scale).
+int moy_ui_more(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk, int up);
 int moy_ui_more_h(const moy_ui_sink_t *s, int fs, int desk);
+int moy_ui_more_need(const moy_ui_sink_t *s, int fs, int desk);
 // The signal glyph (ui.bubble's head, ui.info's `signal`): four bars,
 // bottom-aligned, from x with their feet at `foot`, `n` lit in `ink_dim`,
 // the rest `ink_dim` mixed into `under` (wire order). Its width.

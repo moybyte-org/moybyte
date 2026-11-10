@@ -81,6 +81,7 @@ const char *const moy_str_ids[MOY_STRINGS] = {
     "ui.on",
     "ui.off",
     "ui.more_below",
+    "ui.older",
 };
 
 const char *const moy_str_en[MOY_STRINGS] = {
@@ -161,4 +162,5 @@ const char *const moy_str_en[MOY_STRINGS] = {
     "On",
     "Off",
     "More below",
+    "Older messages",
 };

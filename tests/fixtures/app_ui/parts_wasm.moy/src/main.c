@@ -255,5 +255,27 @@ EXPORT(_draw) void _draw(void) {
         pn = ui_field(S("Name"), pasted, sizeof(pasted), pn, over_buf, over_n) & 0xffff;
         ui_focus(S("paste"), NULL, 0);
         pmem(1, pn, 1);
+    } else if (page == 14) {
+        int32_t v[5];
+        int32_t in3[6] = {0, 3, 0, 75, 4, 0}, in1[6] = {0, 1, 0, 75, 4, 0};
+        int32_t in2[6] = {0, 2, 0, 75, 4, 0}, out0[6] = {1, -1, 0, 75, 4, 0};
+        ui_label(S("LongFast"), NULL, 0);
+        over_begin(2048 | 536870912);       // MOY_UI_O_SNAP, MOY_UI_O_MORE
+        over_word(1);                       // MOY_UI_O2_FOLLOW
+        ui_scroll(S("chat"), over_buf, over_n);
+        ui_bubble(S("See you at the top"), S("Ana Ridge"), S(""), (const char *)in3, sizeof(in3),
+                  NULL, 0, v, sizeof(v));
+        ui_bubble(S("Ten minutes"), S(""), S(""), (const char *)out0, sizeof(out0), NULL, 0, v,
+                  sizeof(v));
+        ui_bubble(S("Trail report: the lower path is washed out past the second bridge, so take "
+                    "the ridge route instead."), S("1E2F"), S(""), (const char *)in1, sizeof(in1),
+                  NULL, 0, v, sizeof(v));
+        ui_bubble(S("On my way up now"), S(""), S(""), (const char *)out0, sizeof(out0), NULL, 0, v,
+                  sizeof(v));
+        ui_bubble(S("Water at the spring is running."), S("Ana Ridge"), S(""), (const char *)in2,
+                  sizeof(in2), NULL, 0, v, sizeof(v));
+        ui_bubble(S("Wait for me at the gate"), S(""), S("Sending\xe2\x80\xa6"), (const char *)out0,
+                  sizeof(out0), NULL, 0, v, sizeof(v));
+        ui_scroll("", 0, NULL, 0);
     }
 }

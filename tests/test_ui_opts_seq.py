@@ -78,6 +78,7 @@ HOME = {"values": ("2 min", "", "1 h"), "subs": ("Gate opens at seven", "Snow", 
 CARD = {"card": True}
 TAG = {"tag": "Public"}
 DFOCUS = {"focus": "Cancel"}
+FOLLOW = {"snap": True, "follow": True}
 NOTE = ("Every radio on a mesh uses one preset.", "On another one you hear none.")
 SHORT = [False]
 OUT = [0] * 5
@@ -117,6 +118,12 @@ def page():
     ui.list("Two", WORDS, -1, HOME)
     ui.group()
     ui.link("LongFast", "", TAG)
+    ui.at(120, 60, 110, 60)
+    ui.scroll("hist", FOLLOW)
+    for w in WORDS:
+        ui.label(w)
+        ui.label(w)
+    ui.scroll()
     ui.note("warn", NOTE)
     ui.dialog("Switch?", ("Cancel", "Switch"), "primary", DFOCUS)
     ui.toggle("Keep", True)

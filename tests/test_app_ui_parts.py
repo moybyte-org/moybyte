@@ -40,6 +40,12 @@ P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
      console's Paste (Ctrl+V) brings it PASTE: the room takes "čaj" and
      leaves the cup, whose three bytes would run past it; pmem 1 the
      field's length in bytes.
+ 14  a chat's history in a ui.scroll region under `snap` and `follow`: it
+     rests on its foot, whole bubbles only, and the "Older messages" cue
+     in the gap its top leaves.
+
+On the handheld consoles page 8 is dragged too: a drag let go settles its
+scroll onto a unit's top.
 """
 
 import os
@@ -57,7 +63,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+PAGES = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14)
 CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 PASTE = "\u010daj\u2615x"                    # "čaj", a cup (three bytes), "x"
@@ -172,6 +178,46 @@ def _shot(name, size, px):
                        golden_png.rgb565be_rows(px, w, h), w, h)
 
 
+def _offset(ws, x, y):
+    """The scroll of the page under (x, y), a Python app's (None elsewhere)."""
+    ui = getattr(ws.run.player, "_ui", None)
+    if getattr(ws.run.player, "_lua", None) is not None or not ui:
+        return None
+    from runtime import ui_draw
+    return ui_draw._C.api_offset(ui[0], x, y)
+
+
+def _drag(ws, drv, x, y, dy):
+    """A drag of `dy` px from (x, y), held still and let go, then frames
+    enough to settle: the pixels, the scroll as the finger let go and
+    after."""
+    drv.touch(x, y)
+    _frame(drv)
+    for i in range(1, 7):
+        drv.touch_drag(x, y + dy * i // 6)
+        _frame(drv)
+    for _ in range(6):
+        drv.touch_drag(x, y + dy)       # held still: let go with no fling
+        _frame(drv)
+    held = _offset(ws, x, y)
+    drv.touch_up()
+    for _ in range(90):
+        _frame(drv)
+    return _pixels(ws), held, _offset(ws, x, y)
+
+
+def _drags(ws, drv):
+    """Page 8 dragged up 30 px, back to its top, then up 33 px."""
+    _set_page(ws, 8)
+    for _ in range(6):
+        _frame(drv)
+    x, y, w, h = ws.run.player.ns["content_rect"]()
+    x, y = x + w // 2, y + h // 2
+    first = _drag(ws, drv, x, y, -30)
+    _drag(ws, drv, x, y - 60, 200)
+    return first, _drag(ws, drv, x, y, -33)
+
+
 @pytest.fixture(scope="module")
 def pages(tmp_path_factory):
     """{(console, tier, page): (size, pixels)}."""
@@ -207,6 +253,10 @@ def pages(tmp_path_factory):
             out[(console, tier, "pasted")] = _pixels(ws), _pmem1(ws)
             if SHOTS:
                 _shot("%s_paste_%s" % (console, tier), *out[(console, tier, "pasted")][0])
+            if console != "desk":
+                out[(console, tier, "drag")] = _drags(ws, drv)
+                if SHOTS:
+                    _shot("%s_drag_%s" % (console, tier), *out[(console, tier, "drag")][0][0])
             ws.exit()
     return out
 
@@ -294,3 +344,19 @@ def test_the_consoles_paste_reaches_the_focused_field(pages, tier, console):
     assert n == PASTED, (tier, console, n)
     assert px != pages[(console, tier, "unpasted")][1], "the paste drew nothing"
     assert px == pages[(console, "python", "pasted")][0][1]
+
+
+@pytest.mark.parametrize("console", ("tdeck", "guition"))
+@pytest.mark.parametrize("tier", TIERS)
+def test_a_drag_let_go_settles_onto_a_units_top(pages, tier, console):
+    """A snapping region dragged 30 px and let go, and 33 px, rests at one
+    scroll: the drag's own offset settles onto the unit's top nearest it,
+    drawn alike on every tier."""
+    if (console, tier, "drag") not in pages:
+        pytest.skip("no host %s tier" % tier)
+    (a, held_a, rest_a), (b, held_b, rest_b) = pages[(console, tier, "drag")]
+    assert a == b, "two drags near one unit rested apart"
+    assert a == pages[(console, "python", "drag")][0][0]
+    if tier == "python":
+        assert held_a != rest_a and held_b != rest_b, (held_a, rest_a, held_b, rest_b)
+        assert rest_a == rest_b > 0, (rest_a, rest_b)

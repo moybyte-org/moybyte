@@ -13,6 +13,13 @@ import moybyte
 HOME = ("Srbija", "Planinari", "Ana Ridge", "Base Camp")
 CHANNELS = ("LongFast", "Planinari", "Base", "Open", "Family")
 PASTED = "ab"
+HISTORY = (("See you at the top", "in", {"head": "Ana Ridge", "signal": 3}),
+           ("Ten minutes", "out", None),
+           ("Trail report: the lower path is washed out past the second bridge, so take "
+            "the ridge route instead.", "in", {"head": "1E2F", "signal": 1}),
+           ("On my way up now", "out", None),
+           ("Water at the spring is running.", "in", {"head": "Ana Ridge", "signal": 2}),
+           ("Wait for me at the gate", "out", {"status": "Sending\u2026"}))
 
 
 def _draw():
@@ -119,3 +126,9 @@ def _draw():
         PASTED, _ = ui.field("Name", PASTED, 8, {"id": "paste"})
         ui.focus("paste")
         pmem(1, len(PASTED.encode("utf-8")))
+    elif page == 14:
+        ui.label("LongFast")
+        ui.scroll("chat", {"snap": True, "follow": True})
+        for text, side, o in HISTORY:
+            ui.bubble(text, side, o)
+        ui.scroll()

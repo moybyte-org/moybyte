@@ -223,6 +223,7 @@ def _block(o):
     card = o.get("card")
     tag = o.get("tag")
     foc = o.get("focus")
+    more = 1 if o.get("follow") else 0     # the second word of flags (MOY_UI_O2_*)
     rmask = 0
     for i in range(5):
         if rows[i] is not None:
@@ -232,7 +233,7 @@ def _block(o):
             or axis or snap or offset is not None or spill is not None or keep is not None
             or ov is not None or whole or across is not None or at is not None or shift
             or fade or sig is not None or vals is not None or check or rmask
-            or card or tag is not None or foc is not None):
+            or card or tag is not None or foc is not None or more):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
@@ -244,7 +245,7 @@ def _block(o):
                  | (4194304 if vals is not None else 0) | (8388608 if check else 0)
                  | (16777216 if wash == "view" else 0) | (33554432 if rmask else 0)
                  | (67108864 if card else 0) | (134217728 if tag is not None else 0)
-                 | (268435456 if foc is not None else 0))
+                 | (268435456 if foc is not None else 0) | (536870912 if more else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -285,6 +286,8 @@ def _block(o):
     if foc is not None:
         fb = str(foc).encode("utf-8")
         tail += _pack("<i", len(fb)) + fb
+    if more:
+        tail += _pack("<i", more)
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),

@@ -481,8 +481,10 @@ ui.dialog()
 
 **A settings page shows whole rows.** `{snap = true}` on `ui.page` or
 `ui.scroll` leaves out a row the view's edge would cut (a group's caption
-goes with its first row, a list's rows are each a row), and the band the
-foot leaves says "More below":
+goes with its first row, a list's label with its first row, a list's rows
+are each a row), and the band the foot leaves says "More below". A drag let
+go, a fling or the wheel spent, and a focus step all rest the view with a
+row flush at its top:
 
 ```lua
 ui.scroll("radio", {snap = true})
@@ -491,6 +493,19 @@ ui.info("Name", name)
 ui.group("Channels")
 ch = ui.list("", channels, ch, {values = kinds})
 ui.group()
+ui.scroll()
+```
+
+**A chat's history rests on its foot.** `{follow = true}` on a snapping
+region opens it at its foot and keeps it there as messages arrive, until
+the person scrolls up; the gap its top leaves says "Older messages" while
+older ones lie above:
+
+```lua
+ui.scroll("chat", {snap = true, follow = true})
+for _, m in ipairs(history) do
+  ui.bubble(m.text, m.side, {head = m.from, status = m.status})
+end
 ui.scroll()
 ```
 

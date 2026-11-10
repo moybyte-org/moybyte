@@ -267,6 +267,9 @@ typedef struct {
 // the first word's takes. Bit 30 is the first word's last free one; bit 31
 // is its sign (a word below 0 is no flags).
 #define MOY_UI_O_MORE 536870912
+// The second word's bits: `follow` (a page or scroll region rests on its
+// foot: it opens there, and stays there as its rows grow while it rests).
+#define MOY_UI_O2_FOLLOW 1
 #define MOY_UI_OR_SUBS 1
 #define MOY_UI_OR_ICONS 2
 #define MOY_UI_OR_COUNTS 4
@@ -305,6 +308,8 @@ typedef struct {
     int16_t used;                   // a dialog or popover: the body height it was laid out for
     int8_t snap, snap_more;         // the outer page's snap state (moy_ui_ctx_t's)
     int16_t snap_cut, snap_cap, snap_cue_h;
+    int8_t snap_at, snap_older;
+    int16_t snap_top;
 } moy_ui_nest_t;
 #define MOY_UI_API_NEST 2
 // What a verb that opens a nest (ui.scroll, ui.text_view, ui.dialog,
@@ -327,7 +332,22 @@ typedef struct {
     int32_t drawn, gen;
     uint8_t kd, s0, sn;
     int16_t rh;                     // a placed table: its row height as it drew
+    uint8_t rest;                   // a page under `follow`: it rests on its foot
 } moy_ui_keep_t;
+
+// A snapping page's units as its last pass placed them (moy_ui_ctx_t's
+// tops): the page's id (0: the slot is free) and its units' tops, in its
+// rows' pixels (0 its first row's top), ascending, MOY_UI_API_TOPS at most,
+// from two views above its scroll on. A drag let go and a focus step settle
+// its scroll onto one of them.
+#define MOY_UI_API_SNAPS 3          // the snapping pages whose units a frame keeps
+#define MOY_UI_API_TOPS 32          // the units kept a page
+typedef struct {
+    uint32_t id;
+    uint8_t n;
+    int16_t cue;                    // the band its foot keeps where its rows run on
+    int16_t top[MOY_UI_API_TOPS];
+} moy_ui_tops_t;
 
 typedef struct {
     int16_t y, h;
@@ -702,6 +722,13 @@ typedef struct {
     // snap_cap a caption's top waiting for its first row (INT16_MIN none).
     int8_t snap, snap_out, snap_rows, snap_more;
     int16_t snap_cut, snap_cap, snap_cue_h;
+    // snap_at the tops slot the page open now records its units in (-1
+    // none); under `follow`, snap_top the screen row a unit must start at
+    // to show (the "Older messages" cue's band above it; INT16_MIN none)
+    // and snap_older whether that cue draws there.
+    int8_t snap_at, snap_older;
+    int16_t snap_top;
+    moy_ui_tops_t tops[MOY_UI_API_SNAPS];
     // The console's paste this frame (moy_ui_api_paste): the focused field
     // takes it; 0 none, and none once a frame begins.
     uint16_t paste_n;

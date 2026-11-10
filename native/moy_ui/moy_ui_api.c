@@ -391,6 +391,7 @@ void moy_ui_api_reset_in(moy_ui_ctx_t *c, moy_ui_inst_t *I) {
     c->dlg_pick = -1;
     c->bar_act = -1;
     c->bar_chip_at = -1;
+    c->snap_at = -1;
 }
 
 void moy_ui_api_reset(moy_ui_ctx_t *c) {
@@ -624,6 +625,9 @@ static void table_reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *v, int n,
     moy_ui_scroll_glide_to(&k->sc, offset, to, 0, k->b, p->b.h);
 }
 
+static int32_t snap_rest(const moy_ui_tops_t *t, int32_t a, int32_t most, int dir);
+static const moy_ui_tops_t *tops_of(const moy_ui_ctx_t *c, uint32_t id);
+
 // Glide page `p`'s scroll to `to`: 1 where that moves it.
 int mua_aim(moy_ui_keep_t *k, const moy_ui_stop_t *p, int32_t to) {
     int32_t content, extent;
@@ -645,7 +649,8 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_
     int sh = (int)(base - k->a);        // the page's window, moved to where it is going
     int top = p->b.y + sh, bottom = p->b.y + p->b.h + sh, d = 0;
     int32_t more = k->b - (base + p->b.h);       // the rows below what shows
-    int fade = more > 0 ? FADE_H * c->fs : 0;
+    const moy_ui_tops_t *ut = tops_of(c, p->id);
+    int fade = more > 0 ? (ut != NULL ? ut->cue : FADE_H * c->fs) : 0;
     if (b.y < top) {
         d = b.y - top;
     } else if (b.y + b.h > bottom - fade) {
@@ -673,6 +678,13 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_
         // a scroll down past a caption may go past the rows' end by as
         // much: the page keeps that room while the scroll stays there
         k->over = (int16_t)(d > 0 ? t - top - d : 0);
+        if (ut != NULL) {
+            // a snapping page steps by whole units: its top lands on one
+            int32_t content, extent;
+            span_of(p, k, &content, &extent);
+            to = snap_rest(ut, to, content - extent, d > 0 ? 1 : -1);
+            k->over = 0;
+        }
     }
     if (to < 0) {
         to = 0;
@@ -1578,6 +1590,29 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             moved = 1;
         }
     }
+    // A snapping page at rest off its units (a drag let go, a fling or the
+    // wheel spent) settles onto the nearest unit's top.
+    for (int i = 0; i < MOY_UI_API_SNAPS; i++) {
+        const moy_ui_tops_t *t = &c->tops[i];
+        moy_ui_keep_t *k = t->id ? mua_keep_of(c, t->id) : NULL;
+        const moy_ui_stop_t *pp = k != NULL ? mua_page_of_keep(v, n, k) : NULL;
+        if (pp == NULL || moy_ui_scroll_moving(&k->sc) || (c->gesture == 2 && c->drag_page == k->id)) {
+            continue;
+        }
+        int32_t content, extent;
+        span_of(pp, k, &content, &extent);
+        int32_t most = content - extent;
+        int32_t to = most > 0 && k->a < most ? snap_rest(t, k->a, most, 0) : k->a;
+        if (to == k->a) {
+            continue;
+        }
+        if (dt <= 0) {
+            k->a = to;
+        } else {
+            moy_ui_scroll_glide_to(&k->sc, k->a, to, 0, content, extent);
+        }
+        moved = 1;
+    }
     if (c->focus != focus0) {
         moved = 1;
     }
@@ -1637,7 +1672,21 @@ int mua_snap_out(moy_ui_ctx_t *c, int y, int h, int unit) {
     if (y + h > foot && unit < c->snap_cut) {
         c->snap_cut = (int16_t)(unit > top ? unit : top);
     }
-    return y < top || y + h > foot || unit >= c->snap_cut;
+    return y < top || y + h > foot || unit >= c->snap_cut || unit < c->snap_top;
+}
+
+// A unit of the snapping page open now starts at screen row `unit`: into
+// its tops (moy_ui_tops_t), from two views above its scroll on.
+static void snap_note(moy_ui_ctx_t *c, int unit) {
+    if (c->snap_at < 0) {
+        return;
+    }
+    moy_ui_tops_t *t = &c->tops[c->snap_at];
+    int y = unit - c->page.y + c->scroll;
+    if (t->n < MOY_UI_API_TOPS && y >= c->scroll - 2 * c->page.h && y <= INT16_MAX
+        && (t->n == 0 || y > t->top[t->n - 1])) {
+        t->top[t->n++] = (int16_t)y;
+    }
 }
 
 // A stacked row placed at screen row y, h tall, on a snapping page.
@@ -1649,6 +1698,7 @@ static void snap_place(moy_ui_ctx_t *c, int y, int h) {
     }
     int unit = c->snap_cap != INT16_MIN ? c->snap_cap : y;
     c->snap_cap = INT16_MIN;
+    snap_note(c, unit);
     c->snap_out = (int8_t)mua_snap_out(c, y, h, unit);
 }
 
@@ -2748,7 +2798,9 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags,
     c->page_keep = -1;
     c->snap = c->snap_out = c->snap_rows = c->snap_more = 0;
     c->snap_cut = INT16_MAX;
-    c->snap_cap = INT16_MIN;
+    c->snap_cap = c->snap_top = INT16_MIN;
+    c->snap_at = -1;
+    c->snap_older = 0;
     int32_t rows = k != NULL ? k->b : 0;
     if (k != NULL) {
         // the rows' height less what shows of them: the page less the hint
@@ -2760,12 +2812,22 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags,
             k->over = 0;            // (a glide past the rows keeps its room until it lands)
         }
         most += k->over;
+        // under `follow` a page that rests on its foot (or opens) is there
+        int follow = o != NULL && (o->flags2 & MOY_UI_O2_FOLLOW);
+        if (follow && c->page_new) {
+            k->rest = 1;
+        }
+        if (follow && k->rest
+            && !(k->sc.flags & (MOY_UI_SCROLL_DRAG | MOY_UI_SCROLL_FLING | MOY_UI_SCROLL_GLIDE))) {
+            k->a = most;
+        }
         if (k->a > most) {
             k->a = most;
         }
         if (k->a < 0) {
             k->a = 0;
         }
+        k->rest = (uint8_t)(follow && k->a >= most);
         c->scroll = (int16_t)k->a;
         c->snap_more = (int8_t)(rows > c->scroll + ct.h);
         k->b = 0;
@@ -3173,6 +3235,7 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
     }
     if (c->snap) {
         // the caption and its first row are one unit
+        snap_note(c, b.y);
         c->snap_out = (int8_t)mua_snap_out(c, b.y, b.h, b.y);
         c->snap_cap = b.y;
     }
@@ -3408,14 +3471,23 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         rh = MOY_UI_TAP_ROW;        // a row a finger aims at meets the board's floor
     }
     int placed = c->has_at;
+    // a caption's top, else the list's own label's: its first row's unit
+    int lunit = c->snap_cap;
     if (label.n && !placed) {
+        int ly = c->page.y + c->y - c->scroll;
         moy_ui_api_label(c, s, label, NULL);
+        if (lunit == INT16_MIN) {
+            lunit = ly;
+        }
     }
     int stacked;
-    int lunit = c->snap_cap;          // a caption's top, its first row's unit
     c->snap_cap = INT16_MIN;
     c->snap_rows = c->snap;
     moy_ui_box_t b = mua_place(c, (count ? count : 1) * rh, &stacked);
+    for (int i = 0; stacked && c->snap && c->snap_at >= 0 && i < count
+                    && c->tops[c->snap_at].n < MOY_UI_API_TOPS; i++) {
+        snap_note(c, i == 0 && lunit != INT16_MIN ? lunit : b.y + i * rh);
+    }
     uint32_t id = mua_id_of(c, o, label);
     int disabled = o->disabled == 1;
     moy_ui_keep_t *kp = disabled ? NULL : mua_keep(c, id, 1);
@@ -4096,9 +4168,74 @@ const moy_ui_over_t *mua_snap_whole(const moy_ui_over_t *o, moy_ui_over_t *copy)
 // The page just opened snaps where `o` says so (ui.page's, ui.scroll's `snap`).
 void mua_snap_open(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const moy_ui_over_t *o) {
     c->snap = (int8_t)(o != NULL && o->snap == 1);
-    if (c->snap) {
-        c->snap_cue_h = (int16_t)moy_ui_more_h(s, c->fs, mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0));
+    moy_ui_keep_t *k = mua_page_keep(c);
+    if (!c->snap || k == NULL) {
+        return;
     }
+    int pf = mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0);
+    c->snap_cue_h = (int16_t)moy_ui_more_h(s, c->fs, pf);
+    // its tops' slot: its own, else a free one, else one whose page is gone
+    int at = -1;
+    for (int i = 0; i < MOY_UI_API_SNAPS && at < 0; i++) {
+        at = c->tops[i].id == k->id ? i : -1;
+    }
+    for (int i = 0; i < MOY_UI_API_SNAPS && at < 0; i++) {
+        at = c->tops[i].id == 0 || mua_keep_of(c, c->tops[i].id) == NULL ? i : -1;
+    }
+    moy_ui_tops_t *t = &c->tops[at < 0 ? 0 : at];
+    if (t->id == k->id && (o->flags2 & MOY_UI_O2_FOLLOW) && c->scroll > 0 && c->pop_prev.w == 0) {
+        // older units above: the "Older messages" cue in the gap the snap
+        // leaves at the top, the top unit giving way where the gap is
+        // shorter than the cue needs
+        int i = 0;
+        while (i < t->n && t->top[i] < c->scroll) {
+            i++;
+        }
+        int need = moy_ui_more_need(s, c->fs, pf);
+        if (i < t->n && t->top[i] - c->scroll < need) {
+            i++;
+        }
+        if (i < t->n && t->top[i] - c->scroll >= need) {
+            c->snap_top = (int16_t)(c->page.y + t->top[i] - c->scroll);
+            c->snap_older = 1;
+        }
+    }
+    t->id = k->id;
+    t->n = 0;
+    t->cue = c->snap_cue_h;
+    c->snap_at = (int8_t)(t - c->tops);
+}
+
+// The snap rest nearest offset `a` (dir 0), or the first at or past it
+// downward (dir 1) or upward (dir -1), of a page whose rows scroll `most`
+// at most: one of its units' tops (`t`), its top or its foot.
+static int32_t snap_rest(const moy_ui_tops_t *t, int32_t a, int32_t most, int dir) {
+    int32_t best = dir > 0 ? most : 0;
+    if (dir == 0) {
+        best = a < most - a ? 0 : most;
+    }
+    for (int i = 0; i < t->n; i++) {
+        int32_t u = t->top[i];
+        if (u <= 0 || u >= most) {
+            continue;
+        }
+        if (dir > 0 ? u >= a && u < best
+            : dir < 0 ? u <= a && u > best
+                      : (u > a ? u - a : a - u) < (best > a ? best - a : a - best)) {
+            best = u;
+        }
+    }
+    return best;
+}
+
+// The tops kept of the snapping page `id`, or NULL.
+static const moy_ui_tops_t *tops_of(const moy_ui_ctx_t *c, uint32_t id) {
+    for (int i = 0; i < MOY_UI_API_SNAPS; i++) {
+        if (id != 0 && c->tops[i].id == id) {
+            return &c->tops[i];
+        }
+    }
+    return NULL;
 }
 
 void mua_nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int used,
@@ -4117,6 +4254,9 @@ void mua_nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int u
     n->snap_cut = c->snap_cut;
     n->snap_cap = c->snap_cap;
     n->snap_cue_h = c->snap_cue_h;
+    n->snap_at = c->snap_at;
+    n->snap_older = c->snap_older;
+    n->snap_top = c->snap_top;
     open_page(c, id, b, flags | (kind >= 2 || mua_in_dialog(c) ? STOP_MODAL : 0)
                         | (kind >= 2 ? STOP_CARD : 0), o, outer);
 }
@@ -4177,12 +4317,19 @@ void mua_foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     if (c->snap) {
         // whole units, no fades: the band the foot's left-out units leave
         // holds the "More below" cue
-        int bottom = c->page.y + c->page.h;
+        int bottom = c->page.y + c->page.h, pf = mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0);
         if (k != NULL && !c->no_foot && c->snap_cut < bottom) {
             moy_ui_box_t b = {c->page.x, c->snap_cut, c->page.w, (int16_t)(bottom - c->snap_cut)};
             clip_t kk;
             EACH_PIECE(c, kk, s, b) {
-                moy_ui_more(s, b, c->fs, mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0));
+                moy_ui_more(s, b, c->fs, pf, 0);
+            }
+        }
+        if (k != NULL && c->snap_older) {
+            moy_ui_box_t b = {c->page.x, c->page.y, c->page.w, (int16_t)(c->snap_top - c->page.y)};
+            clip_t kk;
+            EACH_PIECE(c, kk, s, b) {
+                moy_ui_more(s, b, c->fs, pf, 1);
             }
         }
         return;
@@ -4229,6 +4376,9 @@ int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
     c->snap_cut = n->snap_cut;
     c->snap_cap = n->snap_cap;
     c->snap_cue_h = n->snap_cue_h;
+    c->snap_at = n->snap_at;
+    c->snap_older = n->snap_older;
+    c->snap_top = n->snap_top;
     c->snap_out = 0;
     return took;
 }

@@ -1995,13 +1995,20 @@ int moy_ui_more_h(const moy_ui_sink_t *s, int fs, int desk) {
     return fc.line * tscale(s) + 4 * d.fs;
 }
 
-int moy_ui_more(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
+int moy_ui_more_need(const moy_ui_sink_t *s, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    pf_t fc = font_of(&d, d.tap ? MOY_UI_FONT_TAP_CAPTION : MOY_UI_FONT_CAPTION);
+    return fc.ascent * tscale(s) + 2 * d.fs;
+}
+
+int moy_ui_more(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk, int up) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     int sc = tscale(s), k = d.fs;
     pf_t fc = font_of(&d, d.tap ? MOY_UI_FONT_TAP_CAPTION : MOY_UI_FONT_CAPTION);
     fill(&d, b.x, b.y, b.w, b.h, ground(&d));
-    const uint8_t *w = (const uint8_t *)moy_str(MOY_S_UI_MORE_BELOW);
+    const uint8_t *w = (const uint8_t *)moy_str(up ? MOY_S_UI_OLDER : MOY_S_UI_MORE_BELOW);
     size_t n = strlen((const char *)w);
     int lw = tw(&fc, w, n, sc), cs = fc.ascent * sc;
     int tx = b.x + moy_ui_fdiv(b.w - lw - cs - 4 * k, 2);
@@ -2009,8 +2016,9 @@ int moy_ui_more(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
     uint16_t ink = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK));
     int cx = tx + cs / 2, cy = ty + moy_ui_fdiv(ch, 2);
     for (int i = 0; i < 4; i++) {
-        fill(&d, cx - i * k, cy + (1 - i) * k, k, k, ink);
-        fill(&d, cx + i * k, cy + (1 - i) * k, k, k, ink);
+        int ry = cy + (up ? i - 2 : 1 - i) * k;     // a chevron down, or up
+        fill(&d, cx - i * k, ry, k, k, ink);
+        fill(&d, cx + i * k, ry, k, k, ink);
     }
     text(&d, &fc, w, n, tx + cs + 4 * k, ty, ch, ink, sc);
     return MOY_UI_OK;
