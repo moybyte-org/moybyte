@@ -546,61 +546,111 @@ class _Wifi:
         return (self.asked > self.up_after, "192.168.1.5")
 
 
-def test_a_network_that_comes_up_late_is_not_reported_offline(board, monkeypatch):
+def test_a_network_that_comes_up_late_is_polled_not_waited_for(board, monkeypatch):
     """MEASURED on the P4 (2026-08-02, saved network, cold reset): connect()
-    polls for 4s and gives up, and the link came up 1.5s AFTER it did. Without
-    this wait a perfectly good network reads as "wifi offline"."""
-    monkeypatch.setitem(sys.modules, "time", _fake_time())
+    polls for 4s and gives up, and the link came up 1.5s AFTER it did. The
+    dial is asked once and then polled: None while it runs, nothing slept."""
+    fake = _fake_time(ticks=True)
+    monkeypatch.setitem(sys.modules, "time", fake)
     dialled = []
     board.u.set_wifi(_Wifi(up_after=6), lambda: dialled.append(1))
-    assert board.u.ensure_online() is True
-    assert dialled == [1]
+    seen = [board.u.poll_online() for _ in range(3)]
+    assert seen == [None, None, None] and dialled == [1]
+    while board.u.poll_online() is None:
+        fake.now += 250
     assert board.u.wifi_online() is True
+    assert fake.slept == [] and dialled == [1]
 
 
-def test_the_wait_is_bounded_and_gives_up(board, monkeypatch):
-    """A console cannot sit behind a CHECKING screen forever."""
-    fake = _fake_time()
+def test_the_dial_is_bounded_and_gives_up(board, monkeypatch):
+    """A console cannot sit behind a CHECKING screen forever: DIAL_MS, which
+    outlasts a P4's 20 s slow association."""
+    fake = _fake_time(ticks=True)
     monkeypatch.setitem(sys.modules, "time", fake)
     board.u.set_wifi(_Wifi(up_after=10 ** 9), lambda: None)
-    assert board.u.ensure_online() is False
-    assert sum(fake.slept) <= board.mod.ONLINE_WAIT_MS
+    assert board.u.poll_online() is None
+    fake.now += board.mod.DIAL_MS - 1
+    assert board.u.poll_online() is None
+    fake.now += 1
+    assert board.u.poll_online() is False
+    assert board.mod.DIAL_MS >= 20000
 
 
 def test_an_already_connected_board_neither_dials_nor_waits(board, monkeypatch):
-    fake = _fake_time()
+    fake = _fake_time(ticks=True)
     monkeypatch.setitem(sys.modules, "time", fake)
     dialled = []
     board.u.set_wifi(_Wifi(up_after=0), lambda: dialled.append(1))
-    assert board.u.ensure_online() is True
+    assert board.u.poll_online() is True
     assert dialled == [] and fake.slept == []
 
 
-def test_an_autoconnect_that_throws_still_gets_its_wait(board, monkeypatch):
+def test_an_autoconnect_that_throws_still_gets_its_budget(board, monkeypatch):
     """The dial is best-effort. A radio that raises on connect may still be
-    associating, and the wait is what finds out."""
-    monkeypatch.setitem(sys.modules, "time", _fake_time())
+    associating, and the polled budget is what finds out."""
+    monkeypatch.setitem(sys.modules, "time", _fake_time(ticks=True))
 
     def _boom():
         raise OSError("ESP_ERR_WIFI_CONN")
 
-    board.u.set_wifi(_Wifi(up_after=4), _boom)
-    assert board.u.ensure_online() is True
+    board.u.set_wifi(_Wifi(up_after=2), _boom)
+    assert board.u.poll_online() is None
+    assert board.u.poll_online() is None
+    assert board.u.poll_online() is True
 
 
-def test_a_board_with_no_autoconnect_hook_still_waits(board, monkeypatch):
-    monkeypatch.setitem(sys.modules, "time", _fake_time())
-    board.u.set_wifi(_Wifi(up_after=3))
-    assert board.u.ensure_online() is True
+def test_a_board_with_no_autoconnect_hook_still_polls(board, monkeypatch):
+    monkeypatch.setitem(sys.modules, "time", _fake_time(ticks=True))
+    board.u.set_wifi(_Wifi(up_after=1))
+    assert board.u.poll_online() is None
+    assert board.u.poll_online() is True
 
 
-def test_a_micropython_without_sleep_ms_uses_plain_sleep(board, monkeypatch):
-    """The host runs this module too, and CPython has no `time.sleep_ms`."""
-    fake = _fake_time(sleep_ms=False)
+def test_a_check_is_pending_while_the_link_dials_and_answers_after(board, monkeypatch):
+    """check_online never holds the frame for the link: None with `joining`
+    (`pending`) set, the source resolved once, then the fetch when it is up."""
+    monkeypatch.setitem(sys.modules, "time", _fake_time(ticks=True))
+    board.u.set_wifi(_Wifi(up_after=2), lambda: None)
+    sources = []
+
+    def _source(channel=None):
+        sources.append(channel)
+        return "http://example.invalid/latest.json", False
+    board.u._manifest_source = _source
+    fetched = []
+    monkeypatch.setattr(board.mod.moy_net, "ota_check",
+                        lambda url, b, sig: (fetched.append(url), (1, ""))[1])
+    for _ in range(2):
+        assert board.u.check_online("stable") is None
+        assert board.u.joining and board.u.pending and board.u.error is None
+    assert fetched == []
+    assert board.u.check_online("stable") is None
+    assert not board.u.pending and board.u.absent is True
+    assert fetched == ["http://example.invalid/latest.json"]
+    assert sources == ["stable"]
+
+
+def test_a_check_whose_dial_runs_out_reads_wifi_offline(board, monkeypatch):
+    fake = _fake_time(ticks=True)
     monkeypatch.setitem(sys.modules, "time", fake)
-    board.u.set_wifi(_Wifi(up_after=3), lambda: None)
-    assert board.u.ensure_online() is True
-    assert fake.slept[:1] == [250]
+    board.u.set_wifi(_Wifi(up_after=10 ** 9), lambda: None)
+    board.u._manifest_source = lambda channel=None: ("http://x.invalid/m", False)
+    assert board.u.check_online() is None and board.u.pending
+    fake.now += board.mod.DIAL_MS
+    assert board.u.check_online() is None
+    assert not board.u.pending and board.u.error == "wifi offline"
+
+
+def test_a_cancel_drops_the_dial_so_the_next_check_starts_over(board, monkeypatch):
+    monkeypatch.setitem(sys.modules, "time", _fake_time(ticks=True))
+    dialled = []
+    board.u.set_wifi(_Wifi(up_after=10 ** 9), lambda: dialled.append(1))
+    board.u._manifest_source = lambda channel=None: ("http://x.invalid/m", False)
+    assert board.u.check_online() is None and board.u.pending
+    board.u.cancel()
+    assert not board.u.pending
+    assert board.u.check_online() is None
+    assert dialled == [1, 1]
 
 
 def test_a_radio_that_throws_reads_as_offline(board):
@@ -620,13 +670,6 @@ def test_check_online_reports_a_channel_with_no_url(board):
     assert board.u.error == "no manifest url"
 
 
-def test_check_online_reports_an_offline_board(board, monkeypatch):
-    monkeypatch.setitem(sys.modules, "time", _fake_time())
-    board.u.set_wifi(_Wifi(up_after=10 ** 9), lambda: None)
-    assert board.u.check_online() is None
-    assert board.u.error == "wifi offline"
-
-
 # == the manifest check, over the kernel's client =================================
 
 def _route_manifest(srv, path, manifest):
@@ -634,7 +677,7 @@ def _route_manifest(srv, path, manifest):
 
 
 def test_check_online_fetches_and_parses_through_the_kernel(board):
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     with Server() as srv:
         m = {"version": 99, "channel": "stable", "board": board.mod.BOARD}
         _route_manifest(srv, "/l.json", m)
@@ -649,7 +692,7 @@ def test_check_online_fetches_and_parses_through_the_kernel(board):
     (403, False, "http 403")])
 def test_a_missing_manifest_is_absence_and_any_other_status_an_error(
         board, status, absent, error):
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     with Server({"/l.json": (status, {}, b"no")}) as srv:
         board.u._manifest_source = lambda channel=None: (srv.url("/l.json"), True)
         assert board.u.check_online() is None
@@ -658,7 +701,7 @@ def test_a_missing_manifest_is_absence_and_any_other_status_an_error(
 
 
 def test_a_manifest_that_is_not_json_is_an_error_not_a_crash(board):
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     with Server({"/l.json": (200, {}, b"<html>404 not found</html>")}) as srv:
         board.u._manifest_source = lambda channel=None: (srv.url("/l.json"), True)
         assert board.u.check_online() is None
@@ -669,7 +712,7 @@ def test_an_oversized_manifest_stops_at_the_cap(board):
     """MOY_OTA_MANIFEST_MAX: a manifest is a few hundred bytes, and a body past
     8 KB is not one -- its cut-off JSON is refused, never buffered whole."""
     big = json.dumps({"version": 1, "pad": "x" * 20000}).encode()
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     with Server({"/l.json": (200, {}, big)}) as srv:
         board.u._manifest_source = lambda channel=None: (srv.url("/l.json"), True)
         assert board.u.check_online() is None
@@ -677,14 +720,14 @@ def test_an_oversized_manifest_stops_at_the_cap(board):
 
 
 def test_an_unreachable_host_is_named(board):
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     board.u._manifest_source = lambda channel=None: ("http://127.0.0.1:1/l.json", True)
     assert board.u.check_online() is None
     assert board.u.error.startswith("net error")
 
 
 def test_https_is_the_boards_and_the_host_says_so(board):
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     board.u._manifest_source = lambda channel=None: ("https://127.0.0.1:1/l.json", True)
     assert board.u.check_online() is None
     assert board.u.error == "net error %d" % 93          # EPROTONOSUPPORT
@@ -981,7 +1024,7 @@ def test_an_online_update_from_the_manifest_to_the_next_boot(board, monkeypatch)
     nb._trust(TEST_KEYS)
     machine = _install_machine(monkeypatch)
     blob = app_image(70000)
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     with Server() as srv:
         manifest = _manifest(m, blob, srv.url("/fw.bin"), label="0.9")
         manifest["sig"] = sign_with_test_key(manifest)
@@ -1028,6 +1071,76 @@ def _screen_over(tmp_path, board, srv, blob):
     return uu
 
 
+def _dialling_screen(tmp_path, board, monkeypatch):
+    """The update screen over a board whose saved network never answers, its
+    radio lease and the labels it draws recorded."""
+    from runtime import host_app
+    from runtime.system import update_ui
+
+    fake = _fake_time(ticks=True)
+    monkeypatch.setitem(sys.modules, "time", fake)
+    dialled = []
+    board.u.set_wifi(_Wifi(up_after=10 ** 9), lambda: dialled.append(1))
+    board.u._manifest_source = lambda channel=None: ("http://x.invalid/m", False)
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.updater = board.u
+    lease = []
+    ws.wifi_hold = lambda tag, pid=None: lease.append(("hold", tag))
+    ws.wifi_release = lambda tag, pid=None: lease.append(("release", tag))
+    labels = []
+    real = update_ui._ui.label
+    monkeypatch.setattr(update_ui._ui, "label",
+                        lambda text, *a, **k: (labels.append(text), real(text, *a, **k))[1])
+    return ws, ws.update_ui, dialled, lease, labels, fake
+
+
+def test_the_checking_screen_draws_while_the_link_dials_and_back_cancels(
+        tmp_path, board, monkeypatch):
+    """A P4's slow association takes up to 20 s: the screen keeps drawing
+    (joining WiFi, its dots stepping) instead of freezing, and B leaves it,
+    dropping the dial and the radio's lease."""
+    ws, uu, dialled, lease, labels, fake = _dialling_screen(tmp_path, board, monkeypatch)
+    uu.open_update_online()
+    assert lease == [("hold", "update")]
+    for _ in range(6):
+        uu._pump_update(0.0)
+        del labels[:]
+        uu._draw_update(0.0)
+        fake.now += 3000
+    assert uu._upd_phase == "checking" and board.u.joining and dialled == [1]
+    assert any(t.startswith("joining WiFi.") for t in labels), labels
+    assert board.u.check_online() is None and board.u.pending
+    uu._update_input(types.SimpleNamespace(pressed=lambda k: k == "b"))
+    assert lease[-1] == ("release", "update")
+    assert not board.u.pending and ws.wm.top_kind() != "update"
+
+
+def test_the_checking_screen_gives_up_after_the_dial_budget(tmp_path, board, monkeypatch):
+    ws, uu, dialled, lease, labels, fake = _dialling_screen(tmp_path, board, monkeypatch)
+    uu.open_update_online()
+    uu._pump_update(0.0)                 # the one-frame CHECKING gate
+    uu._pump_update(0.0)                 # the dial
+    fake.now += board.mod.DIAL_MS
+    uu._pump_update(0.0)
+    assert uu._upd_phase == "error" and uu._upd_msg == "wifi offline"
+    assert dialled == [1]
+
+
+def test_the_c6_check_waits_on_the_link_without_holding_the_frame(
+        tmp_path, board, monkeypatch):
+    ws, uu, dialled, lease, labels, fake = _dialling_screen(tmp_path, board, monkeypatch)
+    cu = board.mod.C6Updater(board.u)
+    assert cu.check("stable") == "pending" and cu.error is None
+    board.u.cancel()
+    ws.c6_updater = cu
+    uu.open_update_c6()
+    for _ in range(4):
+        uu._pump_update(0.0)
+        uu._draw_update(0.0)
+    assert uu._upd_phase == "c6_checking" and board.u.joining
+    assert any(t.startswith("joining WiFi.") for t in labels), labels
+
+
 def test_the_update_screen_streams_into_the_slot_and_installs_by_activating(
         tmp_path, board):
     blob = app_image(4096 * 9 + 100)
@@ -1072,7 +1185,7 @@ def _c6_manifest(m, blob, url, version=3, **kw):
 def _c6_check(board, manifest, installed=-1):
     nb._c6(enabled=True, version=installed)
     cu = board.mod.C6Updater(board.u)
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     srv = Server().__enter__()
     try:
         _route_manifest(srv, "/l.json", manifest)
@@ -1103,7 +1216,7 @@ def test_a_baked_manifest_needs_the_blocks_own_signature(board):
     m = _c6_manifest(board.mod, b"x", "http://x/c6.bin")
     nb._c6(enabled=True)
     cu = board.mod.C6Updater(board.u)
-    board.u.ensure_online = lambda: True
+    board.u.poll_online = lambda: True
     board.mod.OTA_PUBLIC_KEYS = TEST_KEYS
     nb._trust(TEST_KEYS)
     m["sig"] = sign_with_test_key(m)

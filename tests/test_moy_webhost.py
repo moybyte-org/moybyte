@@ -1027,76 +1027,7 @@ def test_the_verbs_are_safe_with_no_service(tmp_path):
 
 
 
-# -- the link wait, and the board parity it exists to protect -----------------
-
-
-class _Wifi:
-    """Just enough of the injected wifi service: status() -> (up, ssid, ip)."""
-
-    def __init__(self, up=False, ip="192.168.1.50"):
-        self.up = up
-        self.ip = ip
-        self.connects = 0
-
-    def status(self):
-        return (self.up, "net" if self.up else "", self.ip if self.up else "")
-
-
-def test_ensure_online_waits_for_a_link_that_arrives_late():
-    """The whole reason this helper exists: `connect()` gives up at 4s and a
-    saved network measured 1.5s slower than that, so a good network read as
-    "no wifi". Here autoconnect brings the link up and the IP comes back."""
-    w = _Wifi(up=False)
-
-    def _auto(wifi):
-        wifi.connects += 1
-        wifi.up = True                    # the link arrives during the wait
-
-    assert wh.ensure_online(w, _auto, wait_ms=50, step_ms=5) == "192.168.1.50"
-    assert w.connects == 1
-
-
-def test_ensure_online_reports_a_link_that_never_arrives():
-    w = _Wifi(up=False)
-    with pytest.raises(OSError):
-        wh.ensure_online(w, lambda wifi: None, wait_ms=10, step_ms=5)
-
-
-def test_ensure_online_without_a_wifi_service_is_an_error_not_a_crash():
-    with pytest.raises(OSError):
-        wh.ensure_online(None)
-
-
-def test_an_already_connected_board_neither_reconnects_nor_sleeps():
-    w = _Wifi(up=True)
-    called = []
-    assert wh.ensure_online(w, lambda wifi: called.append(1)) == "192.168.1.50"
-    assert not called, "a connected board was made to reconnect"
-
-
-def test_the_link_wait_is_moy_otas_one_body_with_moy_otas_bounds(monkeypatch):
-    """It was the same 25 lines twice -- here and in `moy_ota.ensure_online` --
-    with `12000` and `250` written out in both. One body now, and the bounds
-    have one home; what stays local is what each caller needs on top (a bool for
-    the updater, the STA IP for the WEB CONSOLE row)."""
-    import moy_ota
-
-    seen = {}
-
-    def _spy(online, autoconnect=None, wait_ms=None, step_ms=None):
-        seen["bounds"] = (wait_ms, step_ms)
-        if autoconnect is not None:
-            autoconnect()
-        return online()
-
-    monkeypatch.setattr(moy_ota, "wait_online", _spy)
-    w = _Wifi(up=False)
-
-    def _auto(wifi):
-        wifi.up = True
-
-    assert wh.ensure_online(w, _auto) == "192.168.1.50"
-    assert seen["bounds"] == (moy_ota.ONLINE_WAIT_MS, moy_ota.ONLINE_STEP_MS)
+# -- the board parity the shared webhost exists to protect -------------------
 
 
 def test_make_webhost_reads_the_wifi_service_lazily():
@@ -1162,13 +1093,13 @@ def test_every_board_injects_the_web_console(board):
 
 
 
-def test_the_link_wait_is_shared_and_not_recopied_per_board():
+def test_no_board_grows_a_private_link_wait():
     """It was a 25-line closure in the P4's run_desktop. Writing it per board is
-    precisely how the T-Deck went without the feature, so the helper is shared
-    and the boards must not grow private copies of it again."""
+    precisely how the T-Deck went without the feature; the link is moy_ota's
+    one polled dial, and the boards must not grow private copies of it."""
     for board in BOARDS:
         src = runtime_text(ROOT / "firmware" / board / "modules" / "moy_runtime.py")
-        assert "ONLINE_WAIT_MS" not in src.replace("moy_ota's ONLINE_WAIT_MS", "")
+        assert "DIAL_MS" not in src, "%s re-grew a private link budget" % board
         assert "def _web_online" not in src, "%s re-grew a private link wait" % board
 
 
@@ -1860,11 +1791,11 @@ def test_turning_the_row_off_still_stops_a_host_that_cannot_take_a_reason():
     assert seen["why"] == "off", "a host that CAN take a reason must get one"
 
 
-def test_the_link_wait_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
+def test_keep_alive_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
         monkeypatch):
-    """A WEB CONSOLE start with no reachable network holds the frame for the
-    whole link wait; unfed, the kernel's task watchdog reset the Guition S3.
-    Fed only when the frame loop armed it: the first feed would subscribe."""
+    """A wait that holds the frame on purpose (a connect's poll), unfed past
+    the kernel's task watchdog, reset the Guition S3. Fed only when the
+    frame loop armed it: the first feed would subscribe."""
     import types
     sys.path.insert(0, str(MODULES))
     import moy_ota
@@ -1873,15 +1804,16 @@ def test_the_link_wait_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
         k = types.SimpleNamespace(watchdog=lambda: (armed, 5000, 0, 0),
                                   feed=lambda: fed.append(1))
         monkeypatch.setitem(sys.modules, "moy_kernel", k)
-        moy_ota.wait_online(lambda: False, None, wait_ms=40, step_ms=10)
-        assert (len(fed) >= 4) is armed, (armed, fed)
+        for _ in range(4):
+            moy_ota.keep_alive()
+        assert (len(fed) == 4) is armed, (armed, fed)
 
 
 # -- the switch never waits (native/moy_net/moy_webconsole.c) -------------------
 
 
 def test_a_start_with_no_link_returns_at_once_and_the_poll_brings_it_on(tmp_path):
-    """ensure_online used to hold the frame until the link came, past the task
+    """A start used to hold the frame until the link came, past the task
     watchdog on a board with no reachable network. The switch returns JOINING,
     and the frame's poll binds once the kernel's link has an address."""
     seen = []

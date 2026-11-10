@@ -1020,29 +1020,6 @@ def test_the_board_transport_reports_a_missing_file_and_a_cut_body(tmp_path, ser
     _untouched(root, "jet.moy")
 
 
-def test_the_board_transport_waits_for_a_late_link(monkeypatch):
-    wire_links, _net = _board_net()
-    import moy_ota
-    state = {"up": False, "dials": 0}
-
-    class Wifi:
-        def status(self):
-            return (state["up"], None, None)
-
-    def dial(w):
-        state["dials"] += 1
-        return False
-
-    def fake_wait(online, autoconnect=None, **kw):
-        autoconnect()
-        state["up"] = True
-        return online()
-    monkeypatch.setattr(moy_ota, "wait_online", fake_wait)
-    assert wire_links.CartNet(Wifi(), dial).online() is True
-    assert state["dials"] == 1
-    assert wire_links.CartNet(None).online() is False
-
-
 def test_the_board_transport_says_when_its_internal_ram_is_spent(monkeypatch):
     """`out_of_memory` reads the internal DMA-capable heap -- where the TLS
     crypto's DMA and the radio's buffers come from -- against TLS_SRAM_MIN;

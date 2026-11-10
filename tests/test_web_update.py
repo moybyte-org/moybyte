@@ -429,8 +429,7 @@ def test_a_backend_that_raises_cannot_take_the_poll_down(tmp_path):
 
 
 def test_every_board_is_wired_by_make_webhost(tmp_path):
-    """The injection is written ONCE. `ensure_online`'s docstring records what
-    the alternative costs: the web console shipped on the P4 with every shared
+    """The injection is written ONCE. The alternative's cost: the web console shipped on the P4 with every shared
     piece in place and the T-Deck still did not have it, because the one
     per-board line was never written there."""
     ws = _ws(tmp_path)

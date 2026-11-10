@@ -7,7 +7,6 @@
 #   WebHost.poll       the C poll, its events, the parked request, the update
 #   WebHost.answer_vm  the routes the VM answers: /run, /update, the system root
 #   WebHost.browsers   the paired browsers (and WebHost.forget, one or all)
-#   ensure_online      connect, wait for the link, report (a port's station)
 #   make_webhost       the WebHost every board injects
 """Serve the moybyte web console FROM the console, over the device's own WiFi.
 
@@ -296,7 +295,7 @@ class WebHost:
     OFF, JOINING, SERVING, CLOSING, FAILED = range(5)
 
     def __init__(self, carts_root, port=None, with_sd=None,
-                 ensure_online=None, auth=None, on_sync=None, auth_source=None,
+                 auth=None, on_sync=None, auth_source=None,
                  on_run=None, update=None, on_stop=None, files_root=None,
                  kinds=None, dial=None, on_serving=None, on_failed=None,
                  system=None, on_paired=None, apps_root=None):
@@ -317,7 +316,6 @@ class WebHost:
         self.on_stop = on_stop
         self.on_serving = on_serving
         self.on_failed = on_failed
-        self._ensure_online = ensure_online
         self._dial = dial
         self._with_sd = with_sd or (lambda fn: fn())
         self._given_ip = None
@@ -380,8 +378,6 @@ class WebHost:
         host); a console's comes from its driver. OSError when the bind is
         refused at once (the link was already up)."""
         self._read_auth()
-        if ip is None and self._ensure_online is not None:
-            ip = self._ensure_online()      # a board whose station is the port's
         self._given_ip = ip
         self.error = None
         self._why = None
@@ -667,24 +663,6 @@ class WebHost:
         doc["ok"] = ok
         doc["message"] = msg
         return http_response(200 if ok else 409, _json.dumps(doc))
-
-
-def ensure_online(wifi, autoconnect=None, wait_ms=None, step_ms=None):
-    """Connect if needed, WAIT for the link (`moy_ota.wait_online`, one body),
-    then report the STA IP the WEB CONSOLE row displays; OSError for a board
-    with no radio or no link."""
-    if wifi is None:
-        raise OSError("no wifi service")
-    import moy_ota
-    moy_ota.wait_online(
-        lambda: wifi.status()[0],
-        None if autoconnect is None else lambda: autoconnect(wifi),
-        moy_ota.ONLINE_WAIT_MS if wait_ms is None else wait_ms,
-        moy_ota.ONLINE_STEP_MS if step_ms is None else step_ms)
-    st = wifi.status()
-    if not st[0]:
-        raise OSError("no wifi")
-    return st[2]                       # the STA IP: what the row displays
 
 
 def _system_dir(ws):

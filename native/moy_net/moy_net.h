@@ -505,7 +505,7 @@ static inline int moy_wifi_use_stored(size_t password_n, size_t stored_n) {
 // about, so remembering it unconditionally let one unreadable load rewrite
 // wifi.json as a single empty-password entry. A non-blank password is kept
 // even on failure: the connect's short poll giving up is the late association
-// the updater's ensure_online waits for.
+// the updater's polled dial (moy_ota.poll_online) watches for.
 static inline int moy_wifi_remember(int ok, const char *password,
                                     size_t password_n, const char *stored,
                                     size_t stored_n) {

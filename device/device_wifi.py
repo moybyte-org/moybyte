@@ -263,8 +263,8 @@ class DeviceWifi:
         unreadable load rewrite wifi.json as one empty-password entry and drop
         every other saved network. Storing a non-blank password even on
         FAILURE is deliberate: a join that read as failed can still associate
-        later (the kernel's driver retries a loss), and moy_ota.wait_online is
-        what waits for that."""
+        later (the kernel's driver retries a loss), and moy_ota.poll_online's
+        budget is what watches for that."""
         ssid = str(ssid)
         stored = self._stored_password(ssid)
         password = wifi_password(password, stored)
@@ -315,7 +315,7 @@ class DeviceWifi:
     def connect(self, ssid, password=""):
         """join(), waited out for about 4 s (a cart's `wifi.connect`): whether
         the link came up. A network that associates later is moy_ota's
-        wait_online's to catch, never this wait's."""
+        poll_online's to catch, never this wait's."""
         ok = self.join(ssid, password)
         for _ in range(40):
             if ok is not None:
@@ -438,8 +438,8 @@ def autoconnect_wifi(wifi):
     station is started toward the most-recently-joined network (moy_carts
     keeps it at the front). True when the link is already up, None while the
     station associates, False with nothing saved or no radio. A caller that
-    needs the link waits for it where it can afford to (moy_ota.wait_online,
-    behind a CHECKING screen) or lets a worker task wait (moy_net_dialing)."""
+    needs the link polls it a frame at a time (moy_ota.poll_online) or lets a
+    worker task wait (moy_net_dialing)."""
     if wifi is None:
         return False
     try:

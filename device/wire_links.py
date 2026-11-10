@@ -79,8 +79,6 @@ class CartNet:
     """`ws.cart_net` on a board: Get Carts' transport (runtime/carts/cart_index.py),
     the shape the host's urllib one has (runtime/host/host_app.py).
 
-        online()   dial the saved network if the link is down and WAIT for it
-                   (moy_ota.wait_online): a caller behind a CHECKING screen
         dial()     dial it and return at once: a request on a worker's task
                    waits for the link there (moy_net_dialing)
         ready()    the link polled (moy_ota.poll_online): True up, None
@@ -105,13 +103,6 @@ class CartNet:
             return bool(self.wifi.status()[0])
         except Exception:  # noqa: BLE001 -- a radio that cannot say is down
             return False
-
-    def online(self):
-        if self.wifi is None:
-            return False
-        import moy_ota
-        return moy_ota.wait_online(self._up, None if self.autoconnect is None
-                                   else self._dial)
 
     def _dial(self):
         return self.autoconnect(self.wifi)

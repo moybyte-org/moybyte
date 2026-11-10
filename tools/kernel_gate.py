@@ -222,10 +222,31 @@ def step_safe(name, dirs):
     return "SAFE -> safe, wallpaper %s; rebooted to start" % wp
 
 
+def _joined(name, dirs):
+    """Whether the console joins its saved network: the update's lease held
+    while the updater's polled dial runs out (DIAL_MS, 20 s), let go after."""
+    b = _open(name, dirs)
+    try:
+        b.pyval("ws.wifi_hold('update')", timeout=15.0)
+        up = None
+        deadline = time.time() + 25.0
+        while up is None and time.time() < deadline:
+            up = b.pyval("ws.updater.poll_online()", timeout=15.0)
+            if b.last_error:
+                raise GateError("%s: poll_online -> %s" % (name, b.last_error))
+            if up is None:
+                b.drain(0.5)
+        return bool(up) and bool(b.pyval("__import__('moy_net').wifi_status()[2]",
+                                         timeout=15.0))
+    finally:
+        try:
+            b.pyval("ws.wifi_release('update')", timeout=15.0)
+        finally:
+            b.close()
+
+
 def step_update(name, dirs):
-    online, = _vals(name, dirs, "(ws.wifi_hold('update'), ws.updater.ensure_online(), "
-                                "__import__('moy_net').wifi_status()[2], "
-                                "ws.wifi_release('update'))[2]")
+    online = _joined(name, dirs)
     if not online:
         raise GateError("%s: the console did not join its network" % name)
     _to_floor(name, dirs)

@@ -113,12 +113,15 @@ paths:
   - **`OTA_PUBLIC_KEYS` is a TUPLE so a key can be ROTATED** — publish an image
     trusted by the old key and signed by the new. The kernel's copy is
     `moy_ota.c`'s `KEYS_HEX`; `tests/test_ota_signing.py` holds the two equal.
-  - **`ensure_online()` must WAIT for the link** after autoconnect
-    (`ONLINE_WAIT_MS`): autoconnect only asks the station for the last-joined
-    network and returns, so a caller behind a CHECKING screen waits there. No
-    other path waits on the radio in the frame: Settings polls its scan and
-    join, Get Carts polls `CartNet.ready()`, and an http request or a stream
-    `dial()`s and lets its worker's task wait (`moy_net_dialing`).
+  - **No path waits on the radio in the frame.** Autoconnect only asks the
+    station for the last-joined network and returns, and a P4's association
+    can take 20 s, so a caller POLLS the link (`moy_ota.poll_online`, a
+    `DIAL_MS` budget): the update screen's CHECKING asks `check_online` again
+    each frame while `joining`, Get Carts and pkg poll `CartNet.ready()`,
+    Settings polls its scan and join, the web console's switch binds from its
+    poll, and an http request or a stream `dial()`s and lets its worker's
+    task wait (`moy_net_dialing`). The headless Zero's `connect()` is the one
+    blocking wait: it has no frame.
   - **Bump `moy_ota.FIRMWARE_VERSION` only via `make release`** — a hand bump
     desynchronises the stamp CI reads back out of the artifact, and a manifest
     advertising a version the image does not carry offers the same install

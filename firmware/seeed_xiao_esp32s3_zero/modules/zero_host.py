@@ -288,8 +288,9 @@ def _unmark(mark):
 def connect(wait_ms=15000, hostname=None):
     """Join the first known network that answers, over the kernel's WiFi
     driver, and answer to `hostname`.local. Returns the STA IP or None. The
-    wait is per-network and generous for the same reason moy_ota's
-    ensure_online waits: cold association routinely outlives a short poll."""
+    wait is per-network and generous for the same reason moy_ota's DIAL_MS
+    is: cold association routinely outlives a short poll. The Zero is
+    headless, so this blocking wait holds no frame."""
     moy_net.wifi_on()
     st = moy_net.wifi_status()
     if st[2] and st[4]:
@@ -491,6 +492,9 @@ class ZeroUpdate:
         want, self._want = self._want, None
         if want in ("check", "check+download"):
             found = self._check()
+            if found is None:
+                self._want = want          # the link is dialled: ask next iteration
+                return True
             if found and want == "check+download":
                 self._begin_download()
             return True
@@ -532,6 +536,8 @@ class ZeroUpdate:
         self.staged = None
         self.nothing_published = False
         m = self.ota.check_online(self._channel)
+        if m is None and getattr(self.ota, "pending", False):
+            return None
         if m is None:
             if self.ota.absent:
                 self.state = "none"

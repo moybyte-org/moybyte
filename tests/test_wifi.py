@@ -450,7 +450,7 @@ def test_an_unverified_blank_password_is_never_remembered(tmp_path):
     assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
 
     # A typed password IS kept even though the link didn't come up inside the ~4s
-    # poll -- that is the late-association case ensure_online() waits for.
+    # poll -- that is the late association moy_ota.poll_online's budget watches for.
     assert dev.connect("Cafe", "cafepw") is False
     saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts)}
     assert saved == {"Cafe": "cafepw", "Home": "secretpw"}
@@ -991,8 +991,8 @@ def test_the_board_transport_polls_the_link_it_dialled(monkeypatch):
     assert net.ready() is True
     state["up"] = False
     assert net.ready() is None and state["dials"] == 2
-    clock.ms = moy_ota.ONLINE_WAIT_MS
-    assert net.ready() is None              # a polled dial outlasts the blocking wait's budget
+    clock.ms = 16000
+    assert net.ready() is None              # a P4's slow association: 11-16 s, sometimes 20
     clock.ms = moy_ota.DIAL_MS
     assert net.ready() is False
     net.dial()

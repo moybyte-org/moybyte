@@ -235,6 +235,30 @@ def test_up_to_date_is_reported_as_up_to_date_and_not_as_an_offer():
     assert task.status()["available"]["label"] == "0.9"
 
 
+def test_a_check_whose_link_is_still_dialling_is_asked_again():
+    """The updater's link is polled: `pending` while it dials. The check is
+    asked again next iteration rather than read as a failure."""
+    ota = _FakeOta(MANIFEST)
+    real = ota.check_online
+    dials = [2]
+
+    def _check(channel=None):
+        if dials[0]:
+            dials[0] -= 1
+            ota.pending = True
+            ota.calls.append("check")
+            return None
+        ota.pending = False
+        return real(channel)
+    ota.check_online = _check
+    task = zero_host.ZeroUpdate(ota)
+    task.request("download")
+    assert task.step() and task.state == "checking"
+    assert task.step() and task.state == "checking"
+    _drive(task)
+    assert ota.calls.count("check") == 3 and "begin_download" in ota.calls
+
+
 def test_the_requested_channel_reaches_the_check():
     """The browser's CHANNEL row is the ONLY place this choice can be made --
     a headless board has no Settings of its own -- so it travels with the
