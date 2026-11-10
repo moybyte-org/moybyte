@@ -1220,7 +1220,7 @@ class MusicAppLayer:
 
     def _tabs(self, page):
         """The two tabs, the toolkit's, the open one filled: no stop of their
-        own (Q E, L R or a tap switch them)."""
+        own (Q and E, which ui.tabs takes, or a tap switch them)."""
         fs = self.fs
         band, page = ui.cut_top(page, self._row_h() + 12 * fs)
         ui.at(band[0] + 8 * fs, band[1] + 6 * fs, band[2] - 16 * fs, band[3] - 12 * fs)
@@ -1636,10 +1636,7 @@ class MusicAppLayer:
             acted = self._now_keys(i, edge)
         elif self.page == "list" and edge:
             ch = chr(edge).lower() if 32 < edge < 127 else ""
-            if ch in ("q", "e"):
-                self._tab(1 - self.tab)
-                acted = True
-            elif ch == "m" and self.stream.card is not None:
+            if ch == "m" and self.stream.card is not None:
                 self._go("now")
                 acted = True
         if self.page == "list" and i.pressed("y") and self.stream.card is not None:

@@ -430,6 +430,9 @@ typedef struct {
     uint32_t modal_from;            // the focus a dialog took
     int32_t typed;                  // the key a focused field takes this frame, 0 none
     int32_t typed_n;                // ...and how many times (a held key's repeats)
+    // Q (-1) or E (1) pressed this frame outside a field: the tab row drawn
+    // first steps back or on by it (ui.tabs), 0 none or taken.
+    int8_t tab_step;
     // ui.popover's: the card drawn this frame and last (w 0: none), the
     // rect it hangs from, and whether this frame's input dismissed it (a
     // press outside the card drawn last, or Esc).

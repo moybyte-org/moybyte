@@ -5,7 +5,10 @@ fixture app per tier in tests/fixtures/app_ui/ running on the T-Deck's
 
   * clip_*.moy -- ui verbs an app places in a table's parts draw inside
     the table's view: a row cut at the view's top or foot paints nothing
-    over what lies above or below the table.
+    over what lies above or below the table;
+  * tabs_*.moy -- ui.tabs takes Q and E itself, wherever the keys do not
+    type into a field, so an app reads no key for its tabs and its frames
+    settle.
 """
 
 import os
@@ -122,3 +125,77 @@ def test_verbs_placed_in_a_part_draw_inside_the_tables_view(clip, tier):
 def test_the_parts_draw_the_same_pixels_on_every_tier(clip):
     assert clip["lua"][1] == clip["python"][1]
     assert clip["lua"][0] == clip["python"][0], "lua drew other pixels than python"
+
+
+# -- Q and E switch ui.tabs ------------------------------------------------------
+
+
+def _key(drv, ch):
+    drv.key_down(ord(ch))
+    _frame(drv)
+    drv.key_up(ord(ch))
+    _frame(drv)
+
+
+def _press(drv, name):
+    drv.press(name)
+    _frame(drv)
+    _frame(drv)
+
+
+# (step, the keys, the tab after it from 1, the field's length after it)
+_TAB_SCRIPT = (
+    ("E on the focused tab row", ("e",), 2, 0),
+    ("E on a button", ("down", "e"), 3, 0),
+    ("E past the last tab", ("e",), 3, 0),
+    ("Q", ("q",), 2, 0),
+    ("Q E typed into the field", ("down", "q", "e"), 2, 2),
+)
+
+
+@pytest.fixture(scope="module")
+def tabs(tmp_path_factory):
+    """Each tier's [(the tab, the field's length, whether the frames after
+    settled -- two drew the same pixels -- and the content pixels)] after
+    each step of _TAB_SCRIPT."""
+    out = {}
+    for tier in TIERS:
+        ws = _open("tabs", tier, tmp_path_factory.mktemp("tabs_" + tier))
+        drv = make_drv(ws)
+        for _ in range(4):
+            _frame(drv)
+        got = []
+        for _what, keys, _tab, _n in _TAB_SCRIPT:
+            for k in keys:
+                if len(k) == 1:
+                    _key(drv, k)
+                else:
+                    _press(drv, k)
+            settled, last = False, None
+            for _ in range(6):          # the goldens' settle: two frames alike
+                _frame(drv)
+                now = _content(ws)
+                if now == last:
+                    settled = True
+                    break
+                last = now
+            m = _pmem(ws, 3)
+            got.append((m[0], m[1], settled, _content(ws)))
+        assert ws.run.player.cart_error is None, (tier, ws.run.player.cart_error)
+        out[tier] = got
+        ws.exit()
+    return out
+
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_q_and_e_switch_the_tabs_the_app_draws(tabs, tier):
+    """Q and E step the tab row, stopping at its ends, wherever focus is but
+    a field, which they type into; the frames after each step settle."""
+    for (what, _keys, tab, n), (got_tab, got_n, settled, _px_) in zip(_TAB_SCRIPT, tabs[tier]):
+        assert (got_tab, got_n) == (tab, n), (tier, what)
+        assert settled, "%s: the frames after %s never settled" % (tier, what)
+
+
+def test_the_tabs_draw_the_same_pixels_on_every_tier(tabs):
+    for (what, _k, _t, _n), lua, py in zip(_TAB_SCRIPT, tabs["lua"], tabs["python"]):
+        assert lua[3] == py[3], "%s: lua drew other pixels than python" % what

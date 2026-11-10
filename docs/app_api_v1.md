@@ -316,6 +316,21 @@ one.
 your app (or step back a page, §11); the ui never reads them. The console's
 own key (the T-Deck's Mic) opens the system menu and is never yours.
 
+**Tabs switch themselves.** `ui.tabs` takes Q and E (the `tabs` hint's
+keys) wherever the keys do not type into a field, left and right while it
+holds focus, and a tap, and answers the new tab; an app never reads Q or
+E for it (a `keyp` in `_draw` keeps the frame from settling):
+
+```lua
+tab = 1
+function _draw()
+  ui.page("Mesh")
+  ui.hints({"tabs", "Switch"})
+  tab = ui.tabs("Views", {"Chat", "Nodes"}, tab)
+  if tab == 1 then chat() else nodes() end
+end
+```
+
 **Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
 "Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
 `cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,

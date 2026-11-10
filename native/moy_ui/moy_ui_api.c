@@ -686,7 +686,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     // while held or let go: the rows the input changes are the floor's.
     int bare = c->hover_off;
     if (!same || owed || over || c->modal || c->pop_prev.w > 0 || c->pop_gone || c->act
-        || c->step_x || ((p & MOY_UI_P_EDGE) && !bare) || (live && !held && !bare)
+        || c->step_x || c->tab_step || ((p & MOY_UI_P_EDGE) && !bare) || (live && !held && !bare)
         || (held && c->gesture != 2 && !bare) || (p & MOY_UI_P_MIDDLE)) {
         return;
     }
@@ -1147,11 +1147,16 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         c->pop_gone = 1;            // Esc dismisses a popover
         settled = 0;
     }
+    int qe = key == c->last_key ? 0 : (key | 0x20) == 'q' ? -1 : (key | 0x20) == 'e' ? 1 : 0;
     c->last_key = key;
     const moy_ui_stop_t *f = fi >= 0 ? &v[fi] : NULL;
     int off = f == NULL || (f->flags & STOP_HOLD)
               || (f->page != NO_PAGE && f->page < n && (v[f->page].flags & STOP_NAV_OFF));
     int field = f != NULL && (f->flags & STOP_FIELD);
+    // Q and E step the tabs wherever the keys do not type or belong to a
+    // part of the app's, or to a dialog or a popover over the page
+    c->tab_step = (int8_t)(field || c->modal || c->elsewhere || (f != NULL && (f->flags & STOP_HOLD))
+                           ? 0 : qe);
     c->typed_n = 0;
     if (field && key != c->last_typed && key != 0 && key != MOY_UI_KEY_TAB) {
         c->typed = key;             // a typed key, once per press
@@ -3048,6 +3053,12 @@ int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy
     }
     if (n > 0) {
         int step = (st & MOY_UI_ST_FOCUS) ? c->step_x : 0;
+        if (kind == MOY_UI_V_TABS && c->tab_step && o->disabled != 1) {
+            step = c->tab_step;         // Q or E: the first tab row drawn takes them
+            c->tab_step = 0;
+            c->keys = 1;
+            c->owe = 1;
+        }
         if (st & MOY_UI_ST_ACTIVATED) {
             int at = c->tap_x != INT16_MIN ? moy_ui_vrow_at(s, b, kind, &r, c->tap_x) : -1;
             if (at >= 0) {

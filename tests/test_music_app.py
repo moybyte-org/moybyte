@@ -530,6 +530,20 @@ def test_the_keys_move_the_current_station_and_the_view_follows(tmp_path, face, 
     assert app.cur[0] == 0 and _offset(app, view) == 0
 
 
+@pytest.mark.parametrize("desk", (False, True))
+def test_q_and_e_switch_the_tabs_through_the_toolkit(tmp_path, face, desk):
+    """The list's tabs are `ui.tabs`, which takes Q and E itself: E steps
+    to My music and stops there, Q back to Radio."""
+    ws, drv, app, _view, _at = _list_on(tmp_path, desk)
+    for ch, tab in (("e", 1), ("e", 1), ("q", 0)):
+        drv.key_down(ord(ch))
+        drv.frame(1 / 30)
+        drv.key_up(ord(ch))
+        for _ in range(3):
+            drv.frame(1 / 30)
+        assert app.tab == tab, ch
+
+
 def test_music_follows_what_another_client_or_a_vm_stop_left_playing(tmp_path, face):
     """The card shows the service's stream whoever played it: Music's own
     after a VM stop (a fresh Stream, its label read back), another client's
