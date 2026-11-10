@@ -242,6 +242,7 @@ _CALLS = {
     "moybyte.service_start": _moybyte.service_start,
     "moybyte.service_stop": _moybyte.service_stop,
     "moybyte.service_running": _moybyte.service_running,
+    "moybyte.status_panel": _moybyte.status_panel,
     "moybyte.name": _moybyte.name,
     "moybyte.key_make": _moybyte.key_make,
     "moybyte.key_public": _moybyte.key_public,
@@ -851,17 +852,19 @@ class Scheduler:
     def _grant(self, p, ws, cart):
         """Service `p`'s roles on console `ws`: its app's, under the
         permissions its start was granted, on a run grant of its own owned by
-        its pid (system_api.service_api), held on its row until its end.
+        its pid (system_api.service_api; a Lua service's always, for its
+        floor rows), held on its row until its end.
         Answers (its roles, the names a Python service's namespace holds);
         ((), {}) on no console."""
         factory = getattr(ws, "app_context", None)
         if factory is None:
             return (), {}
         try:
-            import system_api
+            import app_perms, system_api
         except ImportError:  # host: the runtime package
-            from runtime import system_api
-        p.ctx, roles, names = system_api.service_api(factory, cart, p.granted, p.pid)
+            from runtime import app_perms, system_api
+        p.ctx, roles, names = system_api.service_api(
+            factory, cart, p.granted, p.pid, app_perms.tier_of(cart) == "lua")
         return roles, names
 
     # -- the Lua services -------------------------------------------------

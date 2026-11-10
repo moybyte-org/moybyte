@@ -422,18 +422,21 @@ def granted_names(ctx, roles, kind):
     return ns
 
 
-def service_api(ctx_factory, cart, perms, owner):
+def service_api(ctx_factory, cart, perms, owner, rows=False):
     """`(ctx, roles, names)` for service `cart` started as process `owner`
     under its granted permissions `perms`: its app's roles, as a foreground
     run of the same app is handed them (the same policy, the same app id,
     files kind and prefs namespace), on a run grant of its own whose owner
     is its pid; the names its Python namespace holds (`granted_names`).
     `(None, (), {})` where the permissions grant no role and no device (a
-    device handle's row answers under the grant's, `grant_devices`). A
+    device handle's row answers under the grant's, `grant_devices`), unless
+    the service calls the table's rows itself (`rows`: a Lua service, whose
+    floor rows, the status items, answer as the grant's process). A
     service has no canvas, so it holds no drawing rider and no
     `open_editor`."""
     roles, kind = _moy_app.policy(perms)
-    if not roles and not any(str(p).split(":")[0] in DEVICE_PERMS for p in perms or ()):
+    if not rows and not roles and not any(
+            str(p).split(":")[0] in DEVICE_PERMS for p in perms or ()):
         return None, (), {}
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)

@@ -32,6 +32,14 @@
 //                                (moy_dev.h) under the grant's device
 //                                permissions: the answer, or nil and the
 //                                code's name; a read's bytes as a string
+//   the status item (every run)  moybyte.status_show(icon[, state[, order]]) /
+//                                status_state(item, state) /
+//                                status_remove(item), the kernel's table
+//                                (moy_status.h) as the run's process: the
+//                                row's answer as a compiled program has it,
+//                                the item's handle or 0, a refusal its
+//                                negative code; its panel is the console
+//                                call moybyte.status_panel(item[, rows])
 //
 // and with files, `io` (open, lines, close, type; a file's read, write, lines,
 // seek, flush and close) and `os.remove` / `os.rename`: a path is a NAME of

@@ -1098,6 +1098,55 @@ static int l_moybyte_dev_get(lua_State *L) {
     return 1;
 }
 
+// -- the status items (moy_status.h; the panel is a console call, status_panel) ---------
+
+// Each answers as the row does, for every tier alike: a show the item's
+// handle, a state and a remove 0, a refusal its negative code (FULL where the
+// bar holds MOY_STATUS_CAP, BAD, ABSENT for a handle that is no item of the
+// process's).
+
+static int status_number(lua_State *L, int k, buf_t *b) {
+    const uint8_t *ans;
+    lua_pushinteger(L, row_call_cap(L, k, b, 16u, 0, &ans));
+    return 1;
+}
+
+// moybyte.status_show(icon[, state[, order]]) -> item
+static int l_moybyte_status_show(lua_State *L) {
+    luaL_checkstring(L, 1);
+    int32_t state = (int32_t)luaL_optinteger(L, 2, 0);
+    int32_t order = (int32_t)luaL_optinteger(L, 3, 0);
+    lua_settop(L, 1);
+    buf_t b;
+    buf_init(L, &b, 64u);
+    field_arg(L, &b, 1);
+    field_int(&b, state);
+    field_int(&b, order);
+    return status_number(L, MOY_T_MOYBYTE_STATUS_SHOW, &b);
+}
+
+// moybyte.status_state(item, state) -> 0
+static int l_moybyte_status_state(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    int32_t state = (int32_t)luaL_checkinteger(L, 2);
+    lua_settop(L, 0);
+    buf_t b;
+    buf_init(L, &b, 16u);
+    field_int(&b, h);
+    field_int(&b, state);
+    return status_number(L, MOY_T_MOYBYTE_STATUS_STATE, &b);
+}
+
+// moybyte.status_remove(item) -> 0
+static int l_moybyte_status_remove(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    lua_settop(L, 0);
+    buf_t b;
+    buf_init(L, &b, 16u);
+    field_int(&b, h);
+    return status_number(L, MOY_T_MOYBYTE_STATUS_REMOVE, &b);
+}
+
 // -- io and os over the grant's kind ---------------------------------------------------
 
 #define FILE_MT "moybyte.file"

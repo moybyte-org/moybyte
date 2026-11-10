@@ -535,8 +535,8 @@ manager's Notifications tab) brings your app to the front and calls
 the bar for your process, its section drawn in the item's menu on the desk
 and in the control centre on a handheld; your process's end takes it out
 (`runtime/system/status_items.py`). An item with no section has no menu:
-a tap on it opens your app. A compiled program describes its rows instead
-(§10, a status item).
+a tap on it opens your app. A Lua or a compiled program describes its rows
+instead (§10, a status item).
 
 ## 7. Services: background work and the one wait
 
@@ -882,10 +882,10 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.ed25519_public` | none | `moybyte.ed25519_public` | `moybyte.ed25519_public` | `moybyte_ed25519_public`, `moybyte.os.ed25519_public` | `moy_ed25519_public` |
 | `moybyte.ed25519_sign` | none | `moybyte.ed25519_sign` | `moybyte.ed25519_sign` | `moybyte_ed25519_sign`, `moybyte.os.ed25519_sign` | `moy_ed25519_sign` |
 | `moybyte.ed25519_verify` | none | `moybyte.ed25519_verify` | `moybyte.ed25519_verify` | `moybyte_ed25519_verify`, `moybyte.os.ed25519_verify` | `moy_ed25519_verify` |
-| `moybyte.status_show` | none |  |  | `moybyte_status_show`, `moybyte.os.status_show` | `moy_status_show` |
-| `moybyte.status_state` | none |  |  | `moybyte_status_state`, `moybyte.os.status_state` | `moy_status_state` |
-| `moybyte.status_panel` | none |  |  | `moybyte_status_panel`, `moybyte.os.status_panel` | `moy_status_panel` |
-| `moybyte.status_remove` | none |  |  | `moybyte_status_remove`, `moybyte.os.status_remove` | `moy_status_remove` |
+| `moybyte.status_show` | none |  | `moybyte.status_show` | `moybyte_status_show`, `moybyte.os.status_show` | `moy_status_show` |
+| `moybyte.status_state` | none |  | `moybyte.status_state` | `moybyte_status_state`, `moybyte.os.status_state` | `moy_status_state` |
+| `moybyte.status_panel` | none |  | `moybyte.status_panel` | `moybyte_status_panel`, `moybyte.os.status_panel` | `moy_status_panel` |
+| `moybyte.status_remove` | none |  | `moybyte.status_remove` | `moybyte_status_remove`, `moybyte.os.status_remove` | `moy_status_remove` |
 | `moy_screen` | none |  |  | `moybyte.os.screen` | `moy_screen` |
 | `moy_present` | none |  |  | `moybyte.os.present` | `moy_present` |
 | `moy_ui_pull` | none |  |  | `moybyte.os.ui_pull` | `moy_ui_pull` |
@@ -904,7 +904,7 @@ and then a user app's global. The Lua column is a Lua app's and a Lua
 service's alike, each name under the permission a Python app's is under
 (`tests/test_app_examples.py` drives `tests/fixtures/apps/pinger_lua.moy`).
 In a Lua app the console calls (`notify`, `open_with`, `share`, `send`,
-`award`, `progress`, `pick`) are the moybyte module's own functions run as
+`award`, `progress`, `pick`, `status_panel`) are the moybyte module's own functions run as
 the app's process, their arguments any values JSON carries; a wake
 (`on`, `every`, `after`, `at`) calls its function in the app's state at the
 start of a frame, as a Python app's, and `moybyte.log(level, text)` writes
@@ -913,13 +913,17 @@ PRELUDE_MOYBYTE). The theme's reads (`theme.token(role)`, `gen`, `light`,
 `name`, `variant`) are every Lua app's, as Python's `theme()` is; a Lua app
 hears `_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`,
 the item a table whose `read()` answers its text and whose `write(text)`
-writes it back under an `"rw"` grant. Python-only rows (`status`, `lease`,
-the device APIs) are `runtime/system/moybyte.py`'s. The rows with only a
-wasm and C names (`moybyte.recv`, `item_read`, `item_write`, the `dev_*`
-rows) are what a compiled app or a native module reads where a Python or a
-Lua one is called back or handed an object: its messages (§8; a native
-module reads them from its event descriptor), an item handed to it, and its
-leases and devices by handle (below). Standard names come first on every tier: Python's
+writes it back under an `"rw"` grant. Python holds the leases, the device
+APIs and a status item as objects (`moybyte.lease`, `moybyte.http` and the
+others, `moybyte.status`: `runtime/system/moybyte.py`), so their rows have
+no Python name: Lua and the compiled tiers hold the leases and devices by
+handle (the `dev_*` rows, below) and a status item as an icon in a state
+with a panel the shell draws (`status_show` to `status_remove`, §10, a
+status item). The rows with only wasm and C names (`moybyte.recv`,
+`item_read`, `item_write`) are what a compiled app or a native module reads
+where a Python or a Lua one is called back or handed an object: its
+messages (§8; a native module reads them from its event descriptor) and an
+item handed to it. Standard names come first on every tier: Python's
 `open`, `os`, `time`, `socket`, `requests`, `asyncio` and `logging`; POSIX
 in C; WASI preview1 in wasm; Lua's `io` and `os`.
 
@@ -1129,7 +1133,8 @@ DENIED (`EACCES`), a name, key or value the console does not take BAD
 join, ABSENT (`ENOENT`), a buffer that cannot hold one record FULL
 (`ERANGE`).
 
-**A status item** (owner, 2026-11-09, on #246). A compiled program puts an
+**A status item** (owner, 2026-11-09, on #246). A compiled program, and a
+Lua program (an app or a service), puts an
 item in the bar as a Python program does (§6), but it never draws there: its
 item is an icon in a state, and its menu is a panel of rows it describes,
 which the shell draws (in the item's menu on the desk, in its card of the
@@ -1158,8 +1163,12 @@ until the program describes the panel again, as it does whenever what the
 rows say changes. An item with no panel, or an empty description, has no
 menu: a tap on it opens the app (its run comes to the front, or its cart
 opens). A description no kind reads is BAD (`EINVAL`), a handle not the
-process's ABSENT (`ENOENT`). `runtime/system/status_items.py` is the
-authority (`parse`, `Panel`).
+process's ABSENT (`ENOENT`). In Lua, `moybyte.status_show(icon[, state[,
+order]])`, `status_state`, `status_panel(h[, rows])` and `status_remove`
+answer the row's number (the handle, 0, or the code negated: FULL -2, BAD
+-7, ABSENT -8), and the press is `moybyte.on("moybyte.status", fn)`'s
+`fn(from, item, id, value)`, `from` being `"system"`.
+`runtime/system/status_items.py` is the authority (`parse`, `Panel`).
 
 **A command** (`"type": "command"`) is a program the terminal runs by
 its id's name (`local.hello` is `hello`): in Python its `main(argv)`, with

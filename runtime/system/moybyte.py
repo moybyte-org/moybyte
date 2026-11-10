@@ -729,7 +729,9 @@ def _ear(pid, name):
     """Process `pid` listening on wake message `name`, once whatever the
     wakes it asks for (the kernel's count of a name's listens is finite).
     The queue answers whether it listens already: a queue closed in C and
-    its pid reused carries nothing over."""
+    its pid reused carries nothing over. A process with no queue yet gets
+    one."""
+    WAKES.queue(pid)
     if not _E.hears(pid, name) and _E.listen(pid, name, True) != _E.OK:
         raise OSError(EMFILE, "process %d hears no %s" % (pid, name))
 
@@ -857,6 +859,46 @@ def _items():
 
 def status(icon, section, order=0):
     return _items().add(_pid(), icon, section, order)
+
+
+STALE, BAD = -1, -7         # moy_app.h's codes a status row answers, negated
+
+
+def panel_of(pid, h, rows=None):
+    """Process `pid`'s compiled or Lua item `h` given the panel `rows`
+    describes (status_items' description; empty or None: no panel), the
+    row moybyte.status_panel: 0, or ABSENT for a handle that is no such
+    item of the process's, BAD for a description it refuses, FULL where the
+    process can listen on no more names. A press in the panel reaches the
+    process as the system's message status_items.STATUS."""
+    items = _items()
+    it = items.of(pid, h)
+    if it is None:
+        return ABSENT
+    try:
+        from status_items import parse, STATUS
+    except ImportError:  # host: the runtime package
+        from runtime.status_items import parse, STATUS
+    got = parse(rows or "") if rows is None or isinstance(rows, str) else None
+    if got is None:
+        return BAD
+    if got:
+        try:
+            _ear(pid, STATUS)
+        except OSError:
+            return FULL
+    it.section.set(got)
+    it.changed()
+    if not got and items.closed is not None:
+        items.closed(it)            # no panel: no menu stays open on it
+    return 0
+
+
+def status_panel(item, rows=None):
+    """The calling process's item `item` (a Lua program's status_show) given
+    its panel: `panel_of`'s answer."""
+    pid = _pid()
+    return panel_of(pid, item, rows) if pid > SHELL else STALE
 
 
 def _status_end(pid):

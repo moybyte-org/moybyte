@@ -33,22 +33,24 @@ what its buttons do is the app's, under the app's grants.
 
 THE TABLE is the kernel's (native/moy_kernel/moy_status.h, through the
 module `moy_evq`): each slot's process, icon, state, order and whether it
-shows, written from any task -- a compiled program's status rows run on its
-own task, VM or no VM (native/moy_app/moy_app.c, how "here") -- and this
+shows, written from any task -- a compiled or a Lua program's status rows
+run on its own task, VM or no VM (native/moy_app/moy_app.c, how "here") -- and this
 face's own writes go through it too. Every item is a preallocated record
 (CAP of them) mirroring its slot, read again whenever the table's
 generation moved (`sync`, which `shown`, `gen` and `layout_gen` run): a
 draw and a quiet frame allocate nothing. The sections stay here, a Python
-program's its own and a compiled program's its Panel. The process's end
+program's its own and a compiled or Lua program's its Panel. The process's end
 sweeps its items (`moybyte.ENDS`).
 
 An item with no section has no menu: its tap opens its app (on the desk
 the cell's tap, on a handheld its card's one Open row).
 
-A COMPILED program (a wasm app, a WASI program, an ELF module) never runs
-Python in the shell, so its item's section is the shell's: a `Panel` of
-the rows the program describes (`moybyte.status_panel`, the one status row
-the VM serves: runtime/shell/shell_servers.py's ConsoleCalls), drawn with the same
+A COMPILED program (a wasm app, a WASI program, an ELF module) and a LUA
+program (native/moy_app/moy_app_lua.c) never run Python in the shell, so
+their item's section is the shell's: a `Panel` of the rows the program
+describes (`moybyte.status_panel`, the one status row the VM serves:
+`moybyte.panel_of`, through runtime/shell/shell_servers.py's ConsoleCalls
+for a compiled program and the console call for a Lua one), drawn with the same
 verbs. Its handle is the slot's number from 1. A description is lines of
 text, one row each, at most ROWS_MAX:
 

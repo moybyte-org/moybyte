@@ -106,6 +106,10 @@ ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "do
               "lua", "lua_own", "py", "py_face", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
               "u"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
+# The Python faces a row's Lua names stand beside where Python holds its
+# service as objects, not the row's verbs (a row's py_face): the device faces
+# (moybyte.lease, moybyte.lora, ...) and the status item (moybyte.status).
+PY_FACES = ("devices", "status")
 PERM_FIELDS = {"perm", "grants", "prompt", "needs", "py", "doc", "tiers", "spec"}
 # A row's argument rule (u): one token a kernel parameter. A row the door
 # serves takes its rule from its in (_door_u).
@@ -632,8 +636,8 @@ def check(src):
         lua, py = r.get("lua") or [], list(r.get("py") or [])
         if role_of(r) in ctx_roles(src):
             py.append(r["name"])
-        if r.get("py_face", "devices") != "devices":
-            raise TableError("%s: py_face names devices or is absent" % name)
+        if r.get("py_face", "devices") not in PY_FACES:
+            raise TableError("%s: py_face names one of %s or is absent" % (name, PY_FACES))
         if not set(lua) <= set(py) and not r.get("py_face"):
             raise TableError("%s: Lua's names are Python's, verbatim: %s" % (
                 name, sorted(set(lua) - set(py))))

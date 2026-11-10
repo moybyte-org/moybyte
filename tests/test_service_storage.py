@@ -169,9 +169,10 @@ def test_a_service_without_the_grant_has_no_names(ws, tier):
     p = S.SCHED.procs[pid]
     if tier == "lua":
         assert "false false false" in _log(pid)
+        assert p.ctx is not None, "a Lua service's floor rows answer under a grant"
     else:
         assert "files" not in p.ns and "prefs" not in p.ns
-    assert p.ctx is None
+        assert p.ctx is None
 
 
 def test_a_service_whose_grant_settings_turned_off_reads_none(ws, tier):

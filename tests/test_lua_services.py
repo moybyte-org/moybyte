@@ -365,8 +365,8 @@ def _frames(drv, ms):
 
 def test_a_lua_service_holds_the_crypto_rows_beside_its_own_names(desk):
     """A service's `moybyte` table is its own C's (every, log, exit) and the
-    crypto rows (native/moy_app/moy_app_lua.c) at once: with no permission it
-    has no run grant, and the rows need none."""
+    crypto rows (native/moy_app/moy_app_lua.c) at once, with no permission:
+    the rows need no grant."""
     ws, drv = desk
     since = L.next()
     pid = S.SCHED.start(_cart(CRYPTO), ws=ws)
@@ -533,8 +533,8 @@ def test_a_lua_service_holds_the_radio_by_handle_and_wakes_on_it(desk, radio):
 
 
 def test_a_lua_service_without_the_permission_is_denied_the_radio(desk, radio):
-    """Under a grant without `lora` the row answers DENIED; with no grant at
-    all the names are not there."""
+    """Under a grant without `lora` the row answers DENIED, and so it does
+    under no permission at all (a Lua service's run grant is always made)."""
     N, sim = radio
     ws, drv = desk
     since = L.next()
@@ -544,7 +544,7 @@ def test_a_lua_service_without_the_permission_is_denied_the_radio(desk, radio):
     b = S.SCHED.start(_cart(src, "t.b"), have=("lora",), ws=ws)
     _frames(drv, 20)
     assert N.owner() == 0
-    assert (_texts(since, a)[1:], _texts(since, b)[1:]) == (["DENIED"], ["nil"])
+    assert (_texts(since, a)[1:], _texts(since, b)[1:]) == (["DENIED"], ["DENIED"])
 
 
 def test_a_lua_app_holds_the_radio_by_handle(tmp_path, radio):
@@ -576,3 +576,211 @@ def test_a_lua_app_holds_the_radio_by_handle(tmp_path, radio):
     ws.input.begin_frame()
     ws.frame(_DT)
     assert pl._lua.get_global("GOT") == "hi"
+
+
+STATUS = """
+moybyte.after(1, function()
+    H = moybyte.status_show("wifi", 1, 5)
+    print("show " .. tostring(H > 0) .. " " .. moybyte.status_show("", 0))
+    print("panel " .. moybyte.status_panel(H, "text Uplink\\tup\\nbutton sync Sync now"))
+    print("bad " .. moybyte.status_state(H, 9) .. " none " .. moybyte.status_state(99, 0))
+end)
+moybyte.on("moybyte.status", function(who, item, id, v)
+    print(who .. " " .. tostring(item == H) .. " " .. id .. " " .. v)
+    print("state " .. moybyte.status_state(H, 2) .. " bare " .. moybyte.status_panel(H))
+    print("remove " .. moybyte.status_remove(H) .. " " .. moybyte.status_remove(H))
+    moybyte.exit(0)
+end)
+"""
+
+
+def test_a_lua_service_shows_a_status_item_and_hears_its_panel(desk):
+    """A Lua service's status item (runtime/system/status_items.py), with no
+    permission: the floor rows on its own task (show, state, remove, each the
+    row's answer: BAD for an empty icon or a state out of range, ABSENT for
+    a handle it never had) and its panel through the console call; a press
+    reaches it as the system's message "moybyte.status" [item, id, value]."""
+    from runtime.status_items import ITEMS, PAUSED
+    ws, drv = desk
+    since = L.next()
+    pid = S.SCHED.start(_cart(STATUS), ws=ws)
+    _frames(drv, 60)
+    assert _texts(since, pid)[1:] == ["show true -7", "panel 0", "bad -7 none -8"]
+    h = next(it.k + 1 for it in ITEMS.slots if it.pid == pid)
+    it = ITEMS.of(pid, h)
+    assert it is not None and it.state == PAUSED and it.order == 5 and it.section.n == 2
+    assert (it.section.label[0], it.section.value[0], it.section.rid[1]) == \
+        ("Uplink", "up", "sync")
+    it.section._press(1, 1)
+    _frames(drv, 60)
+    assert _texts(since, pid)[4:] == ["system true sync 1", "state 0 bare 0", "remove 0 -8",
+                                       "exit 0"]
+    assert ITEMS.of(pid, h) is None and ITEMS.count() == 0
+    assert S.SCHED.procs[pid].state == S.EXITED
+
+
+STATUS_APP = """
+H = moybyte.status_show("wifi")
+P = moybyte.status_panel(H, "toggle live Live 0")
+moybyte.on("moybyte.status", function(who, item, id, v)
+    GOT = who .. " " .. tostring(item == H) .. " " .. id .. " " .. v
+    S = moybyte.status_state(H, 2)
+end)
+function _update() if GOT and not R then R = moybyte.status_remove(H) end end
+function _draw() end
+"""
+
+
+def test_a_lua_app_shows_a_status_item_and_hears_its_panel(tmp_path):
+    """A Lua app's run holds the same names (its role binding on the VM's
+    task, status_panel through the run's console calls), and its panel's
+    press reaches its `moybyte.on`."""
+    import json
+    from runtime.status_items import ITEMS, ON
+    from ws_helpers import build_ws, select_on_home
+    d = tmp_path / "carts" / "Bar.moy"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps(
+        {"title": "Bar", "canvas": "320x240", "runtime": "lua", "main": "main.lua",
+         "moybyte": {"type": "app", "permissions": ["graphics"]}}))
+    (d / "main.lua").write_text(STATUS_APP)
+    (d / "config.json").write_text("{}")
+    ws = build_ws(tmp_path)
+    assert select_on_home(ws, "Bar") is not None
+    ws.open()
+    ws.input.begin_frame()
+    ws.frame(_DT)
+    pl = ws.run.player
+    assert pl.cart_error is None, pl.cart_error
+    lua = pl._lua
+    h = lua.get_global("H")
+    assert h > 0 and lua.get_global("P") == 0
+    it = ITEMS.of(pl.pid, h)
+    assert it is not None and it.state == ON and it.section.rid[0] == "live"
+    it.section._press(0, 1)
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws.frame(_DT)
+    assert lua.get_global("GOT") == "system true live 1"
+    assert (lua.get_global("S"), lua.get_global("R")) == (0, 0)
+    assert ITEMS.of(pl.pid, h) is None
+
+
+VM_STATUS = r'''
+import sys
+sys.path[:0] = [@TREE@]
+import json
+from array import array
+import moy_spine, moy_app, moycore, moy_evq
+import moy_log as L
+import moybyte
+from status_items import ITEMS
+
+app = moy_app.App(moy_spine.Settings(lambda b: None))
+
+
+def panel(pid, *args):
+    was = L.current()
+    L.current(pid)
+    try:
+        return moybyte.status_panel(*args)
+    finally:
+        L.current(was)
+
+
+def item(pid):
+    ITEMS.sync()
+    for it in ITEMS.slots:
+        if it.pid == pid:
+            return it.k + 1, it.state, it.order, it.section.n
+    return None
+
+
+# a Lua service: the rows on its own task, the panel a console call
+SVC = """
+moybyte.after(1, function()
+    H = moybyte.status_show("wifi", 1, 5)
+    print("show " .. tostring(H > 0) .. " " .. moybyte.status_show("", 0))
+    print("panel " .. moybyte.status_panel(H, "button sync Sync now"))
+end)
+moybyte.on("moybyte.status", function(who, item, id, v)
+    print(who .. " " .. tostring(item == H) .. " " .. id .. " " .. v)
+    print("state " .. moybyte.status_state(H, 2) .. " remove " .. moybyte.status_remove(H)
+          .. " " .. moybyte.status_remove(H))
+    moybyte.exit(0)
+end)
+"""
+since = L.next()
+g = app.grant("t.st", (), run=True, owner=9)
+h = moycore.svc_start(9, "t.st", SVC, None, app.run(g, ()))
+for t in range(4):
+    moycore.svc_step(t * 10)
+    req = moy_evq.next_call()
+    if req is not None:
+        print("call", req[1], req[2])
+        moy_evq.answer(req[0], json.dumps(panel(req[1], *json.loads(req[3]))))
+print("svc", item(9))
+ITEMS.of(9, item(9)[0]).section._press(0, 1)
+for t in range(4, 8):
+    moycore.svc_step(t * 10)
+print("svc", item(9), moycore.svc_info(h)[:2])
+for r in L.read(since, 32):
+    if r[3] == 9:
+        print("log", r[4])
+moycore.svc_reap(h)
+
+# a Lua app: the rows on the VM's task, the panel the run's console call
+APP = """
+H = moybyte.status_show("wifi")
+BAD = moybyte.status_state(H, 9)
+local n = 0
+function _update()
+    n = n + 1
+    if n == 2 then S = moybyte.status_state(H, 2) end
+    if n == 3 then R = moybyte.status_remove(H); R2 = moybyte.status_remove(H) end
+end
+function _draw() end
+"""
+W, H = 96, 64
+fb = bytearray(W * H * 2)
+snap = array("i", bytearray(4 * moycore.SNAP_LEN))
+aq = array("i", bytearray(4 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
+sheet = bytearray(128 * 256)
+g = app.grant("t.app", (), run=True, owner=10)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True,
+                  app.run(g, ()))
+print("load", moycore.load(((APP, "@cart"),)))
+moycore.tick(0.03125)
+h = moycore.get_global("H")
+print("app", h == item(10)[0], moycore.get_global("BAD"), item(10))
+print("panel", panel(10, h, "toggle live Live 0"), panel(10, h, "nonsense"),
+      panel(10, 99, ""), panel(9, h, ""))
+ITEMS.of(10, h).section._press(0, 1)
+print("heard", moy_evq.take(10)[2:] == ("moybyte.status", json.dumps([h, "live", 1])))
+moycore.tick(0.03125)
+print("app", item(10), moycore.get_global("S"))
+moycore.tick(0.03125)
+print("app", moycore.get_global("R"), moycore.get_global("R2"), item(10))
+moycore.close()
+'''
+
+
+def test_on_the_vm_a_board_runs_lua_status_items(tmp_path):
+    """The status rows of a Lua service and a Lua app on the board's
+    bindings: the C rows answer as on the host, the panel is the console
+    call's (moybyte.status_panel, as the process), and a press posts the
+    item's process "moybyte.status" [item, id, value]."""
+    import subprocess
+    from unix_mp import require_unix_mp, runtime_tree
+    exe = require_unix_mp("moycore", "moy_app", "moy_evq", "moy_log",
+                          why="the Lua status items on the VM a board runs")
+    script = tmp_path / "status.py"
+    script.write_text(VM_STATUS.replace("@TREE@", repr(runtime_tree())))
+    done = subprocess.run([str(exe), str(script)], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.splitlines() == [
+        "call 9 moybyte.status_panel", "svc (1, 1, 5, 1)", "svc None (4, 0)",
+        "log show true -7", "log panel 0", "log system true sync 1",
+        "log state 0 remove 0 -8",
+        "load None", "app True -7 (1, 0, 0, 0)", "panel 0 -7 -8 -8", "heard True",
+        "app (1, 2, 0, 1) 0", "app 0 -8 None"], done.stdout

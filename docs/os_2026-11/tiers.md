@@ -193,9 +193,12 @@ table and the ROLE door (`moy_app_role`) the wasm adapter reaches, for the
 state's own run (§3): the Player makes a Lua app's run, its state's open
 copies it into the state, and the state opens with the names its
 permissions grant (`files`, `prefs`, `set_theme`, `open_app`, and the device
-handles `moybyte.dev_open` to `dev_get` under a device permission: the source's
+handles `moybyte.dev_open` to `dev_get` under a device permission, and
+every run's status item, `moybyte.status_show`, `status_state` and
+`status_remove`, its panel the console call `status_panel`: the source's
 Lua names, §1, generated into `native/moy_app/moy_app_lua_rows.h`), each
-answering as the Python face does (the roles trace for a Lua app,
+answering as the Python face does (the handles and the status item, which
+Python holds as objects, as a compiled program's rows do) (the roles trace for a Lua app,
 `tests/test_semantic_traces.py`), and no others. With it Lua's **`io` and
 `os` libraries** are mapped onto the files tree under the app's permissions
 (owner, 2026-11-03), so Lua code written elsewhere reads and writes files
@@ -228,11 +231,15 @@ through, `processes.md` §5) the call waits until the VM is back.
 `moybyte.send` is the kernel's, a post on its own task (`moy_evq_send`). The
 state also opens the role names its app's run would (owner, 2026-11-08,
 `processes.md` §5): the start makes the service's grant from its granted
-permissions, owned by its pid, and hands its run to the state, which opens
-`files`, `io`, `prefs`, `set_theme`, `open_app`, `clipboard` and the
-theme's reads through the one binding, `moy_app_lua.c`, as a Lua app's
+permissions, owned by its pid, with none granted too, as a compiled
+service's (its status item answers as the grant's process), and hands its
+run to the state, which opens
+`files`, `io`, `prefs`, `set_theme`, `open_app`, `clipboard`, the
+theme's reads, the device handles and the status item through the one
+binding, `moy_app_lua.c`, as a Lua app's
 does. A row of `how` "here" (the store's `files` and `prefs` rows, the
-clipboard's write) runs on the service's own task; any other role row runs
+clipboard's write, the device handles, the status item's) runs on the
+service's own task; any other role row runs
 on the VM's task: on a
 P4 the binding's HOP is a hop on the VM's queue and the task waits until the
 VM's task runs it at the poll (`moy_vmq_serve`), its wait not counted

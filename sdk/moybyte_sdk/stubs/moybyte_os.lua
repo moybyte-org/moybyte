@@ -126,6 +126,14 @@ function moybyte.ed25519_public(...) end
 function moybyte.ed25519_sign(...) end
 --- moybyte.ed25519_verify(pub: bytes, msg: bytes, sig: bytes): the row moybyte.ed25519_verify
 function moybyte.ed25519_verify(...) end
+--- moybyte.status_show(icon: str, state: int, order: int): the row moybyte.status_show
+function moybyte.status_show(...) end
+--- moybyte.status_state(item: int, state: int): the row moybyte.status_state
+function moybyte.status_state(...) end
+--- moybyte.status_panel(item: int, rows: str?): the row moybyte.status_panel
+function moybyte.status_panel(...) end
+--- moybyte.status_remove(item: int): the row moybyte.status_remove
+function moybyte.status_remove(...) end
 --- moybyte.aes_ctr(key: bytes, data: bytes): the row moybyte.aes_ctr
 function moybyte.aes_ctr(...) end
 --- moybyte.aes_ccm_seal(key: bytes, data: bytes, tag: int): the row moybyte.aes_ccm_seal

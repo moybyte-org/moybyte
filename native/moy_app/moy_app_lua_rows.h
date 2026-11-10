@@ -52,6 +52,9 @@
     X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_public", l_moybyte_ed25519_public, MOY_T_MOYBYTE_ED25519_PUBLIC, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_sign", l_moybyte_ed25519_sign, MOY_T_MOYBYTE_ED25519_SIGN, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_verify", l_moybyte_ed25519_verify, MOY_T_MOYBYTE_ED25519_VERIFY, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "status_show", l_moybyte_status_show, MOY_T_MOYBYTE_STATUS_SHOW, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "status_state", l_moybyte_status_state, MOY_T_MOYBYTE_STATUS_STATE, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "status_remove", l_moybyte_status_remove, MOY_T_MOYBYTE_STATUS_REMOVE, 0) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "aes_ctr", l_moybyte_aes_ctr, MOY_T_MOYBYTE_AES_CTR, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "aes_ccm_seal", l_moybyte_aes_ccm_seal, MOY_T_MOYBYTE_AES_CCM_SEAL, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "aes_ccm_open", l_moybyte_aes_ccm_open, MOY_T_MOYBYTE_AES_CCM_OPEN, 1) \
@@ -66,6 +69,7 @@
     X("service_start") \
     X("service_stop") \
     X("service_running") \
+    X("status_panel") \
     X("name") \
     X("key_make") \
     X("key_public") \
@@ -93,5 +97,8 @@
     X(MOY_T_MOYBYTE_DEV_XFER) \
     X(MOY_T_MOYBYTE_DEV_SET) \
     X(MOY_T_MOYBYTE_DEV_GET) \
+    X(MOY_T_MOYBYTE_STATUS_SHOW) \
+    X(MOY_T_MOYBYTE_STATUS_STATE) \
+    X(MOY_T_MOYBYTE_STATUS_REMOVE) \
 
 #endif // MOY_APP_LUA_ROWS_H

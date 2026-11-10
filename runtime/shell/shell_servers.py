@@ -759,38 +759,11 @@ class ConsoleCalls:
     # and the panel it describes here, which the shell draws; a press reaches
     # it as the system's message STATUS, one name of the MOY_EVQ_LISTEN it
     # listens on, taken at its first panel.
-    def _item(self, g, h):
+    def status_panel(self, g, h, rows=None):
         pid = self.__ws.procs.pid_of(g)
         if pid is None or pid <= _SHELL:
-            return None, None
-        items = _moybyte._items()
-        return items, items.of(pid, h)
-
-    def status_panel(self, g, h, rows=None):
-        items, it = self._item(g, h)
-        if it is None:
-            return _DOOR_ABSENT if items is not None else _DOOR_STALE
-        got = _status_items().parse(rows or "")
-        if got is None:
-            return _DOOR_BAD
-        if got:
-            try:
-                _moybyte._ear(it.pid, _status_items().STATUS)
-            except OSError:
-                return _DOOR_FULL
-        it.section.set(got)
-        it.changed()
-        if not got and items.closed is not None:
-            items.closed(it)            # no panel: no menu stays open on it
-        return 0
-
-
-def _status_items():
-    try:
-        import status_items
-    except ImportError:  # host: the runtime package
-        from runtime import status_items
-    return status_items
+            return _DOOR_STALE
+        return _moybyte.panel_of(pid, h, rows)
 
 
 def _dev_handles():
