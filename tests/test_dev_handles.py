@@ -392,6 +392,32 @@ def test_a_lora_handle_sends_and_reads_packets_with_their_rssi(radio):
     assert _kopen(other, "lora", "sf=13", LORA) == H.BAD and N.owner() == 0
 
 
+def test_a_lora_handle_speaks_meshtastic_s_long_fast(radio):
+    """Meshtastic's LongFast in EU_868 (869.525 MHz, SF11, 250 kHz, 4/5) on its
+    sync word 0x2b and a 16-symbol preamble, from the open's words: what goes
+    out carries them, only a packet on that sync word and bandwidth is heard,
+    and each read's RSSI and SNR are the packet's."""
+    N, sim = radio
+    pid = L.spawn("t.mesh")
+    h = _kopen(pid, "lora", "freq=869525000 sf=11 bw=250000 cr=5 sync=0x2b preamble=16", LORA)
+    assert h > 0
+    assert _kwrite(pid, h, b"mesh") == 4
+    assert sim.sent() == (b"mesh", 869525000, 11, 250000, 0x2b, False, 16)
+    N.step(0)
+    assert not sim.air(b"lorawan", 869525000, 11, sync=0x34)
+    assert not sim.air(b"narrow", 869525000, 11, bw=125000)
+    assert sim.air(b"one", 869525000, 11, rssi=-110, snr=-30, bw=250000, sync=0x2b)
+    N.step(1)
+    assert _kread(pid, h, 64) == b"one"
+    assert _kget(pid, h, "rssi") == -110 and _kget(pid, h, "snr") == -30
+    assert sim.air(b"two", 869525000, 11, rssi=-70, snr=40, bw=250000, sync=0x2b)
+    N.step(2)
+    assert _kread(pid, h, 64) == b"two"
+    assert _kget(pid, h, "rssi") == -70 and _kget(pid, h, "snr") == 40
+    assert _kset(pid, h, "preamble=5") == H.BAD and _kset(pid, h, "sync=0x100") == H.BAD
+    assert _kclose(pid, h) == 0
+
+
 def test_a_lora_handle_ends_with_its_process(radio):
     N, sim = radio
     pid = L.spawn("t.lora")

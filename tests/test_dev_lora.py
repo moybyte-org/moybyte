@@ -84,8 +84,9 @@ def test_a_raw_packet_goes_out_with_the_holders_settings_and_is_reported_sent():
     _as(pid, lambda: moybyte.lora.send(b"hello mesh"))
     assert N.mode() == 2                                   # on the air
     assert _errno(lambda: _as(pid, lambda: moybyte.lora.send(b"x"))) == errno.EBUSY
-    data, freq, sf, bw, sync, iq = lora_sim.sent()
-    assert (data, freq, sf, bw, sync, iq) == (b"hello mesh", 869525000, 10, 125000, 0x12, False)
+    data, freq, sf, bw, sync, iq, pre = lora_sim.sent()
+    assert (data, freq, sf, bw, sync, iq, pre) == (b"hello mesh", 869525000, 10, 125000, 0x12,
+                                                   False, 8)
     N.step(0)
     assert N.mode() == N.IDLE
 
@@ -110,6 +111,22 @@ def test_a_listening_radio_hears_its_channel_with_rssi_and_snr_and_nothing_else(
     assert lora_sim.air(b"again", 868100000, 7)
     N.step(2)
     assert _as(pid, lambda: moybyte.lora.recv(buf))[:1] == (5,)
+
+
+def test_meshtastic_s_long_fast_reaches_the_radio_and_only_its_sync_word_is_heard():
+    pid = L.spawn("t.mesh")
+    _as(pid, lambda: moybyte.lora.config(freq=869525000, sf=11, bw=250000, cr=5, power=14,
+                                         sync=0x2b, preamble=16))
+    _as(pid, moybyte.lora.listen)
+    assert not lora_sim.air(b"x", 869525000, 11, sync=0x12)
+    assert not lora_sim.air(b"x", 869525000, 11, bw=500000)
+    assert lora_sim.air(b"mesh", 869525000, 11, rssi=-121, snr=-58, bw=250000, sync=0x2b)
+    N.step(0)
+    buf, meta = bytearray(64), array("i", [0, 0, 0])
+    assert _as(pid, lambda: moybyte.lora.recv(buf, meta)) == 4
+    assert list(meta) == [-121, -58, 0]
+    _as(pid, lambda: moybyte.lora.send(b"back"))
+    assert lora_sim.sent() == (b"back", 869525000, 11, 250000, 0x2b, False, 16)
 
 
 def test_bad_settings_are_refused():
@@ -150,7 +167,7 @@ def test_the_radio_needs_the_permission_and_is_absent_without_one():
 
 def _join(pid, net, window=1, dr=5, t0=1000):
     _as(pid, lambda: moybyte.lora.join(DEV_EUI, JOIN_EUI, APP_KEY, dr=dr))
-    req, freq, sf, bw, sync, iq = lora_sim.sent()
+    req, freq, sf, bw, sync, iq, _pre = lora_sim.sent()
     assert sync == 0x34 and not iq and freq in (868100000, 868300000, 868500000)
     accept = net.answer(req)
     assert accept is not None

@@ -11,8 +11,8 @@
 //   present()   gate_stats() -> (yields, us, xfers, wait_us, wait_max_us) | None:
 //               the feeder's yields and time aside, the radio's commands and their
 //               wait for a band gap (the longest since the last call)
-//   sim(on)   sim_sent() -> (bytes, freq, sf, bw, sync, iq) | None
-//   sim_air(buf, freq, sf, rssi, snr) -> bool   reset()
+//   sim(on)   sim_sent() -> (bytes, freq, sf, bw, sync, iq, preamble) | None
+//   sim_air(buf, freq, sf, bw, sync, rssi, snr) -> bool   reset()
 
 #include "py/runtime.h"
 
@@ -176,14 +176,16 @@ static mp_obj_t lora_sim_sent(void) {
     uint8_t buf[MOY_LORA_PKT];
     uint32_t freq, bw;
     uint8_t sf, sync, iq;
-    int n = moy_lora_sim_sent(buf, sizeof(buf), &freq, &sf, &bw, &sync, &iq);
+    uint16_t pre;
+    int n = moy_lora_sim_sent(buf, sizeof(buf), &freq, &sf, &bw, &sync, &iq, &pre);
     if (n <= 0) {
         return mp_const_none;
     }
-    mp_obj_t t[6] = { mp_obj_new_bytes(buf, (size_t)n), mp_obj_new_int_from_uint(freq),
+    mp_obj_t t[7] = { mp_obj_new_bytes(buf, (size_t)n), mp_obj_new_int_from_uint(freq),
                       MP_OBJ_NEW_SMALL_INT(sf), mp_obj_new_int_from_uint(bw),
-                      MP_OBJ_NEW_SMALL_INT(sync), mp_obj_new_bool(iq) };
-    return mp_obj_new_tuple(6, t);
+                      MP_OBJ_NEW_SMALL_INT(sync), mp_obj_new_bool(iq),
+                      MP_OBJ_NEW_SMALL_INT(pre) };
+    return mp_obj_new_tuple(7, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(lora_sim_sent_obj, lora_sim_sent);
 
@@ -192,10 +194,11 @@ static mp_obj_t lora_sim_air(size_t n_args, const mp_obj_t *a) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(a[0], &b, MP_BUFFER_READ);
     return mp_obj_new_bool(moy_lora_sim_air(b.buf, b.len, u32(a[1]), (uint8_t)u32(a[2]),
-                                            (int16_t)mp_obj_get_int(a[3]),
-                                            (int8_t)mp_obj_get_int(a[4])));
+                                            u32(a[3]), (int)mp_obj_get_int(a[4]),
+                                            (int16_t)mp_obj_get_int(a[5]),
+                                            (int8_t)mp_obj_get_int(a[6])));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(lora_sim_air_obj, 5, 5, lora_sim_air);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(lora_sim_air_obj, 7, 7, lora_sim_air);
 
 static mp_obj_t lora_reset(void) {
     moy_lora_reset();

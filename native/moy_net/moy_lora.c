@@ -440,7 +440,9 @@ static int radio_tune(uint32_t freq, uint8_t sf, uint32_t bw, uint8_t cr, int8_t
     uint8_t fb[4] = { (uint8_t)(f >> 24), (uint8_t)(f >> 16), (uint8_t)(f >> 8), (uint8_t)f };
     rc |= cmd(0x86, fb, 4);
     uint8_t bwc = bw == 500000 ? 0x06 : bw == 250000 ? 0x05 : bw == 62500 ? 0x03 : 0x04;
-    uint8_t ldro = (sf >= 11 && bw <= 125000) ? 1 : 0;
+    // Low data rate optimisation where a symbol lasts 16 ms or more, as
+    // RadioLib (so Meshtastic) decides it: a peer's choice must match ours.
+    uint8_t ldro = ((1000000ull << sf) / bw) >= 16000u ? 1 : 0;
     uint8_t mod[4] = { sf, bwc, (uint8_t)(cr - 4), ldro };
     rc |= cmd(0x8b, mod, 4);
     uint8_t pp[6] = { (uint8_t)(preamble >> 8), (uint8_t)preamble, 0x00, len,
@@ -531,7 +533,7 @@ void moy_lora_sim(int on) {
 }
 
 int moy_lora_sim_sent(uint8_t *out, size_t cap, uint32_t *freq, uint8_t *sf, uint32_t *bw,
-                      uint8_t *sync, uint8_t *iq) {
+                      uint8_t *sync, uint8_t *iq, uint16_t *preamble) {
     (void)out;
     (void)cap;
     (void)freq;
@@ -539,15 +541,18 @@ int moy_lora_sim_sent(uint8_t *out, size_t cap, uint32_t *freq, uint8_t *sf, uin
     (void)bw;
     (void)sync;
     (void)iq;
+    (void)preamble;
     return 0;
 }
 
-int moy_lora_sim_air(const uint8_t *data, size_t n, uint32_t freq, uint8_t sf, int16_t rssi,
-                     int8_t snr) {
+int moy_lora_sim_air(const uint8_t *data, size_t n, uint32_t freq, uint8_t sf, uint32_t bw,
+                     int sync, int16_t rssi, int8_t snr) {
     (void)data;
     (void)n;
     (void)freq;
     (void)sf;
+    (void)bw;
+    (void)sync;
     (void)rssi;
     (void)snr;
     return 0;
@@ -565,6 +570,7 @@ typedef struct {
     struct {
         uint32_t freq, bw;
         uint8_t sf, sync, iq_inv;
+        uint16_t preamble;
     } tune;
     int rxing;                          // the receiver is on
     int txing;
@@ -573,6 +579,7 @@ typedef struct {
     struct {
         uint8_t len, sf, sync, iq;
         uint32_t freq, bw;
+        uint16_t preamble;
         uint8_t data[MOY_LORA_PKT];
     } out[MOY_LORA_QUEUE];
     uint32_t out_head, out_n;
@@ -593,9 +600,9 @@ static int radio_tune(uint32_t freq, uint8_t sf, uint32_t bw, uint8_t cr, int8_t
     (void)cr;
     (void)power;
     (void)crc;
-    (void)preamble;
     (void)len;
     S->rxing = 0;
+    S->tune.preamble = preamble;
     S->tune.freq = freq;
     S->tune.sf = sf;
     S->tune.bw = bw;
@@ -606,7 +613,6 @@ static int radio_tune(uint32_t freq, uint8_t sf, uint32_t bw, uint8_t cr, int8_t
 
 static int radio_tx(const uint8_t *d, size_t n, uint8_t sf, uint16_t preamble, int crc) {
     (void)sf;
-    (void)preamble;
     (void)crc;
     if (S->out_n == MOY_LORA_QUEUE) {
         S->out_head = (S->out_head + 1u) % MOY_LORA_QUEUE;
@@ -619,6 +625,7 @@ static int radio_tx(const uint8_t *d, size_t n, uint8_t sf, uint16_t preamble, i
     S->out[i].bw = S->tune.bw;
     S->out[i].sync = S->tune.sync;
     S->out[i].iq = S->tune.iq_inv;
+    S->out[i].preamble = preamble;
     memcpy(S->out[i].data, d, n);
     S->out_n++;
     S->txing = 1;
@@ -668,7 +675,7 @@ void moy_lora_sim(int on) {
 }
 
 int moy_lora_sim_sent(uint8_t *out, size_t cap, uint32_t *freq, uint8_t *sf, uint32_t *bw,
-                      uint8_t *sync, uint8_t *iq) {
+                      uint8_t *sync, uint8_t *iq, uint16_t *preamble) {
     if (S == NULL || S->out_n == 0) {
         return 0;
     }
@@ -680,14 +687,16 @@ int moy_lora_sim_sent(uint8_t *out, size_t cap, uint32_t *freq, uint8_t *sf, uin
     *bw = S->out[i].bw;
     *sync = S->out[i].sync;
     *iq = S->out[i].iq;
+    *preamble = S->out[i].preamble;
     S->out_head = (S->out_head + 1u) % MOY_LORA_QUEUE;
     S->out_n--;
     return (int)n;
 }
 
-int moy_lora_sim_air(const uint8_t *data, size_t n, uint32_t freq, uint8_t sf, int16_t rssi,
-                     int8_t snr) {
-    if (S == NULL || !S->rxing || S->tune.freq != freq || S->tune.sf != sf || n > MOY_LORA_PKT) {
+int moy_lora_sim_air(const uint8_t *data, size_t n, uint32_t freq, uint8_t sf, uint32_t bw,
+                     int sync, int16_t rssi, int8_t snr) {
+    if (S == NULL || !S->rxing || S->tune.freq != freq || S->tune.sf != sf || n > MOY_LORA_PKT
+        || (bw != 0 && S->tune.bw != bw) || (sync >= 0 && S->tune.sync != (uint8_t)sync)) {
         return 0;
     }
     memcpy(S->heard.data, data, n);

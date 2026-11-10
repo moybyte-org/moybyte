@@ -7,10 +7,12 @@ implementations.
 
   install() / remove()     the console has the radio, or not
   sent()                   the next transmission: (bytes, freq, sf, bw,
-                           sync, iq_inverted) or None
-  air(data, freq, sf, rssi=-60, snr=32)
+                           sync, iq_inverted, preamble) or None
+  air(data, freq, sf, rssi=-60, snr=32, bw=None, sync=None)
                            a packet on the air (snr in quarter dB): whether
-                           the radio heard it, tuned there and receiving
+                           the radio heard it, tuned there and receiving (at
+                           `bw` and `sync` where given, else whatever it is
+                           tuned to)
   Network(dev_eui, join_eui, app_key, ...)
                            a network server for one device: `answer(frame)`
                            the reply to an uplink or a join request (None for
@@ -40,8 +42,8 @@ def sent():
     return _N.sim_sent()
 
 
-def air(data, freq, sf, rssi=-60, snr=32):
-    return _N.sim_air(bytes(data), freq, sf, rssi, snr)
+def air(data, freq, sf, rssi=-60, snr=32, bw=None, sync=None):
+    return _N.sim_air(bytes(data), freq, sf, bw or 0, -1 if sync is None else sync, rssi, snr)
 
 
 def _aes(key):

@@ -657,9 +657,14 @@ ble   scan=<ms>  connect=<addr>|off  find=<uuid>  read=<h>  subscribe=<h>  unsub
                 event u16, n u16, a i32, b i32 (moy_gatt.h's), then n bytes --
                 ADV the address and the name, READ the value, NOTIFY the notification
       dev_get: connected
-lora  join=otaa dev_eui=<hex> join_eui=<hex> app_key=<hex> [dr]
+lora  freq=<Hz> sf=<7..12> bw=<62500|125000|250000|500000> cr=<5..8> power=<dBm>
+      sync=<byte> preamble=<symbols> listen=0|1: the raw radio (open: 868.1 MHz, SF9,
+      125 kHz, 4/5, 14 dBm, sync 0x12, preamble 8, listening; Meshtastic's LongFast
+      in EU_868 is freq=869525000 sf=11 bw=250000 sync=0x2b preamble=16)
+      join=otaa dev_eui=<hex> join_eui=<hex> app_key=<hex> [dr]
       send=<port>|raw [confirmed=0|1 dr]: what dev_write sends, an uplink or a packet
-      dev_read: the next packet or downlink; dev_get: port, joined, fcnt, busy
+      dev_read: the next packet or downlink; dev_get: rssi (dBm) and snr (dB x 4)
+      of the packet read last, port, joined, fcnt, busy
 usb   serial=<addr> [baud=<n>]  write=<addr>: where dev_write goes
       dev_read: the USB face's events, whole records with ble's head (a the address):
                 ATTACH (one for each device plugged in at the open) its class,

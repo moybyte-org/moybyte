@@ -57,8 +57,9 @@ _SIGS = (
     ("moy_lora_present", [], _I),
     ("moy_lora_sim", [_I], None),
     ("moy_lora_sim_sent", [_P, ctypes.c_size_t, ctypes.POINTER(_U32), ctypes.POINTER(_U8),
-                           ctypes.POINTER(_U32), ctypes.POINTER(_U8), ctypes.POINTER(_U8)], _I),
-    ("moy_lora_sim_air", [_B, ctypes.c_size_t, _U32, _U8, _I16, _I8], _I),
+                           ctypes.POINTER(_U32), ctypes.POINTER(_U8), ctypes.POINTER(_U8),
+                           ctypes.POINTER(_U16)], _I),
+    ("moy_lora_sim_air", [_B, ctypes.c_size_t, _U32, _U8, _U32, _I, _I16, _I8], _I),
     ("moy_lora_reset", [], None),
     ("moy_aes_cmac", [_B, _B, ctypes.c_size_t, _P], None),
 )
@@ -172,17 +173,17 @@ def sim(on):
 
 def sim_sent():
     buf = (ctypes.c_uint8 * PKT)()
-    f, sf, bw, sync, iq = _U32(), _U8(), _U32(), _U8(), _U8()
+    f, sf, bw, sync, iq, pre = _U32(), _U8(), _U32(), _U8(), _U8(), _U16()
     n = _lib().moy_lora_sim_sent(buf, PKT, ctypes.byref(f), ctypes.byref(sf), ctypes.byref(bw),
-                                 ctypes.byref(sync), ctypes.byref(iq))
+                                 ctypes.byref(sync), ctypes.byref(iq), ctypes.byref(pre))
     if n <= 0:
         return None
-    return bytes(buf[:n]), f.value, sf.value, bw.value, sync.value, bool(iq.value)
+    return bytes(buf[:n]), f.value, sf.value, bw.value, sync.value, bool(iq.value), pre.value
 
 
-def sim_air(buf, freq, sf, rssi, snr):
+def sim_air(buf, freq, sf, bw, sync, rssi, snr):
     b = bytes(buf)
-    return bool(_lib().moy_lora_sim_air(b, len(b), freq, sf, rssi, snr))
+    return bool(_lib().moy_lora_sim_air(b, len(b), freq, sf, bw, sync, rssi, snr))
 
 
 def reset():

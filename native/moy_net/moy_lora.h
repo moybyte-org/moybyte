@@ -31,8 +31,9 @@
 //
 // THE STAND-IN (the host): the radio is a record of what it was told, its
 // transmissions an outbox the "air" reads (moy_lora_sim_sent) and its
-// receiver hearing what the air delivers on the frequency and spreading factor
-// it is tuned to (moy_lora_sim_air); a transmission ends at the next step.
+// receiver hearing what the air delivers on the frequency, spreading factor,
+// bandwidth and sync word it is tuned to (moy_lora_sim_air); a transmission
+// ends at the next step.
 
 #ifndef MOY_LORA_H
 #define MOY_LORA_H
@@ -80,8 +81,9 @@ typedef struct {
     uint8_t sf;                         // 7..12
     uint8_t cr;                         // 5..8: 4/5 .. 4/8
     int8_t power;                       // dBm, -9..22
-    uint8_t sync;                       // 0x12 private, 0x34 LoRaWAN's
-    uint16_t preamble;
+    uint8_t sync;                       // 0x12 private, 0x34 LoRaWAN's, 0x2b Meshtastic's
+                                        // (an SX126x's 0x0740 word: 0x2b is 0x24b4)
+    uint16_t preamble;                  // symbols, 6 or more: 8 LoRaWAN's, 16 Meshtastic's
 } moy_lora_cfg_t;
 
 // The radio for `owner`: 0, or -EBUSY (another holds it), -ENODEV (none
@@ -128,12 +130,15 @@ void moy_lora_xfer_stats(uint32_t *n, uint32_t *wait_us, uint32_t *wait_max_us);
 // -- the stand-in --
 void moy_lora_sim(int on);
 // The oldest transmission on the air: its length (0: none), its frequency,
-// spreading factor, bandwidth and sync word, and whether its IQ is inverted.
+// spreading factor, bandwidth and sync word, whether its IQ is inverted, and
+// its preamble.
 int moy_lora_sim_sent(uint8_t *out, size_t cap, uint32_t *freq, uint8_t *sf, uint32_t *bw,
-                      uint8_t *sync, uint8_t *iq);
-// A packet on the air: heard (1) when the receiver is on `freq` at `sf` now.
-int moy_lora_sim_air(const uint8_t *data, size_t n, uint32_t freq, uint8_t sf, int16_t rssi,
-                     int8_t snr);
+                      uint8_t *sync, uint8_t *iq, uint16_t *preamble);
+// A packet on the air: heard (1) when the receiver is on `freq` at `sf` now,
+// at bandwidth `bw` (0: whatever it is tuned to) with sync word `sync` (-1:
+// whatever it is tuned to).
+int moy_lora_sim_air(const uint8_t *data, size_t n, uint32_t freq, uint8_t sf, uint32_t bw,
+                     int sync, int16_t rssi, int8_t snr);
 void moy_lora_reset(void);
 
 #endif // MOY_LORA_H
