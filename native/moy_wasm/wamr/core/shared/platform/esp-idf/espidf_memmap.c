@@ -52,22 +52,34 @@ mmap_caps(size_t size, int prot)
     return MALLOC_CAP_8BIT;
 }
 
-/* Where a mapping starts: a 64-byte boundary. The loader lays a module's data
- * sections out at page-aligned offsets from the start of one mapping, so each
- * section is as aligned as the mapping is, and the compiled code relies on a
- * section's own alignment: the stack-size table is aligned 16, so RISC-V code
- * addresses an entry as the table's %hi with the entry's offset in its %lo
- * alone, which reads 4 KB away when the table sits 8 bytes short of a 0x800
- * boundary. 64 covers every section alignment the ESP32-S3 and ESP32-P4
- * targets emit, and is the cache line os_icache_flush syncs in. */
+/* A mapping starts on a 64-byte boundary and spans whole 64-byte lines.
+ *
+ * The start: the loader lays a module's data sections out at page-aligned
+ * offsets from the start of one mapping, so each section is as aligned as the
+ * mapping is, and the compiled code relies on a section's own alignment: the
+ * stack-size table is aligned 16, so RISC-V code addresses an entry as the
+ * table's %hi with the entry's offset in its %lo alone, which reads 4 KB away
+ * when the table sits 8 bytes short of a 0x800 boundary. 64 covers every
+ * section alignment the ESP32-S3 and ESP32-P4 targets emit.
+ *
+ * Both ends: 64 is the line os_icache_flush syncs in, and on the ESP32-P4 its
+ * invalidate drops the data cache's copy of every line it touches, so a line
+ * the mapping shared with another heap block would lose a write another task
+ * made there. No other allocation shares a line with a mapping. */
 #define MMAP_ALIGN 64
+#define MMAP_ROUND_UP(n) \
+    (((n) + (size_t)MMAP_ALIGN - 1) & ~((size_t)MMAP_ALIGN - 1))
 
 void *
 os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
 {
+    if (size > SIZE_MAX - sizeof(uintptr_t) - 2 * MMAP_ALIGN) {
+        return NULL;
+    }
+    size_t span = MMAP_ROUND_UP(size);
     /* Room to align to MMAP_ALIGN and to keep the originally allocated
        address just below the returned one, where os_munmap finds it. */
-    void *buf_origin = heap_caps_malloc(size + sizeof(uintptr_t) + MMAP_ALIGN,
+    void *buf_origin = heap_caps_malloc(span + sizeof(uintptr_t) + MMAP_ALIGN,
                                         mmap_caps(size, prot));
     if (!buf_origin) {
         return NULL;
@@ -81,7 +93,7 @@ os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
 
     /* Cleared through the data bus: the S3's instruction alias is fetch-only
        (a store through it is StoreProhibited). */
-    memset(buf_fixed, 0, size);
+    memset(buf_fixed, 0, span);
 #if (WASM_MEM_DUAL_BUS_MIRROR != 0)
     if (prot & MMAP_PROT_EXEC) {
         return buf_fixed + MEM_DUAL_BUS_OFFSET;
@@ -106,8 +118,9 @@ os_munmap(void *addr, size_t size)
         ptr -= MEM_DUAL_BUS_OFFSET;
     }
 #endif
-    // We don't need special handling of the executable allocations
-    // here, free() of esp-idf handles it properly
+    /* The whole block goes, whatever size the caller names: os_free reads
+       the allocated address from just below the mapping. */
+    (void)size;
     return os_free(ptr);
 }
 
@@ -129,8 +142,10 @@ os_dcache_flush()
 }
 
 /* One cache line on every target this file syncs (the S3's 32 B and the P4's
-   64 B lines both divide it), so an aligned range is aligned for both. */
-#define CACHE_SYNC_ALIGN 64
+   64 B lines both divide it), so an aligned range is aligned for both; and a
+   mapping's own alignment, so a sync within a mapping touches no line beyond
+   it. */
+#define CACHE_SYNC_ALIGN MMAP_ALIGN
 
 void
 os_icache_flush(void *start, size_t len)

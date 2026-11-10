@@ -445,6 +445,16 @@ other core if it is executing from flash or PSRAM at that moment — and on a
 console it always is. The P4 does the same range sync plus `fence.i`. The
 on-glass load/unload loop under a live cart and WiFi is the guard.
 
+A sync covers whole 64-byte lines, and on the P4 its invalidate also drops the
+data cache's copy of each line (L1D and L2), so a line the text shared with
+another heap block would lose a write another task had made there. The fork's
+ESP-IDF `os_mmap` therefore starts every mapping on a 64-byte boundary and
+rounds its size up to whole lines, so no other allocation shares a line with
+a mapping; `tests/test_wamr_espidf_mmap.py` compiles the vendored
+`espidf_memmap.c` on the host and holds every sync to its mapping's lines.
+The S3's invalidate reaches only its separate instruction cache, through the
+fetch-only alias, so it has no such edge.
+
 ## Provenance
 
 A per-architecture (AOT) module is native code; the sandbox is whatever the
