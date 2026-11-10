@@ -322,9 +322,31 @@ def test_notify_posts_lists_opens_and_clears(console, monkeypatch):
     assert io.out == "%d Moybyte: Quiet\n%d Moybyte: Backup done\n" % (nid + 1, nid)
     assert call(d, "role", "notify", "open", str(nid)) == 0
     assert [n.id for n in N.NOTES.list] == [nid + 1]
-    assert call(d, "role", "notify", "clear", "99") == 1
+    assert call(d, "role", "notify", "clear", str(nid + 2)) == 1   # never issued
     assert call(d, "role", "notify", "clear") == 0 and N.NOTES.list == []
     assert call(d, "role", "notify", "send", "-u", "loud", "x") == 2
+
+
+def test_notify_sees_a_compiled_programs_post_before_the_frame_takes_it(console, monkeypatch):
+    """A note a compiled program queued in the kernel since the frame began
+    is listed, opened and cleared by id at once: the verbs take the queue
+    first, oldest first, so a later console post stays the newest."""
+    from runtime import notifications as N
+    monkeypatch.setattr(N, "NOTES", N.Notifications())
+    waiting = []
+    monkeypatch.setattr(N._E, "notes_waiting", lambda: len(waiting))
+    monkeypatch.setattr(N._E, "notes_take", lambda: waiting.pop(0) if waiting else None)
+    _ws, door = console
+    first = N._E.notes_id()
+    waiting.append((first, 0, "local.svc", "Queued", ""))
+    io, d = door()
+    assert call(d, "role", "notify", "send", "Posted") == 0
+    assert [n.id for n in N.NOTES.list] == [int(io.out), first]
+    second = N._E.notes_id()
+    waiting.append((second, 0, "local.svc", "Again", ""))
+    io, d = door()
+    assert call(d, "role", "notify", "clear", str(second)) == 0
+    assert not waiting and second not in [n.id for n in N.NOTES.list]
 
 
 def test_service_starts_stops_and_says_its_state(console):

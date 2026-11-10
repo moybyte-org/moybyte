@@ -230,6 +230,7 @@ def _notes():
 def r_notify(d, a):
     N = _notes()
     notes = N.NOTES
+    notes.drain()       # what compiled programs posted since the frame began
     if not a or a[0] == "list":
         d.out("".join("%d %s: %s\n" % (n.id, n.app or "?", n.summary) for n in notes.list))
         return 0
