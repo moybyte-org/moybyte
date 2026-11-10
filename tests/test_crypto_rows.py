@@ -1,7 +1,9 @@
 """The crypto rows (native/os_calls.json's moybyte.random, sha256, hmac_sha256,
-aes_gcm_seal, aes_gcm_open, x25519, ed25519_public, ed25519_sign and
-ed25519_verify; native/moy_net/moy_crypto.h, the one C body) answer the same known answers on every tier, with no permission, and a
-length the call refuses is an error answered, never a crash:
+aes_gcm_seal, aes_gcm_open, aes_ctr, aes_ccm_seal, aes_ccm_open, x25519,
+ed25519_public, ed25519_sign and ed25519_verify; native/moy_net/moy_crypto.h,
+the one C body) answer the same known answers on every tier, with no
+permission, and a length the call refuses is an error answered, never a
+crash:
 
   * Python: the `moybyte` module's functions over the module moy_app (the
     native module on the desktop MicroPython is tests/test_moy_app.py's);
@@ -64,6 +66,43 @@ def test_python_s_ed25519_verify_refuses_what_was_not_signed():
     assert moybyte.ed25519_verify(moybyte.ed25519_public(mine), b"a mesh packet", said)
 
 
+def test_python_s_aes_ctr_answers_nist_s_and_rfc_3686_s_vectors():
+    for key, block, plain, cipher in V.CTR:
+        assert moybyte.aes_ctr(H(key), H(block + plain)).hex() == cipher
+        assert moybyte.aes_ctr(H(key), H(block + cipher)).hex() == plain, "its own inverse"
+    assert moybyte.aes_ctr(H(V.CTR[0][0]), H(V.CTR[0][1])) == b"", "a counter block alone"
+    # a counter block that wraps all 128 bits counts on from zero
+    key = H(V.CTR[0][0])
+    ones = moybyte.aes_ctr(key, b"\xff" * 16 + bytes(32))
+    assert ones[16:] == moybyte.aes_ctr(key, bytes(16) + bytes(16))
+
+
+def test_python_s_aes_ccm_answers_nist_s_vectors_and_meshtastic_s_packet():
+    for key, nonce, tag, plain, sealed in V.CCM:
+        assert moybyte.aes_ccm_seal(H(key), H(nonce + plain), tag).hex() == sealed
+        assert moybyte.aes_ccm_open(H(key), H(nonce + sealed), tag).hex() == plain
+    radio = H(V.MESH_PKI_RADIO)
+    shared = moybyte.x25519(H(V.MESH_PKI_SECRET), H(V.MESH_PKI_PEER))
+    key = moybyte.sha256(shared)
+    assert key.hex() == V.MESH_PKI_KEY
+    nonce = radio[8:12] + radio[-4:] + radio[4:8] + b"\0"
+    assert nonce.hex() == V.MESH_PKI_NONCE
+    assert moybyte.aes_ccm_open(key, nonce + radio[16:-4], 8).hex() == V.MESH_PKI_PLAIN
+    assert moybyte.aes_ccm_seal(key, nonce + H(V.MESH_PKI_PLAIN), 8) == radio[16:-4]
+
+
+def test_python_s_aes_ccm_open_refuses_what_was_not_sealed():
+    key, nonce, tag, plain, sealed = V.CCM[1]
+    whole = H(nonce + sealed)
+    for at in (0, 13, 13 + 23, len(whole) - 1):
+        changed = bytearray(whole)
+        changed[at] ^= 1
+        assert moybyte.aes_ccm_open(H(key), bytes(changed), tag) is None, at
+    assert moybyte.aes_ccm_open(H(key), whole, 8) is None, "another tag length"
+    assert moybyte.aes_ccm_open(H(key), whole[:13 + 15], tag) is None, "shorter than a tag"
+    assert moybyte.aes_ccm_open(moybyte.random(16), whole, tag) is None
+
+
 def test_python_s_seal_opens_under_its_key_alone():
     key = moybyte.random(32)
     sealed = moybyte.aes_gcm_seal(key, b"a mesh packet")
@@ -87,6 +126,13 @@ def test_python_s_seal_opens_under_its_key_alone():
     lambda: moybyte.ed25519_public(bytes(31)), lambda: moybyte.ed25519_sign(bytes(33), b"x"),
     lambda: moybyte.ed25519_verify(bytes(31), b"x", bytes(64)),
     lambda: moybyte.ed25519_verify(bytes(32), b"x", bytes(63)),
+    lambda: moybyte.aes_ctr(bytes(15), bytes(20)), lambda: moybyte.aes_ctr(bytes(16), bytes(15)),
+    lambda: moybyte.aes_ccm_seal(bytes(16), bytes(12), 8),
+    lambda: moybyte.aes_ccm_seal(bytes(16), bytes(20), 5),
+    lambda: moybyte.aes_ccm_seal(bytes(16), bytes(20), 18),
+    lambda: moybyte.aes_ccm_seal(bytes(16), bytes(20), -8),
+    lambda: moybyte.aes_ccm_seal(bytes(20), bytes(20), 8),
+    lambda: moybyte.aes_ccm_open(bytes(16), bytes(30), 3),
 ])
 def test_python_s_length_mistakes_raise_value_error(call):
     with pytest.raises(ValueError):
@@ -125,6 +171,12 @@ function _init()
   EDOK = tostring(moybyte.ed25519_verify(moybyte.ed25519_public(sk), msg, unhex(EDSIG)))
   EDBAD = tostring(moybyte.ed25519_verify(moybyte.ed25519_public(sk), msg .. "!", unhex(EDSIG)))
   EDLEN = err(moybyte.ed25519_verify, sk, msg, "short")
+  CTR = hex(moybyte.aes_ctr(unhex("@CTR_KEY@"), unhex("@CTR_DATA@")))
+  local mk = unhex("@MESH_KEY@")
+  MESH = hex(moybyte.aes_ccm_open(mk, unhex("@MESH_SEALED@"), 8))
+  RESEALED = hex(moybyte.aes_ccm_seal(mk, unhex("@MESH_NONCE@") .. unhex(MESH), 8))
+  UNOPENED = hex(moybyte.aes_ccm_open(mk, unhex("@MESH_SEALED@"), 4))
+  BADTAG = err(moybyte.aes_ccm_seal, mk, unhex("@MESH_NONCE@"), 7)
   LOG = type(moybyte.log)
 end
 function _draw() cls(0) end
@@ -149,7 +201,11 @@ def test_a_lua_app_s_moybyte_table_answers_the_known_answers(tmp_path):
     key, sealed = V.GCM[0]
     src = (LUA.replace("@KEY@", key).replace("@SEALED@", V.GCM_NONCE + sealed)
            .replace("@ALICE@", V.X25519_ALICE).replace("@BOB_PUB@", V.X25519_BOB_PUB)
-           .replace("@ED_SK@", V.ED25519[3][0]).replace("@ED_MSG@", V.ED25519[3][2]))
+           .replace("@ED_SK@", V.ED25519[3][0]).replace("@ED_MSG@", V.ED25519[3][2])
+           .replace("@CTR_KEY@", V.CTR[0][0]).replace("@CTR_DATA@", V.CTR[0][1] + V.CTR[0][2])
+           .replace("@MESH_KEY@", V.MESH_PKI_KEY)
+           .replace("@MESH_SEALED@", V.MESH_PKI_NONCE + V.MESH_PKI_RADIO[32:68])
+           .replace("@MESH_NONCE@", V.MESH_PKI_NONCE))
     _write_lua_app(tmp_path / "carts", "Lua Crypto", src)
     ws = build_ws(tmp_path)
     assert select_on_home(ws, "Lua Crypto") is not None
@@ -171,6 +227,10 @@ def test_a_lua_app_s_moybyte_table_answers_the_known_answers(tmp_path):
     assert (g("EDPUB"), g("EDSIG")) == (V.ED25519[3][1], V.ED25519[3][3])
     assert (g("EDOK"), g("EDBAD")) == ("true", "false")
     assert g("EDLEN") == "a length the call refuses"
+    assert g("CTR") == V.CTR[0][3]
+    assert (g("MESH"), g("RESEALED")) == (V.MESH_PKI_PLAIN, V.MESH_PKI_RADIO[32:68])
+    assert g("UNOPENED") == "nil"
+    assert g("BADTAG") == "a length the call refuses"
     assert g("LOG") == "function", "the prelude kept its own names"
 
 
@@ -223,6 +283,9 @@ def test_a_compiled_app_s_imports_answer_the_known_answers(tmp_path):
         "ed25519.public " + V.ED25519[2][1], "ed25519.sign " + V.ED25519[2][3],
         "ed25519.verify 1", "ed25519.verify.changed 0", "ed25519.verify.sig -7",
         "ed25519.sign.short -2",
+        "aes_ctr " + V.CTR[1][3], "aes_ctr.block -7",
+        "aes_ccm_open " + V.MESH_PKI_PLAIN, "aes_ccm.tag -7", "aes_ccm_seal.short -2",
+        "aes_ccm_seal " + V.MESH_PKI_RADIO[32:68], "aes_ccm_open.changed -10",
     ], lines
 
 

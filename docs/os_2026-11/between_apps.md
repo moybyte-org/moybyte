@@ -211,11 +211,13 @@ eight readers are not spent one a process. `tests/test_radio_events.py` holds it
 
 ## 5. Crypto
 
-Random bytes, SHA-256, HMAC-SHA256, AES-GCM, X25519 and Ed25519 are rows of
-the one table (`native/os_calls.json`, `moybyte.random`, `sha256`,
-`hmac_sha256`, `aes_gcm_seal`, `aes_gcm_open`, `x25519`, `ed25519_public`,
-`ed25519_sign`, `ed25519_verify`; `docs/app_api_v1.md` §10 names each tier's), so a mesh stack (Reticulum, Meshtastic) can be an app on any
-tier. Decisions (2026-11-09):
+Random bytes, SHA-256, HMAC-SHA256, AES-GCM, AES-CTR, AES-CCM, X25519 and
+Ed25519 are rows of the one table (`native/os_calls.json`, `moybyte.random`,
+`sha256`, `hmac_sha256`, `aes_gcm_seal`, `aes_gcm_open`, `aes_ctr`,
+`aes_ccm_seal`, `aes_ccm_open`, `x25519`, `ed25519_public`, `ed25519_sign`,
+`ed25519_verify`; `docs/app_api_v1.md` §10 names each tier's), so a mesh
+stack (Reticulum, Meshtastic) can be an app on any tier. Decisions
+(2026-11-09):
 
 - **One C body, over the image's mbedTLS.** `native/moy_net/moy_crypto.c`,
   beside the sign-in's `moy_seal.c`, whose random source it shares
@@ -230,12 +232,24 @@ tier. Decisions (2026-11-09):
 - **No permission.** Each row is pure computation over the caller's buffers:
   nothing kept, nothing of the device reached, no key stored. The RNG is
   the hardware's, which no app can drain or read another's draw from.
-- **A small surface that is hard to misuse.** AES is GCM alone: a seal
-  draws its own 12-byte nonce and puts it first, the 16-byte tag last, and
-  an open answers the plaintext or FORGED (EBADMSG on the POSIX tiers, None
-  in Python, nil in Lua); there is no raw CTR or ECB and no caller nonce. No
-  AAD either: the native tier's U-mode check passes at most 7 argument
-  registers, which key, AAD, data and answer would pass. X25519 clamps the
+- **A small surface that is hard to misuse.** An app's own AES is GCM: a
+  seal draws its own 12-byte nonce and puts it first, the 16-byte tag last,
+  and an open answers the plaintext or FORGED (EBADMSG on the POSIX tiers,
+  None in Python, nil in Lua). No AAD: the native tier's U-mode check passes
+  at most 7 argument registers, which key, AAD, data and answer would pass.
+  There is no ECB.
+- **CTR and CCM are for wire formats that fix the nonce (2026-11-10, #246's
+  mesh item).** Meshtastic encrypts a channel's packets with AES-CTR under a
+  counter block made of the packet id and the sender, and a direct message
+  with AES-CCM (a 13-byte nonce, an 8-byte tag) under the SHA-256 of an
+  X25519 secret; an app speaking it must take the nonce the protocol
+  gives. So `aes_ctr(key, data)` takes the 16-byte initial counter block
+  first in `data` (the block counts as one big-endian 128-bit number, NIST
+  SP 800-38A) and is its own inverse, and `aes_ccm_seal(key, data, tag)` /
+  `aes_ccm_open(key, sealed, tag)` take the 13-byte nonce first, no AAD, a
+  tag of 4 to 16 bytes, even: the nonce rides in the data for the same 7
+  registers. Keeping a nonce unique under a key is the caller's, as the
+  protocol it speaks says. X25519 clamps the
   secret itself, takes an empty peer for the base point (the public key)
   and refuses a peer of small order. Every answer is written into the
   caller's buffer and answers its length; one too small is FULL (ERANGE), a

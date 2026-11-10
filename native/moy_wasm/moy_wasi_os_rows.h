@@ -10,6 +10,9 @@
 #define MOY_WASI_OS_ROWS_H
 
 #define MOY_WASI_OS_ROWS(X) \
+    X(aes_ccm_open, "(*~*~i*~)i") \
+    X(aes_ccm_seal, "(*~*~i*~)i") \
+    X(aes_ctr, "(*~*~*~)i") \
     X(aes_gcm_open, "(*~*~*~)i") \
     X(aes_gcm_seal, "(*~*~*~)i") \
     X(after, "(i)i") \
@@ -75,6 +78,9 @@
 // caller's task, no VM's queue, which a host whose module runs on the VM's
 // own task can serve in place (native/moy_wasm_web/moy_wasi_web.h).
 #define MOY_WASI_OS_HERE(X) \
+    X(aes_ccm_open) \
+    X(aes_ccm_seal) \
+    X(aes_ctr) \
     X(aes_gcm_open) \
     X(aes_gcm_seal) \
     X(after) \
@@ -430,6 +436,27 @@ static int32_t w_os_status_panel(wasm_exec_env_t e, int32_t item, const char *ro
 static int32_t w_os_status_remove(wasm_exec_env_t e, int32_t item) {
     const os_arg_t a[1] = { OS_I(item) };
     return os_role(e, MOY_T_MOYBYTE_STATUS_REMOVE, OS_HERE, a, 1, NULL, 0);
+}
+
+static int32_t w_os_aes_ctr(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
+                            const uint8_t *data, uint32_t data_n, uint8_t *text,
+                            uint32_t text_cap) {
+    const os_arg_t a[2] = { OS_O((const char *)key, key_n), OS_O((const char *)data, data_n) };
+    return os_role(e, MOY_T_MOYBYTE_AES_CTR, OS_SEQ, a, 2, text, text_cap);
+}
+
+static int32_t w_os_aes_ccm_seal(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
+                                 const uint8_t *data, uint32_t data_n, int32_t tag,
+                                 uint8_t *sealed, uint32_t sealed_cap) {
+    const os_arg_t a[3] = { OS_O((const char *)key, key_n), OS_O((const char *)data, data_n), OS_I(tag) };
+    return os_role(e, MOY_T_MOYBYTE_AES_CCM_SEAL, OS_SEQ, a, 3, sealed, sealed_cap);
+}
+
+static int32_t w_os_aes_ccm_open(wasm_exec_env_t e, const uint8_t *key, uint32_t key_n,
+                                 const uint8_t *sealed, uint32_t sealed_n, int32_t tag,
+                                 uint8_t *plain, uint32_t plain_cap) {
+    const os_arg_t a[3] = { OS_O((const char *)key, key_n), OS_O((const char *)sealed, sealed_n), OS_I(tag) };
+    return os_role(e, MOY_T_MOYBYTE_AES_CCM_OPEN, OS_SEQ, a, 3, plain, plain_cap);
 }
 
 #endif // MOY_WASI_OS_BODIES

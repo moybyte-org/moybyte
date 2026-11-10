@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 108
+#define MOY_APP_WASM_N 111
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -383,6 +383,25 @@ static int32_t w_moybyte_status_remove(void *e, int32_t item) {
     span_t f[1] = { NUM(q_item, item) };
     return run(e, HERE, MOY_T_MOYBYTE_STATUS_REMOVE, f, 1, NULL, 0);
 }
+static int32_t w_moybyte_aes_ctr(void *e, const uint8_t *key, uint32_t key_n, const uint8_t *data,
+                                 uint32_t data_n, uint8_t *text, uint32_t text_cap) {
+    span_t f[2] = { { key, key_n }, { data, data_n } };
+    return run(e, SEQ, MOY_T_MOYBYTE_AES_CTR, f, 2, text, text_cap);
+}
+static int32_t w_moybyte_aes_ccm_seal(void *e, const uint8_t *key, uint32_t key_n,
+                                      const uint8_t *data, uint32_t data_n, int32_t tag,
+                                      uint8_t *sealed, uint32_t sealed_cap) {
+    uint8_t q_tag[4];
+    span_t f[3] = { { key, key_n }, { data, data_n }, NUM(q_tag, tag) };
+    return run(e, SEQ, MOY_T_MOYBYTE_AES_CCM_SEAL, f, 3, sealed, sealed_cap);
+}
+static int32_t w_moybyte_aes_ccm_open(void *e, const uint8_t *key, uint32_t key_n,
+                                      const uint8_t *sealed, uint32_t sealed_n, int32_t tag,
+                                      uint8_t *plain, uint32_t plain_cap) {
+    uint8_t q_tag[4];
+    span_t f[3] = { { key, key_n }, { sealed, sealed_n }, NUM(q_tag, tag) };
+    return run(e, SEQ, MOY_T_MOYBYTE_AES_CCM_OPEN, f, 3, plain, plain_cap);
+}
 
 // The natives, in their import names' order, and the table row each serves.
 static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
@@ -400,6 +419,9 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "files_ready", FN(w_files_ready), "()i", NULL },
     { "files_rename", FN(w_files_rename), "(*~*~*~*~)i", NULL },
     { "files_save", FN(w_files_save), "(*~*~*~*~)i", NULL },
+    { "moybyte_aes_ccm_open", FN(w_moybyte_aes_ccm_open), "(*~*~i*~)i", NULL },
+    { "moybyte_aes_ccm_seal", FN(w_moybyte_aes_ccm_seal), "(*~*~i*~)i", NULL },
+    { "moybyte_aes_ctr", FN(w_moybyte_aes_ctr), "(*~*~*~)i", NULL },
     { "moybyte_aes_gcm_open", FN(w_moybyte_aes_gcm_open), "(*~*~*~)i", NULL },
     { "moybyte_aes_gcm_seal", FN(w_moybyte_aes_gcm_seal), "(*~*~*~)i", NULL },
     { "moybyte_after", FN(w_moybyte_after), "(i)i", NULL },
@@ -499,7 +521,8 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_CLIPBOARD_KIND, MOY_T_CLIPBOARD_PUT_TEXT, MOY_T_CLIPBOARD_SEQ, MOY_T_CLIPBOARD_TEXT,
     MOY_T_FILES_COUNT, MOY_T_FILES_DELETE, MOY_T_FILES_DUPLICATE, MOY_T_FILES_LIST,
     MOY_T_FILES_LOAD, MOY_T_FILES_NEW_NAME, MOY_T_FILES_READABLE, MOY_T_FILES_READY,
-    MOY_T_FILES_RENAME, MOY_T_FILES_SAVE, MOY_T_MOYBYTE_AES_GCM_OPEN,
+    MOY_T_FILES_RENAME, MOY_T_FILES_SAVE, MOY_T_MOYBYTE_AES_CCM_OPEN,
+    MOY_T_MOYBYTE_AES_CCM_SEAL, MOY_T_MOYBYTE_AES_CTR, MOY_T_MOYBYTE_AES_GCM_OPEN,
     MOY_T_MOYBYTE_AES_GCM_SEAL, MOY_T_MOYBYTE_AFTER, MOY_T_MOYBYTE_AT, MOY_T_MOYBYTE_AWARD,
     MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_GET,
     MOY_T_MOYBYTE_DEV_OPEN, MOY_T_MOYBYTE_DEV_READ, MOY_T_MOYBYTE_DEV_SET,

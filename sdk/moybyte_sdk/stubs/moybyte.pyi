@@ -105,3 +105,12 @@ def ed25519_sign(*args: Any, **kwargs: Any) -> Any:
 
 def ed25519_verify(*args: Any, **kwargs: Any) -> Any:
     """moybyte.ed25519_verify(pub: bytes, msg: bytes, sig: bytes): the row moybyte.ed25519_verify"""
+
+def aes_ctr(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.aes_ctr(key: bytes, data: bytes): the row moybyte.aes_ctr"""
+
+def aes_ccm_seal(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.aes_ccm_seal(key: bytes, data: bytes, tag: int): the row moybyte.aes_ccm_seal"""
+
+def aes_ccm_open(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.aes_ccm_open(key: bytes, sealed: bytes, tag: int): the row moybyte.aes_ccm_open"""

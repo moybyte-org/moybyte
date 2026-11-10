@@ -249,6 +249,7 @@ def _scalar(v):
 # The crypto rows' C (native/moy_net/moy_crypto.h), its codes and sizes.
 _C_BAD, _C_FULL, _C_FORGED, _C_POINT, _C_ABSENT, _C_NOMEM = -1, -2, -3, -4, -5, -6
 _C_HASH, _C_SEAL_OVER, _C_KEY25519, _C_SIG25519, _C_RANDOM_MAX = 32, 28, 32, 64, 4096
+_C_BLOCK, _C_CCM_NONCE = 16, 13
 _SPAN = [c.c_void_p, c.c_size_t]
 _CRYPTO_SIGS = (
     ("moy_crypto_random", [c.c_int32, c.c_void_p, c.c_size_t]),
@@ -256,6 +257,9 @@ _CRYPTO_SIGS = (
     ("moy_crypto_hmac_sha256", _SPAN * 3),
     ("moy_crypto_aes_gcm_seal", _SPAN * 3),
     ("moy_crypto_aes_gcm_open", _SPAN * 3),
+    ("moy_crypto_aes_ctr", _SPAN * 3),
+    ("moy_crypto_aes_ccm_seal", _SPAN * 2 + [c.c_int32] + _SPAN),
+    ("moy_crypto_aes_ccm_open", _SPAN * 2 + [c.c_int32] + _SPAN),
     ("moy_crypto_x25519", _SPAN * 3),
     ("moy_crypto_ed25519_public", _SPAN * 2),
     ("moy_crypto_ed25519_sign", _SPAN * 3),
@@ -325,6 +329,28 @@ def _crypto(lib):
         buf = c.create_string_buffer(max(cap, 1))
         return answer(buf, lib.moy_crypto_aes_gcm_open(*a, buf, cap))
 
+    def aes_ctr(key, data):
+        a = spans(key, data)
+        cap = max(a[3] - _C_BLOCK, 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_ctr(*a, buf, cap))
+
+    def ccm_tag(tag):
+        tag = int(tag)
+        return tag if 0 < tag <= _C_BLOCK else -1
+
+    def aes_ccm_seal(key, data, tag):
+        a, tag = spans(key, data), ccm_tag(tag)
+        cap = max(a[3] - _C_CCM_NONCE, 0) + max(tag, 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_ccm_seal(*a, tag, buf, cap))
+
+    def aes_ccm_open(key, sealed, tag):
+        a, tag = spans(key, sealed), ccm_tag(tag)
+        cap = max(a[3] - _C_CCM_NONCE - max(tag, 0), 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_ccm_open(*a, tag, buf, cap))
+
     def x25519(secret, peer=None):
         a = spans(secret) + (spans(peer) if peer is not None else [None, 0])
         buf = c.create_string_buffer(_C_KEY25519)
@@ -345,7 +371,8 @@ def _crypto(lib):
         return bool(r)
 
     return dict(random=random, sha256=sha256, hmac_sha256=hmac_sha256,
-                aes_gcm_seal=aes_gcm_seal, aes_gcm_open=aes_gcm_open, x25519=x25519,
+                aes_gcm_seal=aes_gcm_seal, aes_gcm_open=aes_gcm_open, aes_ctr=aes_ctr,
+                aes_ccm_seal=aes_ccm_seal, aes_ccm_open=aes_ccm_open, x25519=x25519,
                 ed25519_public=ed25519_public, ed25519_sign=ed25519_sign,
                 ed25519_verify=ed25519_verify)
 

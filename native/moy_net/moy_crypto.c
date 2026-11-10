@@ -5,6 +5,8 @@
 #include "moy_crypto.h"
 #include "moy_seal.h"
 
+#include "mbedtls/aes.h"
+#include "mbedtls/ccm.h"
 #include "mbedtls/ecp.h"
 #include "mbedtls/gcm.h"
 #include "mbedtls/md.h"
@@ -126,6 +128,103 @@ int32_t moy_crypto_aes_gcm_open(const void *key, size_t kn, const void *p, size_
         return MOY_CRYPTO_ENOMEM;
     }
     return (int32_t)m;
+}
+
+int32_t moy_crypto_aes_ctr(const void *key, size_t kn, const void *p, size_t n,
+                           void *out, size_t cap) {
+    if (key == NULL || !good_key(kn) || p == NULL || n < MOY_CRYPTO_BLOCK
+        || n > (size_t)INT32_MAX) {
+        return MOY_CRYPTO_EBAD;
+    }
+    size_t m = n - MOY_CRYPTO_BLOCK;
+    if (cap < m || (m && out == NULL)) {
+        return MOY_CRYPTO_EFULL;
+    }
+    if (m == 0) {
+        return 0;
+    }
+    uint8_t counter[MOY_CRYPTO_BLOCK], stream[MOY_CRYPTO_BLOCK];
+    size_t off = 0;
+    memcpy(counter, p, sizeof counter);
+    mbedtls_aes_context a;
+    mbedtls_aes_init(&a);
+    int rc = mbedtls_aes_setkey_enc(&a, key, (unsigned)(kn * 8u));
+    if (rc == 0) {
+        rc = mbedtls_aes_crypt_ctr(&a, m, &off, counter, stream,
+                                   (const uint8_t *)p + MOY_CRYPTO_BLOCK, out);
+    }
+    mbedtls_aes_free(&a);
+    moy_seal_wipe(stream, sizeof stream);
+    if (rc != 0) {
+        moy_seal_wipe(out, m);
+        return MOY_CRYPTO_ENOMEM;
+    }
+    return (int32_t)m;
+}
+
+static int good_tag(int32_t tag) {
+    return tag >= 4 && tag <= 16 && (tag & 1) == 0;
+}
+
+int32_t moy_crypto_aes_ccm_seal(const void *key, size_t kn, const void *p, size_t n,
+                                int32_t tag, void *out, size_t cap) {
+    if (key == NULL || !good_key(kn) || !good_tag(tag) || p == NULL
+        || n < MOY_CRYPTO_CCM_NONCE || n - MOY_CRYPTO_CCM_NONCE > MOY_CRYPTO_CCM_MAX) {
+        return MOY_CRYPTO_EBAD;
+    }
+    size_t m = n - MOY_CRYPTO_CCM_NONCE, need = m + (size_t)tag;
+    if (cap < need || out == NULL) {
+        return MOY_CRYPTO_EFULL;
+    }
+    const uint8_t *s = p;
+    uint8_t *o = out;
+    mbedtls_ccm_context c;
+    mbedtls_ccm_init(&c);
+    int rc = mbedtls_ccm_setkey(&c, MBEDTLS_CIPHER_ID_AES, key, (unsigned)(kn * 8u));
+    if (rc == 0) {
+        rc = mbedtls_ccm_encrypt_and_tag(&c, m, s, MOY_CRYPTO_CCM_NONCE, NULL, 0,
+                                         s + MOY_CRYPTO_CCM_NONCE, o, o + m, (size_t)tag);
+    }
+    mbedtls_ccm_free(&c);
+    if (rc != 0) {
+        moy_seal_wipe(o, need);
+        return MOY_CRYPTO_ENOMEM;
+    }
+    return (int32_t)need;
+}
+
+int32_t moy_crypto_aes_ccm_open(const void *key, size_t kn, const void *p, size_t n,
+                                int32_t tag, void *out, size_t cap) {
+    if (key == NULL || !good_key(kn) || !good_tag(tag) || (p == NULL && n)
+        || n > (size_t)INT32_MAX) {
+        return MOY_CRYPTO_EBAD;
+    }
+    if (n < MOY_CRYPTO_CCM_NONCE + (size_t)tag
+        || n - MOY_CRYPTO_CCM_NONCE - (size_t)tag > MOY_CRYPTO_CCM_MAX) {
+        return MOY_CRYPTO_EFORGED;
+    }
+    const uint8_t *s = p;
+    size_t m = n - MOY_CRYPTO_CCM_NONCE - (size_t)tag;
+    if (cap < m || (m && out == NULL)) {
+        return MOY_CRYPTO_EFULL;
+    }
+    uint8_t scratch[1];
+    mbedtls_ccm_context c;
+    mbedtls_ccm_init(&c);
+    int rc = mbedtls_ccm_setkey(&c, MBEDTLS_CIPHER_ID_AES, key, (unsigned)(kn * 8u));
+    if (rc == 0) {
+        rc = mbedtls_ccm_auth_decrypt(&c, m, s, MOY_CRYPTO_CCM_NONCE, NULL, 0,
+                                      s + MOY_CRYPTO_CCM_NONCE, m ? (uint8_t *)out : scratch,
+                                      s + MOY_CRYPTO_CCM_NONCE + m, (size_t)tag);
+    }
+    mbedtls_ccm_free(&c);
+    if (rc != 0 && m) {
+        moy_seal_wipe(out, m);
+    }
+    if (rc == MBEDTLS_ERR_CCM_AUTH_FAILED) {
+        return MOY_CRYPTO_EFORGED;
+    }
+    return rc != 0 ? MOY_CRYPTO_ENOMEM : (int32_t)m;
 }
 
 #if defined(MBEDTLS_ECP_DP_CURVE25519_ENABLED)

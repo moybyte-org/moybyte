@@ -794,6 +794,9 @@ The calls a program reaches on more than one tier, each by its name there
 | `moy_present` | none |  |  | `moybyte.os.present` | `moy_present` |
 | `moy_ui_pull` | none |  |  | `moybyte.os.ui_pull` | `moy_ui_pull` |
 | `moy_ui_font_pull` | none |  |  | `moybyte.os.ui_font_pull` | `moy_ui_font_pull` |
+| `moybyte.aes_ctr` | none | `moybyte.aes_ctr` | `moybyte.aes_ctr` | `moybyte_aes_ctr`, `moybyte.os.aes_ctr` | `moy_aes_ctr` |
+| `moybyte.aes_ccm_seal` | none | `moybyte.aes_ccm_seal` | `moybyte.aes_ccm_seal` | `moybyte_aes_ccm_seal`, `moybyte.os.aes_ccm_seal` | `moy_aes_ccm_seal` |
+| `moybyte.aes_ccm_open` | none | `moybyte.aes_ccm_open` | `moybyte.aes_ccm_open` | `moybyte_aes_ccm_open`, `moybyte.os.aes_ccm_open` | `moy_aes_ccm_open` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first
@@ -822,15 +825,24 @@ in C; WASI preview1 in wasm; Lua's `io` and `os`.
 
 **Crypto** (`docs/os_2026-11/between_apps.md` §5): `moybyte.random(n)`,
 `sha256(data)`, `hmac_sha256(key, data)`, `aes_gcm_seal(key, plain)`,
-`aes_gcm_open(key, sealed)`, `x25519(secret, peer)`, `ed25519_public(secret)`,
-`ed25519_sign(secret, msg)` and `ed25519_verify(pub, msg, sig)` are every
+`aes_gcm_open(key, sealed)`, `aes_ctr(key, data)`, `aes_ccm_seal(key, data,
+tag)`, `aes_ccm_open(key, sealed, tag)`, `x25519(secret, peer)`,
+`ed25519_public(secret)`, `ed25519_sign(secret, msg)` and
+`ed25519_verify(pub, msg, sig)` are every
 program's, with no permission, one C body on every tier
 (`native/moy_net/moy_crypto.h`; Ed25519 is the vendored Monocypher's).
 Bytes in and bytes out (a Python `str` is its UTF-8). A seal is a fresh
 nonce, the ciphertext and the tag, 28 bytes longer than what it sealed, under
 a 16-, 24- or 32-byte key; an open that does not authenticate answers `None`
 in Python, `nil` in Lua, FORGED (10) negated to a compiled app and `EBADMSG`
-to a native or WASI program. `x25519` with no peer answers the secret's
+to a native or WASI program. `aes_ctr` and `aes_ccm_*` are for wire formats
+that fix their own nonce (Meshtastic's): `aes_ctr`'s `data` is the 16-byte
+initial counter block, then the bytes, and it answers the bytes XORed with
+the key stream (the same call decrypts); `aes_ccm_seal`'s `data` is the
+13-byte nonce, then the plaintext, and it answers the ciphertext and a
+`tag`-byte tag (4 to 16, even; no associated data); `aes_ccm_open` takes the
+nonce, the ciphertext and the tag and opens as a GCM open does. The nonce is
+the caller's to keep unique. `x25519` with no peer answers the secret's
 public key, with one the shared secret. Ed25519 is RFC 8032's: a 32-byte
 secret (the seed) gives a 32-byte public key and deterministic 64-byte
 signatures; `ed25519_verify` answers 1 or 0 (`True` or `False` in Python,

@@ -112,3 +112,9 @@ function moybyte.ed25519_public(...) end
 function moybyte.ed25519_sign(...) end
 --- moybyte.ed25519_verify(pub: bytes, msg: bytes, sig: bytes): the row moybyte.ed25519_verify
 function moybyte.ed25519_verify(...) end
+--- moybyte.aes_ctr(key: bytes, data: bytes): the row moybyte.aes_ctr
+function moybyte.aes_ctr(...) end
+--- moybyte.aes_ccm_seal(key: bytes, data: bytes, tag: int): the row moybyte.aes_ccm_seal
+function moybyte.aes_ccm_seal(...) end
+--- moybyte.aes_ccm_open(key: bytes, sealed: bytes, tag: int): the row moybyte.aes_ccm_open
+function moybyte.aes_ccm_open(...) end

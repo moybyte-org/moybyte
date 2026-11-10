@@ -79,6 +79,10 @@ moybyte.after(1, function()
     local sk = moybyte.sha256("seed")
     local sig = moybyte.ed25519_sign(sk, "msg")
     print("ed25519 " .. #sig .. " " .. tostring(moybyte.ed25519_verify(moybyte.ed25519_public(sk), "msg", sig)))
+    local nonce = string.rep("n", 13)
+    local sealed = moybyte.aes_ccm_seal(sk, nonce .. "mesh", 8)
+    print("ccm " .. #sealed .. " " .. moybyte.aes_ccm_open(sk, nonce .. sealed, 8)
+          .. " " .. moybyte.aes_ctr(sk, string.rep("c", 16) .. moybyte.aes_ctr(sk, string.rep("c", 16) .. "back")))
     moybyte.exit(0)
 end)
 """
@@ -340,7 +344,8 @@ def test_a_lua_service_holds_the_crypto_rows_beside_its_own_names(desk):
     since = L.next()
     pid = S.SCHED.start(_cart(CRYPTO), ws=ws)
     _frames(drv, 40)
-    assert _texts(since, pid)[1:4] == ["sha256 ba7816bf", "random 8 function", "ed25519 64 true"]
+    assert _texts(since, pid)[1:5] == ["sha256 ba7816bf", "random 8 function", "ed25519 64 true",
+                                       "ccm 12 mesh back"]
 
 
 def test_a_service_runs_on_through_an_app_switch(desk):

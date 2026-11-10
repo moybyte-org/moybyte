@@ -6,7 +6,9 @@
 // section 7.1's Ed25519 TEST 3 (signed, checked, then a changed message and
 // another key answering 0); then a buffer too short (ERANGE), a length
 // refused (EINVAL), a changed byte (EBADMSG) and a peer key of small order
-// (EINVAL). tests/fixtures/wasm/wasi_crypto.moy
+// (EINVAL); RFC 3686's AES-CTR vector 2 and Meshtastic's PKI packet (AES-CCM,
+// an 8-byte tag) opened, sealed again and changed (EBADMSG), a tag length
+// refused (EINVAL). tests/fixtures/wasm/wasi_crypto.moy
 // builds this same file for the WASI tier; tests/crypto_vectors.py holds the
 // lines both print.
 #include <errno.h>
@@ -97,5 +99,25 @@ int main(void) {
     said("ed25519.verify.sig", moy_ed25519_verify(pk, 32, msg, 2, sig, 63), NULL);
     said("ed25519.sign.short", moy_ed25519_sign(sk, 32, msg, 2, buf, 63), NULL);
     said("ed25519.secret", moy_ed25519_public(sk, 31, pk, sizeof pk), NULL);
+    static uint8_t block[32], mesh[64];
+    unhex("ae6852f8121067cc4bf7a5765577f39e", key);
+    unhex("00000030000000000000000000000001", block);
+    memcpy(block + 16, "Single block msg", 16);
+    said("aes_ctr", moy_aes_ctr(key, 16, block, 32, buf, sizeof buf), buf);
+    said("aes_ctr.block", moy_aes_ctr(key, 16, block, 15, buf, sizeof buf), NULL);
+    said("aes_ctr.short", moy_aes_ctr(key, 16, block, 32, buf, 15), NULL);
+    unhex("777b1545c9d6f9a258ee0fd71153c78a50c6bb56c1f4fff2ea0ef28094de0186", key);
+    size_t mn = unhex("62d6b213036a792b2909000000"
+                      "40df24abfcc30a17a3d9046726099e796a1c", mesh);
+    r = moy_aes_ccm_open(key, 32, mesh, mn, 8, plain, sizeof plain);
+    said("aes_ccm_open", r, plain);
+    memcpy(sealed, mesh, 13);
+    memcpy(sealed + 13, plain, 10);
+    r = moy_aes_ccm_seal(key, 32, sealed, 23, 8, buf, sizeof buf);
+    said("aes_ccm_seal", r, buf);
+    said("aes_ccm_seal.same", r == 18 && memcmp(buf, mesh + 13, 18) == 0, NULL);
+    mesh[20] ^= 1;
+    said("aes_ccm_open.changed", moy_aes_ccm_open(key, 32, mesh, mn, 8, plain, sizeof plain), NULL);
+    said("aes_ccm.tag", moy_aes_ccm_seal(key, 32, sealed, 23, 5, buf, sizeof buf), NULL);
     return 0;
 }

@@ -7,8 +7,9 @@
 // case 3 opened and changed, a seal opened, RFC 7748 section 6.1's keys, a
 // peer key of small order, RFC 8032 section 7.1's Ed25519 TEST 3 (its
 // public key and signature, checked, then a changed message answering 0, a
-// short signature BAD, a short buffer FULL). tests/test_crypto_rows.py reads
-// the lines.
+// short signature BAD, a short buffer FULL), RFC 3686's AES-CTR vector 2,
+// Meshtastic's PKI packet (AES-CCM, an 8-byte tag) opened and sealed again, a
+// tag length refused BAD. tests/test_crypto_rows.py reads the lines.
 
 #include <stdint.h>
 
@@ -35,6 +36,12 @@ int32_t moybyte_ed25519_sign(const void *secret, uint32_t sn, const void *msg, u
                              uint8_t *sig, uint32_t cap) APP(moybyte_ed25519_sign);
 int32_t moybyte_ed25519_verify(const void *pub, uint32_t pn, const void *msg, uint32_t n,
                                const void *sig, uint32_t gn) APP(moybyte_ed25519_verify);
+int32_t moybyte_aes_ctr(const void *key, uint32_t kn, const void *data, uint32_t n,
+                        uint8_t *text, uint32_t cap) APP(moybyte_aes_ctr);
+int32_t moybyte_aes_ccm_seal(const void *key, uint32_t kn, const void *data, uint32_t n,
+                             int32_t tag, uint8_t *sealed, uint32_t cap) APP(moybyte_aes_ccm_seal);
+int32_t moybyte_aes_ccm_open(const void *key, uint32_t kn, const void *sealed, uint32_t n,
+                             int32_t tag, uint8_t *plain, uint32_t cap) APP(moybyte_aes_ccm_open);
 int32_t moybyte_log(int32_t level, const char *text, uint32_t text_n) APP(moybyte_log);
 void cls(int32_t c) MOY(cls);
 
@@ -134,6 +141,26 @@ EXPORT(_init) void init(void) {
     said("ed25519.verify.changed", moybyte_ed25519_verify(b, 32, msg, 1, sig, 64), 0);
     said("ed25519.verify.sig", moybyte_ed25519_verify(b, 32, msg, 2, sig, 63), 0);
     said("ed25519.sign.short", moybyte_ed25519_sign(a, 32, msg, 2, buf, 63), 0);
+    kn = unhex("ae6852f8121067cc4bf7a5765577f39e", key);
+    n = unhex("00000030000000000000000000000001"
+              "53696e676c6520626c6f636b206d7367", sealed);
+    said("aes_ctr", moybyte_aes_ctr(key, kn, sealed, n, buf, sizeof buf), buf);
+    said("aes_ctr.block", moybyte_aes_ctr(key, kn, sealed, 15, buf, sizeof buf), 0);
+    kn = unhex("777b1545c9d6f9a258ee0fd71153c78a50c6bb56c1f4fff2ea0ef28094de0186", key);
+    n = unhex("62d6b213036a792b2909000000"
+              "40df24abfcc30a17a3d9046726099e796a1c", sealed);
+    said("aes_ccm_open", moybyte_aes_ccm_open(key, kn, sealed, n, 8, buf, sizeof buf), buf);
+    for (int i = 0; i < 10; i++) {
+        sealed[13 + i] = buf[i];
+    }
+    said("aes_ccm.tag", moybyte_aes_ccm_seal(key, kn, sealed, 23, 5, buf, sizeof buf), 0);
+    said("aes_ccm_seal.short", moybyte_aes_ccm_seal(key, kn, sealed, 23, 8, buf, 17), 0);
+    said("aes_ccm_seal", moybyte_aes_ccm_seal(key, kn, sealed, 23, 8, buf, sizeof buf), buf);
+    for (int i = 0; i < 18; i++) {
+        sealed[13 + i] = buf[i];
+    }
+    sealed[20] ^= 1;
+    said("aes_ccm_open.changed", moybyte_aes_ccm_open(key, kn, sealed, 31, 8, buf, sizeof buf), 0);
 }
 
 EXPORT(_update) void update(float dt) {

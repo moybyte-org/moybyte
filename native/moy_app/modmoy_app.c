@@ -2120,8 +2120,8 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_kinds_obj, mod_kinds);
 // -- the crypto rows (native/moy_net/moy_crypto.h) ------------------------------------
 //
 // A Python program's moybyte.random, sha256, hmac_sha256, aes_gcm_seal,
-// aes_gcm_open, x25519, ed25519_public, ed25519_sign and ed25519_verify
-// (runtime/system/moybyte.py): the C body every tier reaches, over a str's
+// aes_gcm_open, aes_ctr, aes_ccm_seal, aes_ccm_open, x25519, ed25519_public,
+// ed25519_sign and ed25519_verify (runtime/system/moybyte.py): the C body every tier reaches, over a str's
 // UTF-8 or any buffer, answered as bytes (ed25519_verify as a bool).
 
 static const uint8_t *bytes_of(mp_obj_t o, size_t *n) {
@@ -2203,6 +2203,43 @@ static mp_obj_t mod_aes_gcm_open(mp_obj_t key, mp_obj_t sealed) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_aes_gcm_open_obj, mod_aes_gcm_open);
 
+static mp_obj_t mod_aes_ctr(mp_obj_t key, mp_obj_t data) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(data, &n);
+    vstr_t v;
+    vstr_init_len(&v, n > MOY_CRYPTO_BLOCK ? n - MOY_CRYPTO_BLOCK : 0u);
+    return crypto_answer(&v, moy_crypto_aes_ctr(k, kn, p, n, v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_aes_ctr_obj, mod_aes_ctr);
+
+// A tag the body refuses sizes nothing: it answers BAD before writing.
+static size_t ccm_tag(mp_int_t tag) {
+    return tag > 0 && tag <= MOY_CRYPTO_BLOCK ? (size_t)tag : 0u;
+}
+
+static mp_obj_t mod_aes_ccm_seal(mp_obj_t key, mp_obj_t data, mp_obj_t tag_in) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(data, &n);
+    mp_int_t tag = mp_obj_get_int(tag_in);
+    vstr_t v;
+    vstr_init_len(&v, (n > MOY_CRYPTO_CCM_NONCE ? n - MOY_CRYPTO_CCM_NONCE : 0u) + ccm_tag(tag));
+    return crypto_answer(&v, moy_crypto_aes_ccm_seal(k, kn, p, n, ccm_tag(tag) ? (int32_t)tag : -1,
+                                                     v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_aes_ccm_seal_obj, mod_aes_ccm_seal);
+
+static mp_obj_t mod_aes_ccm_open(mp_obj_t key, mp_obj_t sealed, mp_obj_t tag_in) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(sealed, &n);
+    mp_int_t tag = mp_obj_get_int(tag_in);
+    size_t over = MOY_CRYPTO_CCM_NONCE + ccm_tag(tag);
+    vstr_t v;
+    vstr_init_len(&v, n > over ? n - over : 0u);
+    return crypto_answer(&v, moy_crypto_aes_ccm_open(k, kn, p, n, ccm_tag(tag) ? (int32_t)tag : -1,
+                                                     v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_aes_ccm_open_obj, mod_aes_ccm_open);
+
 static mp_obj_t mod_x25519(size_t n_args, const mp_obj_t *args) {
     size_t sn, pn = 0;
     const uint8_t *sec = bytes_of(args[0], &sn), *peer = NULL;
@@ -2280,6 +2317,9 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_hmac_sha256), MP_ROM_PTR(&mod_hmac_sha256_obj) },
     { MP_ROM_QSTR(MP_QSTR_aes_gcm_seal), MP_ROM_PTR(&mod_aes_gcm_seal_obj) },
     { MP_ROM_QSTR(MP_QSTR_aes_gcm_open), MP_ROM_PTR(&mod_aes_gcm_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_ctr), MP_ROM_PTR(&mod_aes_ctr_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_ccm_seal), MP_ROM_PTR(&mod_aes_ccm_seal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_ccm_open), MP_ROM_PTR(&mod_aes_ccm_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_x25519), MP_ROM_PTR(&mod_x25519_obj) },
     { MP_ROM_QSTR(MP_QSTR_ed25519_public), MP_ROM_PTR(&mod_ed25519_public_obj) },
     { MP_ROM_QSTR(MP_QSTR_ed25519_sign), MP_ROM_PTR(&mod_ed25519_sign_obj) },

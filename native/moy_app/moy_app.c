@@ -1804,7 +1804,8 @@ static int no_args(int row) {
         case MOY_ROW_MOYBYTE_HMAC_SHA256: case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
         case MOY_ROW_MOYBYTE_AES_GCM_OPEN: case MOY_ROW_MOYBYTE_X25519:
         case MOY_ROW_MOYBYTE_ED25519_PUBLIC: case MOY_ROW_MOYBYTE_ED25519_SIGN:
-        case MOY_ROW_MOYBYTE_ED25519_VERIFY:
+        case MOY_ROW_MOYBYTE_ED25519_VERIFY: case MOY_ROW_MOYBYTE_AES_CTR:
+        case MOY_ROW_MOYBYTE_AES_CCM_SEAL: case MOY_ROW_MOYBYTE_AES_CCM_OPEN:
             return 0;
         default:
             return 1;
@@ -2545,6 +2546,7 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
         case MOY_ROW_MOYBYTE_HMAC_SHA256:
         case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
         case MOY_ROW_MOYBYTE_AES_GCM_OPEN:
+        case MOY_ROW_MOYBYTE_AES_CTR:
         case MOY_ROW_MOYBYTE_X25519:
             d = arg_field(f, &dn);
             e = arg_field(f, &en);
@@ -2557,7 +2559,21 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
                               ? moy_crypto_aes_gcm_seal(d, dn, e, en, ans, cap)
                               : row == MOY_ROW_MOYBYTE_AES_GCM_OPEN
                               ? moy_crypto_aes_gcm_open(d, dn, e, en, ans, cap)
+                              : row == MOY_ROW_MOYBYTE_AES_CTR
+                              ? moy_crypto_aes_ctr(d, dn, e, en, ans, cap)
                               : moy_crypto_x25519(d, dn, e, en, ans, cap));
+        case MOY_ROW_MOYBYTE_AES_CCM_SEAL:
+        case MOY_ROW_MOYBYTE_AES_CCM_OPEN: {
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            int32_t tag = arg_int(f);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(row == MOY_ROW_MOYBYTE_AES_CCM_SEAL
+                              ? moy_crypto_aes_ccm_seal(d, dn, e, en, tag, ans, cap)
+                              : moy_crypto_aes_ccm_open(d, dn, e, en, tag, ans, cap));
+        }
         case MOY_ROW_MOYBYTE_ED25519_PUBLIC:
             d = arg_field(f, &dn);
             if (f->bad || f->at != f->n) {

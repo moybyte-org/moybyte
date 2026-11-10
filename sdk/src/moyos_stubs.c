@@ -1236,3 +1236,33 @@ uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap)
     return ((moy_os_fn_moy_ui_font_pull *)__moy_os->fn[120])(gen, font, buf, cap);
 }
 #endif
+
+#if MOY_OS_ROW(121)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap);
+MOY_OS_USED(121);
+int32_t moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap)
+{
+    return ((moy_os_fn_moy_aes_ctr *)__moy_os->fn[121])(key, key_len, data, data_len, text, text_cap);
+}
+#endif
+
+#if MOY_OS_ROW(122)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap);
+MOY_OS_USED(122);
+int32_t moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap)
+{
+    return ((moy_os_fn_moy_aes_ccm_seal *)__moy_os->fn[122])(key, key_len, data, data_len, tag, sealed, sealed_cap);
+}
+#endif
+
+#if MOY_OS_ROW(123)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap);
+MOY_OS_USED(123);
+int32_t moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap)
+{
+    return ((moy_os_fn_moy_aes_ccm_open *)__moy_os->fn[123])(key, key_len, sealed, sealed_len, tag, plain, plain_cap);
+}
+#endif

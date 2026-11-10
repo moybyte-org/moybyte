@@ -29,9 +29,9 @@ The role table is data, and every verb has one of four servers:
   glass, the lease table, the engine's sizing, the user-files layer). Each verb
   is its own C function taking the grant; there is no by-name dispatcher.
   The `moybyte` role's C rows, the crypto (`random`, `sha256`, `hmac_sha256`,
-  `aes_gcm_seal`, `aes_gcm_open`, `x25519`, `ed25519_public`, `ed25519_sign`,
-  `ed25519_verify`), keep no state at all: the door
-  runs `native/moy_net/moy_crypto.h`'s body in place (`how` "seq"); every
+  `aes_gcm_seal`, `aes_gcm_open`, `aes_ctr`, `aes_ccm_seal`, `aes_ccm_open`,
+  `x25519`, `ed25519_public`, `ed25519_sign`, `ed25519_verify`), keep no state
+  at all: the door runs `native/moy_net/moy_crypto.h`'s body in place (`how` "seq"); every
   Lua state holds them in its `moybyte` table, calling the body directly, a
   service with no grant too (`moy_app_lua_open_crypto`); and the module's
   functions of the same names are Python's (`runtime/system/moybyte.py`).

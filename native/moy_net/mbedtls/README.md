@@ -1,7 +1,8 @@
 # mbedTLS, the sign-in's and the apps' crypto subset (VENDORED)
 
-A copy of mbedTLS 3.6.4 as ESP-IDF v5.5.1 carries it: the AES, GCM, SHA-256,
-HMAC, HMAC_DRBG, bignum, P-256 and Curve25519 sources the browser sign-in
+A copy of mbedTLS 3.6.4 as ESP-IDF v5.5.1 carries it: the AES (with its CTR
+mode), GCM, CCM, SHA-256, HMAC, HMAC_DRBG, bignum, P-256 and Curve25519
+sources the browser sign-in
 (`native/moy_net/moy_seal.h`) and the apps' crypto rows
 (`native/moy_net/moy_crypto.h`) call, under upstream's paths. The host's
 library (`runtime/host/host_native.py`) and the browser's wasm

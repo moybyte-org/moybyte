@@ -124,3 +124,6 @@
 118 moy_present | int moy_present(const void *px, size_t n)
 119 moy_ui_pull | uint32_t moy_ui_pull(uint32_t have, void *buf, size_t cap)
 120 moy_ui_font_pull | uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap)
+121 moy_aes_ctr | int32_t moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap)
+122 moy_aes_ccm_seal | int32_t moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap)
+123 moy_aes_ccm_open | int32_t moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap)

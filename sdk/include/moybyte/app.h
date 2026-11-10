@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MOYBYTE_APP_VERSION 121
+#define MOYBYTE_APP_VERSION 124
 
 #define MOYBYTE_APP_IMPORT(name) __attribute__((import_module("moybyte.app"), import_name(#name)))
 
@@ -318,6 +318,17 @@ int32_t moybyte_status_panel(int32_t item, const char *rows,
                              uint32_t rows_n) MOYBYTE_APP_IMPORT(moybyte_status_panel);
 // moybyte.status_remove
 int32_t moybyte_status_remove(int32_t item) MOYBYTE_APP_IMPORT(moybyte_status_remove);
+// moybyte.aes_ctr
+int32_t moybyte_aes_ctr(const void *key, uint32_t key_n, const void *data, uint32_t data_n,
+                        void *text, uint32_t text_cap) MOYBYTE_APP_IMPORT(moybyte_aes_ctr);
+// moybyte.aes_ccm_seal
+int32_t moybyte_aes_ccm_seal(const void *key, uint32_t key_n, const void *data, uint32_t data_n,
+                             int32_t tag, void *sealed,
+                             uint32_t sealed_cap) MOYBYTE_APP_IMPORT(moybyte_aes_ccm_seal);
+// moybyte.aes_ccm_open
+int32_t moybyte_aes_ccm_open(const void *key, uint32_t key_n, const void *sealed,
+                             uint32_t sealed_n, int32_t tag, void *plain,
+                             uint32_t plain_cap) MOYBYTE_APP_IMPORT(moybyte_aes_ccm_open);
 
 #ifdef __cplusplus
 }

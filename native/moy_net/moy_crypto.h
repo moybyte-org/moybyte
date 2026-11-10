@@ -1,10 +1,10 @@
 // moy_crypto: the crypto an app calls (native/os_calls.json's rows
-// moybyte.random, sha256, hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519,
-// ed25519_public, ed25519_sign and ed25519_verify, docs/app_api_v1.md section
-// 10), one body every tier reaches: a compiled
-// app's and a native or WASI program's through the app ABI's door
-// (native/moy_app), a Lua run's through its role names, a Python program's
-// through the module moy_app. A board compiles it against the ESP-IDF's
+// moybyte.random, sha256, hmac_sha256, aes_gcm_seal, aes_gcm_open, aes_ctr,
+// aes_ccm_seal, aes_ccm_open, x25519, ed25519_public, ed25519_sign and
+// ed25519_verify, docs/app_api_v1.md section 10), one body every tier
+// reaches: a compiled app's and a native or WASI program's through the app
+// ABI's door (native/moy_app), a Lua run's through its role names, a Python
+// program's through the module moy_app. A board compiles it against the ESP-IDF's
 // mbedTLS (AES and SHA in hardware), the host's library and the browser's
 // wasm against the vendored copy of the same release (mbedtls/README.md),
 // beside moy_seal.c, whose random source it shares. Ed25519 is the vendored
@@ -26,6 +26,20 @@
 //   aes_gcm_open what aes_gcm_seal made, back: the plaintext, or FORGED
 //                with the caller's buffer wiped where the tag does not check
 //                (the wrong key, or a byte changed).
+//   aes_ctr      AES-CTR (NIST SP 800-38A section 6.5) under a 16-, 24- or
+//                32-byte key over bytes that start with the 16-byte initial
+//                counter block: the rest, XORed with the key stream, the
+//                block counting up as one big-endian 128-bit number. Its own
+//                inverse; the counter block is the caller's to keep unique.
+//   aes_ccm_seal AES-CCM (NIST SP 800-38C, RFC 3610) under a 16-, 24- or
+//                32-byte key over bytes that start with the 13-byte nonce
+//                (L = 2: a plaintext of at most CCM_MAX bytes), with no
+//                associated data: the ciphertext, then the tag of `tag`
+//                bytes (4, 6, ... 16). The nonce is the caller's to keep
+//                unique under one key.
+//   aes_ccm_open the nonce, the ciphertext and the tag back to the
+//                plaintext, or FORGED with the caller's buffer wiped where
+//                the tag does not check.
 //   x25519       RFC 7748's X25519 of a 32-byte secret (clamped here) and
 //                a 32-byte peer key, or the base point for an empty peer
 //                (the secret's public key): 32 bytes. A peer key of small
@@ -53,6 +67,9 @@
 #define MOY_CRYPTO_KEY25519 32
 #define MOY_CRYPTO_SIG25519 64
 #define MOY_CRYPTO_RANDOM_MAX 4096
+#define MOY_CRYPTO_BLOCK 16
+#define MOY_CRYPTO_CCM_NONCE 13
+#define MOY_CRYPTO_CCM_MAX 65535
 
 enum {
     MOY_CRYPTO_EBAD = -1,       // a length the call refuses: a key, a secret, a count
@@ -71,6 +88,12 @@ int32_t moy_crypto_aes_gcm_seal(const void *key, size_t kn, const void *p, size_
                                 void *out, size_t cap);
 int32_t moy_crypto_aes_gcm_open(const void *key, size_t kn, const void *p, size_t n,
                                 void *out, size_t cap);
+int32_t moy_crypto_aes_ctr(const void *key, size_t kn, const void *p, size_t n,
+                           void *out, size_t cap);
+int32_t moy_crypto_aes_ccm_seal(const void *key, size_t kn, const void *p, size_t n,
+                                int32_t tag, void *out, size_t cap);
+int32_t moy_crypto_aes_ccm_open(const void *key, size_t kn, const void *p, size_t n,
+                                int32_t tag, void *out, size_t cap);
 int32_t moy_crypto_x25519(const void *secret, size_t sn, const void *peer, size_t pn,
                           void *out, size_t cap);
 int32_t moy_crypto_ed25519_public(const void *secret, size_t sn, void *out, size_t cap);

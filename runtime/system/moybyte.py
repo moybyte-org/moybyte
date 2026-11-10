@@ -8,7 +8,7 @@
 #   send                     a message to an app (open_with, share, pick)
 #   service_start            this app's own service (service_stop, service_running)
 #   log                      a line of the OS log
-#   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_seal, aes_gcm_open, x25519, ed25519_*)
+#   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_*, aes_ctr, aes_ccm_*, x25519, ed25519_*)
 #   __getattr__              the device APIs (http, ble, camera, ...) by name
 """moybyte: what a Python app asks the OS for that has no standard name
 (docs/os_2026-11/processes.md sections 1 and 3). The clock is the standard
@@ -159,6 +159,16 @@ it refuses (a key, a secret, a count) raises ValueError.
   aes_gcm_open(key, sealed)
                      what aes_gcm_seal made, back; None where it does not
                      open (the wrong key, or a byte changed)
+  aes_ctr(key, data) AES-CTR under a 16-, 24- or 32-byte key: `data` is the
+                     16-byte initial counter block, then the bytes; the
+                     bytes XORed with the key stream (the same call decrypts)
+  aes_ccm_seal(key, data, tag)
+                     AES-CCM under a 16-, 24- or 32-byte key, no associated
+                     data: `data` is the 13-byte nonce, then the plaintext;
+                     the ciphertext and the `tag`-byte tag (4, 6, ... 16)
+  aes_ccm_open(key, sealed, tag)
+                     the nonce, ciphertext and tag back to the plaintext;
+                     None where it does not open
   x25519(secret, peer=None)
                      RFC 7748's X25519 of a 32-byte secret and the peer's
                      32-byte public key: the shared secret; with no peer the
@@ -1003,6 +1013,18 @@ def aes_gcm_seal(key, plain):
 
 def aes_gcm_open(key, sealed):
     return _app().aes_gcm_open(key, sealed)
+
+
+def aes_ctr(key, data):
+    return _app().aes_ctr(key, data)
+
+
+def aes_ccm_seal(key, data, tag):
+    return _app().aes_ccm_seal(key, data, tag)
+
+
+def aes_ccm_open(key, sealed, tag):
+    return _app().aes_ccm_open(key, sealed, tag)
 
 
 def x25519(secret, peer=None):

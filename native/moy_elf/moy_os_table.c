@@ -392,6 +392,32 @@ int32_t moy_os_moy_status_remove(int32_t item) {
     return moy_os_call(199u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.status_remove
 }
 
+int32_t moy_os_moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap) {
+    const moy_os_arg_t a[2] = {
+        { key, key_len, 0, MOY_OS_ARG_BYTES },
+        { data, data_len, 0, MOY_OS_ARG_BYTES },
+    };
+    return moy_os_call(200u, MOY_OS_SEQ, a, 2, text, text_cap);   // moybyte.aes_ctr
+}
+
+int32_t moy_os_moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap) {
+    const moy_os_arg_t a[3] = {
+        { key, key_len, 0, MOY_OS_ARG_BYTES },
+        { data, data_len, 0, MOY_OS_ARG_BYTES },
+        { NULL, 0u, tag, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(201u, MOY_OS_SEQ, a, 3, sealed, sealed_cap);   // moybyte.aes_ccm_seal
+}
+
+int32_t moy_os_moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap) {
+    const moy_os_arg_t a[3] = {
+        { key, key_len, 0, MOY_OS_ARG_BYTES },
+        { sealed, sealed_len, 0, MOY_OS_ARG_BYTES },
+        { NULL, 0u, tag, MOY_OS_ARG_INT },
+    };
+    return moy_os_call(202u, MOY_OS_SEQ, a, 3, plain, plain_cap);   // moybyte.aes_ccm_open
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -536,6 +562,9 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_present,
         (void *)moy_os_moy_ui_pull,
         (void *)moy_os_moy_ui_font_pull,
+        (void *)moy_os_moy_aes_ctr,
+        (void *)moy_os_moy_aes_ccm_seal,
+        (void *)moy_os_moy_aes_ccm_open,
     },
 };
 
@@ -661,4 +690,7 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_present",
     "moy_ui_pull",
     "moy_ui_font_pull",
+    "moy_aes_ctr",
+    "moy_aes_ccm_seal",
+    "moy_aes_ccm_open",
 };

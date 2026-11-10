@@ -857,6 +857,44 @@ static int l_moybyte_aes_gcm_open(lua_State *L) {
     return crypto_answer(L, moy_crypto_aes_gcm_open(k, kn, p, n, o, cap));
 }
 
+// moybyte.aes_ctr(key, data): the bytes after data's 16-byte counter block, XORed
+// with AES-CTR's key stream.
+static int l_moybyte_aes_ctr(lua_State *L) {
+    size_t kn, n;
+    const char *k = crypto_arg(L, 1, &kn, 0), *p = crypto_arg(L, 2, &n, 0);
+    size_t cap = n > MOY_CRYPTO_BLOCK ? n - MOY_CRYPTO_BLOCK : 0u;
+    void *o = crypto_out(L, cap);
+    return crypto_answer(L, moy_crypto_aes_ctr(k, kn, p, n, o, cap));
+}
+
+// A tag the body refuses sizes nothing: it answers BAD before writing.
+static int32_t ccm_tag(lua_State *L, int i) {
+    lua_Integer t = luaL_checkinteger(L, i);
+    return t > 0 && t <= MOY_CRYPTO_BLOCK ? (int32_t)t : -1;
+}
+
+// moybyte.aes_ccm_seal(key, data, tag): data's 13-byte nonce, then the
+// plaintext, sealed: the ciphertext and the tag.
+static int l_moybyte_aes_ccm_seal(lua_State *L) {
+    size_t kn, n;
+    const char *k = crypto_arg(L, 1, &kn, 0), *p = crypto_arg(L, 2, &n, 0);
+    int32_t tag = ccm_tag(L, 3);
+    size_t cap = (n > MOY_CRYPTO_CCM_NONCE ? n - MOY_CRYPTO_CCM_NONCE : 0u) + (tag > 0 ? (size_t)tag : 0u);
+    void *o = crypto_out(L, cap);
+    return crypto_answer(L, moy_crypto_aes_ccm_seal(k, kn, p, n, tag, o, cap));
+}
+
+// moybyte.aes_ccm_open(key, sealed, tag): the plaintext, or nil where it does not open.
+static int l_moybyte_aes_ccm_open(lua_State *L) {
+    size_t kn, n;
+    const char *k = crypto_arg(L, 1, &kn, 0), *p = crypto_arg(L, 2, &n, 0);
+    int32_t tag = ccm_tag(L, 3);
+    size_t over = MOY_CRYPTO_CCM_NONCE + (tag > 0 ? (size_t)tag : 0u);
+    size_t cap = n > over ? n - over : 0u;
+    void *o = crypto_out(L, cap);
+    return crypto_answer(L, moy_crypto_aes_ccm_open(k, kn, p, n, tag, o, cap));
+}
+
 // moybyte.x25519(secret, peer): the shared secret, or with no peer the secret's public key.
 static int l_moybyte_x25519(lua_State *L) {
     size_t sn, pn;
@@ -898,7 +936,9 @@ int moy_app_lua_open_crypto(lua_State *L) {
     static const luaL_Reg fns[] = {
         { "random", l_moybyte_random }, { "sha256", l_moybyte_sha256 },
         { "hmac_sha256", l_moybyte_hmac_sha256 }, { "aes_gcm_seal", l_moybyte_aes_gcm_seal },
-        { "aes_gcm_open", l_moybyte_aes_gcm_open }, { "x25519", l_moybyte_x25519 },
+        { "aes_gcm_open", l_moybyte_aes_gcm_open }, { "aes_ctr", l_moybyte_aes_ctr },
+        { "aes_ccm_seal", l_moybyte_aes_ccm_seal }, { "aes_ccm_open", l_moybyte_aes_ccm_open },
+        { "x25519", l_moybyte_x25519 },
         { "ed25519_public", l_moybyte_ed25519_public },
         { "ed25519_sign", l_moybyte_ed25519_sign },
         { "ed25519_verify", l_moybyte_ed25519_verify },

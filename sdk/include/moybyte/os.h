@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 121
+#define MOY_OS_VERSION 124
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -727,6 +727,39 @@ static inline uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, 
     return (uint32_t)r;
 }
 
+int32_t __moy_os_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap)
+    __attribute__((import_module("moybyte.os"), import_name("aes_ctr")));
+static inline int32_t moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap) {
+    int32_t r = __moy_os_aes_ctr(key, key_len, data, data_len, text, text_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int32_t)r;
+}
+
+int32_t __moy_os_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap)
+    __attribute__((import_module("moybyte.os"), import_name("aes_ccm_seal")));
+static inline int32_t moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap) {
+    int32_t r = __moy_os_aes_ccm_seal(key, key_len, data, data_len, tag, sealed, sealed_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int32_t)r;
+}
+
+int32_t __moy_os_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap)
+    __attribute__((import_module("moybyte.os"), import_name("aes_ccm_open")));
+static inline int32_t moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap) {
+    int32_t r = __moy_os_aes_ccm_open(key, key_len, sealed, sealed_len, tag, plain, plain_cap);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int32_t)r;
+}
+
 #else
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
@@ -805,6 +838,9 @@ int32_t moy_status_show(const char *icon, int32_t state, int32_t order);   // mo
 int32_t moy_status_state(int32_t item, int32_t state);   // moybyte.status_state
 int32_t moy_status_panel(int32_t item, const char *rows);   // moybyte.status_panel
 int32_t moy_status_remove(int32_t item);   // moybyte.status_remove
+int32_t moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap);   // moybyte.aes_ctr
+int32_t moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap);   // moybyte.aes_ccm_seal
+int32_t moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap);   // moybyte.aes_ccm_open
 
 #endif // __wasm__
 

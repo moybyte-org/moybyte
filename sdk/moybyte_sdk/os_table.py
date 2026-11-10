@@ -3,7 +3,7 @@
 reaches on each tier, with the permissions each answers under (any one of
 them), from native/os_calls.json."""
 
-VERSION = 121
+VERSION = 124
 SPEC_NAMES = ('print',)
 
 # a wasm app's "moybyte.app" imports
@@ -22,6 +22,9 @@ WASM_APP = {
     'files_ready': ('files',),
     'files_rename': ('files',),
     'files_save': ('files',),
+    'moybyte_aes_ccm_open': (),
+    'moybyte_aes_ccm_seal': (),
+    'moybyte_aes_ctr': (),
     'moybyte_aes_gcm_open': (),
     'moybyte_aes_gcm_seal': (),
     'moybyte_after': (),
@@ -120,6 +123,9 @@ WASM_APP = {
 
 # a WASI program's "moybyte.os" imports
 WASM_OS = {
+    'aes_ccm_open': (),
+    'aes_ccm_seal': (),
+    'aes_ctr': (),
     'aes_gcm_open': (),
     'aes_gcm_seal': (),
     'after': (),
@@ -302,6 +308,9 @@ ELF = {
     118: ('moy_present', ()),
     119: ('moy_ui_pull', ()),
     120: ('moy_ui_font_pull', ()),
+    121: ('moy_aes_ctr', ()),
+    122: ('moy_aes_ccm_seal', ()),
+    123: ('moy_aes_ccm_open', ()),
 }
 
 # the ordinals of the retired rows, which no module built now calls
@@ -325,6 +334,9 @@ PY = {
     'files.rename': ('files',),
     'files.save': ('files',),
     'files.save_text': ('files',),
+    'moybyte.aes_ccm_open': (),
+    'moybyte.aes_ccm_seal': (),
+    'moybyte.aes_ctr': (),
     'moybyte.aes_gcm_open': (),
     'moybyte.aes_gcm_seal': (),
     'moybyte.after': (),
@@ -390,6 +402,9 @@ LUA = {
     'files.rename': ('files',),
     'files.save': ('files',),
     'files.save_text': ('files',),
+    'moybyte.aes_ccm_open': (),
+    'moybyte.aes_ccm_seal': (),
+    'moybyte.aes_ctr': (),
     'moybyte.aes_gcm_open': (),
     'moybyte.aes_gcm_seal': (),
     'moybyte.after': (),

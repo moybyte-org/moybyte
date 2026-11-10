@@ -59,7 +59,8 @@ enum {
     MOY_ROW_MOYBYTE_DEV_XFER, MOY_ROW_MOYBYTE_DEV_SET, MOY_ROW_MOYBYTE_DEV_GET,
     MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
     MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_MOYBYTE_STATUS_SHOW, MOY_ROW_MOYBYTE_STATUS_STATE,
-    MOY_ROW_MOYBYTE_STATUS_REMOVE, MOY_ROW_N,
+    MOY_ROW_MOYBYTE_STATUS_REMOVE, MOY_ROW_MOYBYTE_AES_CTR, MOY_ROW_MOYBYTE_AES_CCM_SEAL,
+    MOY_ROW_MOYBYTE_AES_CCM_OPEN, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
     "damage.all", "damage.again", "surface.canvas", "surface.size", "surface.font_scale", \
@@ -89,7 +90,8 @@ enum {
     "moybyte.dev_close", "moybyte.dev_read", "moybyte.dev_write", "moybyte.dev_xfer", \
     "moybyte.dev_set", "moybyte.dev_get", "moybyte.ed25519_public", "moybyte.ed25519_sign", \
     "moybyte.ed25519_verify", "moybyte.status_show", "moybyte.status_state", \
-    "moybyte.status_remove", \
+    "moybyte.status_remove", "moybyte.aes_ctr", "moybyte.aes_ccm_seal", \
+    "moybyte.aes_ccm_open", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -145,9 +147,10 @@ enum {
     MOY_T_MOYBYTE_DEV_WRITE, MOY_T_MOYBYTE_DEV_XFER, MOY_T_MOYBYTE_DEV_SET,
     MOY_T_MOYBYTE_DEV_GET, MOY_T_MOYBYTE_ED25519_PUBLIC, MOY_T_MOYBYTE_ED25519_SIGN,
     MOY_T_MOYBYTE_ED25519_VERIFY, MOY_T_MOYBYTE_STATUS_SHOW, MOY_T_MOYBYTE_STATUS_STATE,
-    MOY_T_MOYBYTE_STATUS_PANEL, MOY_T_MOYBYTE_STATUS_REMOVE,
+    MOY_T_MOYBYTE_STATUS_PANEL, MOY_T_MOYBYTE_STATUS_REMOVE, MOY_T_MOYBYTE_AES_CTR,
+    MOY_T_MOYBYTE_AES_CCM_SEAL, MOY_T_MOYBYTE_AES_CCM_OPEN,
 };
-#define MOY_APP_TABLE_N 200u
+#define MOY_APP_TABLE_N 203u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -351,6 +354,9 @@ enum {
     { "moybyte.status_state", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_STATUS_STATE }, \
     { "moybyte.status_panel", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.status_remove", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_STATUS_REMOVE }, \
+    { "moybyte.aes_ctr", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AES_CTR }, \
+    { "moybyte.aes_ccm_seal", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AES_CCM_SEAL }, \
+    { "moybyte.aes_ccm_open", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AES_CCM_OPEN }, \
 }
 
 // The permission each role is granted by: a role absent here is never

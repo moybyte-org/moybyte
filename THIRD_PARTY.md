@@ -300,7 +300,7 @@ modules; nothing in any firmware image does. A module is a build product
 
 The sign-in (`native/moy_net/moy_seal.h`) runs AES-GCM, SHA-256, HMAC, HKDF,
 PBKDF2, HMAC_DRBG and SPAKE2+ over P-256; the apps' crypto rows (`native/moy_net/moy_crypto.h`)
-AES-GCM, SHA-256, HMAC and X25519 over Curve25519. A board links the copy ESP-IDF builds (its hardware AES
+AES-GCM, AES-CTR, AES-CCM, SHA-256, HMAC and X25519 over Curve25519. A board links the copy ESP-IDF builds (its hardware AES
 and SHA); the host's library and the browser's wasm compile this one, the same
 release, under the config `native/moy_net/moy_seal_mbedtls.h`.
 

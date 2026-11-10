@@ -72,7 +72,9 @@ _ROWS = ("damage.all", "damage.again",
          "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify",
          # the bar's status items (native/moy_kernel/moy_status.h), counted
          # by nothing here
-         "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove")
+         "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove",
+         # the crypto rows appended after them
+         "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",
@@ -158,6 +160,48 @@ def aes_gcm_open(key, sealed):
         return None
     try:
         return g.decrypt(sealed[:12], sealed[12:], None)
+    except InvalidTag:
+        return None
+
+
+def _aes_key(key):
+    key = _bytes(key)
+    if len(key) not in (16, 24, 32):
+        raise ValueError("a length the call refuses")
+    return key
+
+
+def aes_ctr(key, data):
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    key, data = _aes_key(key), _bytes(data)
+    if len(data) < 16:
+        raise ValueError("a length the call refuses")
+    e = Cipher(algorithms.AES(key), modes.CTR(data[:16])).encryptor()
+    return e.update(data[16:]) + e.finalize()
+
+
+def _ccm(key, tag):
+    from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+    key = _aes_key(key)
+    if tag not in (4, 6, 8, 10, 12, 14, 16):
+        raise ValueError("a length the call refuses")
+    return AESCCM(key, tag_length=tag)
+
+
+def aes_ccm_seal(key, data, tag):
+    c, data = _ccm(key, tag), _bytes(data)
+    if len(data) < 13:
+        raise ValueError("a length the call refuses")
+    return c.encrypt(data[:13], data[13:], None)
+
+
+def aes_ccm_open(key, sealed, tag):
+    from cryptography.exceptions import InvalidTag
+    c, sealed = _ccm(key, tag), _bytes(sealed)
+    if len(sealed) < 13 + tag:
+        return None
+    try:
+        return c.decrypt(sealed[:13], sealed[13:], None)
     except InvalidTag:
         return None
 

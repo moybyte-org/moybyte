@@ -395,6 +395,26 @@ def run(sp, ap, say, mi, root):
             ap.ed25519_verify(pk, m + b"!", sig), ap.ed25519_verify(ap.ed25519_public(alice), m, sig),
             ap.ed25519_sign(bytearray(sk), m) == sig)
     say("ed25519 empty", x(ap.ed25519_sign(alice, b"")), x(ap.ed25519_sign(alice, "moybyte")))
+    # AES-CTR: NIST SP 800-38A F.5.1 and RFC 3686's vector 2; AES-CCM: NIST
+    # CAVP's DVPT128 (13-byte nonce, no associated data, a 4-byte tag) and
+    # Meshtastic's PKI packet (an 8-byte tag), opened and changed
+    k38a = h("2b7e151628aed2a6abf7158809cf4f3c")
+    blk = h("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff")
+    p38a = h("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51")
+    say("ctr", x(ap.aes_ctr(k38a, blk + p38a)), x(ap.aes_ctr(k38a, blk)),
+        x(ap.aes_ctr(h("ae6852f8121067cc4bf7a5765577f39e"),
+                     h("00000030000000000000000000000001") + b"Single block msg")),
+        ap.aes_ctr(k38a, blk + ap.aes_ctr(k38a, blk + p38a)) == p38a)
+    kd, nd = h("197afb02ffbd8f699dacae87094d5243"), h("5a8aa485c316e9403aff859fbb")
+    pd = h("a16a2e741f1cd9717285b6d882c1fc53655e9773761ad697")
+    sd = ap.aes_ccm_seal(kd, nd + pd, 4)
+    say("ccm", x(sd), ap.aes_ccm_open(kd, nd + sd, 4) == pd, x(ap.aes_ccm_seal(kd, nd, 16)),
+        ap.aes_ccm_open(kd, nd + sd[:-1] + b"\x00", 4), ap.aes_ccm_open(kd, nd + sd, 6),
+        ap.aes_ccm_open(kd, nd, 4))
+    km = h("777b1545c9d6f9a258ee0fd71153c78a50c6bb56c1f4fff2ea0ef28094de0186")
+    nm = h("62d6b213036a792b2909000000")
+    say("ccm mesh", x(ap.aes_ccm_open(km, nm + h("40df24abfcc30a17a3d9046726099e796a1c"), 8)),
+        x(ap.aes_ccm_seal(km, nm + h("08011204746573744800"), 8)))
     r = ap.random(16)
     say("random", len(r), len(ap.random(0)), len(ap.random(4096)), r != ap.random(16))
     for what, fn, args in (("random 4097", ap.random, (4097,)), ("random -1", ap.random, (-1,)),
@@ -406,7 +426,13 @@ def run(sp, ap, say, mi, root):
                            ("ed25519 secret", ap.ed25519_public, (b"x",)),
                            ("ed25519 sign secret", ap.ed25519_sign, (bytes(33), b"")),
                            ("ed25519 pub", ap.ed25519_verify, (bytes(31), b"", bytes(64))),
-                           ("ed25519 sig", ap.ed25519_verify, (alice, b"", bytes(63)))):
+                           ("ed25519 sig", ap.ed25519_verify, (alice, b"", bytes(63))),
+                           ("ctr key", ap.aes_ctr, (b"short", blk)),
+                           ("ctr block", ap.aes_ctr, (k38a, blk[:15])),
+                           ("ccm nonce", ap.aes_ccm_seal, (kd, nd[:12], 4)),
+                           ("ccm tag", ap.aes_ccm_seal, (kd, nd, 5)),
+                           ("ccm tag big", ap.aes_ccm_open, (kd, nd + sd, 18)),
+                           ("ccm key", ap.aes_ccm_open, (b"short", nd + sd, 4))):
         try:
             fn(*args)
             say(what, "answered")
