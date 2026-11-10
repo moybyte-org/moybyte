@@ -53,6 +53,9 @@
 //                   how many segments a root's store keeps `rel` as, 0 for
 //                   none (moy_sync.local_segs: the receiving C's path rule and
 //                   the root's shape)
+//   folder(root id, rel)
+//                   whether a root's store reads folder `rel` back, one a
+//                   sweep walks (moy_sync.local_folder)
 //   song(rel)       a files store's song (moy_sync.local_song)
 //   plain(name)     a name an install may write (cart_index.plain_name)
 //   record, stage   the names of Get Carts' record and of the folder an
@@ -419,7 +422,7 @@ export async function readAll(store) {
         }
         return out;
     }
-    await walk(store.carts, "", out, 0, store.root.songs ? rules.song : null);
+    await walk(store.root.id, store.carts, "", out, store.root.songs ? rules.song : null);
     return out;
 }
 
@@ -429,22 +432,20 @@ function asValue(bytes) {
     try { return strict.decode(bytes); } catch (e) { return bytes; }
 }
 
-async function walk(dir, prefix, out, depth, leave) {
-    if (depth > 6) return;
+// Each file of root `rootId`'s store under `dir` the VM's rules keep: a
+// folder `rules.folder` reads, a file `rules.path` keeps (the journal comes
+// BACK too), none `leave` names.
+async function walk(rootId, dir, prefix, out, leave) {
     const entries = [];
     for await (const [name, handle] of dir.entries()) entries.push([name, handle]);
     entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     for (const [name, handle] of entries) {
-        if (skipLocal(name)) continue;      // the journal comes BACK too
         const rel = prefix ? prefix + "/" + name : name;
         if (handle.kind === "directory") {
-            await walk(handle, rel, out, depth + 1, leave);
+            if (rules.folder(rootId, rel)) await walk(rootId, handle, rel, out, leave);
             continue;
         }
-        if (leave && leave(rel)) continue;
-        // Top-level files are not cart files; the sweep never ships them and
-        // the VFS must not be seeded with them either.
-        if (rel.indexOf("/") < 0) continue;
+        if ((leave && leave(rel)) || !partsIn(rootId, rel)) continue;
         out[rel] = asValue(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
     }
 }

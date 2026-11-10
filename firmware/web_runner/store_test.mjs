@@ -109,6 +109,31 @@ for (const sync of [true, false]) {
        JSON.stringify(Object.keys(all)));
     ok("a top-level file is never stored (" + label + ")", !("system.json" in all));
 
+    // What readAll reads back is the VM's rule too (rules.path, rules.folder):
+    // a file beside the cart folders, or below the deepest folder a sweep
+    // walks (moy_sync.WALK_DEPTH), stays in OPFS and out of the VFS.
+    {
+        const put = async (rel) => {
+            const parts = rel.split("/");
+            let d = s.carts;
+            for (const seg of parts.slice(0, -1)) d = await d.getDirectoryHandle(seg, { create: true });
+            // the fake's own bytes, as its seed writes them: OPFS put there by hand
+            (await d.getFileHandle(parts[parts.length - 1], { create: true })).data =
+                new TextEncoder().encode("x");
+        };
+        const deepest = "a.moy/1/2/3/4/5/6/f.txt", below = "a.moy/1/2/3/4/5/6/7/f.txt";
+        await put("loose.json");
+        await put(deepest);
+        await put(below);
+        const got = await store.readAll(s);
+        ok("readAll leaves a top-level file out (" + label + ")", !("loose.json" in got));
+        ok("readAll reads the deepest folder a sweep walks (" + label + ")",
+           got[deepest] === "x", JSON.stringify(Object.keys(got)));
+        ok("...and nothing below it (" + label + ")", !(below in got));
+        await s.carts.removeEntry("loose.json");
+        await (await s.carts.getDirectoryHandle("a.moy")).removeEntry("1", { recursive: true });
+    }
+
     // The op vocabulary, in one batch: an overwrite, a chunked file, a file
     // delete and a whole-cart delete.
     const r = await store.applyOps(s, [

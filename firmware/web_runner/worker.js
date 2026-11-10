@@ -783,6 +783,7 @@ function bindStore() {
         roots,
         skip: (name, history) => native.skip(name, history),
         path: (id, rel, dc) => sync.local_segs(id, rel, dc),
+        folder: (id, rel) => sync.local_folder(id, rel),
         song: (rel) => sync.local_song(rel),
         plain: (name) => ci.plain_name(name),
         record: installRecord,

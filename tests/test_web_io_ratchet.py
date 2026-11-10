@@ -16,6 +16,9 @@ holds it there:
     has no rename: `commitFile`, `commitInstall`) and the browser's API.
   * no regular expression but the channel's word: a channel is a page's
     (site/build.py), and no console has one.
+  * `NUMBERS` -- every number the store holds, and no test of where a slash
+    falls: how deep a store is read and which of its files are the kid's
+    are the VM's rules (`folder`, `path`), never a count of segments here.
 
 And worker.js may call only exported names on the store, names no file kind
 by its suffix (what a dropped file is, is web_boot.drop_kind's call), no
@@ -68,6 +71,13 @@ WORDS = {
 }
 
 CHANNEL_WORD = r"/^[a-z][a-z0-9-]{0,31}$/"
+
+NUMBERS = {
+    "0", "1",
+    "0x8000",                       # base64's chunk of bytes
+    "1048576", "10",                # a size in MB, one decimal below ten
+    "403", "404", "405", "501",     # the mode probe's HTTP statuses
+}
 
 # The rules that moved into the VM; none may come back under its old name.
 MOVED = (
@@ -126,6 +136,16 @@ def test_the_store_names_no_file_and_matches_no_pattern():
     assert "`" not in bare, "no template strings in the store"
     regexes = re.findall(r"(?<![\w)\]\s])\s*(/(?![/*])(?:[^/\\\n]|\\.)+/[gimsuy]*)", bare)
     assert [r.strip() for r in regexes] == [CHANNEL_WORD], regexes
+
+
+def test_the_store_counts_no_segments():
+    bare = re.sub(r'"(?:[^"\\]|\\.)*"', '""', _code(_store())).replace(CHANNEL_WORD, "")
+    nums = set(re.findall(r"(?<![\w$.])(0x[0-9a-fA-F]+|\d+(?:\.\d+)?)(?![\w$])", bare))
+    assert nums - NUMBERS == set(), (
+        "a new number in moy_store.mjs: a depth or a count of segments is the "
+        "VM's rule (moy_sync.local_folder, local_segs)", nums - NUMBERS)
+    assert ".indexOf(\"\")" not in bare, (
+        "a test of where a slash falls in a path is the VM's rule (rules.path)")
 
 
 def test_no_moved_rule_comes_back():

@@ -161,6 +161,7 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   | `plainName`, `writtenName` | `cart_index.plain_name`; the apps root's shape in `moy_sync_apply.c` | none | the VM's: `plain_name`, `local_segs("apps", ..)` |
   | `isSong`, `MUSIC_DIR` | `moy_webhost.c`'s song rule and music folder | none | the C's: `moy_sync_song` and `MOY_SYNC_MUSIC` (the webhost's too), by `moy_sync.local_song` and `MUSIC` |
   | `RECORD_NAME`, `STAGE_DIR`, `WRITTEN_ROOT` | `cart_index.RECORD_NAME`/`STAGE_DIR`, the apps root | none | the VM's: `bind`'s `record`/`stage` from `cart_index`, the registry's apps root |
+  | `walk`'s depth (`depth > 6`) and "a top-level file is no cart file" | `StoreWatcher._walk_dir`'s depth; `local_segs`' shape | the page read files 7 segments deep at most where the sweep ships them 8 deep, so a deepest file went out and never came back | the VM's: `rules.folder` (`moy_sync.local_folder`, `WALK_DEPTH`, the sweep's own) and `rules.path` |
   | `isEmpty` (roots other than carts) | `seed_folders`' `first` | none | the VM's: `moy_sync.seed_store` (`moy_seed.adopt_bundle`) |
   | `probeMode` | the boards' `GET /sync` | none | JavaScript's: it decides what the VFS is seeded from |
 

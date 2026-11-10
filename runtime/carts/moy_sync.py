@@ -625,6 +625,21 @@ def local_segs(root_id, rel, dc=False):
     return n if n >= 2 else 0
 
 
+# The folders below a root's own a sweep walks (StoreWatcher._walk_dir):
+# deeper than this nothing is swept, so no store of record holds a file
+# there and a browser's store reads none back (moy_store.mjs's walk).
+WALK_DEPTH = 6
+
+
+def local_folder(root_id, rel):
+    """Whether the browser's store of record for `root_id` reads folder `rel`
+    (moy_store.mjs's walk): a folder a sweep walks, `WALK_DEPTH` below the
+    root's own at most, whose name the receiving C's path rule takes with
+    the journal kept."""
+    n = sync_path(rel, 1) if root_by_id(root_id) is not None else 0
+    return 0 < n <= WALK_DEPTH + 1
+
+
 def local_song(rel):
     """Whether `rel` of a files store is a song of its music folder, which
     the browser's store keeps out of the VFS (`MUSIC`, moy_sync_song)."""
@@ -1239,7 +1254,7 @@ class StoreWatcher:
                 yield item
 
     def _walk_dir(self, path, prefix, depth):
-        if depth > 6:
+        if depth > WALK_DEPTH:
             return
         for name, isdir in self._sorted_entries(path):
             if self.skip(name):

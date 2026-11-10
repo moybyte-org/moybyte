@@ -121,8 +121,9 @@ export async function loadTree(tree, sync = true) {
 
 // The rules a worker hands the store from its VM (worker.js, bindStore),
 // answered here by CPython's copy of the same modules over the same C
-// (moy_sync.roots_json and local_segs/local_song, cart_index.plain_name and
-// its names, moy_pack.pack_skip over the native store's skip): one long-lived
+// (moy_sync.roots_json and local_segs/local_folder/local_song,
+// cart_index.plain_name and its names, moy_pack.pack_skip over the native
+// store's skip): one long-lived
 // process the store asks synchronously, as the worker asks its VM, through
 // two FIFOs. Returns what it handed the store.
 const RULES_PY = `
@@ -130,6 +131,7 @@ import json, sys
 sys.path.insert(0, sys.argv[1])
 from runtime import cart_index, moy_pack, moy_sync
 fns = {"skip": moy_pack.pack_skip, "path": moy_sync.local_segs,
+       "folder": moy_sync.local_folder,
        "song": moy_sync.local_song, "plain": cart_index.plain_name}
 asks = open(sys.argv[2])
 out = open(sys.argv[3], "w")
@@ -180,6 +182,7 @@ export async function vmRules(store) {
         roots: first.roots, record: first.record, stage: first.stage,
         skip: (name, history) => call("skip", name, !!history),
         path: (id, rel, dc) => call("path", id, rel, !!dc),
+        folder: (id, rel) => call("folder", id, rel),
         song: (rel) => call("song", rel),
         plain: (name) => call("plain", name),
     };
