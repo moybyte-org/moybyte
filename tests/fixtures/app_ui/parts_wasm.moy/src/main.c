@@ -248,5 +248,12 @@ EXPORT(_draw) void _draw(void) {
         char name[64];
         int32_t n = moybyte_name(name, sizeof(name));
         ui_info(S("Name"), name, n > 0 ? (uint32_t)n : 0, NULL, 0);
+    } else if (page == 13) {
+        static char pasted[8] = "ab";
+        static int32_t pn = 2;
+        over_field(S("paste"), NULL, 0, -1);
+        pn = ui_field(S("Name"), pasted, sizeof(pasted), pn, over_buf, over_n) & 0xffff;
+        ui_focus(S("paste"), NULL, 0);
+        pmem(1, pn, 1);
     }
 }

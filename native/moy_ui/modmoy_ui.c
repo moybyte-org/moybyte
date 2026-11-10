@@ -3642,6 +3642,25 @@ static mp_obj_t ui_api_run_bar_tap(mp_obj_t i) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_bar_tap_obj, ui_api_run_bar_tap);
 
+// api_paste(ctx, text): the console's Paste into the field focused in the
+// frame begun (moy_ui_api_paste); text bytes, UTF-8
+static mp_obj_t ui_api_paste(mp_obj_t ctx, mp_obj_t text) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
+    moy_ui_api_paste(ctx_of(ctx), (const uint8_t *)b.buf, b.len);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_paste_obj, ui_api_paste);
+
+// api_run_paste(text): api_paste into the running cart's own frame begun next
+static mp_obj_t ui_api_run_paste(mp_obj_t text) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
+    moy_ui_run_paste((const uint8_t *)b.buf, b.len);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_paste_obj, ui_api_run_paste);
+
 // api_rule(ctx, cv, look)
 static mp_obj_t ui_api_rule(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
     moy_ui_sink_t s;
@@ -4279,6 +4298,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_run_back), MP_ROM_PTR(&ui_api_run_back_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_bar_lent), MP_ROM_PTR(&ui_api_run_bar_lent_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_bar_tap), MP_ROM_PTR(&ui_api_run_bar_tap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_paste), MP_ROM_PTR(&ui_api_paste_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_paste), MP_ROM_PTR(&ui_api_run_paste_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_rule), MP_ROM_PTR(&ui_api_rule_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text), MP_ROM_PTR(&ui_api_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_mark), MP_ROM_PTR(&ui_api_card_mark_obj) },

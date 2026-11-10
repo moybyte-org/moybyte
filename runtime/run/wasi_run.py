@@ -36,6 +36,8 @@ SENT, SHOWN = 1, 2                      # moy_screen_slot.h's MOY_SCREEN_SLOT_*
 class WasiApp:
     """A WASI app's run in the Player (this module's head)."""
 
+    own_ui = True                       # its toolkit is its own: a paste is its message
+
     def __init__(self, rt, ws, cart, run, lay=None):
         self._rt = rt
         self._ws = ws
@@ -50,6 +52,7 @@ class WasiApp:
             else:
                 _E.open(pid, cart.get("id") or "")
         _E.listen(pid, "frame", True)
+        _E.listen(pid, "paste", True)       # the console's Paste (elf_run.post_paste)
         if _E.screen_open(pid, self._w, self._h, 2) != 0:
             self._release()
             raise RuntimeError("no screen for it")
@@ -98,7 +101,7 @@ class WasiApp:
         read_buttons(self._ws.input, self._mask_of, out)
         self._pressed |= out[1]
         self._shown = False             # the call lets the last frame go
-        fill_words(self._ws, self._words, self._ptr, self._keys, self._lay)
+        fill_words(self._ws, self._words, self._ptr, self._keys, self._lay, self.pid)
         tick = int(dt * 1000)
         self._ms += tick
         got = _E.screen_frame(self.pid, out[0], self._pressed, self._ms,

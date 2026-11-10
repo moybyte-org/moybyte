@@ -463,7 +463,10 @@ if ui.link("LongFast", "", {tag = "Public"}) then open_channel() end
 **A field is a row's value.** In a group, `ui.field(label, text, max)` sits
 at the row's right as wide as its text, cut at `max` bytes; a text wider
 than it shows its tail after an ellipsis. `{disabled = true}` draws it off
-and takes no focus. A confirm opens on the button `o.focus` names:
+and takes no focus. The console's Paste (the desk's Ctrl+V) puts its
+clipboard into the focused field, as many whole characters as `max` leaves
+room for: the app reads no clipboard and needs no `clipboard` permission
+for it, on every tier. A confirm opens on the button `o.focus` names:
 
 ```lua
 ui.group("This node")

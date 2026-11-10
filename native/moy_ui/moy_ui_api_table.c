@@ -901,6 +901,19 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
             }
         }
     }
+    if ((st & MOY_UI_ST_FOCUS) && c->paste_n) {
+        // the console's paste: what the room holds, whole characters
+        size_t n = c->paste_n;
+        c->paste_n = 0;
+        if (n > cap - len) {
+            n = cap - len;
+            while (n > 0 && (c->paste[n] & 0xC0) == 0x80) {
+                n--;
+            }
+        }
+        memcpy(buf + len, c->paste, n);
+        len += n;
+    }
     if ((st & MOY_UI_ST_ACTIVATED) && c->tap_y == INT16_MIN) {
         done = 1;
     }

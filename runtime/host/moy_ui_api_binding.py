@@ -373,6 +373,15 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     def api_run_bar_tap(i):
         lib.moy_ui_run_bar_tap(int(i))
 
+    def api_paste(ctx, text):
+        p, _k = _ctx(ctx)
+        b = bytes(text)
+        lib.moy_ui_api_paste(p, b, len(b))
+
+    def api_run_paste(text):
+        b = bytes(text)
+        lib.moy_ui_run_paste(b, len(b))
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -811,7 +820,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
               api_split_toward, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_note, api_bubble, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_back, api_run_back, api_run_bar_lent,
-              api_run_bar_tap, api_rule,
+              api_run_bar_tap, api_paste, api_run_paste, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,
               api_dup, api_lost):
         setattr(m, f.__name__, f)

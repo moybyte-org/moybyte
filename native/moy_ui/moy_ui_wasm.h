@@ -172,6 +172,12 @@ int moy_ui_run_back(int take);
 int moy_ui_run_bar_lent(const char **title, int16_t *slots, int *n, uint32_t *off,
                         const char **chip);
 void moy_ui_run_bar_tap(int i);
+// The console's Paste fired: the run's frame begun next takes `text`
+// (moy_ui_api_paste), its focused field inserting it. The console's host
+// calls it for a Lua or compiled run; a native or WASI app's linked toolkit
+// for the "paste" message its console posts ahead of the frame carrying
+// Ctrl+V (sdk/src/moyui_link.c).
+void moy_ui_run_paste(const uint8_t *text, size_t n);
 
 // The rows, in the role table's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an

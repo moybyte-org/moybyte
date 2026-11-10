@@ -351,10 +351,15 @@ class AppHost:
         # may be planned (moy_ui_api_host_begin): the canvas makes the moves
         # its plan names, then the pass draws the floor alone. A dialog's
         # rows frame is the host's to allow (`held`).
+        paste = a[5] == KEY_PASTE and not away
         r = _C.api_host_begin(ctx, a, rect, flags, fs, _PF, hp)
         if r & _HB_DUP:
             print("ui: two stops share the id %r; the later is no stop" % _C.api_dup(ctx))
             r = _C.api_host_begin(ctx, a, rect, flags, fs, _PF, hp)
+        if paste:
+            t = paste_text()            # the console's Paste: the focused field takes it
+            if t:
+                _C.api_paste(ctx, t)
         self.shifting = False
         self._dy = 0
         if r & _HB_SHIFT and (not r & _HB_HELD or self._held(hp)):
@@ -965,8 +970,8 @@ try:
         UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
         _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
         _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
-        _WHOLE, _WINDOW,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, rows_drawn, ui_context,
+        _WHOLE, _WINDOW, KEY_PASTE,
+        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
         window_frame, within)
     from ui_scroll import PaintRing
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -974,7 +979,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
         _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
         _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
-        _WHOLE, _WINDOW,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, rows_drawn, ui_context,
+        _WHOLE, _WINDOW, KEY_PASTE,
+        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
         window_frame, within)
     from runtime.ui_scroll import PaintRing

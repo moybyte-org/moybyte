@@ -34,6 +34,8 @@ static int32_t s_dt;
 static uint16_t s_canon[MOY_PALETTE];   // the palette's words as the canvas began
 static int32_t s_swap;
 static int32_t s_lay[3];                // the (w, h, fs) `_layout` last heard
+static uint8_t s_paste[MOY_UI_API_PASTE];  // the console's last "paste" message's text
+static size_t s_paste_n;
 
 int moy_ui_link_open(void) {
     if (s_px != NULL) {
@@ -62,12 +64,36 @@ int moy_ui_link_open(void) {
     return 0;
 }
 
+// The console's "paste" message (moy_os.h's MOY_OS_PASTE): its one string,
+// whose escapes are a quote's and a backslash's alone, kept for the frame
+// that carries its Ctrl+V.
+static void heard(const moy_evq_ev_t *ev, const char *args) {
+    if (ev->from > 1u || strcmp(ev->name, "paste") != 0) {
+        return;
+    }
+    const char *a = strchr(args, '"');
+    size_t n = 0;
+    if (a != NULL) {
+        for (a++; *a != 0 && *a != '"' && n < sizeof s_paste; a++) {
+            if (*a == '\\' && a[1] != 0) {
+                a++;
+            }
+            s_paste[n++] = (uint8_t)*a;
+        }
+    }
+    s_paste_n = n;
+}
+
 int moy_ui_link_frame(moy_frame_t *f) {
     if (s_px == NULL && moy_ui_link_open() != 0) {
         return 0;
     }
-    if (!moy_game_frame(f, NULL)) {
+    if (!moy_game_frame(f, heard)) {
         return 0;
+    }
+    if (f->in[MOY_FRAME_KEY] == 0x16 && s_paste_n > 0) {
+        moy_ui_run_paste(s_paste, s_paste_n);      // Ctrl+V: the console's Paste
+        s_paste_n = 0;
     }
     s_snap[MOYCORE_UI_SNAP_BTN] = (int32_t)f->held;
     s_snap[MOYCORE_UI_SNAP_BTNP] = (int32_t)f->pressed;

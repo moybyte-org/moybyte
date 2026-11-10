@@ -142,6 +142,8 @@ static int close_run(run_t *r, int rc) {
 static moy_ui_ctx_t *s_ctx;
 static uint32_t s_tick, s_serial;
 static int s_live;
+static uint8_t s_paste[MOY_UI_API_PASTE];  // moy_ui_run_paste's, for the frame begun next
+static size_t s_paste_n;
 
 static moy_ui_ctx_t *run_ctx(const void *target) {
     const moy_canvas *c = (const moy_canvas *)target;
@@ -197,9 +199,21 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
             }
         }
         moy_ui_api_begin(s_ctx, in, surf, flags, face_fs(run_face()));
+        if (s_paste_n > 0) {
+            moy_ui_api_paste(s_ctx, s_paste, s_paste_n);
+            s_paste_n = 0;
+        }
         s_tick = tick;
     }
     return s_ctx;
+}
+
+void moy_ui_run_paste(const uint8_t *text, size_t n) {
+    if (n > sizeof s_paste) {
+        n = sizeof s_paste;         // moy_ui_api_paste keeps whole characters
+    }
+    memcpy(s_paste, text, n);
+    s_paste_n = n;
 }
 
 int moy_ui_run_back(int take) {

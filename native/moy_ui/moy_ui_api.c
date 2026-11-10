@@ -1085,6 +1085,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->txt_role = -1;
     c->dlg_pick = -1;
     c->typed = 0;
+    c->paste_n = 0;
     c->pop_prev = c->pop_card;
     c->pop_card.w = 0;
     c->pop_gone = 0;
@@ -3978,6 +3979,31 @@ int moy_ui_api_keys_taken(const moy_ui_ctx_t *c) {
 
 void moy_ui_api_keys_back(moy_ui_ctx_t *c) {
     c->elsewhere = 0;
+}
+
+void moy_ui_api_paste(moy_ui_ctx_t *c, const uint8_t *text, size_t n) {
+    size_t k = 0;
+    for (size_t i = 0; i < n && k < MOY_UI_API_PASTE; i++) {
+        uint8_t b = text[i];
+        if (b == '\n' || b == '\r' || b == '\t') {
+            b = ' ';
+        } else if (b < 32 || b == 127) {
+            continue;
+        }
+        c->paste[k++] = b;
+    }
+    // a last character cut short (the room ran out mid-way) is left out
+    size_t i = k;
+    while (i > 0 && (c->paste[i - 1] & 0xC0) == 0x80) {
+        i--;
+    }
+    if (i > 0 && c->paste[i - 1] >= 0xC0) {
+        size_t need = c->paste[i - 1] >= 0xF0 ? 4 : c->paste[i - 1] >= 0xE0 ? 3 : 2;
+        if (k - (i - 1) < need) {
+            k = i - 1;
+        }
+    }
+    c->paste_n = (uint16_t)k;
 }
 
 int moy_ui_api_edge(const moy_ui_ctx_t *c) {

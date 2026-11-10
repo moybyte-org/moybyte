@@ -12,6 +12,7 @@ import moybyte
 
 HOME = ("Srbija", "Planinari", "Ana Ridge", "Base Camp")
 CHANNELS = ("LongFast", "Planinari", "Base", "Open", "Family")
+PASTED = "ab"
 
 
 def _draw():
@@ -113,3 +114,8 @@ def _draw():
         ui.dialog()
     elif page == 12:
         ui.info("Name", moybyte.name())
+    elif page == 13:
+        global PASTED
+        PASTED, _ = ui.field("Name", PASTED, 8, {"id": "paste"})
+        ui.focus("paste")
+        pmem(1, len(PASTED.encode("utf-8")))

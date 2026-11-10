@@ -36,6 +36,10 @@ P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
  11  a dialog with a stop in its body opening on its Cancel (`o.focus`).
  12  the console's name (`moybyte.name()`, a compiled app's moybyte_name
      row) as an info row's value.
+ 13  a focused field of `max` 8 holding "ab", before and after the
+     console's Paste (Ctrl+V) brings it PASTE: the room takes "čaj" and
+     leaves the cup, whose three bytes would run past it; pmem 1 the
+     field's length in bytes.
 """
 
 import os
@@ -56,6 +60,8 @@ _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
 PAGES = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
+PASTE = "\u010daj\u2615x"                    # "čaj", a cup (three bytes), "x"
+PASTED = 6                                      # "ab" and "čaj": the cup would run past 8
 
 
 def _host_wasm():
@@ -189,6 +195,18 @@ def pages(tmp_path_factory):
                     _shot("%s_%d_%s" % (console, page, tier), *out[(console, tier, page)])
                 if page == 2:
                     assert _pmem1(ws) == 16, (console, tier, "the long bubble was not cut")
+            _set_page(ws, 13)
+            for _ in range(6):
+                _frame(drv)
+            out[(console, tier, "unpasted")] = _pixels(ws)
+            ws.clipboard.put_text(PASTE)
+            drv.type_char(0x16)             # Ctrl+V
+            for _ in range(6):
+                _frame(drv)
+            assert ws.run.player.cart_error is None, (tier, ws.run.player.cart_error)
+            out[(console, tier, "pasted")] = _pixels(ws), _pmem1(ws)
+            if SHOTS:
+                _shot("%s_paste_%s" % (console, tier), *out[(console, tier, "pasted")][0])
             ws.exit()
     return out
 
@@ -262,3 +280,17 @@ def test_two_line_rows_take_the_consoles_height(pages, console, pitch):
     apart."""
     rules = _rules(pages, console, 7)
     assert rules[:3] == [pitch, 2 * pitch, 3 * pitch], rules
+
+
+@pytest.mark.parametrize("console", CONSOLES)
+@pytest.mark.parametrize("tier", TIERS)
+def test_the_consoles_paste_reaches_the_focused_field(pages, tier, console):
+    """Ctrl+V brings the console's clipboard into the focused field on every
+    tier, as many whole characters as its `max` holds, and draws the same
+    pixels as a Python app's."""
+    if (console, tier, "pasted") not in pages:
+        pytest.skip("no host %s tier" % tier)
+    (size, px), n = pages[(console, tier, "pasted")]
+    assert n == PASTED, (tier, console, n)
+    assert px != pages[(console, tier, "unpasted")][1], "the paste drew nothing"
+    assert px == pages[(console, "python", "pasted")][0][1]

@@ -1937,6 +1937,30 @@ def bar_tap(ctx, i):
         _C.api_bar_tap(ctx, i)
 
 
+# The console's Paste: the key Ctrl+V types (the desk's), and where the text
+# it brings comes from, set by the console: a function answering its
+# clipboard's text as UTF-8 bytes, or None where it holds none.
+KEY_PASTE = 0x16
+PASTE = [None]
+
+
+def paste_text():
+    """The text the console's Paste brings, UTF-8 bytes; None for none."""
+    src = PASTE[0]
+    return src() if src is not None else None
+
+
+def paste(ctx, text):
+    """The console's Paste (the desk's Ctrl+V) into the field the app `ctx`
+    (RUN_UI: the running cart's own) has focused: `text` UTF-8 bytes from the
+    console's clipboard. A Python app's frame takes it once begun, the run's
+    its frame begun next (moy_ui_api_paste, moy_ui_run_paste)."""
+    if ctx is RUN_UI:
+        _C.api_run_paste(text)
+    else:
+        _C.api_paste(ctx, text)
+
+
 def app_back(ctx, take=True):
     """The host's back -- the bar's chevron, a window's, Esc, B and the
     T-Deck's K -- over the frame `ctx` drew last: True where the app takes

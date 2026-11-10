@@ -193,6 +193,12 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
 // is a service's, the descriptor hung up. It has no process row of its own:
 // `pid` is its Player run's, and the scheduler never reaps or stops it.
 #define MOY_OS_FRAME "frame"
+// An app's queue hears the console's Paste too: the system's message
+// `paste`, its arguments a JSON array of one string (no escape but \" and
+// \\), posted ahead of the frame message carrying Ctrl+V
+// (runtime/run/elf_run.py's post_paste), which the toolkit it links inserts
+// into its focused field (sdk/src/moyui_link.c).
+#define MOY_OS_PASTE "paste"
 moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
                            const char *id, int w, int h, int depth, const moy_app_run_t *run,
                            char *err, size_t errlen);

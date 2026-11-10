@@ -438,6 +438,8 @@ _DRAW_SIGS = (
     ("moy_ui_run_bar_lent", [c.POINTER(c.c_char_p), c.POINTER(c.c_int16), c.POINTER(_I),
                              c.POINTER(c.c_uint32), c.POINTER(c.c_char_p)], _I),
     ("moy_ui_run_bar_tap", [_I], None),
+    ("moy_ui_api_paste", [c.c_void_p, c.c_char_p, c.c_size_t], None),
+    ("moy_ui_run_paste", [c.c_char_p, c.c_size_t], None),
     ("moy_ui_api_bar_chip", [c.c_void_p, c.POINTER(_I)], c.c_char_p),
     ("moy_ui_api_rule", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p], None),

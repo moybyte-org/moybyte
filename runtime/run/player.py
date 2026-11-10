@@ -2342,8 +2342,14 @@ class Player(PlayerDiag):
                 # for its first cls()), and letting it fall out of the bracket
                 # once put ~4.7ms of Brick Siege's frame under CHROME and sent
                 # #172 hunting the shell for a regression that was never there.
-                if self._ui is not None and getattr(self, "_lua", None) is None:
+                lua = getattr(self, "_lua", None)
+                if self._ui is not None and lua is None:
                     self._ui_begin(ws, render)
+                elif (lua is not None and getattr(ws.input, "last_key", 0) == _ui_draw.KEY_PASTE
+                        and not getattr(lua, "own_ui", False)):
+                    t = _ui_draw.paste_text()   # the console's Paste, into the run's next frame
+                    if t:
+                        _ui_draw.paste(_ui_draw.RUN_UI, t)
                 _tb = _ticks_us() if _perf else 0
                 rb = self._restore_bg
                 if render and rb is not None:

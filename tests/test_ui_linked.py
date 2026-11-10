@@ -9,7 +9,10 @@ message, its RGB565 screen handed over with moy_present.
     tests/fixtures/ui_page/page_mini_py.moy (the same calls as a Python app)
     draw the same pixels under the same keys and typed text;
   * each app hears the toggle's press and the field's typing inline and
-    ends on the button's.
+    ends on the button's;
+  * the console's Paste (Ctrl+V) reaches each app's focused field: a native
+    or WASI app's toolkit hears the "paste" message posted ahead of the
+    frame carrying the key.
 """
 
 import os
@@ -26,6 +29,7 @@ WASI = os.path.join(ROOT, "tests", "fixtures", "wasm", "wasi_page.moy")
 DT = 1.0 / 30.0
 KEYS = ("a", "a", "down", "up")     # the toggle has the focus first, the field below it
 TYPED = "hi"
+PASTE = "\u010daj\u2615"              # a two-byte and a three-byte character
 STEADY = 4
 
 
@@ -64,7 +68,8 @@ def _shot(drv):
 
 def _script(ws):
     """Settle, then each key of KEYS pressed, then TYPED typed into the
-    field: a shot after each; then the button activated."""
+    field, then PASTE pasted into it: a shot after each; then the button
+    activated."""
     drv = make_drv(ws)
     shots = []
     for _ in range(3):
@@ -81,6 +86,10 @@ def _script(ws):
         drv.type_char(ord(ch))
         _frame(drv)
         _shot(drv)
+    shots.append(_shot(drv))
+    ws.clipboard.put_text(PASTE)
+    drv.type_char(0x16)                 # Ctrl+V: the console's Paste
+    _frame(drv)
     shots.append(_shot(drv))
     drv.press("down")
     _frame(drv)
@@ -164,5 +173,6 @@ def test_the_toggle_and_the_field_are_heard_and_the_button_ends_it(runs, tier):
     assert shots[2] == shots[0], "a second press did not turn it back"
     assert shots[3] != shots[2] and shots[4] == shots[2], "the focus did not move and back"
     assert shots[5] != shots[3], "the typed text did not reach the field"
+    assert shots[6] != shots[5], "the paste did not reach the field"
     assert err is None, err
     assert screen == "launcher", "the button's press did not end the app"

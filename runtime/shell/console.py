@@ -895,6 +895,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # transport, never touches a host OS clipboard (parity trap).
         self.clipboard = _moy_app.Clipboard(
             self.app_abi, self.app_abi.grant("editor", ("clipboard",)))
+        # The console's Paste into an app's focused field reads it here, so
+        # the app holds no clipboard grant (ui_draw.PASTE).
+        _ui_draw.PASTE[0] = self._paste_text
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         # Paint's document model (runtime/apps/artwork.py's ArtworkService), which
         # Paint builds over its own grant: the backdrop's My Art, the image
@@ -1596,6 +1599,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         req = self._text_request
         self._text_request = None
         return req
+
+    def _paste_text(self):
+        """What the console's Paste brings an app's field: the clipboard's
+        text as UTF-8 bytes, None where it holds none."""
+        clip = self.clipboard
+        if clip.kind() != "text":
+            return None
+        return clip.text().encode("utf-8") or None
 
     def open_text_cart(self, name, kind=None, mode=None):
         """RUN the text app on one document -- the Files router's door for

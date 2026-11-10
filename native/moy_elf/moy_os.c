@@ -3620,7 +3620,8 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
             return NULL;
         }
         p->game = 1;
-        if (moy_evq_listen(pid, MOY_OS_FRAME, true) != MOY_EVQ_OK) {
+        if (moy_evq_listen(pid, MOY_OS_FRAME, true) != MOY_EVQ_OK
+            || (depth == 2 && moy_evq_listen(pid, MOY_OS_PASTE, true) != MOY_EVQ_OK)) {
             snprintf(err, errlen, "its event queue hears no frames");
             proc_end(p);
             return NULL;

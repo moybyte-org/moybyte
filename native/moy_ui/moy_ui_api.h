@@ -39,6 +39,7 @@
 #define MOY_UI_API_DIVS 8           // the dividers one frame's splits record (moy_ui_api_split_at)
 #define MOY_UI_API_PANES 16         // the panes one pass's splits record (moy_ui_api_split_frame)
 #define MOY_UI_API_TROWS 48         // the rows of a carried table a frame keeps the record of
+#define MOY_UI_API_PASTE 240        // the bytes the console's paste brings a field at most
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
 // and pressed this frame (bit i is MOY_INPUT_NAMES[i]: left, right, up, down,
@@ -693,6 +694,10 @@ typedef struct {
     // snap_cap a caption's top waiting for its first row (INT16_MIN none).
     int8_t snap, snap_out, snap_rows, snap_more;
     int16_t snap_cut, snap_cap, snap_cue_h;
+    // The console's paste this frame (moy_ui_api_paste): the focused field
+    // takes it; 0 none, and none once a frame begins.
+    uint16_t paste_n;
+    uint8_t paste[MOY_UI_API_PASTE];
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one, of
@@ -1263,6 +1268,13 @@ int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
 // let them go in its update): from here a stop takes the focus as on a frame
 // begun with them, so the first frame after shows its mark.
 void moy_ui_api_keys_back(moy_ui_ctx_t *c);
+// The console's Paste fired (the desk's Ctrl+V): the field focused in this
+// frame, begun already, takes `n` bytes of UTF-8 `text` at its caret, as many
+// as its room holds, cut at a character boundary. A line break or a tab is a
+// space and any other control byte is dropped. The console reads the text
+// from its clipboard, so the app holds no clipboard grant; MOY_UI_API_PASTE
+// bytes at most are kept.
+void moy_ui_api_paste(moy_ui_ctx_t *c, const uint8_t *text, size_t n);
 // Whether this frame's up press found no stop above the focused one, outside
 // a dialog: the keys went past the page's top.
 int moy_ui_api_edge(const moy_ui_ctx_t *c);

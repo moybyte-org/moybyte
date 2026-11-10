@@ -5,6 +5,8 @@
 
 function _layout(w, h, fs) end
 
+local pasted = "ab"
+
 function _draw()
   local page = pmem(0)
   local px, py, pw, ph = ui.page("Parts")
@@ -103,5 +105,9 @@ function _draw()
     ui.dialog()
   elseif page == 12 then
     ui.info("Name", moybyte.name())
+  elseif page == 13 then
+    pasted = ui.field("Name", pasted, 8, {id = "paste"})
+    ui.focus("paste")
+    pmem(1, #pasted)
   end
 end
