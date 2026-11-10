@@ -264,3 +264,22 @@ def test_the_manifest_asks_for_the_radio_and_names_its_service():
     assert man["id"] == "moybyte.mesh" and man["moybyte"]["type"] == "app"
     assert man["moybyte"]["entries"] == {"service": "service.lua"}
     assert set(man["moybyte"]["required"]) == {"lora", "prefs"}
+
+
+def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    windowed=True)
+
+    def titles(rows):
+        return [c.get("title") for c in rows if c]
+    desk = ws.wm._backdrop_layer
+    assert "Mesh" not in titles(ws._runnable_items())
+    assert "Mesh" not in titles(c for _k, _l, c in desk._icon_catalog())
+    assert "Mesh" in titles(ws._launcher_items(ws.carts.all, "make"))
+    lora_sim.install()
+    try:
+        assert "Mesh" in titles(ws._launcher_items(ws.carts.all, "apps"))
+        assert "Mesh" in titles(c for _k, _l, c in desk._icon_catalog())
+    finally:
+        lora_sim.remove()

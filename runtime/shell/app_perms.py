@@ -355,6 +355,23 @@ def check(cart, rec, have):
     return granted, absent, refusal
 
 
+def lacking(cart, have):
+    """The first permission `cart`'s manifest requires that a console holding
+    the services `have` has nothing for -- `check`'s refusal where the
+    console lacks what it needs, whatever was consented -- or None. A cart
+    lacking one is no run tile: the home's shelves and the desk column leave
+    it out (`Consent.runnable`), and Files and Make still list it."""
+    req = (cart.get("required") if cart else None) or ()
+    if not req:
+        return None
+    perms = cart.get("permissions") or ()
+    tier = tier_of(cart)
+    for p in req:
+        if p in perms and _why_absent(p, tier, have, None) == "needs":
+            return p
+    return None
+
+
 def absent_names(absent, rec):
     """The names a Python cart's namespace holds as None for the absent
     permissions `absent` under consent record `rec`: the ones turned off in
@@ -528,6 +545,21 @@ class Consent:
         launch's)."""
         have = self._services() if self._services is not None else ()
         return check(cart, None if install else self.for_run(cart), have)
+
+    def runnable(self, carts):
+        """`carts` less those requiring what this console lacks (`lacking`):
+        the ones a tile may run. The services are asked once, and only when
+        a cart requires something."""
+        have = None
+        out = []
+        for c in carts:
+            if c.get("required"):
+                if have is None:
+                    have = self._services() if self._services is not None else ()
+                if lacking(c, have) is not None:
+                    continue
+            out.append(c)
+        return out
 
     def for_run(self, cart):
         """The record a launch of `cart` runs under: its own, else UNASKED

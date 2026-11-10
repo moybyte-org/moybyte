@@ -402,6 +402,9 @@ class HomeVerbs:
                  then the installed app- and tool-typed carts no app claims;
           make   "+ New" first, then every editable cart (`_make_items`).
 
+        The first three hold only what runs here (`runs_here`): a cart
+        requiring a device this console lacks is no run tile.
+
         WALLPAPERS play in none of the first three: they are a backdrop chosen
         in Settings (Make lists them). THEMES are in none of the four: a theme
         is data the Appearance app picks (docs/history/theming_2026-09.md §9 phase 6
@@ -414,6 +417,7 @@ class HomeVerbs:
         if tab == "make":
             items = self._make_items(carts)
             return items if manage else items[1:]
+        carts = self.runs_here(carts)
         own = self.carts.is_own
         if tab == "apps":
             hidden = getattr(self.wm, "HIDDEN_APPS", ())
@@ -439,6 +443,14 @@ class HomeVerbs:
         if tab == "mine" and not out and manage:
             out.append(new_tile())
         return out
+
+    def runs_here(self, carts):
+        """`carts` less those whose manifest requires a device this console
+        lacks, the launch's refusal (`app_perms.lacking`): the run tiles
+        (Games, Mine, Apps, the desk column) leave them out, and Files and
+        Make still list them."""
+        consent = getattr(self, "consent", None)
+        return consent.runnable(carts) if consent is not None else list(carts)
 
     def unclaimed_apps(self, carts):
         """The installed app- and tool-typed carts of `carts` that no

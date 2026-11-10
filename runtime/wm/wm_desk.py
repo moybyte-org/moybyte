@@ -300,7 +300,7 @@ class _BackdropLayer(Layer):
         `notes`) and no registered app has that id, else its whole id."""
         ws = self.ws
         out = [("play", "Play", None), ("projects", "Projects", None)]
-        carts = ws.carts.all
+        carts = ws.runs_here(ws.carts.all)
         apps = getattr(ws, "_apps", ())
         for app, _text in apps:
             if app.id in self.HIDDEN_APPS or not getattr(app, "DESK_TILE", True):

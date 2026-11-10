@@ -85,7 +85,7 @@
     "tasks_two_games": [8, 24]
   },
   "guition_p4_1280x800_tasks": {
-    "note_banner": [6, 33],
+    "note_banner": [6, 31],
     "rec_indicator": [3, 9],
     "tasks_crashed_service": [2, 12],
     "tasks_empty": [0, 5],
@@ -446,7 +446,7 @@
     "status_desk_panel": [13, 11]
   },
   "p4_1024x600_cs2_fs1_tasks": {
-    "note_banner": [6, 33],
+    "note_banner": [6, 31],
     "rec_indicator": [3, 9],
     "tasks_crashed_service": [2, 12],
     "tasks_empty": [0, 5],

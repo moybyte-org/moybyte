@@ -407,7 +407,9 @@ off in Settings (About → App permissions) has its names bound to `None`
 (`nil`), so `if prefs is None:` is how an app copes. A permission naming what
 this console lacks (`pins` on a board without them) leaves no name. Only a
 `required` one refuses the launch, naming what is missing, at install and
-again at launch. Never grantable, whatever a manifest says: the shell's own
+again at launch; an app requiring a device the console lacks shows no run
+tile (the home's Games, Mine and Apps, the desk), while Files and Make still
+list it to edit. Never grantable, whatever a manifest says: the shell's own
 roles (`carts`, `install`, `wallpaper`, `artwork`, `damage`, `surface`,
 `notify`, `shell`); `tests/test_user_apps.py` pins it.
 
