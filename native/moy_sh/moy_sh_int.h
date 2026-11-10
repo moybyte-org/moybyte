@@ -37,6 +37,15 @@ struct moy_sh {
 
     char *pending;                      // what MOY_SH_MORE holds
     size_t pending_n, pending_cap;
+    size_t cmd_start;                   // where in it the running line began
+
+    // a question asked (moy_sh_ask): the line that asked, run again with the
+    // next line typed as its answer
+    char *ask_line;
+    char ask_prompt[MOY_SH_ASK_MAX];
+    char *answer;                       // that line, while the command runs again
+    char *answered;                     // its block, freed when that run ends
+    int asked;                          // asked during this run
 
     jmp_buf run_jb;                     // the session's own exit
     int status;

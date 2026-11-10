@@ -119,6 +119,8 @@ _SIGS = (
     ("moy_sh_running", [], _P),
     ("moy_sh_fd_write", [_P, _I, _P, _SZ], ctypes.c_long),
     ("moy_sh_fd_read", [_P, _I, _P, _SZ], ctypes.c_long),
+    ("moy_sh_ask", [_P, _S], _I),
+    ("moy_sh_answer", [_P], _S),
     ("moy_sh_arena_in_use", [_P], _SZ),
     ("moy_sh_board_line", [_S], ctypes.c_bool),
     ("moy_sh_interrupted", [_P], _I),
@@ -220,6 +222,20 @@ def read(fd, n):
     if r < 0:
         raise OSError(5, "i/o error")
     return buf.raw[:r]
+
+
+def ask(prompt):
+    """A question of the session that called the door (moy_sh.h's
+    moy_sh_ask): the next line typed is its answer."""
+    if _lib().moy_sh_ask(_running(), str(prompt).encode()) != 0:
+        raise OSError(5, "i/o error")
+
+
+def answer():
+    """The line typed to the question this run's command asked, once, or
+    None."""
+    a = _lib().moy_sh_answer(_running())
+    return a.decode("utf-8", "replace") if a is not None else None
 
 
 def arena():

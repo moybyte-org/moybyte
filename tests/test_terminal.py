@@ -73,6 +73,56 @@ def test_a_command_that_goes_on_takes_the_continuation_prompt(term):
     assert plain(app)[-1] == "after"
 
 
+def _command(root, cid, perms):
+    import json
+    d = root / (cid + ".moy")
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps({
+        "format": "moy-1", "title": cid, "id": cid, "runtime": "python", "main": "main.py",
+        "moybyte": {"type": "command", "permissions": list(perms)}}))
+    (d / "main.py").write_text("def main(argv):\n    print('ran', *argv[1:])\n")
+
+
+@pytest.mark.first_run
+def test_a_first_run_asks_at_the_prompt_and_the_next_line_answers(tmp_path):
+    """A command nobody consented to asks as the shell's prompt, the rest of
+    its line held; the next line typed answers, and the line runs again with
+    it (all of it: dash parses a line as one command). No run waits on the
+    terminal for it."""
+    from runtime.host_app import build_workstation
+    root = tmp_path / "carts"
+    _command(root, "local.greet", ["http"])
+    _command(root, "local.other", ["http"])
+    ws = build_workstation(str(root))
+    app = ws.terminal_app
+    app.open()
+    try:
+        run(app, "echo before; greet one; echo after")
+        got = plain(app)
+        assert got[1] == "before" and "after" not in got and "ran one" not in got, got
+        assert app.face.prompt() == "Open it? [y/N] " and not app.face.busy()
+        assert ws.consent.get("local.greet") is None
+        run(app, "y")
+        got = plain(app)
+        assert got[-4:] == ["Open it? [y/N] y", "before", "ran one", "after"], got
+        assert app.face.prompt() == "$ "
+        assert ws.consent.get("local.greet") == {"perms": ["http"], "off": []}
+        run(app, "greet two")
+        assert plain(app)[-1] == "ran two"
+        run(app, "other")
+        run(app, "")                    # Enter alone is a no
+        got = plain(app)
+        assert "".join(got[-2:]) == "other: needs your OK - open it to say yes", got
+        assert ws.consent.get("local.other") is None and app.face.prompt() == "$ "
+        run(app, "other")
+        app.face.key(3)                 # Ctrl-C drops the question
+        assert app.face.prompt() == "$ "
+        run(app, "echo fine")
+        assert plain(app)[-1] == "fine"
+    finally:
+        app.close_session()
+
+
 def test_tab_completes_a_command_and_a_path(term, tmp_path):
     ws, app = term
     f = app.face

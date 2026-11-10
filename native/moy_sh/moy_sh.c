@@ -56,6 +56,13 @@ void moy_sh_hfree(void *p) {
     }
 }
 
+// Session `s`'s own block back to its host, from any call.
+static void sfree(moy_sh_t *s, void *p) {
+    if (p != NULL) {
+        s->host.free(s->host.ctx, p);
+    }
+}
+
 void *moy_sh_malloc(size_t n) {
     return moy_sh_arena_alloc(moy_sh_cur->arena, n);
 }
@@ -269,6 +276,9 @@ void moy_sh_free(moy_sh_t *s) {
     if (s->pending != NULL) {
         hfree(s->host.ctx, s->pending);
     }
+    if (s->ask_line != NULL) {
+        hfree(s->host.ctx, s->ask_line);
+    }
     if (s->roles != NULL) {
         hfree(s->host.ctx, s->roles);
     }
@@ -361,6 +371,33 @@ const char *moy_sh_cwd(moy_sh_t *s) {
 
 void moy_sh_cancel(moy_sh_t *s) {
     s->pending_n = 0;
+    sfree(s, s->ask_line);
+    s->ask_line = NULL;
+}
+
+int moy_sh_ask(moy_sh_t *s, const char *prompt) {
+    if (s->pending_n == 0 || s->cmd_start >= s->pending_n) {
+        return -1;
+    }
+    size_t n = s->pending_n - s->cmd_start;
+    char *line = s->host.alloc(s->host.ctx, n + 1);
+    if (line == NULL) {
+        return -1;
+    }
+    memcpy(line, s->pending + s->cmd_start, n);
+    line[n] = 0;
+    sfree(s, s->ask_line);
+    s->ask_line = line;
+    snprintf(s->ask_prompt, sizeof s->ask_prompt, "%s", prompt);
+    s->asked = 1;
+    s->interrupt = 1;                   // the rest of the line goes
+    return 0;
+}
+
+const char *moy_sh_answer(moy_sh_t *s) {
+    const char *a = s->answer;
+    s->answer = NULL;                   // once: moy_sh_run frees it
+    return a;
 }
 
 static int hold(moy_sh_t *s, const char *p, size_t n) {
@@ -401,13 +438,38 @@ int moy_sh_run(moy_sh_t *s, const char *text, size_t n) {
         return MOY_SH_EXIT;
     }
     struct moy_sh_globals *was = enter(s);
-    if (!hold(s, text, n) || (s->pending_n && s->pending[s->pending_n - 1] != '\n' && !hold(s, "\n", 1))) {
-        leave(was);
-        return MOY_SH_DONE;
+    char *again = NULL;
+    if (s->ask_line != NULL && s->pending_n == 0) {
+        // the answer to the question asked: the line that asked runs again
+        size_t k = n;
+        while (k && (text[k - 1] == '\n' || text[k - 1] == '\r')) {
+            k--;
+        }
+        char *a = moy_sh_halloc(k + 1);
+        if (a != NULL) {
+            memcpy(a, text, k);
+            a[k] = 0;
+        }
+        s->answer = s->answered = a;
+        again = s->ask_line;
+        s->ask_line = NULL;
+        text = again;
+        n = strlen(again);
     }
-    if (continues(s->pending, s->pending_n)) {
+    s->asked = 0;
+    int held = hold(s, text, n);
+    moy_sh_hfree(again);
+    int early = -1;
+    if (!held || (s->pending_n && s->pending[s->pending_n - 1] != '\n' && !hold(s, "\n", 1))) {
+        early = MOY_SH_DONE;
+    } else if (continues(s->pending, s->pending_n)) {
+        early = MOY_SH_MORE;
+    }
+    if (early >= 0) {
+        moy_sh_hfree(s->answered);
+        s->answer = s->answered = NULL;
         leave(was);
-        return MOY_SH_MORE;
+        return early;
     }
     volatile int ret = MOY_SH_DONE;
     volatile size_t start = 0;
@@ -435,7 +497,9 @@ int moy_sh_run(moy_sh_t *s, const char *text, size_t n) {
             s->pending[s->pending_n] = 0;
             ret = MOY_SH_MORE;
         } else {
-            if (e == EXINT) {
+            if (e == EXINT && s->asked) {
+                exitstatus = MOY_PROC_NOT_RUN;  // its line held for the answer, not stopped
+            } else if (e == EXINT) {
                 out2c('\n');
             }
             s->pending_n = 0;
@@ -453,6 +517,7 @@ int moy_sh_run(moy_sh_t *s, const char *text, size_t n) {
         if (parsefile->strpush == NULL) {
             start = parsefile->nextc - s->pending;
         }
+        s->cmd_start = start;
         moy_sh_g->input_more = 1;
         moy_sh_g->input_eof = 0;
         node = parsecmd(0);
@@ -481,12 +546,23 @@ int moy_sh_run(moy_sh_t *s, const char *text, size_t n) {
     flushall();
 out:
     (void)pushed;
+    moy_sh_hfree(s->answered);
+    s->answer = s->answered = NULL;
     s->status = s->exited ? s->status : exitstatus;
     leave(was);
     return ret;
 }
 
 size_t moy_sh_prompt(moy_sh_t *s, int more, char *out, size_t cap) {
+    if (s->ask_line != NULL) {
+        size_t n = strlen(s->ask_prompt);
+        n = n < cap ? n : (cap ? cap - 1 : 0);
+        if (cap) {
+            memcpy(out, s->ask_prompt, n);
+            out[n] = 0;
+        }
+        return n;
+    }
     struct moy_sh_globals *was = enter(s);
     const char *p = more ? ps2val() : ps1val();
     struct stackmark smark;

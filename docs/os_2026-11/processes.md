@@ -359,7 +359,9 @@ build, and Remove forgets the record.
 2026-11-09).** One copied onto the card, over SFTP or USB, or pushed by a
 paired browser has no record, and its first launch from the home shows the
 install prompt's lines, "Open <title>?" (`Workstation.ask_first`); a
-command asks in its terminal (`sh_door`). Open records the consent an
+command asks in its terminal (`sh_door`): where its session asks questions
+(`moy_sh_ask`), at the prompt, and the next line typed answers and runs its
+line again, so no run waits on the terminal. Open records the consent an
 install would; No runs nothing and records nothing, so the next launch
 asks again; and until a yes every other way in (a service's start, the
 Editor, another app's play) is refused by name (`app_perms.UNASKED`), its

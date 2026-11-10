@@ -94,6 +94,7 @@ NOT_RUN, INTERRUPTED, TRAPPED, KILLED = _L.NOT_RUN, _L.INTERRUPTED, _L.TRAPPED, 
 WASI_TRAPPED = -1               # the wasm runtime's `command` answer for a trap
 EXITS = 8                       # background commands' exit codes kept for `wait`
 LINE = 256                      # what a stdin read takes at a time
+ASKED = object()                # _first_run: the session asks, the next line answers
 
 
 def _cron():
@@ -514,6 +515,8 @@ class ShellDoor:
             return NOT_RUN
         run, rec, have, env = got
         rec = self._first_run(run, rec, bg)
+        if rec is ASKED:
+            return NOT_RUN
         granted, absent, refusal = app_perms.check(run, rec, have)
         if refusal is not None:
             self.err(name, refusal)
@@ -554,22 +557,33 @@ class ShellDoor:
 
     def _first_run(self, run, rec, bg):
         """The record command `run` runs under, from `rec` (`Consent.for_run`'s):
-        where it is asked first, the install prompt's lines and "Open it?"
-        in the foreground's terminal, a yes recording the consent as an
-        install does and the record it made coming back; in the background,
-        or on a no, `rec` as it was (UNASKED: the launch refuses)."""
+        where it is asked first, the install prompt's lines and "Open it?" in
+        the foreground's terminal, a yes recording the consent as an install
+        does and the record it made coming back; in the background, or on a
+        no, `rec` as it was (UNASKED: the launch refuses). A session that
+        asks questions (`io.ask`, moy_sh.h's moy_sh_ask) asks it as the
+        shell's prompt and ends the run, ASKED coming back: the line typed
+        next is the answer, and the line runs again with it (`io.answer`),
+        so no run waits on the terminal for it."""
         try:
             import app_perms
         except ImportError:  # host: the runtime package
             from runtime import app_perms
         if rec is not app_perms.UNASKED or bg or self.io is None:
             return rec
-        self.out("".join(ln + "\n" for ln in app_perms.prompt(run)))
-        self.out("Open it? [y/N] ")
-        line = In(self.io).readline().strip().lower()
-        if not line:
-            self.out("\n")
-        if line not in ("y", "yes"):
+        if getattr(self.io, "ask", None) is not None:
+            line = self.io.answer()
+            if line is None:
+                self.out("".join(ln + "\n" for ln in app_perms.prompt(run)))
+                self.io.ask("Open it? [y/N] ")
+                return ASKED
+        else:
+            self.out("".join(ln + "\n" for ln in app_perms.prompt(run)))
+            self.out("Open it? [y/N] ")
+            line = In(self.io).readline()
+            if not line.strip():
+                self.out("\n")
+        if line.strip().lower() not in ("y", "yes"):
             return rec
         consent = self.ws.consent
         aid = app_perms.app_id(run)
@@ -601,6 +615,8 @@ class ShellDoor:
         run = carts.rehydrate(cart) if carts is not None else cart
         consent = getattr(self.ws, "consent", None)
         rec = self._first_run(run, consent.for_run(run), bg) if consent is not None else None
+        if rec is ASKED:
+            return NOT_RUN
         have = app_perms.services(self.ws) if consent is not None else ()
         granted, _absent, refusal = app_perms.check(run, rec, have)
         if refusal is None:

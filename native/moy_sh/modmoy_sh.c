@@ -122,6 +122,22 @@ static mp_obj_t sh_read(mp_obj_t fd_in, mp_obj_t n_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sh_read_obj, sh_read);
 
+// ask(prompt): a question of the running session's (moy_sh.h's moy_sh_ask);
+// answer(): the line typed to the one its command asked, once, or None.
+static mp_obj_t sh_ask(mp_obj_t prompt) {
+    if (moy_sh_ask(running(), mp_obj_str_get_str(prompt)) != 0) {
+        mp_raise_OSError(EIO);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(sh_ask_obj, sh_ask);
+
+static mp_obj_t sh_answer(void) {
+    const char *a = moy_sh_answer(running());
+    return a != NULL ? mp_obj_new_str(a, strlen(a)) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(sh_answer_obj, sh_answer);
+
 static mp_obj_t sh_arena(void) {
     moy_sh_t *s = moy_sh_running();
     return s != NULL ? mp_obj_new_int_from_uint(moy_sh_arena_in_use(s)) : mp_const_none;
@@ -752,6 +768,8 @@ static const mp_rom_map_elem_t moy_sh_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_DOOR), MP_ROM_INT(MOY_SH_DOOR) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&sh_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&sh_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ask), MP_ROM_PTR(&sh_ask_obj) },
+    { MP_ROM_QSTR(MP_QSTR_answer), MP_ROM_PTR(&sh_answer_obj) },
     { MP_ROM_QSTR(MP_QSTR_arena), MP_ROM_PTR(&sh_arena_obj) },
     { MP_ROM_QSTR(MP_QSTR_line), MP_ROM_PTR(&sh_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_interrupted), MP_ROM_PTR(&sh_interrupted_obj) },
