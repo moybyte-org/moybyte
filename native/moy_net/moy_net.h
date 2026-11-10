@@ -542,8 +542,8 @@ typedef struct {
 // row: the board's own station (MOY_NET_WIFI_OWN, the Zero's, which serves
 // and offers its setup access point), the ESP-NOW link riding it, or the
 // webhost serving on it until the next VM takes its "web" row back. A
-// station something else raised with no row goes down with the last row
-// too. A holder of the tags a C worker waits on the link for ("http",
+// station something else raised with no row goes down at the book's next
+// change that leaves it empty, a release of a tag nobody held included. A holder of the tags a C worker waits on the link for ("http",
 // "media") also asks for the kept network (moy_wifi_connect_kept) when
 // nothing is asked yet; the console's tags dial from Python's store
 // (device_wifi.autoconnect_wifi), and "link" never dials (a network would

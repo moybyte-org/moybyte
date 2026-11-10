@@ -537,7 +537,7 @@ void moy_wifi_book(uint32_t mask) {
         if (!s_st.on) {
             moy_wifi_on();
         }
-    } else if (mask == 0u && was != 0u) {
+    } else if (mask == 0u) {
         if (s_st.on && !kept_up()) {
             moy_wifi_off();
         }
