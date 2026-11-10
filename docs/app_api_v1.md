@@ -327,7 +327,10 @@ views before it leaves the app, on every tier:
 3. else the chevron leaves the app, and Esc and B reach your `keyp` and
    `btnp` (Notes calls `quit()` on Esc there).
 
-A second page, a dialog, a picker: lend the way back while it shows.
+A second page, a dialog, a picker: lend the way back while it shows. A
+page's title is the bar's: `ui.page("Radio")` draws no head in the page
+and the bar reads "Radio" (a desk window "Moy Mesh · Radio") where
+`ui.bar` lends no title of its own.
 
 ```lua
 page = "list"

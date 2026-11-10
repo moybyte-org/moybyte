@@ -350,6 +350,22 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     def api_run_back(take):
         return bool(lib.moy_ui_run_back(1 if take else 0))
 
+    def api_run_bar_lent():
+        title = c.c_char_p()
+        slots = (c.c_int16 * 6)()
+        n = _I()
+        off = c.c_uint32()
+        chip = c.c_char_p()
+        if not lib.moy_ui_run_bar_lent(c.byref(title), slots, c.byref(n), c.byref(off),
+                                       c.byref(chip)):
+            return None
+        return ((title.value or b"").decode("utf-8", "replace"),
+                tuple(slots[i] for i in range(n.value)), off.value,
+                (chip.value or b"").decode("utf-8", "replace"))
+
+    def api_run_bar_tap(i):
+        lib.moy_ui_run_bar_tap(int(i))
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -787,7 +803,8 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
               api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
               api_split_toward, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_bubble, api_month, api_toast,
-              api_tool, api_bar, api_bar_lent, api_bar_tap, api_back, api_run_back, api_rule,
+              api_tool, api_bar, api_bar_lent, api_bar_tap, api_back, api_run_back, api_run_bar_lent,
+              api_run_bar_tap, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,
               api_dup, api_lost):
         setattr(m, f.__name__, f)

@@ -806,9 +806,15 @@ void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slots, int *n,
                         uint32_t *off) {
     if (!c->bar_seen) {
-        return 0;
+        if (!c->page_title[0]) {
+            return 0;
+        }
+        *title = c->page_title;     // a page's title, with nothing more lent
+        *n = 0;
+        *off = 0;
+        return 1;
     }
-    *title = c->bar_title;
+    *title = c->bar_title[0] ? c->bar_title : c->page_title;
     for (int i = 0; i < c->bar_n; i++) {
         slots[i] = c->bar_slot[i];
     }

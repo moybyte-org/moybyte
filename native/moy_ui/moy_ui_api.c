@@ -1065,6 +1065,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->tip_at.w = 0;
     c->tip_shown = 0;
     c->bar_seen = 0;
+    c->page_title[0] = 0;
     int settled = !c->owe;
     int owed_last = c->owe;
     int over_last = c->fl_dirty;
@@ -2781,8 +2782,18 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     moy_ui_box_t ct = b;
     clip_t k;
     int drew = 0;
+    if (c->n_nest == 0) {
+        // the title is the bar's, never drawn in the page (rows scroll under no head)
+        size_t tn = title.n < MOY_UI_API_TIP - 1 ? title.n : MOY_UI_API_TIP - 1;
+        if (tn) {
+            memcpy(c->page_title, title.p, tn);
+        }
+        c->page_title[tn] = 0;
+    }
+    static const uint8_t untitled[1] = {0};
+    moy_ui_span_t head = {untitled, 0};
     EACH_PIECE(c, k, s, b) {
-        moy_ui_page_ground(s, b, title, c->fs, mua_ground_of(c), &ct);
+        moy_ui_page_ground(s, b, head, c->fs, mua_ground_of(c), &ct);
         drew = 1;
     }
     if (!drew) {
@@ -2791,7 +2802,7 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         int32_t saved[4];
         memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
         row->st[MOY_ST_CX1] = row->st[MOY_ST_CX0];
-        moy_ui_page_ground(s, b, title, c->fs, mua_ground_of(c), &ct);
+        moy_ui_page_ground(s, b, head, c->fs, mua_ground_of(c), &ct);
         memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
     }
     // a page's id is its title, or `o.id` where two pages share one

@@ -162,6 +162,13 @@ int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size
 // The host's back over the run's frame drawn last (moy_ui_api_back): 1 where
 // the app takes it, 0 where the host leaves the app; `take` 0 only asks.
 int moy_ui_run_back(int take);
+// The host's bar over the run's frame drawn last, as moy_ui_api_bar_lent,
+// moy_ui_api_bar_chip and moy_ui_api_bar_tap are over a context: what a Lua
+// or compiled app lent it with ui.bar (0: nothing, or no run open), and a
+// tool of it the bar activated.
+int moy_ui_run_bar_lent(const char **title, int16_t *slots, int *n, uint32_t *off,
+                        const char **chip);
+void moy_ui_run_bar_tap(int i);
 
 // The rows, in the role table's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an

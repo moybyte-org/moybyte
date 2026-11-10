@@ -268,9 +268,10 @@ def _hint(b):
 
 
 def page(title, o=None):
-    """A page filling the app's surface (or `at`'s rect) under `title`, its
-    rows stacking from the top: the content rect `(x, y, w, h)`. Its id is
-    its title, or `o.id` where two pages share one."""
+    """A page filling the app's surface (or `at`'s rect), its rows stacking
+    from the top: the content rect `(x, y, w, h)`. `title` draws in no
+    page: it is the title the frame lends the host's bar where `bar` lends
+    none. Its id is its title, or `o.id` where two pages share one."""
     t = _T
     return _C.api_page(t[0], t[1], t[2], title, _over(o))
 

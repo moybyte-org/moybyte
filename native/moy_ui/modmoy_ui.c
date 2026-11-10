@@ -3491,22 +3491,13 @@ static mp_obj_t ui_api_bar(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bar_obj, 6, 7, ui_api_bar);
 
-// api_bar_lent(ctx) -> (title, slots, off, chip) the frame drawn last lent
-// its bar, or None
-static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
-    const char *title = NULL;
-    int16_t slots[MOY_UI_API_BAR];
-    int n = 0;
-    uint32_t off = 0;
-    if (!moy_ui_api_bar_lent(ctx_of(ctx), &title, slots, &n, &off)) {
-        return mp_const_none;
-    }
+// A lent bar as api_bar_lent answers it.
+static mp_obj_t bar_lent_tuple(const char *title, const int16_t *slots, int n, uint32_t off,
+                               const char *chip) {
     mp_obj_t sl[MOY_UI_API_BAR];
     for (int i = 0; i < n; i++) {
         sl[i] = MP_OBJ_NEW_SMALL_INT(slots[i]);
     }
-    int at = -1;
-    const char *chip = moy_ui_api_bar_chip(ctx_of(ctx), &at);
     // The host's bar asks every frame it draws, and the bar lent is the last
     // one's as a rule: the answer it had, where it says the same, allocates
     // nothing.
@@ -3535,7 +3526,42 @@ static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
     MP_STATE_VM(moy_ui_bar_last) = last;
     return last;
 }
+
+// api_bar_lent(ctx) -> (title, slots, off, chip) the frame drawn last lent
+// its bar, or None
+static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
+    const char *title = NULL;
+    int16_t slots[MOY_UI_API_BAR];
+    int n = 0;
+    uint32_t off = 0;
+    if (!moy_ui_api_bar_lent(ctx_of(ctx), &title, slots, &n, &off)) {
+        return mp_const_none;
+    }
+    int at = -1;
+    return bar_lent_tuple(title, slots, n, off, moy_ui_api_bar_chip(ctx_of(ctx), &at));
+}
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_bar_lent_obj, ui_api_bar_lent);
+
+// api_run_bar_lent() -> api_bar_lent over the running cart's own context, a
+// Lua, compiled, WASI or native app's (moy_ui_run_bar_lent)
+static mp_obj_t ui_api_run_bar_lent(void) {
+    const char *title = NULL, *chip = "";
+    int16_t slots[MOY_UI_API_BAR];
+    int n = 0;
+    uint32_t off = 0;
+    if (!moy_ui_run_bar_lent(&title, slots, &n, &off, &chip)) {
+        return mp_const_none;
+    }
+    return bar_lent_tuple(title, slots, n, off, chip);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_run_bar_lent_obj, ui_api_run_bar_lent);
+
+// api_run_bar_tap(i): api_bar_tap over the running cart's own context
+static mp_obj_t ui_api_run_bar_tap(mp_obj_t i) {
+    moy_ui_run_bar_tap(mp_obj_get_int(i));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_bar_tap_obj, ui_api_run_bar_tap);
 
 // api_rule(ctx, cv, look)
 static mp_obj_t ui_api_rule(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
@@ -4159,6 +4185,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_bar_tap), MP_ROM_PTR(&ui_api_bar_tap_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_back), MP_ROM_PTR(&ui_api_back_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_back), MP_ROM_PTR(&ui_api_run_back_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_bar_lent), MP_ROM_PTR(&ui_api_run_bar_lent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_bar_tap), MP_ROM_PTR(&ui_api_run_bar_tap_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_rule), MP_ROM_PTR(&ui_api_rule_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text), MP_ROM_PTR(&ui_api_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_mark), MP_ROM_PTR(&ui_api_card_mark_obj) },

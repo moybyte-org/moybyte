@@ -208,6 +208,32 @@ int moy_ui_run_back(int take) {
     return s_ctx != NULL && s_live && serial == s_serial ? moy_ui_api_back(s_ctx, take) : 0;
 }
 
+// The run's context while the run that drew in it is the one open, else NULL
+// (a native or WASI app draws with a toolkit of its own, and no run is open).
+static moy_ui_ctx_t *run_ctx_now(void) {
+    uint32_t tick = 0, serial = 0;
+    const int32_t *snap = moycore_ui_snap(&tick, &serial);
+    return snap != NULL && s_ctx != NULL && s_live && serial == s_serial ? s_ctx : NULL;
+}
+
+int moy_ui_run_bar_lent(const char **title, int16_t *slots, int *n, uint32_t *off,
+                        const char **chip) {
+    moy_ui_ctx_t *c = run_ctx_now();
+    int at = -1;
+    if (c == NULL || !moy_ui_api_bar_lent(c, title, slots, n, off)) {
+        return 0;
+    }
+    *chip = moy_ui_api_bar_chip(c, &at);
+    return 1;
+}
+
+void moy_ui_run_bar_tap(int i) {
+    moy_ui_ctx_t *c = run_ctx_now();
+    if (c != NULL) {
+        moy_ui_api_bar_tap(c, i);
+    }
+}
+
 // What shows of the table's part open now (moy_ui_run_table_part), x0, y0,
 // x1, y1 on the canvas: every verb drawn while it is open draws inside it,
 // as the canvas's own verbs do.

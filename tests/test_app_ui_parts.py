@@ -168,6 +168,8 @@ def pages(tmp_path_factory):
                     _frame(drv)
                 assert ws.run.player.cart_error is None, (tier, ws.run.player.cart_error)
                 out[(console, tier, page)] = _pixels(ws)
+                lent = ws.bar_layer._lent("tool")
+                out[(console, tier, page, "bar")] = lent and lent[0]
                 if SHOTS:
                     _shot("%s_%d_%s" % (console, page, tier), *out[(console, tier, page)])
                 if page == 2:
@@ -186,6 +188,17 @@ def test_every_tier_draws_the_python_apps_page(pages, tier, console, page):
     rsize, rpx = pages[(console, "python", page)]
     assert size == rsize, (size, rsize)
     assert px == rpx, "%s on %s drew page %d other than python" % (tier, console, page)
+
+
+@pytest.mark.parametrize("console", CONSOLES)
+@pytest.mark.parametrize("tier", TIERS)
+def test_the_page_title_is_the_bars(pages, tier, console):
+    """`ui.page("Parts")` draws no head in the page: its title is what the
+    app lends the host's bar, from a Lua or compiled app's own context as
+    from a Python app's."""
+    if (console, tier, 1) not in pages:
+        pytest.skip("no host %s tier" % tier)
+    assert pages[(console, tier, 1, "bar")] == "Parts"
 
 
 @pytest.mark.parametrize("console", CONSOLES)

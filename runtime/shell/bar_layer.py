@@ -1281,8 +1281,7 @@ class BarLayer:
         cart's ("tool"), the registered app's on top ("app"), else None."""
         ws = self.ws
         if where == "tool":
-            ui = getattr(ws.run.player, "_ui", None)
-            return ui[0] if ui else None
+            return ws.run.player.bar_ctx()
         if where == "app":
             app = ws._apps_by_id.get(ws.wm.top_kind())
             host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None

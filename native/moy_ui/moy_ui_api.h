@@ -562,6 +562,7 @@ typedef struct {
     // that lent them (bar_seen), and the tool the host's bar activated for
     // the next ui.bar to answer (-1 none).
     char bar_title[MOY_UI_API_TIP];
+    char page_title[MOY_UI_API_TIP];    // the top page's title this frame ("" none)
     int16_t bar_slot[MOY_UI_API_BAR];
     uint8_t bar_n, bar_off, bar_seen, bar_back;
     int8_t bar_act;
@@ -1093,8 +1094,9 @@ int32_t moy_ui_api_bar(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t ti
 // across ui.at's rect (down it where the rect is taller than wide), else a
 // row of the page's with the line across its middle.
 void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
-// The host's side of ui.bar: whether the frame drawn last lent a bar, its
-// title then, its tools' slots into `slots` (room for MOY_UI_API_BAR) and
+// The host's side of ui.bar: whether the frame drawn last lent a bar (or a
+// top page with a title, which lends that title alone), its title then (the
+// page's where ui.bar named none), its tools' slots into `slots` (room for MOY_UI_API_BAR) and
 // their count into *n, the half-strength bits and MOY_UI_BAR_BACK into *off.
 int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slots, int *n,
                         uint32_t *off);

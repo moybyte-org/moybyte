@@ -1902,12 +1902,17 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     return settled
 
 
+# The context of the running cart's own frames, a Lua, compiled, WASI or native
+# app's (native/moy_ui/moy_ui_wasm.c's), as `bar_lent` and `bar_tap` take it.
+RUN_UI = "run"
+
+
 def bar_lent(ctx):
-    """What the app whose context is `ctx` lent its bar in the frame it drew
-    last (`ui.bar`): (title, icon slots, half-strength bits, back, chip), or
-    None; `chip` the words of the tool that names no icon (its slot -1),
-    "" for none."""
-    got = _C.api_bar_lent(ctx)
+    """What the app whose context is `ctx` (RUN_UI: the running cart's own)
+    lent its bar in the frame it drew last (`ui.bar`): (title, icon slots,
+    half-strength bits, back, chip), or None; `chip` the words of the tool
+    that names no icon (its slot -1), "" for none."""
+    got = _C.api_run_bar_lent() if ctx is RUN_UI else _C.api_bar_lent(ctx)
     if got is None:
         return None
     last = _BAR_LENT
@@ -1924,8 +1929,12 @@ _BAR_LENT = [None, None]                # the module's last answer, and ours to 
 
 def bar_tap(ctx, i):
     """The host's bar activated tool `i` (-2: its way back) of the bar `ctx`
-    lent; the app's next `ui.bar` answers it."""
-    _C.api_bar_tap(ctx, i)
+    (RUN_UI: the running cart's own) lent; the app's next `ui.bar` answers
+    it."""
+    if ctx is RUN_UI:
+        _C.api_run_bar_tap(i)
+    else:
+        _C.api_bar_tap(ctx, i)
 
 
 def app_back(ctx, take=True):

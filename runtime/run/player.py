@@ -1322,6 +1322,16 @@ class Player(PlayerDiag):
         fs = getattr(run.canvas, "font_scale", 1)
         return f | (fs if fs > 1 else 1) << _FACE_FS_SHIFT
 
+    def bar_ctx(self):
+        """The ui context whose `ui.bar` lends the host's bar: this Player's
+        for a Python app, the run's own (`ui_draw.RUN_UI`) for any other
+        (a Lua or compiled app's; one linking a toolkit of its own lends
+        none there); None for a game or before a frame."""
+        if self._lua is not None:
+            return _ui_draw.RUN_UI if self._is_tool else None
+        ui = self._ui
+        return ui[0] if ui else None
+
     def _ui_begin(self, ws, render=True):
         """Begin a Python app's frame of `ui` verbs (runtime/toolkit/ui.py) over the
         input its btn() and touch() read, in the run snapshot's shape, before

@@ -313,7 +313,7 @@ def _page():
     def draw():
         ui.page("Nav")
         st["a"] = ui.button("A")
-        ui.at(200, 12, 60, 20)          # on A's line (its row: 12, 20 tall)
+        ui.at(200, 0, 60, 20)           # on A's line (its row: 0, 20 tall; the title is the bar's)
         st["side"] = ui.button("Side")
         st["b"] = ui.button("B")
         st["c"] = ui.button("C")
@@ -387,13 +387,13 @@ def test_activation_by_key_and_by_tap():
     assert got["a"] and not got["b"]
     assert not r.frame()["a"], "a button answers true the frame it is activated only"
     # a tap released inside B activates it and focuses it
-    r.frame(ptr=(20, 45, 1 | 2 | 4))
-    got = r.frame(ptr=(20, 45, 1))
+    r.frame(ptr=(20, 33, 1 | 2 | 4))
+    got = r.frame(ptr=(20, 33, 1))
     assert got["b"] and ui.focus() == "B"
     # a press dragged away from the stop is no tap
-    r.frame(ptr=(20, 45, 1 | 2 | 4))
-    r.frame(ptr=(20, 30, 1 | 2))
-    got = r.frame(ptr=(20, 30, 1))
+    r.frame(ptr=(20, 33, 1 | 2 | 4))
+    r.frame(ptr=(20, 18, 1 | 2))
+    got = r.frame(ptr=(20, 18, 1))
     assert not got["b"] and not got["a"]
 
 
@@ -650,7 +650,7 @@ def test_a_hover_owes_a_frame_only_over_a_stop():
     drawn on change owes no frame for it: wall time then never decides
     whether a settled page draws whole (the shell goldens' draw budgets)."""
     r = _Run(_page())
-    ground, on_a = (300, 230), (20, 20)
+    ground, on_a = (300, 230), (20, 8)
     r.frame()
     r.frame()
     r.frame(ptr=ground + (1,))
