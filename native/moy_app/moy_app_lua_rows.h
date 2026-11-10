@@ -66,6 +66,7 @@
     X("service_start") \
     X("service_stop") \
     X("service_running") \
+    X("name") \
 
 // The rows a Lua name calls that run where they are called (how "here"),
 // on a Lua service's own task too, hopped only where they answer NEEDS_VM.

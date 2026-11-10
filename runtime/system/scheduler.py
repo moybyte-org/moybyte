@@ -242,6 +242,7 @@ _CALLS = {
     "moybyte.service_start": _moybyte.service_start,
     "moybyte.service_stop": _moybyte.service_stop,
     "moybyte.service_running": _moybyte.service_running,
+    "moybyte.name": _moybyte.name,
 }
 # END GENERATED
 
@@ -437,6 +438,7 @@ class Scheduler:
         self.wakes.ended = self._ended
         self.wakes.opener = self._open
         self.wakes.service = self.own
+        self.wakes.named = self.console_name
 
     # -- the tick ---------------------------------------------------------
 
@@ -1260,6 +1262,21 @@ class Scheduler:
             _let_go(p)
 
     # -- an app's own service ----------------------------------------------
+
+    def console_name(self):
+        """The name of the console this scheduler is attached to
+        (ssh_service.name: the one Settings gives it, else its board's),
+        None before an attach."""
+        if self.ws is None:
+            return None
+        try:
+            import ssh_service as _ssh
+        except ImportError:  # host: the runtime package
+            try:
+                from runtime import ssh_service as _ssh
+            except ImportError:  # an image without it
+                return None
+        return _ssh.name(self.ws)
 
     def own(self, pid, verb):
         """moybyte's `service_<verb>` as process `pid` (AN APP'S OWN

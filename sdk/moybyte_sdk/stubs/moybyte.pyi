@@ -114,3 +114,6 @@ def aes_ccm_seal(*args: Any, **kwargs: Any) -> Any:
 
 def aes_ccm_open(*args: Any, **kwargs: Any) -> Any:
     """moybyte.aes_ccm_open(key: bytes, sealed: bytes, tag: int): the row moybyte.aes_ccm_open"""
+
+def name(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.name(): the row moybyte.name"""

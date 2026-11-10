@@ -60,6 +60,7 @@ def sched():
     _clear(wakes)
     wakes.ended = S.SCHED._ended
     wakes.opener = S.SCHED._open
+    wakes.named = S.SCHED.console_name
 
 
 def _since():
@@ -740,3 +741,19 @@ def test_a_service_that_does_not_fit_the_share_is_refused(sched):
     assert p.state == S.EXITED and p.code == S.EXIT_CRASHED and p.held == 0
     assert (3, "no room") in _lines(since, p.pid)
     assert sched.holding() == []
+
+
+def test_the_console_s_name_is_the_one_its_settings_give_it(sched):
+    """moybyte.name(), a console call every tier holds: the name Settings
+    gives the console the scheduler is attached to, else its board's."""
+    from runtime import ssh_service
+
+    class Console:
+        system = {"name": ""}
+
+    board = ssh_service.default_name()
+    assert board.startswith("moybyte-") and moybyte.name() == board
+    S.attach(Console(), sched)
+    assert moybyte.name() == board
+    Console.system["name"] = "Kuhinja"
+    assert moybyte.name() == "Kuhinja" == S._CALLS["moybyte.name"]()

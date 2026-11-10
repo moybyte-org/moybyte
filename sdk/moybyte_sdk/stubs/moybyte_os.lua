@@ -132,3 +132,5 @@ function moybyte.aes_ctr(...) end
 function moybyte.aes_ccm_seal(...) end
 --- moybyte.aes_ccm_open(key: bytes, sealed: bytes, tag: int): the row moybyte.aes_ccm_open
 function moybyte.aes_ccm_open(...) end
+--- moybyte.name(): the row moybyte.name
+function moybyte.name(...) end

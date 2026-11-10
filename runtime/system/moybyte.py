@@ -7,6 +7,7 @@
 #   notify                   a notification (status: a status-bar item)
 #   send                     a message to an app (open_with, share, pick)
 #   service_start            this app's own service (service_stop, service_running)
+#   name                     the console's name
 #   log                      a line of the OS log
 #   sha256                   the crypto rows (random, hmac_sha256, aes_gcm_*, aes_ctr, aes_ccm_*, x25519, ed25519_*)
 #   __getattr__              the device APIs (http, ble, camera, ...) by name
@@ -70,6 +71,10 @@ one, `time.ticks_us()`.
   service_running()  its pid while it runs, else 0
                      Each answers ABSENT (-8) where the app declares no
                      service; the last start or stop asked wins
+  name()             the console's name, the one it answers to on the
+                     network (`<name>.local`): the name Settings gives it,
+                     else its board's own ("moybyte-" and its MAC's last
+                     four hex digits; the Zero's "moybyte-zero")
   every(ms, fn)      wake `fn()` every `ms`, no earlier
   after(ms, fn)      wake `fn()` once, no earlier than `ms` from now
   at(t, fn)          an alarm: wake `fn()` once, no earlier than `t`, Unix
@@ -333,6 +338,7 @@ class Wakes:
                                     # (the scheduler's: its app and `receives`)
         self.service = None         # fn(pid, verb) -> service_<verb>'s answer
                                     # (the scheduler's `own`)
+        self.named = None           # fn() -> the console's name (the scheduler's)
         self._rbuf = None
 
     def bind(self, table):
@@ -869,6 +875,19 @@ def service_stop():
 
 def service_running():
     return _service("running")
+
+
+def name():
+    fn = WAKES.named
+    if fn is not None:
+        got = fn()
+        if got:
+            return got
+    try:
+        import ssh_service as _ssh
+    except ImportError:  # host: the runtime package
+        from runtime import ssh_service as _ssh
+    return _ssh.default_name()
 
 
 ACHIEVEMENTS = "moybyte.achievements"
