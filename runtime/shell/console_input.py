@@ -158,12 +158,17 @@ class InputVerbs:
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
         # B and Esc on a registered app's fullscreen surface are the bar's
-        # back chevron (`app_back`): a page of the app, else out of it.
+        # back chevron (`app_back`): a page of the app, else out of it; on a
+        # running app's, while it has a view of its own open (`has_page`).
         _apps = (self._apps_by_id if pressed and not self.windowed_chrome
                  and (i.pressed("b") or i.pressed("stop")) else None)
         for layer in self.wm.visible_stack_rev():
             if _apps is not None and layer.id in _apps:
                 self.app_back(layer)
+                return
+            if (_apps is not None and layer.id == "desktop"
+                    and self.run.player.has_page()):
+                self.app_back(self.run.player)
                 return
             if layer.handle_input(i):
                 if getattr(layer, "leave_asked", False):

@@ -1437,6 +1437,32 @@ class Player(PlayerDiag):
         self._bg_on = True
         return self._bg(*a)
 
+    def has_page(self):
+        """Whether the running app has a view of its own open, which the
+        host's back steps out of before it leaves the app: a popover its last
+        frame drew, or a page it lent `ui.bar`'s way back for, on any tier
+        (docs/app_api_v1.md section 4). False for a game."""
+        return self._app_back(False)
+
+    def back(self):
+        """The host's back -- the bar's chevron, a window's, Esc, B and the
+        T-Deck's K -- into the running app: True where it steps out of a view
+        of its own (`has_page`), which the next frame shows; False where it
+        has none, and the host leaves it (`Workstation.app_back`)."""
+        if not self._app_back(True):
+            return False
+        self._owe = max(self._owe, 1)
+        self.ws.request_frame()
+        return True
+
+    def _app_back(self, take):
+        if not self._is_tool or self.cart_error is not None:
+            return False
+        if self._lua is not None:       # the run's own context
+            return bool(_ui_draw.run_back(take))
+        ui = self._ui
+        return ui is not None and bool(_ui_draw.app_back(ui[0], take))
+
     def animates(self):
         """Whether the running cart has a frame to draw now. A game always
         has. An app on the verbs (`_on_change`) has one while input is going

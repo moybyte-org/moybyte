@@ -312,9 +312,45 @@ Enter, A or a tap activates, a drag scrolls. So: every action is a stop
 (a button, a list row, a menu item), and a key shortcut only ever doubles
 one.
 
-**Back is the host's.** Esc, B, the T-Deck's K and the bar's chevron leave
-your app (or step back a page, §11); the ui never reads them. The console's
-own key (the T-Deck's Mic) opens the system menu and is never yours.
+**Back is the host's, and steps out of your views first.** Esc, B, the
+T-Deck's K (its B), the bar's back chevron and a desk window's are the
+console's way back; the ui never reads them. Back steps out of the app's own
+views before it leaves the app, on every tier:
+
+1. a `ui.popover` the last frame drew is dismissed (it answers false);
+2. else, while the app lends the bar its way back (`ui.bar`'s fourth
+   argument), the next `ui.bar` answers it -- `ui.UP` in Python, -1 in Lua,
+   -2 in a compiled app -- and the app steps back itself; the console shows
+   the chevron meanwhile, in a desk window's title strip too;
+3. else the chevron leaves the app, and Esc and B reach your `keyp` and
+   `btnp` (Notes calls `quit()` on Esc there).
+
+A second page, a dialog, a picker: lend the way back while it shows.
+
+```lua
+page = "list"
+function _draw()
+  if ui.bar(page == "chat" and "Chat" or "", {}, {}, page == "chat") == -1 then
+    page = "list"                      -- back: the second page closes
+  end
+  ui.page("Mesh")
+  if page == "list" then
+    if ui.button("Open chat", "primary") then page = "chat" end
+  else
+    if ui.button("Who", "normal") then who = true end
+    if who then
+      who = ui.popover("who", 120)     -- back dismisses this first
+      ui.label("Nodes heard")
+      ui.popover()
+    end
+  end
+end
+```
+
+A shell app built into the console answers the same back through its
+`back()` and `has_page()` (`Workstation.app_back`); a running app cart's are
+the Player's, over its `ui` context. The console's own key (the T-Deck's
+Mic) opens the system menu and is never yours.
 
 **Tabs switch themselves.** `ui.tabs` takes Q and E (the `tabs` hint's
 keys) wherever the keys do not type into a field, left and right while it

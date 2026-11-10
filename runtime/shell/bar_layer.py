@@ -1234,11 +1234,7 @@ class BarLayer:
         elif where == "app":
             ws.app_back()
         elif where == "tool":
-            lent = self._lent(where)
-            if lent is not None and lent[3]:
-                _ui_draw.bar_tap(self._lent_ctx(where), -2)    # the app's page steps back
-            else:
-                ws._exit_to_caller()
+            ws.app_back(ws.run.player)  # the app's own view first, then out of it
         elif where == "settings":
             ws.settings_layer.back()
         elif where == "tasks":

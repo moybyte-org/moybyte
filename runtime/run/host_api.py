@@ -458,11 +458,14 @@ class ConsoleDriver:
         """Esc is the console's: a menu shows, a game plays fullscreen (its
         Esc is the console's key), Settings or a registered app is the
         fullscreen surface (its Esc is the bar's back), or the focused desk
-        window shows its back chevron."""
+        window shows its back chevron, or a running app has a view of its
+        own open (`Player.has_page`)."""
         ws = self.ws
         return (self.menu_open() or ws.plays_fullscreen()
                 or ws.screen in ("settings", "tasks")
                 or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
+                or (not ws.windowed_chrome and ws.screen == "desktop"
+                    and ws.run.player.has_page())
                 or (ws.windowed_chrome and ws.wm.focus_has_back()))
 
     def escape(self):
@@ -490,6 +493,9 @@ class ConsoleDriver:
             ws.tasks_layer.back()
         elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
             ws.app_back()
+        elif (not ws.windowed_chrome and ws.screen == "desktop"
+              and ws.run.player.has_page()):
+            ws.app_back(ws.run.player)  # the running app's own view steps back
         elif ws.windowed_chrome and ws.wm.focus_back():
             pass
         elif ws.screen == "menu" and ws.editor_layer() is not ws.layer_of(ws.menu_view):

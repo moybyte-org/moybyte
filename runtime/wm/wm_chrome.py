@@ -491,8 +491,6 @@ class WindowChrome:
         the back chevron while its app has a page of it open
         (docs/history/look_2026-10.md step 27a), which the chrome's freeze signature
         carries."""
-        if win.kind == "desktop":
-            return _ui_draw.FRAME_MIN
         if self.ws.app_has_page(win.kind):
             return _ui_draw.FRAME_MIN | _ui_draw.FRAME_BACK
         return _ui_draw.FRAME_MIN

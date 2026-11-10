@@ -1143,10 +1143,12 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     int pressed = in[MOY_UI_IN_BTNP];
     int key = in[MOY_UI_IN_KEY];
     int tab = key == MOY_UI_KEY_TAB && c->last_key != MOY_UI_KEY_TAB;
-    if (c->modal && c->pop_prev.w > 0 && key == MOY_UI_KEY_ESC && c->last_key != key) {
-        c->pop_gone = 1;            // Esc dismisses a popover
+    if (c->modal && c->pop_prev.w > 0
+        && ((key == MOY_UI_KEY_ESC && c->last_key != key) || c->pop_back)) {
+        c->pop_gone = 1;            // Esc or the host's back dismisses a popover
         settled = 0;
     }
+    c->pop_back = 0;
     int qe = key == c->last_key ? 0 : (key | 0x20) == 'q' ? -1 : (key | 0x20) == 'e' ? 1 : 0;
     c->last_key = key;
     const moy_ui_stop_t *f = fi >= 0 ? &v[fi] : NULL;

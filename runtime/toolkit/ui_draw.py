@@ -1927,6 +1927,21 @@ def bar_tap(ctx, i):
     _C.api_bar_tap(ctx, i)
 
 
+def app_back(ctx, take=True):
+    """The host's back -- the bar's chevron, a window's, Esc, B and the
+    T-Deck's K -- over the frame `ctx` drew last: True where the app takes
+    it (a popover it drew is dismissed, else the page it lent `ui.bar`'s
+    `back` for answers UP next frame), False where it has no view to step
+    out of and the host leaves it. `take` False only asks."""
+    return _C.api_back(ctx, take)
+
+
+def run_back(take=True):
+    """`app_back` over the running cart's own context: a Lua, compiled,
+    WASI or native app's."""
+    return _C.api_run_back(take)
+
+
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 _UP = 1 << 2                            # "up"'s bit in a frame's buttons
 _DIRS = 15                              # the four directions' bits

@@ -201,6 +201,12 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
     return s_ctx;
 }
 
+int moy_ui_run_back(int take) {
+    uint32_t tick = 0, serial = 0;
+    (void)moycore_ui_snap(&tick, &serial);
+    return s_ctx != NULL && s_live && serial == s_serial ? moy_ui_api_back(s_ctx, take) : 0;
+}
+
 // What shows of the table's part open now (moy_ui_run_table_part), x0, y0,
 // x1, y1 on the canvas: every verb drawn while it is open draws inside it,
 // as the canvas's own verbs do.

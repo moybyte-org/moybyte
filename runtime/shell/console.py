@@ -2764,10 +2764,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     def page_app(self, kind):
         """The app behind process `kind` whose pages its back steps through:
-        a registered app, or Settings; None for any other kind."""
+        a registered app, Settings, or the running app cart (the Player,
+        whose `has_page` and `back` are its app's views); None for any other
+        kind."""
         app = self._apps_by_id.get(kind)
         if app is None and kind == "settings":
             app = self.settings_layer
+        if app is None and kind == "desktop" and self.run.player._is_tool:
+            app = self.run.player
         return app
 
     def app_has_page(self, kind):

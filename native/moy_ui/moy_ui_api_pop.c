@@ -733,6 +733,22 @@ void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i) {
     c->bar_act = (int8_t)((i >= 0 && i < MOY_UI_API_BAR) || i == MOY_UI_BAR_UP ? i : -1);
 }
 
+int moy_ui_api_back(moy_ui_ctx_t *c, int take) {
+    if (c->pop_card.w > 0) {
+        if (take) {
+            c->pop_back = 1;
+        }
+        return 1;
+    }
+    if (c->bar_seen && c->bar_back) {
+        if (take) {
+            c->bar_act = MOY_UI_BAR_UP;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 int moy_ui_api_owes(const moy_ui_ctx_t *c) {
     return c->owe;
 }

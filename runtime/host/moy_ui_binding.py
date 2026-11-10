@@ -430,6 +430,8 @@ _DRAW_SIGS = (
     ("moy_ui_api_bar_lent", [c.c_void_p, c.POINTER(c.c_char_p), c.POINTER(c.c_int16),
                              c.POINTER(_I), c.POINTER(c.c_uint32)], _I),
     ("moy_ui_api_bar_tap", [c.c_void_p, _I], None),
+    ("moy_ui_api_back", [c.c_void_p, _I], _I),
+    ("moy_ui_run_back", [_I], _I),
     ("moy_ui_api_bar_chip", [c.c_void_p, c.POINTER(_I)], c.c_char_p),
     ("moy_ui_api_rule", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p], None),

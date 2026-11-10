@@ -438,6 +438,7 @@ typedef struct {
     // press outside the card drawn last, or Esc).
     moy_ui_box_t pop_card, pop_prev, pop_at;
     uint8_t pop_gone;
+    uint8_t pop_back;               // the host's back took the popover: gone next frame
     uint8_t tip_shown;              // ui.end drew a tooltip this frame
     uint8_t pop_mid;                // it opened with nothing to hang from: centred
     uint32_t pop_id;                // the popover drawn this frame (0: none)
@@ -1062,6 +1063,12 @@ const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at);
 // The host's bar activated tool `i` of the bar lent last (MOY_UI_BAR_UP its
 // way back); the next ui.bar answers it.
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);
+// The host's back (the bar's chevron, a window's, Esc, B and the T-Deck's
+// K) over the frame drawn last: 1 where the app takes it -- a popover it
+// drew is dismissed next frame (ui.popover answers false), else the bar it
+// lent with MOY_UI_BAR_BACK answers MOY_UI_BAR_UP -- and 0 where it has no
+// view to step out of, so the host leaves the app. `take` 0 only asks.
+int moy_ui_api_back(moy_ui_ctx_t *c, int take);
 // Whether the frame drawn last owes the next though no input comes: a
 // dialog or a popover laid out from a stale measure, or a reveal its pass
 // set (a list's or a table's row stepped where begin could not reveal it, a
