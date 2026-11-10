@@ -219,10 +219,8 @@ answers four values.
 
 **The canvas: fixed by default, responsive by opt-in.** The manifest's
 `canvas` is the raster, and the console centres and integer-scales it, as it
-does a game's. A Python cart that defines a top-level `_layout(w, h, fs)` opts
-into the whole surface (the opt-in is Python's: `system_api.wants_layout`
-probes for its `def`, so a Lua app's canvas is fixed, on the desk a scaled
-raster like a game's rather than a window): it draws on the system canvas,
+does a game's. A cart that defines `_layout(w, h, fs)` (each tier its own way,
+the table below) opts into the whole surface: it draws on the system canvas,
 is called before `_init` and again whenever the size or font scale changes,
 and gets the responsive bar. A cart that also declares a small `canvas` keeps the fixed raster and
 is told so through `_layout`'s arguments. On the desk the cart gets a window

@@ -5,7 +5,6 @@
   "id": "moymesh",
   "runtime": "lua",
   "main": "main.lua",
-  "canvas": "320x240",
   "description": "Text messages on the LoRa radio, on the default LongFast channel. Works with Meshtastic.",
   "moybyte": {
     "type": "app",

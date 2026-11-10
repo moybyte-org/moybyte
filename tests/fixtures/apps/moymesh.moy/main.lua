@@ -3,7 +3,9 @@
 -- channel, newest first, and sends what is typed; the service holds the radio
 -- and keeps running when the window closes. The region picks the frequency
 -- and must match the law where the console is: EU_868 until another is
--- chosen.
+-- chosen. The window is responsive: the ui verbs lay the page out in
+-- whatever room `_layout` was given, and a window too narrow for a row's
+-- signal readout lists the text alone.
 
 ME = "moymesh"
 REGIONS = {"EU_868", "EU_433", "US", "ANZ", "ANZ_433", "CN", "JP", "RU", "KR", "TW",
@@ -15,6 +17,18 @@ cur = 1
 text = ""
 region = 1
 node = ""
+room_w, room_h, room_fs = 320, 240, 1
+
+function _layout(w, h, fs)
+  room_w, room_h, room_fs = w, h, fs
+  _reload()
+end
+
+-- The ui verbs draw a Lua app's text at one size whatever `fs` is, so the
+-- readout fits by width alone: the 320 the handheld gives it.
+function signal_fits()
+  return room_w >= 320
+end
 
 function _reload()
   local log = prefs.get("log") or {}
@@ -25,7 +39,7 @@ function _reload()
     local line = (heard and m.from or "me") .. ": " .. (m.text or "")
     if m.failed then
       line = line .. " (not sent)"
-    elseif heard then
+    elseif heard and signal_fits() then
       line = line .. string.format("  %d dBm %.1f dB", m.rssi or 0, m.snr or 0)
     end
     rows[#rows + 1] = line

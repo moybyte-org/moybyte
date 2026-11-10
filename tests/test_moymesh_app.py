@@ -26,7 +26,7 @@ from runtime import moybyte, scheduler as S
 from runtime import moy_lora as N
 from runtime.host import lora_sim
 
-from ws_helpers import build_ws, make_drv, select_on_home
+from ws_helpers import build_desktop_ws, build_ws, make_drv, open_cart, select_on_home
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CART = os.path.join(ROOT, "tests", "fixtures", "apps", "moymesh.moy")
@@ -352,6 +352,36 @@ def test_on_the_handheld_the_window_opens_on_the_field_below_the_bar(tmp_path):
         assert room[1] > 0 and got == room          # the page lies below the bar
         win.run("FOCUS = ui.focus()")
         assert win.get("FOCUS") == "Message"
+    finally:
+        while N.owner():
+            moybyte.end(N.owner())
+        lora_sim.remove()
+
+
+def test_on_the_desk_mesh_is_a_window_laid_out_for_its_room(tmp_path):
+    lora_sim.install()
+    ws = build_desktop_ws(tmp_path)
+    try:
+        ws.open_desk()
+        _install(ws)
+        open_cart(ws, TITLE)
+        pl = ws.run.player
+        assert pl.cart_error is None, pl.cart_error
+        assert ws.run.app_window_canvas, "it opens in a window, not a scaled raster"
+        drv = make_drv(ws)
+        for _ in range(3):
+            ws.mark_dirty()
+            drv.frame(1 / 30)
+        win = _Window(pl)
+        w, h = ws.app_window_size()
+        assert (w, h) != (ws.glass_canvas.w, ws.glass_canvas.h)
+        assert [win.get(k) for k in ("room_w", "room_h", "room_fs")] == \
+            [w, h, ws.look.effective_font_scale()]
+        pl.ns["prefs"].set("log", [{"from": "!5e6f7a8b", "text": "hi", "rssi": -98, "snr": 6.5}])
+        win.run("_layout(200, %d, 1)" % h)
+        assert win.rows() == ["!5e6f7a8b: hi"], "a narrow window drops the readout"
+        win.run("_layout(%d, %d, 1)" % (w, h))
+        assert win.rows() == ["!5e6f7a8b: hi  -98 dBm 6.5 dB"]
     finally:
         while N.owner():
             moybyte.end(N.owner())
