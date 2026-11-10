@@ -1303,6 +1303,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # last saw it, and the one that last set the keyboard's text mode.
         self._holder = None
         self._text_by = None
+        # The cart each registered app was opened on last (`open_app`): its
+        # bar's title, whatever project the console holds open.
+        self.app_carts = {}
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
         # redraws + flushes when something visible changed. `_dirty` is the "redraw
         # this frame" flag; it starts True so the very first frame always paints, and

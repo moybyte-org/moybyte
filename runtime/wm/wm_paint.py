@@ -279,8 +279,15 @@ class WindowPaint:
 
     def _win_extent(self, win):
         """Everything a window's draw touches: body, border and shadow, padded
-        like _gesture_extent."""
-        return self._pad_extent(win, win.x, win.y, win.w, win.h)
+        like _gesture_extent; the answer kept while the window and the look
+        stand (the window loop asks it every frame)."""
+        k = getattr(win, "_ext", None)
+        g = self.ws.look.look_gen
+        if (k is None or k[0] != win.x or k[1] != win.y or k[2] != win.w or k[3] != win.h
+                or k[4] != win.title_h or k[5] is not win.saved or k[6] != g):
+            k = win._ext = [win.x, win.y, win.w, win.h, win.title_h, win.saved, g,
+                            self._pad_extent(win, win.x, win.y, win.w, win.h)]
+        return k[7]
 
     def _hand_damage(self, touched):
         """Close this frame's damage description: hand the backdrop's rects and
@@ -644,9 +651,11 @@ class WindowPaint:
         # redrawing them is pure waste. Measured on P4 glass during a picker
         # scroll: 8.2ms of a 70ms frame, every frame, for an unchanged title bar.
         # _lowest_dirty_window sets _sig_stable (window shape/order/focus).
-        self._chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
+        quiet = self._chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
         touched = []
         self._under_hit = False
+        below = self._below
+        below[0] = below[1] = below[2] = below[3] = 0
         top = self._wins[self._order[-1]] if n else None
         for i in range(n):
             key = self._order[i]
@@ -660,9 +669,31 @@ class WindowPaint:
             self._win_touched = False
             self._chrome_drew = False
             self._part[4] = 0
-            if win is not top and not self._under_hit \
-                    and _overlap(self._win_extent(win), top.content_rect()):
-                self._under_hit = True    # the top window's retained pixels are hit
+            ext = None
+            if win is not top and not self._under_hit:
+                ext = self._win_extent(win)
+                if _overlap(ext, top.content_rect()):
+                    self._under_hit = True    # the top window's retained pixels are hit
+            # A window drawn under this one this frame may have drawn over its
+            # strip and border, which a quiet frame's chrome would leave: its
+            # chrome draws, and its content stamps whole.
+            if quiet and below[2] > below[0]:
+                if ext is None:
+                    ext = self._win_extent(win)
+                self._chrome_quiet = not (
+                    ext[0] < below[2] and below[0] < ext[0] + ext[2]
+                    and ext[1] < below[3] and below[1] < ext[1] + ext[3])
+            if win is not top:
+                if ext is None:
+                    ext = self._win_extent(win)
+                if below[2] > below[0]:
+                    below[0] = min(below[0], ext[0])
+                    below[1] = min(below[1], ext[1])
+                    below[2] = max(below[2], ext[0] + ext[2])
+                    below[3] = max(below[3], ext[1] + ext[3])
+                else:
+                    below[0], below[1] = ext[0], ext[1]
+                    below[2], below[3] = ext[0] + ext[2], ext[1] + ext[3]
             u = self._under_gesture(win, focused, top)
             if u is not None:
                 if u:
@@ -693,6 +724,7 @@ class WindowPaint:
                     touched.append((pt[0], pt[1], pt[2] - pt[0], pt[3] - pt[1]))
                 else:
                     touched.append(self._win_extent(win))
+        self._chrome_quiet = quiet
         # The chips live on the OS bar, whose strip the compositor carries
         # when the chip draw says it moved; the resize outline lies inside the
         # gesture union. Neither is a rect of its own.

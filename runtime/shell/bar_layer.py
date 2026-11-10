@@ -1672,11 +1672,15 @@ class BarLayer:
         if lent is not None and lent[0]:
             return lent[0]
         if where == "app":
-            app = ws._apps_by_id.get(ws.wm.top_kind())
+            kind = ws.wm.top_kind()
+            app = ws._apps_by_id.get(kind)
             pt = getattr(app, "page_title", None)
             t = pt() if pt is not None else None
             if t:
                 return t                    # a page of the app names its own
+            c = ws.app_carts.get(kind)
+            if c is not None:
+                return c.get("title") or ""     # the cart it was opened on
         if where in ("tool", "app", "menu") and ws.cart:
             return ws.cart.get("title") or ""
         if where == "home":

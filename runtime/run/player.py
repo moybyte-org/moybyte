@@ -249,6 +249,10 @@ FREE_DT_MAX = 0.1
 _SIG_FPS = 2                            # the WM's overlay sig bit of the FPS chip
 
 
+def _deaf_btn(name, player=None):
+    return False
+
+
 class Player(PlayerDiag):
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
@@ -282,6 +286,9 @@ class Player(PlayerDiag):
         # (runtime/shell/procs.py): it reads no input, keeps no edges, pulls
         # no mix and leaves by `quit_asked` instead of the caller's route.
         self.detached = False
+        # Deaf: its desk window does not hold the keyboard (`set_deaf`).
+        self.deaf = False
+        self._deaf_ns = None          # (ns, btn, btnp) the deafness took
         self.quit_asked = False
         self.ns = None
         self._update = None
@@ -436,8 +443,35 @@ class Player(PlayerDiag):
 
     def focused_editor(self):
         """The handle holding the keyboard, or None -- what `ws.nav` asks
-        before it spends a trackball roll on the cursor."""
-        return self._focus_editor
+        before it spends a trackball roll on the cursor. None while the run
+        is deaf: the keyboard is another window's."""
+        return None if self.deaf else self._focus_editor
+
+    def set_deaf(self, on):
+        """Its desk window lost (`on`) or took back the keyboard
+        (`Procs.frame` says, every frame): while deaf the run reads no key,
+        no typed text and no button -- key(), keyp(), btn() and btnp()
+        answer nothing, its editor handle and its ui frame take no key, and
+        a Lua or compiled run's snapshot carries no input. Its pointer is
+        the console's to strip (`player_has_pointer`)."""
+        ns = self.ns
+        took = self._deaf_ns
+        want = ns if on and ns and "btn" in ns else None
+        if on == self.deaf and want is (took[0] if took is not None else None):
+            return
+        if took is not None:
+            self._deaf_ns = None
+            if took[0] is ns:
+                ns["btn"], ns["btnp"] = took[1], took[2]
+        if want is not None:
+            self._deaf_ns = (ns, ns["btn"], ns["btnp"])
+            ns["btn"] = ns["btnp"] = _deaf_btn
+        if on != self.deaf:
+            self.deaf = on
+            self._keyp_latch = 0
+            m = getattr(self._lua, "mute", None)
+            if m is not None and not self.detached:
+                m(on)
 
     def seed_cart_key(self, code):
         """Swallow the byte that took the keyboard, on the CART tier.
@@ -1320,8 +1354,12 @@ class Player(PlayerDiag):
         if getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE:
             a[4] |= _P_MIDDLE
         fed = self._focus_editor
-        if fed is not None:
+        deaf = self.deaf or self.detached
+        if deaf:
+            a[0] = a[1] = a[5] = a[6] = 0   # the keys are another window's
+        elif fed is not None:
             a[0] = a[1] = a[5] = 0      # the keys are the focused editor handle's
+        if fed is not None:
             if a[4] and fed.claims(a[2], a[3]):
                 a[4] = _P_LIVE          # its own gesture (a mouse's, a selection's): a hover
         # an app on the whole surface (a desk's window, or its glass) lays out
@@ -1344,7 +1382,7 @@ class Player(PlayerDiag):
             _ui_draw.window_frame(2)
         try:
             settled = host.run(cv, ws.theme_colors, self.ui_room(), a, desk, ws.windowed_chrome,
-                               fed is not None)
+                               fed is not None, deaf=deaf)
         finally:
             if own:
                 _ui_draw.window_frame(0)
@@ -1486,21 +1524,25 @@ class Player(PlayerDiag):
     def _input_active(self, inp):
         """A key, a button, the wheel or the middle button this frame: what
         an app's `_update` and its verbs read. The pointer's moves are the
-        console's own redraw leg (`Workstation._ptr_changed`)."""
+        console's own redraw leg (`Workstation._ptr_changed`). A deaf run's
+        keys and buttons are another window's."""
+        if not self.deaf and self._keys_active(inp):
+            return True
+        if getattr(inp, "wheel_x", 0) or getattr(inp, "wheel_y", 0):
+            return True
+        return bool(getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE)
+
+    def _keys_active(self, inp):
         if getattr(inp, "last_key", 0):
             return True
         bm = self._masks
         if bm is not None:
             m = bm(_NET_BUTTONS, None, _UI_MASKS)
-            if m[0] or m[1]:
+            return bool(m[0] or m[1])
+        for i in range(len(_NET_BUTTONS)):
+            if inp.held(_NET_BUTTONS[i]) or inp.pressed(_NET_BUTTONS[i]):
                 return True
-        else:
-            for i in range(len(_NET_BUTTONS)):
-                if inp.held(_NET_BUTTONS[i]) or inp.pressed(_NET_BUTTONS[i]):
-                    return True
-        if getattr(inp, "wheel_x", 0) or getattr(inp, "wheel_y", 0):
-            return True
-        return bool(getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE)
+        return False
 
     def _build_namespace(self, ws, project, cart, wifi, net, gpio, console):
         """The cart's namespace: make_api over the project, the artwork and
@@ -2377,8 +2419,8 @@ class Player(PlayerDiag):
         # independent of whether the backend sets last_key before or after
         # begin_frame().
         k = ws.input.last_key
-        if self._netplay is not None:
-            k = 0                       # only buttons cross the air: no key() in a match
+        if self._netplay is not None or self.deaf:
+            k = 0                       # no key() in a match (only buttons cross the air), nor deaf
         fed = self._focus_editor
         if fed is None:
             ws.input.cart_key = k
@@ -2393,7 +2435,7 @@ class Player(PlayerDiag):
                 self._keyp_latch = k    # a key it did not take (Esc) is the cart's
             # a held key types again at the input table's repeat: the
             # handle's, never the cart's key()/keyp()
-            n = getattr(ws.input, "key_repeats", 0)
+            n = 0 if self.deaf else getattr(ws.input, "key_repeats", 0)
             if n:
                 r = ws.input.repeat_key
                 if r in (8, 9, 10, 13, 127) or 32 <= r < 127:

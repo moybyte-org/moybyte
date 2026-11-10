@@ -513,6 +513,7 @@ class Procs:
                 pass
 
     def _mute(self, pl):
+        pl.set_deaf(False)
         pl.detached = True
         m = getattr(pl._lua, "mute", None)
         if m is not None:
@@ -806,11 +807,13 @@ class Procs:
 
     def _front_state(self, wm, dt):
         """The front's window minimised (the console's frame does not tick
-        it): a game held, an app's update every frame; and its events."""
+        it): a game held, an app's update every frame; and its events. The
+        front run is deaf while its desk window does not hold the keys."""
         ws = self.ws
         pl = ws.run.player
         wins = getattr(wm, "_wins", None)
         win = wins.get(FRONT) if wins is not None else None
+        pl.set_deaf(win is not None and wm.input_holder() != FRONT)
         hidden = (win is not None and win.minimized and self._front_live())
         if hidden:
             app = _is_app(ws.cart)

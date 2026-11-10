@@ -51,7 +51,11 @@ the Workstation). Focusing a Proc's window PROMOTES it: the two Runs trade
 places and the two windows their keys, so the focused game is always the
 front one and gets the keys,
 the pointer, the audible session and the pause menu. A Proc reads no input
-(its input verbs answer nothing), keeps no edges and pulls no mix. A game
+(its input verbs answer nothing), keeps no edges and pulls no mix. The
+front run is deaf while another window holds the keys (`Player.set_deaf`,
+set every frame from the desk's focus): its key(), keyp(), btn() and btnp()
+answer nothing, and its editor handle and ui frame take no key, so typing
+and Q/E reach the focused window alone. A game
 window is in one of three states:
 
 - **running**: the front game, frames at the cart's rate as before -- also

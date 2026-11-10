@@ -411,6 +411,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._part = [0, 0, 0, 0, 0]  # [x0, y0, x1, y1, set]: the root rect the
                                       # window changed, where narrower than it
         self._under_hit = False       # a window under the top one drew into it
+        self._below = [0, 0, 0, 0]    # [x0, y0, x1, y1): what the windows this
+                                      # frame drew under the one drawing next reach
         self._settle_f = -1           # the frame a settle asked for
 
     # -- layout-context plumbing ----------------------------------------------

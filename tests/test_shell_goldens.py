@@ -860,7 +860,39 @@ def _surface_plan(ws, cfg):
     plan.append(("pick", lambda: _pick(ws, home)))
     plan.append(("app_files_document", lambda: _files_document(ws)))
     plan.append(("app_moymesh", _mesh_installed(ws, desktop)))
+    if desktop:
+        plan.append(("desk_two_windows", _two_windows(ws)))
     return plan
+
+
+def _two_windows(ws):
+    """Two windows on the desk: Notes on a note, the Terminal over it with a
+    line typed. Each strip names its own window, and Notes, drawn under the
+    Terminal every frame, leaves the Terminal's strip as it drew it."""
+    def run():
+        ws.go_home()                     # the desk's windows close
+        ws.open_desk()
+        open_cart(ws, "Notes")
+        ws.run.player.ns["_open"](NOTES_VAULT[0][0])
+        app = ws._apps_by_id["terminal"]
+        ws.open_app(app)
+        f = app.face
+        f.clear_cands()
+        f.set_line("clear")
+        f.submit()
+        f.set_line("ls")
+        app._damage.all()
+        # apart enough that Notes' strip shows and its page lies under the
+        # Terminal's strip
+        wm = ws.wm
+        wm._sync_windows()
+        fs = wm._fs()
+        dx, dy, dw, dh = wm._desk_rect()
+        wm._move_window(wm._wins["desktop"], dx + dw // 8, dy + 8 * fs)
+        term = wm._wins["terminal"]
+        wm._resize_window(term, dw * 3 // 5, dh * 3 // 5)
+        wm._move_window(term, dx + dw // 3, dy + dh // 3)
+    return run
 
 
 def _open_with(ws, home):
@@ -1917,6 +1949,8 @@ def surface_names(config_name):
         names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
                   "app_terminal_colours"]
     names += ["open_with", "pick", "app_files_document", "app_moymesh"]
+    if cfg["windowed"] and not cfg.get("console"):
+        names.append("desk_two_windows")
     return names
 
 

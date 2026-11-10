@@ -473,7 +473,9 @@ class SpineVerbs:
         self.look.commit()             # an app switch is an exit: `custom` is written
         self.settings_layer.commit_name()  # ... and a Name still being typed
         self._note_app_caller()        # a jump OUT of an app comes back to it
-        self.cart = cart
+        self.app_carts[app.id] = cart
+        if not self._project_held():
+            self.cart = cart
         self.input.text_mode = False
         self.search_typing = False     # #105: an app jump ends any in-progress search typing
         app.open()
@@ -481,6 +483,25 @@ class SpineVerbs:
         self._set_text_mode(bool(text))
         self.ach.played(cart.get("path") or cart.get("title"))
         return True
+
+    def _project_held(self):
+        """Whether the open project is another surface's: a run plays it (in
+        a desk window, parked behind console mode, or on a handheld's
+        back-stack) or the Editor has it open or parked. An app opened then
+        leaves it as it is."""
+        wm = self.wm
+        if self.procs._front_live():
+            return True
+        pl = self.run.player
+        if (wm.is_parked("desktop") and pl.cart_error is None
+                and (pl._update is not None or pl._draw is not None)):
+            return True
+        ed = getattr(self, "editor_app", None)
+        if ed is None or ed.project is not self.run.project:
+            return False
+        wins = getattr(wm, "_wins", None)
+        return (("menu" in wins) if wins is not None else wm.stack.has("menu")) \
+            or wm.is_parked("menu")
 
     def is_system_app(self, cart):
         """True when a registered system app's identity claims `cart`, or it

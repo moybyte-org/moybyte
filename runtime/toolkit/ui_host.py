@@ -299,12 +299,14 @@ class AppHost:
             self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         return r
 
-    def run(self, cv, th, rect, a, desk=False, window=False, away=False, edge=False, tap=0):
+    def run(self, cv, th, rect, a, desk=False, window=False, away=False, edge=False, tap=0,
+            deaf=False):
         """Begin the frame on input `a` (the run snapshot's shape, its
         pointer's flags as the app's own host made them: a run's Player),
         as `begin` does: whether it is settled. `away`: no stop holds focus;
         `edge`: the key in `a` is a press edge already; `tap`: the pointer's
-        tap state (`begin`'s), 0 none."""
+        tap state (`begin`'s), 0 none; `deaf`: the keys are another window's,
+        so the frame does not take them (`steps_dead` asks the one that does)."""
         ctx = self.ctx
         u = UI_TARGET
         u[0] = ctx
@@ -374,8 +376,8 @@ class AppHost:
             _EDGE[0] = True
         self._began = _PAINT[0]
         self._console = _PAINT[2]
-        self._keys = not away
-        if not away:
+        self._keys = not (away or deaf)
+        if self._keys:
             _KEYS_HOST[0] = self
         settled = r & _HB_SETTLED != 0
         self.owed = not settled
