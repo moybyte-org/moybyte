@@ -138,29 +138,41 @@ def test_shift_tab_super_and_f11_in_chrome(tmp_path, base):
 
 # -- the mouse ------------------------------------------------------------------
 
-_HASH = ("(function(){var c=document.getElementById('cv');var d=c.getContext('2d')"
-         ".getImageData(0,0,c.width,c.height).data;var h=0;for(var i=0;i<d.length;i+=4)"
-         "{h=(h*31+d[i]+d[i+1]*7+d[i+2]*13)|0;}return '%s '+JSON.stringify(h);})()")
+# A hash of Files' list rows (canvas pixels x 500..880, y 125..505): the
+# bar's clock and everything outside the list stay out of it.
+_LIST_HASH = ("(function(){var d=document.getElementById('cv').getContext('2d')"
+              ".getImageData(500,125,380,380).data;var h=0;for(var i=0;i<d.length;i+=4)"
+              "{h=(h*31+d[i]+d[i+1]*7+d[i+2]*13)|0;}return h;})()")
+
+
+def _list_settled():
+    """Waits until the list's rows hold still for five samples running (the
+    list loaded, a notch's glide landed), however slow the frames are."""
+    return {"js": "window.__wh = null; window.__wn = 0; 'reset'"}, {
+        "waitFor": "(function(){var h=%s;window.__wn=(h===window.__wh)?window.__wn+1:0;"
+                   "window.__wh=h;return window.__wn>=5;})()" % _LIST_HASH,
+        "timeout": 15000}
 
 
 def test_the_wheel_scrolls_files_list_in_chrome(tmp_path, base):
     """Over Files' list a notch scrolls it and the notch back returns it,
     the pointer resting where it was."""
     at = [700, 330]
+
+    def probe(tag):
+        return [*_list_settled(), {"js": "'%s ' + JSON.stringify(%s)" % (tag, _LIST_HASH)}]
+
     steps = [
         {"note": "Files up", "wait": 6000},
-        {"move": at}, {"wait": 800},
-        {"js": _HASH % "BEFORE"}, {"shot": "files_before"},
-        {"wheel": at + [0, 300]}, {"wait": 800},
-        {"js": _HASH % "DOWN"}, {"shot": "files_down"},
-        {"wheel": at + [0, -300]}, {"wait": 800},
-        {"js": _HASH % "BACK"},
+        {"move": at}, *probe("BEFORE"), {"shot": "files_before"},
+        {"wheel": at + [0, 300]}, *probe("DOWN"), {"shot": "files_down"},
+        {"wheel": at + [0, -300]}, *probe("BACK"),
     ]
     out, js = web_e2e.run(tmp_path, "wheel_files", "?desktop=1&cart=moybyte.files.moy&dev=1",
                           steps, base, tmp_path / "chrome_wheel", boot_ms=30000)
     got = _tagged(js)
     assert got["DOWN"] != got["BEFORE"], "the wheel moved nothing:\n" + out[-2000:]
-    assert got["BACK"] == got["BEFORE"], "the notch back did not return it"
+    assert got["BACK"] == got["BEFORE"], "the notch back did not return it:\n" + out[-2000:]
 
 
 def _grid(tmp_path, base):
