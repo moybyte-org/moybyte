@@ -101,8 +101,9 @@ def test_a_native_service_is_started_listed_and_stopped_as_any_service(svc):
 
 
 def test_its_app_calls_are_answered_on_the_vms_task(svc):
-    """moy_notify from the service's own task hops to the VM's queue, which
-    the scheduler's poll serves: the notification posts as the service."""
+    """moy_notify from the service's own task is the kernel's notification
+    queue's (native/moy_kernel/moy_notes.h), taken into the list as the
+    console's frame starts: the notification posts as the service."""
     ws, s, cart, peer = svc
     notifications.NOTES.reset()
     pid = S.start_cart(ws, cart, s)
@@ -113,6 +114,7 @@ def test_its_app_calls_are_answered_on_the_vms_task(svc):
     assert moy_evq.take(peer) == (pid, "elf.svc", "noted", "[1]")
     # its own app declares no service: a `type: service` cart's call is ABSENT
     assert moy_evq.take(peer) == (pid, "elf.svc", "owned", '["absent"]')
+    notifications.NOTES.drain()             # the console's next frame takes it into the list
     n = [n for n in notifications.NOTES.list if n.summary == "Hello"]
     assert [(x.body, x.pid) for x in n] == [("from a service", pid)]
     notifications.NOTES.reset()
