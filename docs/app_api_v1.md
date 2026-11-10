@@ -401,14 +401,18 @@ end
 ```
 
 **Details hang from what they detail.** `ui.at` the rect `ui.bubble`
-answered, then `ui.popover(id, w)` with the room's width less the gutters
-spans the chat; its buttons form one row at the card's foot, the primary
-last:
+answered (its height takes in the status line), then `ui.popover(id, w)`
+with the room's width less the gutters spans the chat; its buttons form one
+row at the card's foot, the primary last. `wash = "view"` washes the scroll
+region the bubble lies in, all but the bubble and its ring:
 
 ```lua
+ui.scroll("history")
+-- ... the bubbles before it
 local x, y, w, h = ui.bubble(m.text, "out", {tone = "failed", anchor = true})
 ui.at(x, y, w, h)
-details = ui.popover("details", pw - 16)   -- back or a press outside: false
+ui.scroll()
+details = ui.popover("details", pw - 16, {wash = "view"})   -- back or a press outside: false
 ui.info("Status", "Not sent")
 if ui.button("Delete", "danger") then delete(m) end
 if ui.button("Send again", "primary") then resend(m) end

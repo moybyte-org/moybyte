@@ -57,6 +57,17 @@ static const void *over_values(const char *v, uint32_t n) {
     return over_buf;
 }
 
+// An override block naming only the flags word `fl` (MOY_UI_O_*): the nine
+// words, no hint, the flags.
+static const void *over_flags(int32_t fl) {
+    int32_t w[11] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, fl};
+    for (uint32_t i = 0; i < 44; i++) {
+        over_buf[i] = (uint8_t)(w[i / 4] >> (8 * (i % 4)));
+    }
+    over_n = 44;
+    return over_buf;
+}
+
 EXPORT(_layout) void _layout(int32_t w, int32_t h, int32_t fs) {
     (void)w;
     (void)h;
@@ -107,6 +118,23 @@ EXPORT(_draw) void _draw(void) {
         ui_info(S("Channel"), S("LongFast"), NULL, 0);
         ui_info(S("Status"), S("Not sent"), NULL, 0);
         ui_button(S("Delete"), 3, NULL, 0);
+        ui_button(S("Send again"), 1, NULL, 0);
+        ui_popover("", 0, 0, NULL, 0);
+        ui_focus(S("Send again"), NULL, 0);
+    } else if (page == 6) {
+        int32_t v[5];
+        int32_t in3[6] = {0, 3, 0, 75, 4, 0}, failed[6] = {1, -1, 1, 75, 4, 1};
+        ui_label(S("LongFast"), NULL, 0);
+        ui_scroll(S("history"), NULL, 0);
+        ui_bubble(S("See you at the top"), S("Ana Ridge"), S(""), (const char *)in3, sizeof(in3), NULL, 0,
+                  v, sizeof(v));
+        ui_bubble(S("Wait for me at the gate"), S(""), S("Not sent"), (const char *)failed,
+                  sizeof(failed), NULL, 0, v, sizeof(v));
+        ui_at(v[0], v[1], v[2], v[3]);
+        ui_scroll("", 0, NULL, 0);
+        // wash "view": MOY_UI_O_WASH | MOY_UI_O_WASH_VIEW
+        ui_popover(S("details"), room[2] - 16, over_flags(1 | 16777216), over_n);
+        ui_info(S("Status"), S("Not sent"), NULL, 0);
         ui_button(S("Send again"), 1, NULL, 0);
         ui_popover("", 0, 0, NULL, 0);
         ui_focus(S("Send again"), NULL, 0);

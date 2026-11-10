@@ -71,6 +71,7 @@ BUBBLES = (("in", {"head": "Ana Ridge", "signal": 2, "lines": 1, "id": "b0"}),
            ("out", None))
 SIGNAL = {"signal": 3}
 REGION = {"values": ("Europe", "United States", "China"), "check": True}
+POP = {"wash": "view"}
 SHORT = [False]
 OUT = [0] * 5
 
@@ -101,6 +102,10 @@ def page():
     ui.info("Signal", "-104 dBm", SIGNAL)
     ui.at(4, 150, 230, 48)
     ui.list("Region", WORDS, 1, REGION)
+    ui.at(40, 40, 120, 30)
+    ui.popover("pv", 200, POP)
+    ui.info("Status", "Not sent")
+    ui.popover()
     ui.end()
     return out
 

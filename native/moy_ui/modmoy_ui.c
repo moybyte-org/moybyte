@@ -2461,6 +2461,9 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     mp_obj_t lead = vals[OV_LEAD];
     if (wash != MP_OBJ_NULL || lead != MP_OBJ_NULL) {
         out->wash = (int8_t)(wash != MP_OBJ_NULL && mp_obj_is_true(wash));
+        if (out->wash == 1 && mp_obj_is_str(wash)) {
+            out->wash = 2;          // "view": its anchor's view alone
+        }
         out->lead = (int8_t)(lead != MP_OBJ_NULL && mp_obj_is_true(lead));
     }
     v = vals[OV_GEN];

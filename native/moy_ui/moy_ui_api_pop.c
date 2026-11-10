@@ -19,6 +19,41 @@ static int pop_body(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int cap,
     return bh < rh ? rh : bh;
 }
 
+// A popover's `wash` "view": the view its anchor lies in (a scroll's, else
+// the page), inside what a wash covers, but for the anchor grown by its
+// ring's reach, which stays as drawn: the four strips around it.
+static void wash_view(const moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t a) {
+    moy_ui_box_t v = c->pop_view, wb = moy_ui_api_wash_box(c);
+    int x0 = v.x > wb.x ? v.x : wb.x, y0 = v.y > wb.y ? v.y : wb.y;
+    int x1 = v.x + v.w < wb.x + wb.w ? v.x + v.w : wb.x + wb.w;
+    int y1 = v.y + v.h < wb.y + wb.h ? v.y + v.h : wb.y + wb.h;
+    int o = 3 * c->fs;
+    int hx0 = a.x - o, hy0 = a.y - o, hx1 = a.x + a.w + o, hy1 = a.y + a.h + o;
+    hx0 = hx0 < x0 ? x0 : hx0;
+    hy0 = hy0 < y0 ? y0 : hy0;
+    hx1 = hx1 > x1 ? x1 : hx1;
+    hy1 = hy1 > y1 ? y1 : hy1;
+    if (x1 <= x0 || y1 <= y0) {
+        return;
+    }
+    if (hx1 <= hx0 || hy1 <= hy0) {
+        moy_ui_scrim(s, (moy_ui_box_t){(int16_t)x0, (int16_t)y0, (int16_t)(x1 - x0),
+                                       (int16_t)(y1 - y0)});
+        return;
+    }
+    moy_ui_box_t strip[4] = {
+        {(int16_t)x0, (int16_t)y0, (int16_t)(x1 - x0), (int16_t)(hy0 - y0)},
+        {(int16_t)x0, (int16_t)hy1, (int16_t)(x1 - x0), (int16_t)(y1 - hy1)},
+        {(int16_t)x0, (int16_t)hy0, (int16_t)(hx0 - x0), (int16_t)(hy1 - hy0)},
+        {(int16_t)hx1, (int16_t)hy0, (int16_t)(x1 - hx1), (int16_t)(hy1 - hy0)},
+    };
+    for (int i = 0; i < 4; i++) {
+        if (strip[i].w > 0 && strip[i].h > 0) {
+            moy_ui_scrim(s, strip[i]);
+        }
+    }
+}
+
 int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
                        const moy_ui_over_t *o) {
     o = mua_over(o);
@@ -60,11 +95,13 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     // the rect it hangs from: ui.at's, else the one it opened under
     if (c->has_at) {
         c->pop_at = c->at;
+        c->pop_view = c->at_view;
         c->has_at = 0;
         c->pop_mid = 0;
         c->pop_placed = 1;
     } else if (c->pop_prev.w == 0) {
         c->pop_at = c->focus_box;
+        c->pop_view = c->page;
         c->pop_mid = c->focus_box.w == 0;   // nothing to hang from: centred
         c->pop_placed = 0;
     }
@@ -139,6 +176,8 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     static const uint8_t none[1] = {0};
     if (o->wash == 1) {
         mua_wash(c, s);                     // a row's or a card's menu (DESIGN, Menus and washes)
+    } else if (o->wash == 2) {
+        wash_view(c, s, a);
     }
     moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);
     int lp = c->cls ? mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * fs
@@ -344,7 +383,7 @@ void moy_ui_api_bubble(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t te
     out[0] = box.x;
     out[1] = box.y;
     out[2] = box.w;
-    out[3] = box.h;
+    out[3] = (int32_t)h;                // the block: the bubble and its status line
     out[4] = st | (cut ? MOY_UI_ST_CUT : 0);
 }
 

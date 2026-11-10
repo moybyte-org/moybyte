@@ -169,7 +169,9 @@ typedef struct {
     int8_t current, disabled, nav, mark;    // -1 absent
     int8_t steps;                   // a slider: a segment per step, no number
     moy_ui_span_t hint;             // a field's placeholder (p NULL: none)
-    int8_t wash;                    // a popover: wash what it covers (-1 absent)
+    int8_t wash;                    // a popover: wash what it covers (-1 absent), or
+                                    // 2 ("view") its anchor's view alone, less the
+                                    // anchor and its ring
     int8_t lead;                    // a table: its first row is a verb (-1 absent)
     int8_t has_gen;                 // `gen` given: 1, else 0
     int32_t gen;                    // what the app draws in the stop is a function of it
@@ -236,6 +238,7 @@ typedef struct {
 #define MOY_UI_O_SIGNAL 2097152     // and `signal` (0..4 bars lit), its word after the fade's
 #define MOY_UI_O_VALUES 4194304     // and `values`, its length's word and its text after the signal's
 #define MOY_UI_O_CHECK 8388608      // and `check`
+#define MOY_UI_O_WASH_VIEW 16777216 // and `wash` "view" (with MOY_UI_O_WASH)
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
@@ -402,6 +405,7 @@ typedef struct {
     moy_ui_box_t surface;           // what a page fills where ui.at does not place it
     moy_ui_box_t page;              // the content rect rows stack in
     moy_ui_box_t at;
+    moy_ui_box_t at_view;           // the view ui.at's rect lay in: a scroll's, else the page
     int16_t y;                      // the row cursor, in content coordinates
     int16_t scroll;                 // the page's scroll
     int8_t page_keep;               // the page's kept state, or -1
@@ -451,6 +455,7 @@ typedef struct {
     // rect it hangs from, and whether this frame's input dismissed it (a
     // press outside the card drawn last, or Esc).
     moy_ui_box_t pop_card, pop_prev, pop_at;
+    moy_ui_box_t pop_view;          // the view its anchor lies in (`wash` "view")
     uint8_t pop_gone;
     uint8_t pop_back;               // the host's back took the popover: gone next frame
     uint8_t tip_shown;              // ui.end drew a tooltip this frame
@@ -904,8 +909,9 @@ int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon
 // top, across its width, else stacked on the page inside its gutters, a
 // stop: `opt` its options as words in MOY_UI_BBO_* order (`n` of them, the
 // rest their defaults: side 0 "in", signal -1 none, tone 0, max 75
-// hundredths, lines 4, anchor 0). out: the bubble's x, y, w, h and the
-// state bits, MOY_UI_ST_CUT where its text was cut. Stacked bubbles stand
+// hundredths, lines 4, anchor 0). out: the bubble's x, y and w, the
+// block's h (the bubble and its status line: a popover hung from it clears
+// the line) and the state bits, MOY_UI_ST_CUT where its text was cut. Stacked bubbles stand
 // 4 pixels apart at the scale, 6 on the desk.
 enum { MOY_UI_BBO_SIDE, MOY_UI_BBO_SIGNAL, MOY_UI_BBO_TONE, MOY_UI_BBO_MAX, MOY_UI_BBO_LINES,
        MOY_UI_BBO_ANCHOR, MOY_UI_BBO_WORDS };

@@ -223,7 +223,8 @@ def _over(o):
                  | (65536 if whole else 0) | (131072 if across is not None else 0)
                  | (262144 if at is not None else 0) | (524288 if shift else 0)
                  | (1048576 if fade else 0) | (2097152 if sig is not None else 0)
-                 | (4194304 if vals is not None else 0) | (8388608 if check else 0))
+                 | (4194304 if vals is not None else 0) | (8388608 if check else 0)
+                 | (16777216 if wash == "view" else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -980,7 +981,9 @@ def popover(id=None, w=0, o=None):
     `popover()` ends it; while it is drawn nothing outside it takes input.
     True, or False the frame a press outside the card or Esc dismissed it
     (the app then stops drawing it). With `o.wash` it washes what it
-    covers, as a dialog does: a row's or a card's menu."""
+    covers, as a dialog does: a row's or a card's menu; with `o.wash`
+    "view" only the view its anchor lies in (the scroll region `at` was
+    called in, else the page), all but the anchor and its ring."""
     t = _T
     if id is None:
         _C.api_popover(t[0], t[1], t[2], "", 0, None)
@@ -1069,7 +1072,8 @@ def bubble(text, side="in", o=None):
     line under it ("Sending...", or failed, the warn icon and "Not sent" in
     the danger ink); `o.anchor` rings it while a popover hangs from it.
     Stacked, else at `at`'s rect's top across its width: `(x, y, w, h,
-    state)`, the bubble's rect and the state bits, `CUT` where its text was
+    state)`, the bubble's rect (its height the block's, with its status
+    line) and the state bits, `CUT` where its text was
     cut."""
     b = _BB
     b[0] = 1 if side == "out" else 0

@@ -200,6 +200,9 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
             at += 4u;
             if (fl >= 0) {
                 o->wash = (int8_t)((fl & MOY_UI_O_NO_WASH) ? -1 : (fl & MOY_UI_O_WASH) != 0);
+                if (o->wash == 1 && (fl & MOY_UI_O_WASH_VIEW)) {
+                    o->wash = 2;
+                }
                 o->lead = (int8_t)((fl & MOY_UI_O_LEAD) != 0);
                 if ((fl & MOY_UI_O_GEN) && n - at >= 4u) {
                     memcpy(&o->gen, w + at, 4);
@@ -3843,6 +3846,7 @@ void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h) {
     c->at.y = (int16_t)y;
     c->at.w = (int16_t)(w > 0 ? w : 0);
     c->at.h = (int16_t)(h > 0 ? h : 0);
+    c->at_view = c->page;
     c->has_at = 1;
 }
 

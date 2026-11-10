@@ -147,6 +147,11 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->mark = moycore_ui_flag(L, i, "mark");
     o->steps = moycore_ui_flag(L, i, "steps");
     o->wash = moycore_ui_flag(L, i, "wash");
+    lua_getfield(L, i, "wash");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        o->wash = 2;                /* "view": its anchor's view alone */
+    }
+    lua_pop(L, 1);
     o->lead = moycore_ui_flag(L, i, "lead");
     o->bar = moycore_ui_flag(L, i, "bar");
     o->snap = (int8_t)(moycore_ui_flag(L, i, "snap") == 1);

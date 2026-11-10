@@ -18,6 +18,9 @@ P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
      the card, the primary focused.
   5  ui.list's secondary texts (`o.values`) and the check on its current
      row (`o.check`).
+  6  ui.popover's `wash = "view"` hung from a failed bubble in a scroll
+     region: the region washed, the row above it and the bubble with its
+     status line and anchor ring not; the card clears the status line.
 """
 
 import os
@@ -35,7 +38,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2, 3, 4, 5)
+PAGES = (1, 2, 3, 4, 5, 6)
 CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 
