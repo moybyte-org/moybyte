@@ -558,7 +558,7 @@ class MoycoreRun:
             x = y = st = 0
         bits = _moy_play.frame(self._run, n, dt, draw, x, y, st,
                                getattr(ws, "windowed_chrome", False),
-                               ws.run.player.ui_room())
+                               run_room(ws.run))
         if bits:
             if bits & _moy_play.QUIT:
                 inp.cart_quit = True

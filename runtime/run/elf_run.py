@@ -61,10 +61,10 @@ WHAT = {4: "an illegal instruction", 5: "a breakpoint", 7: "a misaligned access"
         9: "killed", 11: "a memory fault", 31: "a call the console lacks"}
 
 try:
-    from lua_ext import MOY_BUTTONS
+    from lua_ext import MOY_BUTTONS, run_room
     from moy_input import pointer_state
 except ImportError:  # host: the runtime package
-    from runtime.lua_ext import MOY_BUTTONS
+    from runtime.lua_ext import MOY_BUTTONS, run_room
     from runtime.moy_input import pointer_state
 
 from array import array
@@ -130,7 +130,7 @@ def fill_words(ws, words, ptr, ring):
     words[IN_KEY] = ring[2 + ring[0]] if ring[1] else 0
     words[IN_WINDOW] = 1 if getattr(ws, "windowed_chrome", False) else 0
     words[IN_SWAP] = 1 if getattr(ws.run.canvas, "swapped565", False) else 0
-    room = ws.run.player.ui_room()
+    room = run_room(ws.run)
     if room is None:
         words[IN_ROOM_X] = words[IN_ROOM_Y] = words[IN_ROOM_W] = words[IN_ROOM_H] = 0
     else:

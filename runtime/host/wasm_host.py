@@ -343,7 +343,7 @@ class WasmHostRun:
             x = y = st = 0
         bits = moy_play.frame(self._prun, n, dt, draw, x, y, st,
                               getattr(ws, "windowed_chrome", False),
-                              ws.run.player.ui_room())
+                              run_room(ws.run))
         if bits:
             if bits & moy_play.QUIT:
                 inp.cart_quit = True
