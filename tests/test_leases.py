@@ -472,7 +472,7 @@ def test_the_vms_end_lets_its_devices_go_alike_on_the_vm_a_board_runs(tmp_path):
 
 def test_the_radios_tags_are_the_closed_set():
     assert N.WIFI_TAGS == ("web", "update", "settings", "cart", "link", "carts", "dev",
-                           "http", "media", "ssh", "native", "net")
+                           "http", "media", "ssh", "native", "net", "kstop")
     w = N.Wifi()
     for i, tag in enumerate(N.WIFI_TAGS):
         assert w.hold(tag) == (1 << (i + 1)) - 1 and w.held(tag)

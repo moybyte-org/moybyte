@@ -1658,10 +1658,10 @@ static void moy_kernel_kstop_mark(void) {
     }
     uint32_t mask;
     moy_returns_run(k->returns, "kstop", 5);
-    moy_lease_wifi_hold(MOY_LEASE_SHELL, "dev", 3, &mask);
+    moy_lease_wifi_hold(MOY_LEASE_SHELL, "kstop", 5, &mask);
 }
 
-// What the mark reads after the stop, cleared: "route=kstop lease=dev" when
+// What the mark reads after the stop, cleared: "route=kstop lease=kstop" when
 // both survived it, then the app ABI's live grants ("grants=N", "-" where the
 // image has none), which a return start's re-registration keeps flat.
 static void moy_kernel_kstop_readback(char *out, size_t n) {
@@ -1672,17 +1672,17 @@ static void moy_kernel_kstop_readback(char *out, size_t n) {
     }
     const moy_kind_t *c = moy_returns_caller(k->returns);
     bool route = c != NULL && moy_kind_is(c, "kstop", 5);
-    bool lease = (moy_lease_wifi_mask() & moy_lease_wifi_bit("dev", 3)) != 0;
+    bool lease = (moy_lease_wifi_mask() & moy_lease_wifi_bit("kstop", 5)) != 0;
     if (moy_app_kernel_grants != NULL) {
         snprintf(out, n, "route=%s lease=%s grants=%u", route ? "kstop" : "lost",
-                 lease ? "dev" : "lost", (unsigned)moy_app_kernel_grants());
+                 lease ? "kstop" : "lost", (unsigned)moy_app_kernel_grants());
     } else {
         snprintf(out, n, "route=%s lease=%s grants=-", route ? "kstop" : "lost",
-                 lease ? "dev" : "lost");
+                 lease ? "kstop" : "lost");
     }
     uint32_t mask;
     moy_returns_run(k->returns, NULL, 0);
-    moy_lease_wifi_release(MOY_LEASE_SHELL, "dev", 3, &mask);
+    moy_lease_wifi_release(MOY_LEASE_SHELL, "kstop", 5, &mask);
 }
 
 void moy_kernel_kstop(int n) {

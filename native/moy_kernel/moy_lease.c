@@ -564,7 +564,7 @@ static bool pin_rows_held(void) {
 
 static const char *const wifi_tags[MOY_LEASE_WIFI_TAGS] = {
     "web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh",
-    "native", "net",
+    "native", "net", "kstop",
 };
 
 const char *moy_lease_wifi_tag(uint32_t i) {

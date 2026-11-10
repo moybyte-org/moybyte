@@ -113,8 +113,11 @@
 // The WiFi driver is the kernel's (native/moy_net/moy_wifi.c): the station
 // that serves, the first-run setup access point beside it, and the mDNS name
 // (`<name>.local`) a headless board is found by. Python never constructs the
-// port's network.WLAN on this board.
+// port's network.WLAN on this board. The station is the board's own
+// (MOY_NET_WIFI_OWN): the lease table's book (moy_net.h) starts it for a
+// holder and never puts it down.
 #define MOY_NET_WIFI                        (1)
+#define MOY_NET_WIFI_OWN                    (1)
 #define MOY_NET_MDNS                        (1)
 
 // THE /gpio ALLOWLIST (native/moy_net/moy_gpio.c): the pins a browser's cart may

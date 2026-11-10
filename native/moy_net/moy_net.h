@@ -538,14 +538,17 @@ typedef struct {
 // a station that is down on (moy_wifi_on), and the book is the station's one
 // start: the VM's view of it (modmoy_net's wifi_on) starts only a station
 // that is down, since on a P4 a second start crosses the join asked right
-// after it. The last out powers it off, where the book powered it on -- a
-// station already up when the first holder came (a board's own setup, the
-// ESP-NOW link riding it) stays up. A holder of the tags a C worker waits on
-// the link for ("http", "media") also asks for the kept network
-// (moy_wifi_connect_kept) when nothing is asked yet; the console's tags dial
-// from Python's store (device_wifi.autoconnect_wifi), and "link" never dials
-// (a network would move ESP-NOW's channel). The kernel's own "dev" hold (its
-// kstop mark, moy_kernel.c) is a record that powers nothing.
+// after it. The last out powers it off unless something keeps it up with no
+// row: the board's own station (MOY_NET_WIFI_OWN, the Zero's, which serves
+// and offers its setup access point), the ESP-NOW link riding it, or the
+// webhost serving on it until the next VM takes its "web" row back. A
+// station something else raised with no row goes down with the last row
+// too. A holder of the tags a C worker waits on the link for ("http",
+// "media") also asks for the kept network (moy_wifi_connect_kept) when
+// nothing is asked yet; the console's tags dial from Python's store
+// (device_wifi.autoconnect_wifi), and "link" never dials (a network would
+// move ESP-NOW's channel). The kernel's kstop mark ("kstop", moy_kernel.c)
+// is a record that powers nothing.
 // moy_wifi_off is otherwise called only where nothing holds the book: a VM's
 // start resting a station nobody holds, and the Zero, whose station is its
 // own. A connect is asked once and kept (the driver re-associates on a loss)

@@ -54,10 +54,12 @@
 // consoles' rule, .claude/rules/boards.md): MOY_LEASE_WIFI is a SHARED class
 // whose rows are its holders, each row's `tags` a mask of the closed table
 // moy_lease_wifi_tag names ("web", "update", "settings", "cart", "link",
-// "carts", "dev", "http", "media", "ssh", "native", "net"). The console's own
-// holds are one row owned by the shell (pid 1); a process's (a run's "cart",
-// a request's "http", a stream's "media", a native process's "native", a
-// radio link's port's "net") are one row it owns, so its end
+// "carts", "dev", "http", "media", "ssh", "native", "net", "kstop"). The
+// console's own holds (the developer's "dev" among them) are one row owned
+// by the shell (pid 1), and so is the kernel's kstop mark, "kstop", a
+// record that powers nothing; a process's (a run's "cart", a request's
+// "http", a stream's "media", a native process's "native", a radio link's
+// port's "net") are one row it owns, so its end
 // (moy_lease_sweep) lets exactly its holds go and the listing names who
 // holds the radio. A hold is idempotent per tag and owner; a row goes with
 // its last tag; the station is held while any row is. The rows are the
@@ -132,7 +134,7 @@ enum {
 #define MOY_LEASE_EDGES 4u          // edge sources a lease holds
 #define MOY_LEASE_NAME 7u
 #define MOY_LEASE_PIN_MAX 64u
-#define MOY_LEASE_WIFI_TAGS 12u     // the radio's holder tags
+#define MOY_LEASE_WIFI_TAGS 13u     // the radio's holder tags
 #define MOY_LEASE_SHELL 1u          // the console's own radio holds' owner, the shell's pid
 
 typedef struct {

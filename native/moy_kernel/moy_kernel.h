@@ -114,7 +114,7 @@ void moy_kernel_test_crash(bool abort_not_fault);
 // alive, with moy_loop_task presenting across each window. `kstop N stop` runs
 // N real VM stops instead, each printing a third line, `KSTOP i/n down`, with
 // the heaps read while no VM runs and the route and lease set before the stop
-// read back (`route=kstop lease=dev`); the start after it is a RETURN start.
+// read back (`route=kstop lease=kstop`); the start after it is a RETURN start.
 // When the kernel lit the glass with the logo, ms after power-on; 0: it did not.
 uint32_t moy_kernel_lit_ms(void);
 void moy_kernel_kstop(int n);

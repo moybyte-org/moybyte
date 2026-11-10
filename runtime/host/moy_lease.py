@@ -28,7 +28,7 @@ PART = native_build.Part("lease", ("moy_lease.h", "moy_lease.c", "moy_dev.h", "m
 GPIO, UART, SPI = 1, 2, 3
 WIFI = 8
 WIFI_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev", "http", "media", "ssh",
-             "native", "net")
+             "native", "net", "kstop")
 VM, PINS = 0x01, 0x02
 SHELL = 1
 PIN_IN, PIN_OUT, PIN_PU, PIN_PD, PIN_PERIPH = 0x01, 0x02, 0x04, 0x08, 0x10

@@ -2702,7 +2702,7 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     """`kstop N stop`: N real stops and starts of the VM with no cart
     (docs/history/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
     lease on the kernel's tables before the stop and reads them back with the
-    VM down (`route=kstop lease=dev` on the KSTOP down line); the heaps read
+    VM down (`route=kstop lease=kstop` on the KSTOP down line); the heaps read
     then -- the first heap area freed with the VM -- hold flat from the second
     cycle, the largest block to the byte and free within KSTOP_JITTER. The
     app ABI's grants (`grants=N`, native/moy_app) read the same every cycle:
@@ -2718,7 +2718,7 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     while len(down) < n and time.time() < end:
         line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
         if line is not None and " down " in line:
-            assert "route=kstop lease=dev" in line, line
+            assert "route=kstop lease=kstop" in line, line
             grants.append(line.split("grants=", 1)[1].split()[0])
             down.append(_kstop_after(line.replace(" down ", " after ")))
     assert len(down) == n, "only %d of %d stops came back" % (len(down), n)

@@ -6,6 +6,7 @@
 
 #include "moy_net.h"
 #include "moy_lease.h"
+#include "moy_link.h"
 
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
 
@@ -505,23 +506,39 @@ int moy_net_link(uint32_t *ip) {
     return up;
 }
 
-// THE BOOK (moy_net.h): the mask it last followed, and whether its first
-// holder powered the station on.
+// THE BOOK (moy_net.h): the mask it last followed.
 static uint32_t s_book;
-static uint8_t s_book_on;
+
+// What keeps a station up with no row: the board's own station (the Zero's,
+// MOY_NET_WIFI_OWN), the ESP-NOW link riding it, or the webhost serving on
+// it until the next VM takes its "web" row back.
+static int kept_up(void) {
+    #if defined(MOY_NET_WIFI_OWN) && MOY_NET_WIFI_OWN
+    return 1;
+    #else
+    #if defined(MOY_NET_LINK) && MOY_NET_LINK
+    moy_link_stats_t l;
+    moy_link_stats(&l);
+    if (l.up) {
+        return 1;
+    }
+    #endif
+    moy_web_state_t w;
+    moy_web_state(&w);
+    return w.listening;
+    #endif
+}
 
 void moy_wifi_book(uint32_t mask) {
-    mask &= ~moy_lease_wifi_bit("dev", 3);     // the kernel's kstop mark powers nothing
+    mask &= ~moy_lease_wifi_bit("kstop", 5);   // the kernel's kstop mark powers nothing
     uint32_t was = s_book;
     s_book = mask;
     if (mask != 0u && was == 0u) {
-        s_book_on = !s_st.on;
-        if (s_book_on) {
+        if (!s_st.on) {
             moy_wifi_on();
         }
     } else if (mask == 0u && was != 0u) {
-        if (s_book_on) {
-            s_book_on = 0;
+        if (s_st.on && !kept_up()) {
             moy_wifi_off();
         }
         return;
