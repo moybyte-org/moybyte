@@ -82,12 +82,16 @@ def _run(tmp_path, base, name, steps):
 
 
 def test_the_sprite_tabs_keys_in_chrome(tmp_path, base):
-    """S selects nothing and shifts nothing; Ctrl+Z / Ctrl+Y walk the
-    history; Ctrl+C then Del then Ctrl+V puts the sprite back."""
+    """S and X select nothing and shift nothing; W and Q step to the sprite
+    after and back (PICO-8's sprite keys, the pane's "Q W" hint); Ctrl+Z /
+    Ctrl+Y walk the history; Ctrl+C then Del then Ctrl+V puts the sprite
+    back."""
     steps = _edit("paint") + [
         _probe("START"),
         {"key": "f"}, {"wait": 300}, _probe("FLIPPED"),
-        {"key": "s"}, {"key": "w"}, {"wait": 300}, _probe("LETTERS"),
+        {"key": "s"}, {"key": "x"}, {"wait": 300}, _probe("LETTERS"),
+        {"key": "w"}, {"wait": 300}, _probe("NEXT"),
+        {"key": "q"}, {"wait": 300}, _probe("BACK"),
         {"key": "z", "mods": ["ctrl"]}, {"wait": 300}, _probe("UNDONE"),
         {"key": "y", "mods": ["ctrl"]}, {"wait": 300}, _probe("REDONE"),
         {"key": "c", "mods": ["ctrl"]}, {"key": "Delete"}, {"wait": 300}, _probe("CLEARED"),
@@ -98,6 +102,8 @@ def test_the_sprite_tabs_keys_in_chrome(tmp_path, base):
     assert got["START"]["edit"]["tab"] == "paint", out[-3000:]
     assert sprite["FLIPPED"] != sprite["START"], "F did not flip"
     assert sprite["LETTERS"] == sprite["FLIPPED"], "a letter moved the sprite"
+    assert sprite["NEXT"] != sprite["FLIPPED"], "W did not step to the next sprite"
+    assert sprite["BACK"] == sprite["FLIPPED"], "Q did not step back"
     assert sprite["UNDONE"] == sprite["START"], "Ctrl+Z did not undo"
     assert sprite["REDONE"] == sprite["FLIPPED"], "Ctrl+Y did not redo"
     assert set(sprite["CLEARED"]) == {"0"}, "Del did not clear"

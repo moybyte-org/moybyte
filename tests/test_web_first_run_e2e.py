@@ -95,7 +95,7 @@ def test_a_saved_choice_wins_over_the_scheme(tmp_path, base):
     got, _ = _load(tmp_path, base, profile, "", "dark", "pick", steps=[
         {"note": "Settings from the system menu, Appearance, Mode: Day"},
         {"click": [16, 14]}, {"wait": 600},
-        {"click": [77, 104]}, {"wait": 1200},
+        {"click": [77, 134]}, {"wait": 1200},
         {"click": [443, 273]}, {"wait": 1500},
         {"click": [923, 330]}, {"wait": 6000}])
     assert got["variant"] == "light", "the Day pick did not take"
@@ -137,7 +137,7 @@ def test_esc_over_a_handheld_playtest_pauses_and_quit_returns_to_the_editor(tmp_
     its Quit (the fourth row) lands back in the Editor."""
     got, out = _load(tmp_path, base, tmp_path / "chrome", "&edit=%s&tab=cards" % CART,
                      "dark", "playtest", tier="handheld", steps=[
-                         {"click": [245, 13]}, {"wait": 1500},       # the bar's PLAY
+                         {"click": [234, 13]}, {"wait": 1500},       # the bar's PLAY
                          {"key": "Escape"}, {"wait": 600},
                          {"key": "ArrowDown"}, {"key": "ArrowDown"}, {"key": "ArrowDown"},
                          {"key": "Enter"}, {"wait": 900}])
