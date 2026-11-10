@@ -163,6 +163,9 @@ except ImportError:                     # host: the runtime package
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
+# The words of `ui_face` (native/moy_ui/moy_ui_wasm.h's MOYCORE_UI_FACE_*).
+_FACE_WINDOW, _FACE_DESK, _FACE_LOOK, _FACE_FS_SHIFT = 1, 2, 4, 8
+
 try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
     from ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
@@ -324,8 +327,11 @@ class Player(PlayerDiag):
         # granted ones and its absent ones.
         self.granted = ()
         self.absent = ()
-        self._look = False            # a built-in app: its code draws in the look, outside
-                                      # the app-cart boundary (system_api.draws_in_look)
+        self._boundary = 1            # the app-cart boundary's mode while its code runs
+                                      # (ui_draw.cart_text): 0 a built-in app's, which
+                                      # draws in the look (system_api.draws_in_look); 2 a
+                                      # responsive app's, whose `ui` verbs do
+        self._responsive = False      # the app defines `_layout` (Player._wants_layout)
         self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
         self._on_change = False       # an app on the verbs: drawn on change (animates())
         self._masks = None            # ws.input.button_masks, bound for an app's run
@@ -930,7 +936,7 @@ class Player(PlayerDiag):
             _CODE_CACHE[_ckey] = (_csig, code, self._native_ins, self._native_fail)
             t_compile = t_compile_native + _ticks_diff(_ticks_ms(), t4)
             t5 = _ticks_ms()
-            _was = _cart_text(not self._look)
+            _was = _cart_text(self._boundary)
             a0 = _allocated()
             try:
                 exec(code, ns)
@@ -1031,7 +1037,8 @@ class Player(PlayerDiag):
         self._app_id = None
         self.granted = ()
         self.absent = ()
-        self._look = False
+        self._boundary = 1
+        self._responsive = False
         self._ui = None
         self._uh = None
         self._on_change = False
@@ -1126,7 +1133,7 @@ class Player(PlayerDiag):
             # EDIT/CODE -- so "this app is broken" and "here is how you fix it"
             # are the same screen.
             self._app_id = ws.app_cart_id(cart)
-            self._look = draws_in_look(cart)
+            self._boundary = 0 if draws_in_look(cart) else 1
             if not ws.app_guard.arm(self._app_id):
                 self._app_id = None
                 return ("app turned off after %d crashes - EDIT it"
@@ -1139,6 +1146,10 @@ class Player(PlayerDiag):
             # the cart runs because the canvas has to be chosen before make_api
             # closes over it -- see `_wants_layout`.
             if self._wants_layout(ws, cart):
+                # its `ui` verbs draw in the shell's look, on every tier
+                # (docs/app_api_v1.md section 3): the boundary keeps its print
+                self._responsive = True
+                self._boundary = self._boundary and 2
                 ws.bind_app_canvas()
         # A SCRIPT is responsive by construction -- the SHELL draws it, and text
         # is the one thing an integer upscale of the 320x240 raster serves worst
@@ -1252,6 +1263,27 @@ class Player(PlayerDiag):
         `_ui_begin`, the snapshot of a Lua or compiled run, a native or WASI
         app's frame words); None, the whole canvas, for a game."""
         return self.ws.app_content_rect() if self._app_id is not None else None
+
+    def ui_face(self):
+        """How the run's `ui` frame draws, as one word (native/moy_ui/
+        moy_ui_wasm.h's MOYCORE_UI_FACE_*) a Lua, compiled, WASI or native
+        run's snapshot carries, so its verbs draw what this Player's
+        `_ui_begin` draws for a Python app: whether the surface is a window's
+        body, whether the frame lays out on the desk's rows, whether it is a
+        responsive app's (the shell's look, its faces and colours), and the
+        font scale of the canvas it draws on. A game's is its window bit
+        alone: the cart's look at scale 1."""
+        ws = self.ws
+        f = _FACE_WINDOW if ws.windowed_chrome else 0
+        if self._app_id is None:
+            return f
+        run = self.run
+        if run.app_full_canvas and _layout_base.metric_class() == _layout_base.DESK:
+            f |= _FACE_DESK
+        if self._responsive:
+            f |= _FACE_LOOK
+        fs = getattr(run.canvas, "font_scale", 1)
+        return f | (fs if fs > 1 else 1) << _FACE_FS_SHIFT
 
     def _ui_begin(self, ws, render=True):
         """Begin a Python app's frame of `ui` verbs (runtime/toolkit/ui.py) over the
@@ -2202,7 +2234,7 @@ class Player(PlayerDiag):
                 fed.mouse_frame(ws.input, gp[0], gp[1], dt)   # its wheel and autoscroll
             # The cart's code prints and measures in petme128, whatever the
             # theme names (docs/theme_and_shell_2026-11.md §3.7).
-            _was = _cart_text(not self._look)
+            _was = _cart_text(self._boundary)
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window
                 # resize, a font-scale change or a mode switch re-runs `_layout`
@@ -2581,7 +2613,7 @@ class Player(PlayerDiag):
         if fn is None:
             return True
         ws = self.ws
-        _was = _cart_text(not self._look)
+        _was = _cart_text(self._boundary)
         t0 = _ticks_us()
         try:
             fn(*args)

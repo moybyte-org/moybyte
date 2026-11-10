@@ -22,7 +22,7 @@ presented screen into the run's canvas through the one canvas class's
 `blit_indices`. An APP (its manifest's type "app") draws with the toolkit
 it links (sdk/include/moybyte/ui.h): its screen is RGB565, drawn with
 `blit565`, and its frame message carries the input words the toolkit reads
-(moy_os.h's MOY_OS_FRAME_IN_*: the pointer, the key typed, the window and
+(moy_os.h's MOY_OS_FRAME_IN_*: the pointer, the key typed, the ui face and
 the canvas's byte order); a key typed while the app has not read the last
 message waits for the next one (key_ring). A game whose main returns 0 quits; any other end is a stop
 the stop card reports, a signal by its name and, where the console keeps
@@ -61,16 +61,16 @@ WHAT = {4: "an illegal instruction", 5: "a breakpoint", 7: "a misaligned access"
         9: "killed", 11: "a memory fault", 31: "a call the console lacks"}
 
 try:
-    from lua_ext import MOY_BUTTONS, run_room
+    from lua_ext import MOY_BUTTONS, run_face, run_room
     from moy_input import pointer_state
 except ImportError:  # host: the runtime package
-    from runtime.lua_ext import MOY_BUTTONS, run_room
+    from runtime.lua_ext import MOY_BUTTONS, run_face, run_room
     from runtime.moy_input import pointer_state
 
 from array import array
 
 # moy_os.h's MOY_OS_FRAME_IN_*: an app's input words.
-IN_X, IN_Y, IN_PTR, IN_KEY, IN_WINDOW, IN_SWAP = range(6)
+IN_X, IN_Y, IN_PTR, IN_KEY, IN_FACE, IN_SWAP = range(6)
 IN_ROOM_X, IN_ROOM_Y, IN_ROOM_W, IN_ROOM_H = range(6, 10)
 IN_LAYOUT_W, IN_LAYOUT_H, IN_LAYOUT_FS = range(10, 13)
 IN_WORDS = 13
@@ -184,7 +184,7 @@ def fill_words(ws, words, ptr, ring, lay=None):
         ring[2 + (ring[0] + ring[1]) % KEYS_HELD] = key
         ring[1] += 1
     words[IN_KEY] = ring[2 + ring[0]] if ring[1] else 0
-    words[IN_WINDOW] = 1 if getattr(ws, "windowed_chrome", False) else 0
+    words[IN_FACE] = run_face(ws)
     words[IN_SWAP] = 1 if getattr(ws.run.canvas, "swapped565", False) else 0
     room = run_room(ws.run)
     if room is None:

@@ -2,7 +2,9 @@
 # its page names how many times `_layout` was called and the arguments of
 # the last call. layout_lua.moy, layout_wasm.moy, layout_wasi.moy and
 # layout_elf.moy are the same app on the other tiers, and
-# tests/test_app_layout.py holds them to the same calls and pixels. Into
+# tests/test_app_layout.py holds them to the same calls and pixels: a
+# primary button (the focused stop) and a list with a current row draw the
+# shell's row styles and selection look on every tier. Into
 # pmem 0: the calls `_layout` had heard when `_init` ran.
 
 calls = 0
@@ -23,3 +25,5 @@ def _draw():
     ui.page("Layout")
     ui.label("calls %d" % calls)
     ui.label(last)
+    ui.button("Go", "primary")
+    ui.list("Rows", ["one", "two", "three"], 1)

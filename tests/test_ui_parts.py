@@ -1750,7 +1750,8 @@ def test_the_files_page_answers_its_script(files_runs):
 # -- a page in a window's body ---------------------------------------------------------
 #
 # A page whose host begins it in a window (`ui_frame(window=True)`; a run's
-# snapshot slot SNAP_WINDOW, which the kernel's Player writes from the console)
+# snapshot slot SNAP_FACE's window bit, which the kernel's Player writes from the
+# console)
 # lies on the window's body as the frame paints it; a fullscreen page keeps
 # its own ground.
 
@@ -1835,7 +1836,7 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
             snap = getattr(run, "snap", None)
             if snap is None:
                 snap = run._run.snap
-            assert snap[wasm_binding.SNAP_WINDOW] == (1 if desk else 0), name
+            assert snap[wasm_binding.SNAP_FACE] & 1 == (1 if desk else 0), name
         ws.exit()
 
 

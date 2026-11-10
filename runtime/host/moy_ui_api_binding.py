@@ -1150,8 +1150,9 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return None if was < 0 else was
 
     def cart_text(on):
-        lib.moy_canvas_cart(1 if on else 0)     # the canvases' colour mask with it
-        return bool(lib.moy_ui_cart_text(1 if on else 0))
+        m = int(on)
+        lib.moy_canvas_cart(1 if m else 0)      # the canvases' colour mask with it
+        return lib.moy_ui_cart_text(m)
 
     def font_load(src):
         b = bytes(src)

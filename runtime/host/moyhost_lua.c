@@ -547,9 +547,9 @@ int hl_play_open(uint32_t run) { return moy_play_open(run); }
 /* The run's ticks; the pointer and the window flag the console published
  * first. `out` gets MOY_PLAY_QUIT and MOY_PLAY_VIEW. */
 int hl_play_frame(uint32_t run, int ticks, float dt, int render, int x, int y, int touch,
-                  int window, int rx, int ry, int rw, int rh, uint32_t *out)
+                  int face, int rx, int ry, int rw, int rh, uint32_t *out)
 {
-    moy_play_in_t in = { x, y, touch, window != 0, { rx, ry, rw, rh } };
+    moy_play_in_t in = { x, y, touch, face, { rx, ry, rw, rh } };
     int rc = moy_play_input(run, &in);
     if (rc != MOY_PLAY_OK) {
         *out = 0;

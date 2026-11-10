@@ -58,4 +58,6 @@ EXPORT(_draw) void _draw(void) {
     ui_page("Layout", 6, NULL, 0, NULL, 0);
     ui_label(line, n, NULL, 0);
     ui_label(last, last_n, NULL, 0);
+    ui_button("Go", 2, 1, NULL, 0);
+    ui_list("Rows", 4, "one\0two\0three", 13, 1, NULL, 0);
 }

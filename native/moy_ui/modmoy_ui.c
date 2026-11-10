@@ -902,10 +902,12 @@ static mp_obj_t ui_print_font(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_print_font_obj, 0, 1, ui_print_font);
 
-// cart_text(on) -> bool: the app-cart boundary (moy_ui.h); whether it was on.
+// cart_text(mode) -> the mode it replaced: the app-cart boundary (moy_ui.h's
+// MOY_UI_CART_*; True and False are ON and OFF).
 static mp_obj_t ui_cart_text(mp_obj_t on) {
-    moy_canvas_cart(mp_obj_is_true(on));    // the canvases' colour mask with it
-    return mp_obj_new_bool(moy_ui_cart_text(mp_obj_is_true(on)));
+    mp_int_t m = mp_obj_get_int(on);
+    moy_canvas_cart(m != 0);                // the canvases' colour mask with it
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_cart_text((int)m));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_cart_text_obj, ui_cart_text);
 

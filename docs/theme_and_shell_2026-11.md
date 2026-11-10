@@ -997,9 +997,12 @@ builds least:
     title clear of its buttons and the game canvas unchanged.
 - **App carts.** `ui` is the real toolkit, handed to every `type: "app"` cart,
   and those carts lay out in 8px cells and `print` in petme128. A theme font
-  therefore reaches app carts **only together with** a published `text_w()` and
-  line metrics; until then a cart's code runs inside the app-cart boundary
-  (`ui.cart_text`, below), so its `ui` and its `print` draw petme128.
+  therefore reaches a cart's own text **only together with** a published
+  `text_w()` and line metrics; until then a cart's code runs inside the
+  app-cart boundary (`ui.cart_text`, below), so its `print` draws petme128.
+  The `ui` verbs measure their own text, so a responsive app's (one that
+  defines `_layout`) draw in the look on every tier (`docs/app_api_v1.md`
+  section 3); a game's and a fixed app's draw petme128.
 - **Legibility.** A theme font has a text-size floor tied to #203's chrome
   floor: `chrome.text_scale_floor` reads the same declared diagonal, with the
   same opt-in, and answers the font scale at which the `ui` font's ascent
@@ -1056,7 +1059,10 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
   - **The app-cart boundary** is `ui.cart_text`: on while a cart's code runs
     (its body, `_layout`, `_init`, `_update`, `_draw`; a wallpaper cart's
     frame), every role and the print font read petme128, and the shell's
-    come back after. A compiled run's canvas is petme128 already (step 2).
+    come back after. A responsive app's mode (`CART_APP`) keeps its print
+    and its colours inside while its `ui` verbs' sinks are outside. A
+    run's page on the RUN face draws as a cart's, petme128, unless its
+    snapshot's face names the look (`moy_ui_wasm.h`).
     A built-in app cart (`system_carts/`, `system_api.draws_in_look`:
     Notes) runs outside it: its page is the verbs' and its note the editor
     handle's, both in the look's colours and faces; a copy of it is a

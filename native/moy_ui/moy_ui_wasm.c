@@ -49,12 +49,26 @@ typedef struct {
     moy_canvas saved;
 } run_t;
 
+// The snapshot's face word (moy_ui_wasm.h's MOYCORE_UI_FACE_*), 0 with no run.
+static int32_t run_face(void) {
+    uint32_t tick = 0, serial = 0;
+    const int32_t *snap = moycore_ui_snap(&tick, &serial);
+    return snap != NULL ? snap[MOYCORE_UI_SNAP_FACE] : 0;
+}
+
+static int face_fs(int32_t face) {
+    int fs = (face >> MOYCORE_UI_FACE_FS_SHIFT) & 0xFF;
+    return fs > 1 ? fs : 1;
+}
+
 static int open_run(run_t *r, moy_canvas *c) {
     if (c == NULL || moy_app_wasm_theme == NULL) {
         return -MOY_UI_STALE;
     }
     uint32_t tick = 0, serial = 0;
-    (void)moycore_ui_snap(&tick, &serial);
+    const int32_t *snap = moycore_ui_snap(&tick, &serial);
+    int32_t face = snap != NULL ? snap[MOYCORE_UI_SNAP_FACE] : 0;
+    int fs = face_fs(face);
     if (serial != s_gen_serial) {
         s_gen = 0;
         s_gen_serial = serial;
@@ -89,16 +103,25 @@ static int open_run(run_t *r, moy_canvas *c) {
     r->row.h = (uint16_t)c->h;
     r->row.st[MOY_ST_CX1] = r->row.st[MOY_ST_W] = c->w;
     r->row.st[MOY_ST_CY1] = r->row.st[MOY_ST_H] = c->h;
-    r->row.st[MOY_ST_FONT_SCALE] = 1;
-    // A compiled app is a cart: its colours are MOY64 (its theme imports
-    // answer each role's nearest index), so both halves are the canvas's.
+    r->row.st[MOY_ST_FONT_SCALE] = fs;
     memcpy(r->row.pal, c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
-    memcpy(&r->row.pal[MOY_CANVAS_BLOCK], c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
-    r->s.kind = MOY_UI_SINK_RUN;
-    r->s.fs = 1;
-    r->s.look = MOY_UI_LOOK_RUN;
+    r->s.fs = (uint8_t)fs;
     r->s.dst = &r->row;
-    r->s.cart = (uint8_t)moy_ui_cart_on();
+    if (face & MOYCORE_UI_FACE_LOOK) {
+        // A responsive app's page is the shell's: the theme's block at
+        // 64..127, as every glass row holds it, and outside the boundary.
+        moy_ui_theme_pal(&r->row.pal[MOY_CANVAS_BLOCK]);
+        r->s.kind = MOY_UI_SINK_ROW;
+        r->s.look = MOY_UI_LOOK_APP;
+        r->s.cart = 0;
+    } else {
+        // A cart's colours are MOY64 (its theme imports answer each role's
+        // nearest index), so both halves are the canvas's.
+        memcpy(&r->row.pal[MOY_CANVAS_BLOCK], c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
+        r->s.kind = MOY_UI_SINK_RUN;
+        r->s.look = MOY_UI_LOOK_RUN;
+        r->s.cart = (uint8_t)moy_ui_cart_on();
+    }
     r->s.shown = (uint8_t)moy_ui_marks_shown();
     return 0;
 }
@@ -138,7 +161,9 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
         int32_t in[MOY_UI_IN_LEN] = {0};
         int flags = 0;
         if (snap != NULL) {
-            flags = snap[MOYCORE_UI_SNAP_WINDOW] ? MOY_UI_WINDOW : 0;
+            int32_t face = snap[MOYCORE_UI_SNAP_FACE];
+            flags = ((face & MOYCORE_UI_FACE_WINDOW) ? MOY_UI_WINDOW : 0)
+                    | ((face & MOYCORE_UI_FACE_DESK) ? MOY_UI_DESK : 0);
             in[MOY_UI_IN_BTN] = snap[MOYCORE_UI_SNAP_BTN];
             in[MOY_UI_IN_BTNP] = snap[MOYCORE_UI_SNAP_BTNP];
             in[MOY_UI_IN_X] = snap[MOYCORE_UI_SNAP_X];
@@ -170,7 +195,7 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
                 }
             }
         }
-        moy_ui_api_begin(s_ctx, in, surf, flags, 1);
+        moy_ui_api_begin(s_ctx, in, surf, flags, face_fs(run_face()));
         s_tick = tick;
     }
     return s_ctx;

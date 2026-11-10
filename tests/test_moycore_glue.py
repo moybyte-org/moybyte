@@ -491,13 +491,18 @@ class MinimalInput:
 
 class FakePlayer:
     """The Player's `ui_room()`: None, a game's whole canvas, unless a test
-    sets an app's content_rect."""
+    sets an app's content_rect; and its `ui_face()`, a game's 0 unless a test
+    sets one."""
 
     def __init__(self):
         self.room = None
+        self.face = 0
 
     def ui_room(self):
         return self.room
+
+    def ui_face(self):
+        return self.face
 
 
 class FakeRun:
@@ -1387,13 +1392,26 @@ def test_the_ui_room_crosses_and_a_game_reads_the_whole_canvas(w):
     assert [run.snap[i] for i in room] == [0, 0, 0, 0]
 
 
+def test_the_ui_face_crosses_whole(w):
+    """The Player's ui_face() is the snapshot's face word as it is: the RUN
+    face reads its bits and its font scale (moy_ui_wasm.h)."""
+    ws = FakeWs(inp=FakeInput())
+    run = w.run(ws=ws)
+    ws.run.player.face = 1 | 2 | 4 | 3 << 8
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_FACE"]] == 1 | 2 | 4 | 3 << 8
+    ws.run.player.face = 0
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_FACE"]] == 0
+
+
 def test_the_slot_numbers_are_bound_once_at_construction(w):
     """They were a module attribute lookup per frame, a dozen times a frame."""
     run = w.run()
     for name in ("SNAP_BTN", "SNAP_BTNP", "SNAP_BTN_P1", "SNAP_BTNP_P1",
                  "SNAP_PLAYERS", "SNAP_TIME_MS", "SNAP_TOUCH_X",
                  "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN", "SNAP_TOUCH_MS",
-                 "SNAP_KEY", "SNAP_WINDOW", "SNAP_ROOM_X", "SNAP_ROOM_Y",
+                 "SNAP_KEY", "SNAP_FACE", "SNAP_ROOM_X", "SNAP_ROOM_Y",
                  "SNAP_ROOM_W", "SNAP_ROOM_H"):
         delattr(w.core, name)
     run._refresh()                       # reads nothing off the module

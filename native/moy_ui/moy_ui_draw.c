@@ -864,7 +864,7 @@ static int button_iw(int flags, int fs) {
 int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs) {
     int iw = button_iw(flags, fs);
     int pad = metric(MOY_UI_K_BUTTON, MOY_UI_M_BUTTON_PAD) * fs;
-    tfont_t f = role_font(moy_ui_cart_on(), MOY_UI_FONT_UI);
+    tfont_t f = role_font(moy_ui_cart_ui(), MOY_UI_FONT_UI);
     int ln = t_fit(&f, label, b.w - 2 * pad - iw, fs);
     return b.x + button_off(b, iw, t_w(&f, label.p, (size_t)ln, fs), fs);
 }
@@ -1110,7 +1110,7 @@ int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int coun
                      int gap, moy_ui_box_t *out, int *labels_on) {
     int pad = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_PAD) * fs;
     int icon_w = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_ICON) * fs;
-    tfont_t f = role_font(moy_ui_cart_on(), MOY_UI_FONT_UI);
+    tfont_t f = role_font(moy_ui_cart_ui(), MOY_UI_FONT_UI);
     if (gap == MOY_UI_DEFAULT) {
         gap = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_GAP) * fs;
     }
@@ -1685,7 +1685,7 @@ static void frame_layout(const moy_ui_shape_t *sh, moy_ui_box_t w, int th, moy_u
 int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int btns, int fs,
                          moy_ui_frame_button_t out[MOY_UI_FRAME_BUTTONS]) {
     frame_lay_t L;
-    frame_layout(moy_ui_shape(), win, title_h, title, btns, fs, moy_ui_cart_on(), &L);
+    frame_layout(moy_ui_shape(), win, title_h, title, btns, fs, moy_ui_cart_ui(), &L);
     for (int i = 0; i < L.n; i++) {
         out[i] = L.b[i];
     }

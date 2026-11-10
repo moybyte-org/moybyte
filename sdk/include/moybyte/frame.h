@@ -19,7 +19,9 @@
 
 // An app's input words (moy_os.h's MOY_OS_FRAME_IN_*): the pointer's x and
 // y on the screen, its state (0 none), the key typed this frame (0 none),
-// whether the screen is a window's body, whether the console's RGB565 words
+// how its ui frame draws (a word of flags and the font scale the toolkit it
+// links reads: a window's body, the desk's rows, the shell's look),
+// whether the console's RGB565 words
 // are byte-swapped, the rect its ui frame lies in (its content_rect():
 // the screen less the host's bars; a width of 0, the whole screen), and the
 // surface it lays out for, `_layout`'s (w, h, fs) (moybyte/ui.h; a width of
@@ -29,7 +31,7 @@
 #define MOY_FRAME_Y 1
 #define MOY_FRAME_PTR 2
 #define MOY_FRAME_KEY 3
-#define MOY_FRAME_WINDOW 4
+#define MOY_FRAME_FACE 4
 #define MOY_FRAME_SWAP 5
 #define MOY_FRAME_ROOM_X 6
 #define MOY_FRAME_ROOM_Y 7

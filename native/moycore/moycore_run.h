@@ -37,7 +37,7 @@ enum {
     SNAP_KEY_DOWN,       // the code currently held, or 0
     SNAP_TEXTMODE,       // written BY the cart (textmode)
     SNAP_QUIT,           // written BY the cart (quit)
-    SNAP_WINDOW,         // 1: the run's surface is a window's body (the desk)
+    SNAP_FACE,           // how the run's ui frame draws (moy_ui_wasm.h's FACE_*)
     SNAP_ROOM_X,         // the rect an app's ui frame lies in, its content_rect()
     SNAP_ROOM_Y,         // (the surface less the host's bars); a W of 0, a game's,
     SNAP_ROOM_W,         // is the whole canvas

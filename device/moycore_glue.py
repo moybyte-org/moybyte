@@ -67,14 +67,14 @@ try:
                          LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
                          install_handles, end_handles, put_scenes, layer_restore,
                          layer_restore_end,
-                         snap_slots, audio_ops, snap_shared, run_room, sync_view,
+                         snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
                          drain_audio, cfg_blob, wants_layout)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
                                  install_handles, end_handles, put_scenes,
                                  layer_restore, layer_restore_end, snap_slots, audio_ops,
-                                 snap_shared, run_room, sync_view, drain_audio, cfg_blob,
+                                 snap_shared, run_room, run_face, sync_view, drain_audio, cfg_blob,
                                  wants_layout)
 
 try:
@@ -417,7 +417,7 @@ class MoycoreRun:
         s[self._I_BTNP] = pressed
         snap_shared(s, inp, self.ws.run.cart_start_ms, self._I_SNAP, pointer_state,
                     self._touch_out, _since_ms,
-                    getattr(self.ws, "windowed_chrome", False),
+                    run_face(self.ws),
                     run_room(self.ws.run))
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
@@ -572,7 +572,7 @@ class MoycoreRun:
         except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
             x = y = st = 0
         bits = _moy_play.frame(self._run, n, dt, draw, x, y, st,
-                               getattr(ws, "windowed_chrome", False),
+                               run_face(ws),
                                run_room(ws.run))
         if bits:
             if bits & _moy_play.QUIT:

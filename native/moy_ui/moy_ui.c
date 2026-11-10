@@ -564,23 +564,28 @@ int moy_ui_font_use(int role, uint32_t font) {
     return rc;
 }
 
-static int s_cart;                              // a cart's code is running
+static int s_cart;                              // the mode while a cart's code runs
 static uint32_t s_cart_print;                   // the print font it put aside
 
 int moy_ui_cart_text(int on) {
     int was = s_cart;
+    on = on == MOY_UI_CART_APP ? MOY_UI_CART_APP : on ? MOY_UI_CART_ON : MOY_UI_CART_OFF;
     if (on && !s_cart) {
         s_cart_print = moy_text_print_font();
         moy_text_print_font_use(MOY_FONT_PETME128);
     } else if (!on && s_cart) {
         moy_text_print_font_use(s_cart_print);    // refused if freed meanwhile
     }
-    s_cart = on != 0;
+    s_cart = on;
     return was;
 }
 
 int moy_ui_cart_on(void) {
-    return s_cart;
+    return s_cart != MOY_UI_CART_OFF;
+}
+
+int moy_ui_cart_ui(void) {
+    return s_cart == MOY_UI_CART_ON;
 }
 
 int moy_ui_cmask(void) {

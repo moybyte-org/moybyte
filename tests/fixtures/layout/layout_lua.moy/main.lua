@@ -18,4 +18,6 @@ function _draw()
   ui.page("Layout")
   ui.label("calls " .. calls)
   ui.label(last)
+  ui.button("Go", "primary")
+  ui.list("Rows", {"one", "two", "three"}, 2)
 end

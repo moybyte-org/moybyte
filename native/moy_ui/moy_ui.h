@@ -38,11 +38,13 @@ enum {
 typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
 
 #define MOY_UI_ABSENT INT32_MIN     // a token the theme does not hold
-#define MOY_UI_LOOKS 6
+#define MOY_UI_LOOKS 7
 #define MOY_UI_LOOK_RUN 4           // a run's: the live theme's nearest MOY64 tokens,
                                     // put there at every publish (ui_draw.run_look) and
                                     // at a compiled run's open; a linked copy's
 #define MOY_UI_LOOK_KERNEL 5        // the kernel's chrome's (ui_draw.kernel_look)
+#define MOY_UI_LOOK_APP 6           // a responsive app's run: the live theme's own
+                                    // tokens, put there with the run's (run_look)
 
 // A kind's id by name: an unknown name is row's. kind_known: -1 instead.
 int moy_ui_kind(const char *name, size_t n);
@@ -190,10 +192,17 @@ uint32_t moy_ui_font(int cart, int role, moy_font_info_t *out);
 // at 64..127 (moy_canvas.h). The console's: a sink it builds carries it as
 // its `cart` flag (moy_ui_sink_row, the RUN sink), and a draw reads the
 // flag of the sink it draws through, so a program's sink over its own
-// surface is outside it whatever the console runs. Answers whether it was
-// on; moy_ui_cart_on reads it.
+// surface is outside it whatever the console runs. `on` is a mode:
+// MOY_UI_CART_OFF, MOY_UI_CART_ON, or MOY_UI_CART_APP, a responsive app's
+// (docs/app_api_v1.md section 3): inside for its print and its colours, while
+// the sinks built meanwhile draw its `ui` verbs in the shell's look, as a
+// built-in app's are. Answers the mode it replaced; moy_ui_cart_on reads
+// whether the boundary is on, moy_ui_cart_ui whether a sink built now is
+// inside it (the flag moy_ui_sink_row gives it).
+enum { MOY_UI_CART_OFF = 0, MOY_UI_CART_ON = 1, MOY_UI_CART_APP = 2 };
 int moy_ui_cart_text(int on);
 int moy_ui_cart_on(void);
+int moy_ui_cart_ui(void);
 // What a colour index is masked with: 127, or 63 inside the boundary
 // (moy_ui_cmask: the console's).
 int moy_ui_cmask(void);
@@ -246,9 +255,12 @@ int moy_ui_glyph_draw(const moy_text_target_t *t, int g, int x, int y, int w, in
 typedef struct { const uint8_t *p; uint16_t n; } moy_ui_span_t;
 
 // A sink: where a primitive draws, always through a canvas row (`dst`). ROW:
-// a canvas row of the glass, named by its CANVAS handle (moy_ui_sink_row
-// checks it). RUN: a compiled run's libmoy canvas lent as a row of its own,
-// its draw state saved, reset and restored around the call (moy_ui_wasm.h).
+// a row drawn as the shell's apps draw, in the faces and icons of the look
+// -- a canvas row of the glass, named by its CANVAS handle (moy_ui_sink_row
+// checks it), or a responsive app's run canvas (moy_ui_wasm.h). RUN: a
+// run's libmoy canvas lent as a row of its own, drawn as a cart's (petme128,
+// no icon masks); the RUN face saves, resets and restores its draw state
+// around the call.
 // `fs` is the scale text draws at; `look` the look its colours resolve in;
 // `cart` 1 inside the app-cart boundary (moy_ui_cart_text); `shown` the
 // focus word its marks draw under (moy_ui_marks_active: the console's for a

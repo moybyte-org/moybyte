@@ -2,10 +2,15 @@
 app -- tests/fixtures/layout/layout_py.moy, layout_lua.moy, layout_wasm.moy
 (a compiled app), layout_wasi.moy (a WASI app) and layout_elf.moy (a native
 app) -- defines `_layout(w, h, fs)` and pages how many calls it heard and the
-last one's arguments. In a window on the desk, each tier's run hears the
-same calls with the same arguments and draws the same pixels as its window
-is resized, the font scale moves and the window is maximised; and a tier
-with `_init` hears `_layout` before it.
+last one's arguments, then a primary button and a list with a current row. In
+a window on the desk, each tier's run hears the same calls with the same
+arguments and draws the same pixels as its window is resized, the font scale
+moves and the window is maximised; on the T-Deck's shared 320x240 and on a
+console's whole 800x480 surface at font scale 3 it draws the same pixels
+too: the `ui` verbs of a responsive app draw in the shell's look (its faces,
+colours, row styles and selection marks) at the canvas's font scale, on
+every tier (docs/app_api_v1.md section 3). A tier with `_init` hears
+`_layout` before it.
 """
 
 import os
@@ -126,42 +131,74 @@ def _pmem0(ws):
     return img[0]
 
 
+def _open(tier, base, desk, **kw):
+    """The fixture app of `tier` running on a fresh console (the desk's, a
+    window on it, or `kw`'s), or None where the host has no such tier."""
+    from runtime import host_app
+    root = str(base / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    if not _install(tier, root):
+        return None
+    ws = build_desktop_ws(base) if desk else host_app.build_workstation(root, **kw)
+    rt = {"wasi": "wasm"}.get(tier, tier)
+    if tier != "python" and rt not in ws.runtimes:
+        ws.exit()
+        return None
+    ws.look.set_theme("moy", persist=False)
+    ws.pointer.visible = False
+    ws.bar_layer._clock_text = lambda: "10:30"
+    if desk:
+        ws.open_desk()
+    cart = next(c for c in ws.carts.all if c["title"] == TITLES[tier])
+    ws._open_workspace(cart)
+    ws.play(ws.launcher_layer)
+    if ws.confirm.open:             # a copied app's consent: Open
+        act = ws.confirm._act
+        ws.confirm.cancel()
+        act()
+    assert ws.run.player.cart_error is None, (tier, ws.run.player.cart_error)
+    return ws
+
+
 @pytest.fixture(scope="module")
 def runs(tmp_path_factory):
     """Each tier's [(surface, (size, pixels)), ...], whether the run was
     window-bound, and pmem 0 where the tier has `_init`."""
-    from runtime import host_app
     out = {}
     for tier in TIERS:
-        base = tmp_path_factory.mktemp("layout_" + tier)
-        root = str(base / "carts")
-        host_app.moy_carts.ensure_dirs(root)
-        if not _install(tier, root):
+        ws = _open(tier, tmp_path_factory.mktemp("layout_" + tier), True)
+        if ws is None:
             continue
-        ws = build_desktop_ws(base)
-        rt = {"wasi": "wasm"}.get(tier, tier)
-        if tier != "python" and rt not in ws.runtimes:
-            ws.exit()
-            continue
-        ws.look.set_theme("moy", persist=False)
-        ws.pointer.visible = False
-        ws.bar_layer._clock_text = lambda: "10:30"
-        ws.open_desk()
-        cart = next(c for c in ws.carts.all if c["title"] == TITLES[tier])
-        ws._open_workspace(cart)
-        ws.play(ws.launcher_layer)
-        if ws.confirm.open:             # a copied app's consent: Open
-            act = ws.confirm._act
-            ws.confirm.cancel()
-            act()
         p = ws.run.player
-        assert p.cart_error is None, (tier, p.cart_error)
         bound = ws.run.app_window_canvas
         shots = _script(ws)
         assert p.cart_error is None, (tier, p.cart_error)
         init = _pmem0(ws) if tier in ("python", "lua", "wasm") else None
         out[tier] = (shots, bound, init)
         ws.exit()
+    return out
+
+
+# The consoles the page is held to beside the desk's window: the T-Deck's
+# shared 320x240 at font scale 1, and a console's whole 800x480 at 3.
+CONSOLES = {"tdeck": {}, "console_fs3": {"sys_size": (800, 480), "font_scale": 3}}
+
+
+@pytest.fixture(scope="module")
+def consoles(tmp_path_factory):
+    """{(console, tier): (the run's ui_face(), its page's (size, pixels))}."""
+    out = {}
+    for name, kw in CONSOLES.items():
+        for tier in TIERS:
+            ws = _open(tier, tmp_path_factory.mktemp("%s_%s" % (name, tier)), False, **kw)
+            if ws is None:
+                continue
+            drv = make_drv(ws)
+            for _ in range(3):
+                _frame(drv)
+            out[(name, tier)] = (ws.run.player.ui_face(), _shot(drv))
+            assert ws.run.player.cart_error is None, (name, tier)
+            ws.exit()
     return out
 
 
@@ -193,6 +230,45 @@ def test_every_tier_draws_the_python_apps_page(runs, tier):
     for i, ((s, (size, px)), (rs, (rsize, rpx))) in enumerate(zip(got, want)):
         assert s == rs and size == rsize, (tier, i, s, rs)
         assert px == rpx, "%s: step %d drew other pixels than python" % (tier, i)
+
+
+@pytest.mark.parametrize("console", sorted(CONSOLES))
+@pytest.mark.parametrize("tier", TIERS[1:])
+def test_every_tier_draws_the_python_apps_page_on_each_console(consoles, console, tier):
+    """The page a responsive app draws through the `ui` verbs is the same
+    pixels on every tier: the same faces, colours, row styles, selection
+    marks and font scale."""
+    if (console, tier) not in consoles:
+        pytest.skip("no host %s tier" % tier)
+    face, (size, px) = consoles[(console, tier)]
+    rface, (rsize, rpx) = consoles[(console, "python")]
+    assert face == rface and size == rsize, (face, rface, size, rsize)
+    assert px == rpx, "%s on %s drew other pixels than python" % (tier, console)
+
+
+def test_a_responsive_app_draws_in_the_look_at_the_canvas_scale(consoles):
+    """The face each run's `ui` frame draws with (Player.ui_face): the
+    shell's look, at the T-Deck's 1 and the console's 3."""
+    from runtime import player
+    for console, fs in (("tdeck", 1), ("console_fs3", 3)):
+        face = consoles[(console, "python")][0]
+        assert face & player._FACE_LOOK, console
+        assert face >> player._FACE_FS_SHIFT == fs, (console, face)
+
+
+def test_the_look_is_not_the_carts(tmp_path):
+    """The same page drawn inside the app-cart boundary (a game's run face,
+    petme128 in the cart's colours) is other pixels: the look is what the
+    tiers agree on."""
+    ws = _open("python", tmp_path, False)
+    drv = make_drv(ws)
+    for _ in range(3):
+        _frame(drv)
+    look = _shot(drv)
+    ws.run.player._boundary = 1
+    cart = _shot(drv)
+    ws.exit()
+    assert look != cart
 
 
 @pytest.mark.parametrize("tier", ["python", "lua", "wasm"])

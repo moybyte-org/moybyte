@@ -18,7 +18,7 @@ int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look) {
     s->fs = (uint8_t)(row->st[MOY_ST_FONT_SCALE] > 0 ? row->st[MOY_ST_FONT_SCALE] : 1);
     s->look = (uint8_t)look;
     s->dst = row;
-    s->cart = (uint8_t)moy_ui_cart_on();
+    s->cart = (uint8_t)moy_ui_cart_ui();
     s->shown = (uint8_t)moy_ui_marks_shown();
     return MOY_UI_OK;
 }

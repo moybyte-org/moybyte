@@ -245,6 +245,20 @@ own way and the console finding it before the cart runs
 A Python, Lua or compiled app hears `_layout` before `_init`; a WASI or
 native app, which has no `_init`, before the first frame its loop reads.
 
+**A responsive app's `ui` looks like the shell's apps.** Its `ui` verbs draw
+in the theme's faces, colours, row styles and selection marks, as a
+built-in app's do, at the font scale of the canvas it draws on (the
+console's on a whole surface, 1 in a desk window and on the handheld's
+raster), and lay out on the desk's rows where its surface is the desk's.
+The same calls draw the same pixels on every tier
+(`tests/test_app_layout.py`): a Python app's frame is drawn by its Player
+(`ui_draw.CART_APP`, the boundary keeping only its `print` and its own
+colours), a Lua, compiled, WASI or native run's by the RUN face over the
+word its snapshot carries (`Player.ui_face`, `moy_ui_wasm.h`'s
+`MOYCORE_UI_FACE_*`). The rest of its drawing stays a cart's: `print` in
+petme128, colours MOY64. A game's `ui`, and a fixed app's, draws as a
+cart's.
+
 **Text editing: the editor handle (#112).** `open_editor` hands the cart the
 console's own text editor over one document. You draw it into a rect and
 forward taps; it does the text, the caret, the selection, wrap, undo, the

@@ -75,7 +75,7 @@ int moy_ui_link_frame(moy_frame_t *f) {
     s_snap[MOYCORE_UI_SNAP_Y] = f->in[MOY_FRAME_Y];
     s_snap[MOYCORE_UI_SNAP_PTR] = f->in[MOY_FRAME_PTR];
     s_snap[MOYCORE_UI_SNAP_KEY] = f->in[MOY_FRAME_KEY];
-    s_snap[MOYCORE_UI_SNAP_WINDOW] = f->in[MOY_FRAME_WINDOW];
+    s_snap[MOYCORE_UI_SNAP_FACE] = f->in[MOY_FRAME_FACE];
     s_snap[MOYCORE_UI_SNAP_ROOM_X] = f->in[MOY_FRAME_ROOM_X];
     s_snap[MOYCORE_UI_SNAP_ROOM_Y] = f->in[MOY_FRAME_ROOM_Y];
     s_snap[MOYCORE_UI_SNAP_ROOM_W] = f->in[MOY_FRAME_ROOM_W];

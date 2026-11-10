@@ -125,7 +125,7 @@ MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 
 SNAP_SLOTS = ("SNAP_BTN_P1", "SNAP_BTNP_P1", "SNAP_PLAYERS",
               "SNAP_TOUCH_X", "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN",
-              "SNAP_TOUCH_MS", "SNAP_TIME_MS", "SNAP_WINDOW",
+              "SNAP_TOUCH_MS", "SNAP_TIME_MS", "SNAP_FACE",
               "SNAP_ROOM_X", "SNAP_ROOM_Y", "SNAP_ROOM_W", "SNAP_ROOM_H")
 
 AQ_OPS = ("AQ_SFX", "AQ_MUSIC", "AQ_BEEP", "AQ_MUSIC_STOP", "AQ_SOUND_STOP",
@@ -142,9 +142,9 @@ def audio_ops(mod):
     return tuple(getattr(mod, name) for name in AQ_OPS)
 
 
-def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False,
+def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, face=0,
                 room=None):
-    """PLAYER TWO, THE POINTER, THE CLOCK, THE WINDOW and THE ROOM, into the
+    """PLAYER TWO, THE POINTER, THE CLOCK, THE FACE and THE ROOM, into the
     snapshot the tick will read.
 
     PLAYER TWO (#65). These slots exist in the C ABI and nothing filled them, so
@@ -168,9 +168,11 @@ def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False,
     milliseconds inside the tick to -- the same clock a Python cart's time()
     reads. A None `start` leaves the slot as it was.
 
-    THE WINDOW: whether the run's surface is a window's body (the desk's
-    `windowed_chrome`), which the public UI API's page lies on: its ground is
-    then the window's (native/moy_ui/moy_ui_wasm.c), as a Python app's is.
+    THE FACE: how the run's `ui` frame draws, the Player's `ui_face()`
+    (`run_face`): whether its surface is a window's body (the page's ground is
+    then the window's), the desk's rows, the shell's look for a responsive
+    app, and the font scale -- what native/moy_ui/moy_ui_wasm.c's RUN face
+    reads to draw the page a Python app's frame draws.
 
     THE ROOM: the rect (x, y, w, h) the run's `ui` frame lies in, the
     Player's `ui_room()`: an app's content_rect(), below the host's bars; None,
@@ -196,12 +198,21 @@ def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, window=False,
         s[idx[5]] = 0
     if start is not None:
         s[idx[7]] = since_ms(start)
-    s[idx[8]] = 1 if window else 0
+    s[idx[8]] = int(face)
     x, y, w, h = room if room else (0, 0, 0, 0)
     s[idx[9]] = int(x)
     s[idx[10]] = int(y)
     s[idx[11]] = int(w)
     s[idx[12]] = int(h)
+
+
+def run_face(ws):
+    """`snap_shared`'s face for the run in front: its Player's `ui_face()`,
+    the window bit alone where the run has no Player."""
+    player = getattr(ws.run, "player", None)
+    if player is not None:
+        return player.ui_face()
+    return 1 if getattr(ws, "windowed_chrome", False) else 0
 
 
 def run_room(run):

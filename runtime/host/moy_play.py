@@ -499,12 +499,12 @@ def open(run):  # noqa: A001 -- the module's verb
     _rc(d.hl_play_open(int(run)))
 
 
-def frame(run, ticks, dt, render, x, y, touch, window=False, room=None):
+def frame(run, ticks, dt, render, x, y, touch, face=0, room=None):
     d, lb = _play()
     out = _U32(0)
     rx, ry, rw, rh = room if room is not None else (0, 0, 0, 0)
     rc = d.hl_play_frame(int(run), int(ticks), float(dt), 1 if render else 0,
-                         int(x), int(y), int(touch), 1 if window else 0,
+                         int(x), int(y), int(touch), int(face),
                          int(rx), int(ry), int(rw), int(rh), ctypes.byref(out))
     if rc == 8:                             # MOY_PLAY_RAISED: the cart's own text
         i = lb.PlayInfo()

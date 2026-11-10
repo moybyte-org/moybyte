@@ -214,11 +214,16 @@ def print_width(s, scale=1):
     return _C.text_width(s, scale, _C.print_font())
 
 
+CART_OFF, CART_ON, CART_APP = 0, 1, 2      # moy_ui.h's MOY_UI_CART_*
+
+
 def cart_text(on):
     """The app-cart boundary (docs/theme_and_shell_2026-11.md §3.7): on while a
     cart's code runs, so its `print` and its `ui` draw in petme128 whatever
-    the theme names; off puts the shell's fonts back. Answers whether it
-    was on."""
+    the theme names; off puts the shell's fonts back. `on` is a mode:
+    CART_OFF (False), CART_ON (True), or CART_APP, a responsive app's, whose
+    `print` stays inside while its `ui` verbs draw in the shell's look.
+    Answers the mode it replaced."""
     return _C.cart_text(on)
 
 
@@ -528,14 +533,18 @@ def _bind_theme(th):
 
 _LOOK_RUN = 4                         # moy_ui.h's MOY_UI_LOOK_RUN
 _LOOK_KERNEL = 5                      # moy_ui.h's MOY_UI_LOOK_KERNEL
+_LOOK_APP = 6                         # moy_ui.h's MOY_UI_LOOK_APP
 _KERNEL = [None, -1]                  # the theme dict the kernel's look holds, its look gen
 
 
-def run_look(th):
-    """Put `th`, the live theme's nearest MOY64 tokens, in a run's look: the
-    one a compiled run's page and a copy of the toolkit linked into a program
-    draw in (the theme block carries it, moy_ui.h's moy_ui_theme_pull)."""
-    _C.look(_LOOK_RUN, _pack(th))
+def run_look(near, th):
+    """Put `near`, the live theme's nearest MOY64 tokens, in a run's look, the
+    one a game's or a fixed app's page draws in on a Lua, compiled, WASI or
+    native run, and `th`, the live theme's own, in a responsive app's
+    (moy_ui.h's MOY_UI_LOOK_APP): the theme block carries both to a copy of
+    the toolkit linked into a program (moy_ui.h's moy_ui_theme_pull)."""
+    _C.look(_LOOK_RUN, _pack(near))
+    _C.look(_LOOK_APP, _pack(th))
 
 
 def kernel_look(th):

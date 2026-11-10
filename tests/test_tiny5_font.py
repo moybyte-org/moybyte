@@ -204,11 +204,11 @@ def test_the_cart_boundary_puts_the_shell_fonts_back():
     try:
         ui_draw.use_font("ui", fid)
         ui_draw.print_font(fid)
-        assert ui_draw.cart_text(True) is False
+        assert ui_draw.cart_text(True) == 0
         assert ui_draw.font("ui")[0] == 0 and ui_draw.print_font() == 0
         assert ui_draw.print_font(0) == fid          # names the font prints come back to
         ui_draw.print_font(fid)
-        assert ui_draw.cart_text(False) is True
+        assert ui_draw.cart_text(False) == 1
         assert ui_draw.font("ui")[0] == fid and ui_draw.print_font() == fid
     finally:
         ui_draw.font_free(fid)

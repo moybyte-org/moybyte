@@ -284,7 +284,7 @@ typedef struct {
     uint32_t flags;
     uint32_t start_ms;
     int32_t ptr[3];                 // x, y, the touch() flags
-    int32_t window;                 // the console's: the run lies in a window
+    int32_t face;                   // the console's: how its ui frame draws
     int32_t room[4];                // the console's: an app's ui frame (w 0: the canvas)
     uint32_t upc0[MOY_UPC_CLASSES];
     uint32_t owner;                 // the run's OWNER row (moy_buf.h), or 0
@@ -545,7 +545,7 @@ int moy_play_input(uint32_t run, const moy_play_in_t *in) {
     r->ptr[0] = in->x;
     r->ptr[1] = in->y;
     r->ptr[2] = in->touch;
-    r->window = in->window ? 1 : 0;
+    r->face = in->face;
     memcpy(r->room, in->room, sizeof(r->room));
     return MOY_PLAY_OK;
 }
@@ -554,10 +554,10 @@ int moy_play_input(uint32_t run, const moy_play_in_t *in) {
 // table: the union of every source as player one (libmoy's seven buttons are
 // the table's first seven bits), player two's own when more than one slot is
 // in play, the last typed key, the pointer the console published and the
-// cart's clock, whether its surface is a window's body and the rect an
+// cart's clock, how its ui frame draws and the rect an
 // app's ui frame lies in.
 static void refresh(run_t *r, int32_t *s) {
-    s[SNAP_WINDOW] = r->window;
+    s[SNAP_FACE] = r->face;
     s[SNAP_ROOM_X] = r->room[0];
     s[SNAP_ROOM_Y] = r->room[1];
     s[SNAP_ROOM_W] = r->room[2];

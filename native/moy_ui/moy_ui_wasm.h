@@ -7,13 +7,19 @@
 // cart's own verbs draw on (for a compiled app moycore_ui_target, an owed or
 // kept frame on the screen written in first, as libmoy's verbs do), lent to
 // the primitives as a canvas row of its own -- its pixels, its size, the
-// whole canvas as the clip, no camera, font scale 1 (the app is
-// cart-shaped), the canvas's index-to-pixel words as the palette. Around each
+// whole canvas as the clip, no camera, the canvas's index-to-pixel words as
+// the palette. How it draws is the snapshot's face word (SNAP_FACE, the
+// console's Player.ui_face), so a run's page is the page a Python app's frame
+// draws with the same calls: the font scale of the canvas, the desk's rows,
+// and for a responsive app (one that defines `_layout`) the shell's look --
+// a ROW sink in MOY_UI_LOOK_APP, the theme's faces and icons, its block at
+// the palette's 64..127 -- where a game's or a fixed app's draws as a cart's,
+// in petme128 and the look below. Around each
 // verb the run's libmoy draw state (camera, clip, pal, palt, the screen
 // palette, fillp) is saved, reset, and restored after, so a widget looks the
 // same whatever the cart left set and the cart finds its state as it left it.
 //
-// The colours are the RUN look's (MOY_UI_LOOK_RUN): the style resolved
+// A cart's colours are the RUN look's (MOY_UI_LOOK_RUN): the style resolved
 // against the live theme's token row, rebuilt when its generation moves and
 // read under native/moy_app's seqlock, so a verb runs on the run's own thread
 // with no hop and no upcall.
@@ -51,8 +57,16 @@ int32_t moycore_ui_dt_take(void);
 enum {
     MOYCORE_UI_SNAP_BTN = 0, MOYCORE_UI_SNAP_BTNP = 1, MOYCORE_UI_SNAP_X = 6,
     MOYCORE_UI_SNAP_Y = 7, MOYCORE_UI_SNAP_PTR = 8, MOYCORE_UI_SNAP_KEY = 10,
-    MOYCORE_UI_SNAP_WINDOW = 14, MOYCORE_UI_SNAP_ROOM_X = 15, MOYCORE_UI_SNAP_ROOM_Y = 16,
+    MOYCORE_UI_SNAP_FACE = 14, MOYCORE_UI_SNAP_ROOM_X = 15, MOYCORE_UI_SNAP_ROOM_Y = 16,
     MOYCORE_UI_SNAP_ROOM_W = 17, MOYCORE_UI_SNAP_ROOM_H = 18
+};
+// The face word's bits: the surface is a window's body (the page's ground is
+// the window's), the frame lays out on the desk's rows (MOY_UI_DESK), it is a
+// responsive app's (the shell's look), and from FS_SHIFT the font scale its
+// text draws at (0: 1). A game's is its window bit alone.
+enum {
+    MOYCORE_UI_FACE_WINDOW = 1, MOYCORE_UI_FACE_DESK = 2, MOYCORE_UI_FACE_LOOK = 4,
+    MOYCORE_UI_FACE_FS_SHIFT = 8
 };
 
 // The verbs over `target`, a libmoy moy_canvas (NULL: -MOY_UI_STALE). 0 or a
