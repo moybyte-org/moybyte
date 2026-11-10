@@ -71,6 +71,50 @@
     X(ui_pull, "(i*~)i") \
     X(x25519, "(*~*~*~)i") \
 
+// The rows served where they are called (how "here" or "seq"): C on the
+// caller's task, no VM's queue, which a host whose module runs on the VM's
+// own task can serve in place (native/moy_wasm_web/moy_wasi_web.h).
+#define MOY_WASI_OS_HERE(X) \
+    X(aes_gcm_open) \
+    X(aes_gcm_seal) \
+    X(after) \
+    X(cancel) \
+    X(clipboard_kind) \
+    X(clipboard_put_text) \
+    X(clipboard_seq) \
+    X(clipboard_text) \
+    X(dev_close) \
+    X(dev_get) \
+    X(dev_open) \
+    X(dev_read) \
+    X(dev_set) \
+    X(dev_write) \
+    X(dev_xfer) \
+    X(ed25519_public) \
+    X(ed25519_sign) \
+    X(ed25519_verify) \
+    X(every) \
+    X(files_count) \
+    X(files_delete) \
+    X(files_duplicate) \
+    X(files_list) \
+    X(files_load) \
+    X(files_new_name) \
+    X(files_readable) \
+    X(files_ready) \
+    X(files_rename) \
+    X(files_save) \
+    X(hmac_sha256) \
+    X(log) \
+    X(prefs_clear) \
+    X(prefs_get) \
+    X(prefs_set) \
+    X(random) \
+    X(send) \
+    X(service_running) \
+    X(sha256) \
+    X(x25519) \
+
 #endif // MOY_WASI_OS_ROWS_H
 
 // The natives of the rows the kernel does not serve, where moy_wasi.c

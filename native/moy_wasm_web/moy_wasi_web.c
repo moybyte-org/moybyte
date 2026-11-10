@@ -8,6 +8,7 @@
 #include <emscripten.h>
 
 #include "moy_wasi.h"
+#include "moy_wasi_os_rows.h"
 
 EM_JS_DEPS(moy_wasi_web, "$stringToUTF8,$lengthBytesUTF8,$getWasmTableEntry,malloc,free,"
                          "moy_web_cmd_row,moy_web_cmd_thrown");
@@ -25,6 +26,20 @@ static struct {
 static int32_t row_unserved(wasm_exec_env_t env) {
     (void)env;
     return -52;                     // WASI's NOSYS, as a moybyte.os row answers an errno
+}
+
+// The moybyte.os rows served where they are called (moy_wasi_os_rows.h):
+// the only ones this page's one thread can serve while `_start` runs.
+#define HERE_NAME(verb) #verb,
+static const char *const HERE[] = { MOY_WASI_OS_HERE(HERE_NAME) NULL };
+
+static bool here(const char *verb) {
+    for (int i = 0; HERE[i] != NULL; i++) {
+        if (strcmp(HERE[i], verb) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool wasm_runtime_register_natives_sorted(const char *module, const NativeSymbol *rows, uint32_t n) {
@@ -59,9 +74,14 @@ bool wasm_runtime_unregister_natives(const char *module, const NativeSymbol *row
 }
 
 // Row `i` of every registered table, for the page's imports: its module and
-// name, and the function the import calls (by its table index), a
-// moybyte.os row's being the one that answers NOSYS. -1 past the last.
-EMSCRIPTEN_KEEPALIVE int moy_web_cmd_row(int i, const char **module, const char **name) {
+// name, and the function the import calls (by its table index). A WASI or
+// moybyte.term row takes the module's own arguments (*spans NULL: its body
+// reaches memory through moy_wasi_web_reach); a moybyte.os row served here
+// takes each pointer and length its signature marks `*~` as a copy in this
+// VM (*spans its signature), the bytes it changed copied back; any other
+// moybyte.os row is the one answering NOSYS. -1 past the last.
+EMSCRIPTEN_KEEPALIVE int moy_web_cmd_row(int i, const char **module, const char **name,
+                                         const char **spans) {
     for (int t = 0; t < TABLES; t++) {
         if (s_tables[t].module == NULL) {
             continue;
@@ -70,8 +90,15 @@ EMSCRIPTEN_KEEPALIVE int moy_web_cmd_row(int i, const char **module, const char 
             const NativeSymbol *r = &s_tables[t].rows[i];
             *module = s_tables[t].module;
             *name = r->symbol;
-            void *fn = strcmp(s_tables[t].module, MOY_WASI_OS) == 0 ? (void *)row_unserved
-                                                                    : r->func_ptr;
+            *spans = NULL;
+            void *fn = r->func_ptr;
+            if (strcmp(s_tables[t].module, MOY_WASI_OS) == 0) {
+                if (here(r->symbol)) {
+                    *spans = r->signature;
+                } else {
+                    fn = (void *)row_unserved;
+                }
+            }
             return (int)(uintptr_t)fn;
         }
         i -= (int)s_tables[t].n;

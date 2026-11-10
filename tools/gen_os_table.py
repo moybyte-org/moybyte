@@ -990,6 +990,14 @@ def gen_wasi_h(src):
          "#define MOY_WASI_OS_ROWS(X) \\"]
     for r in sorted(wasi_rows(src), key=lambda r: wasi_name(r).encode()):
         o.append('    X(%s, "%s") \\' % (wasi_name(r), wasi_sig(r)))
+    o += ["",
+          "// The rows served where they are called (how \"here\" or \"seq\"): C on the",
+          "// caller's task, no VM's queue, which a host whose module runs on the VM's",
+          "// own task can serve in place (native/moy_wasm_web/moy_wasi_web.h).",
+          "#define MOY_WASI_OS_HERE(X) \\"]
+    for r in sorted(wasi_rows(src), key=lambda r: wasi_name(r).encode()):
+        if r.get("how") in ("here", "seq"):
+            o.append("    X(%s) \\" % wasi_name(r))
     o += ["", "#endif // MOY_WASI_OS_ROWS_H", "",
           "// The natives of the rows the kernel does not serve, where moy_wasi.c",
           "// defines MOY_WASI_OS_BODIES after its os_call and os_role: a console",

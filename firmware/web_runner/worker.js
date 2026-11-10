@@ -498,10 +498,12 @@ export function installCartEngine(M) {
 // the module compiled and instantiated here, a sibling of the VM as a
 // compiled cart is, its imports the rows the VM's C registers
 // (moy_web_cmd_row), each called with the module's own arguments -- a
-// pointer is an offset in the module's memory. What a row's C reaches of that
-// memory is copied into the VM's (span) and its changed bytes copied back
-// when the row returns; then, where the C says the module unwinds (proc_exit,
-// Ctrl-C, the budget), it is thrown through the module. `_start` runs inside
+// pointer is an offset in the module's memory -- or, where the C hands a
+// row's signature, each pointer and length it marks `*~` copied into the VM
+// first. What a row's C reaches of that memory is copied into the VM's
+// (span) and its changed bytes copied back when the row returns; then, where
+// the C says the module unwinds (proc_exit, Ctrl-C, the budget), it is thrown
+// through the module. `_start` runs inside
 // the shell door's crossing, to its end. Every decision is the C's: this only
 // compiles, instantiates, calls and moves bytes.
 class CommandEnd extends Error {}
@@ -533,18 +535,31 @@ export function installCommandEngine(M) {
             C = vm;
             run = r;
             const imports = {};
-            const at = C.malloc(8);
+            const at = C.malloc(12);
             try {
                 for (let i = 0; ; i++) {
-                    const fi = C.row(i, at, at + 4);
+                    const fi = C.row(i, at, at + 4, at + 8);
                     if (fi < 0) break;
-                    const h = new Uint32Array(M.HEAPU8.buffer, at, 2);
+                    const h = new Uint32Array(M.HEAPU8.buffer, at, 3);
                     const mod = cstr(h[0]), name = cstr(h[1]), fn = C.fn(fi);
+                    // the argument indices a `*~` pair starts at, where copied
+                    const pairs = [];
+                    if (h[2]) {
+                        const sig = /^\((.*)\)/.exec(cstr(h[2]))[1];
+                        for (let k = 0, n = 0; k < sig.length; k++, n++) {
+                            if (sig[k] === "*" && sig[k + 1] === "~") { pairs.push(n); k++; n++; }
+                        }
+                    }
                     (imports[mod] = imports[mod] || {})[name] = (...a) => {
                         const outer = spans;
                         spans = [];
                         let r;
                         try {
+                            for (const k of pairs) {
+                                const p = M.moyCommand.span(a[k] >>> 0, a[k + 1] >>> 0);
+                                if (!p) throw new Error("out of bounds memory access");
+                                a[k] = p;
+                            }
                             r = fn(run, ...a);
                             for (const [off, p, was] of spans) {
                                 const mem = bytes(), now = M.HEAPU8;

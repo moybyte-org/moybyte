@@ -315,8 +315,9 @@ spike the owner approved on 2026-11-06):
   page's worker, so one past its budget is stopped as Ctrl-C stops it
   (`native/moy_sh/moy_sh_screen.c`). A WASI command typed there runs on the
   page's own WebAssembly engine through the boards' adapter, inside the same
-  run and budget (`native/moy_wasm_web/README.md`, "A WASI command here");
-  `moybyte.os`'s rows answer NOSYS there. The bundle every board bakes
+  run and budget (`native/moy_wasm_web/README.md`, "A WASI command here"):
+  stdin from the grid is end of file, and the `moybyte.os` rows that hop
+  answer NOSYS there. The bundle every board bakes
   carries the face and no shell. **A spike first**: image size against `headroom_floor_kib`,
 RAM per session, and internal SRAM on the S3 with WiFi up. Terminal-only
 apps are **the app model for the headless Zero**

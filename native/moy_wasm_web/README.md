@@ -81,13 +81,24 @@ writes the bytes the body changed back when the row returns, then throws
 through the module where the C says it unwinds (`proc_exit`, Ctrl-C, the
 budget). The first step runs `_start` to its end inside the door's crossing:
 the page has one thread and the line's run holds it already
-(`MOY_SH_RUN_BUDGET_S`), so a terminal read is end of file and a run past 3 s
-is stopped at its next import.
+(`MOY_SH_RUN_BUDGET_S`), so stdin from the Terminal's grid is end of file
+(a pipe or a redirection is not) and a run past 3 s is stopped at its next
+import. A command that asks before its first run (a cart that arrived as
+files, `app_perms.asks_first`) asks at the shell's prompt before its run
+starts, and the next line typed answers (`moy_sh_ask`, native/moy_sh/moy_sh.h),
+so the question needs no keys during a run.
 
-`moybyte.os`'s rows are linked to one answering NOSYS: they reach the console
-through the VM's queue and its hop (`moy_vmq.h`), which a run holding the
-VM's one thread cannot wait on, and their bodies take pointers into the
-engine's memory. A module importing them runs; a call of one fails.
+`moybyte.os`'s rows take pointers into the engine's memory, so a row served
+here is handed each pointer and length its signature marks `*~` as a copy in
+this VM, whose changed bytes go back after it (the C hands the page the
+row's signature: `moy_web_cmd_row`). Served are the rows served where they
+are called, `how` "here" or "seq" in `native/os_calls.json`
+(`MOY_WASI_OS_HERE`, generated): the files, prefs and clipboard rows, the
+timers, `send` and `log`, the device handles and the crypto rows, in place,
+the page's one thread being the VM's. The rows that hop (the console calls,
+the door's Python half's, the status items, `on`, `at`, the screen) go
+through the VM's queue (`moy_vmq.h`), which a run holding that thread cannot
+wait on: each answers NOSYS, and a module importing them still runs.
 
 ## What does not apply here
 

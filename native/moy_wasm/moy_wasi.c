@@ -1144,6 +1144,11 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, int how, const os_arg_t 
             c.r = -MOY_APP_NEEDS_VM;
         }
         w->hopped_us += mono_us() - t0;
+#ifdef MOY_WASI_WEB
+    } else if (how != OS_HOP) {
+        // the page's one thread is the VM's: the row runs in place
+        c.r = moy_app_role(c.run->a, c.run->g, c.row, c.arg, c.n, c.out, c.cap);
+#endif
     } else {
         uint32_t waited = 0;
         w->calling++;

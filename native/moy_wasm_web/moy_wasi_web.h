@@ -19,10 +19,16 @@
 // place, so a command holds the worker as every run of the browser's shell
 // does (moy_sh_screen.c, MOY_SH_RUN_BUDGET_S).
 //
-// moybyte.os's rows are not served here: they reach the console through the
-// VM's queue and its hop (moy_vmq.h), which a run holding the VM's one thread
-// cannot wait on. A module importing them still runs, and each such row
-// answers NOSYS.
+// moybyte.os's rows take pointers into the engine's memory, so a row served
+// here takes each pointer and length its signature marks `*~` as a copy in
+// this VM, the bytes it changed copied back (moy_web_cmd_row). The rows
+// served are those served where they are called (moy_wasi_os_rows.h's
+// MOY_WASI_OS_HERE: the files, prefs, clipboard, timers, send and log, the
+// device handles and the crypto rows), in place, the page's one thread being
+// the VM's. The rest go through the VM's queue (moy_vmq.h: the console calls,
+// the rows the door's Python half serves, the screen), which a run holding
+// that thread cannot wait on: each answers NOSYS, and a module importing
+// them still runs.
 
 #ifndef MOY_WASI_WEB_H
 #define MOY_WASI_WEB_H

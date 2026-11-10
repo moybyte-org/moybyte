@@ -225,14 +225,16 @@ nor those docs will warn you about:
   the boards' adapter**, compiled into the site's wasm alone; the README of
   `native/moy_wasm_web` says how ("A WASI command here"). What bites:
   - **A row's pointer is an offset in the module's memory, never one into
-    the VM's.** A row whose body dereferences what it is handed would read
-    the VM at that number, so those rows (`moybyte.os`'s, today) are linked
-    to NOSYS, not to their bodies. A new WAMR call in `moy_wasi.c` needs its
-    twin in `moy_wasi_web.c`: `tests/test_wasi_web.py` names it before a
-    `--site` build fails.
+    the VM's.** A WASI row reaches it through `moy_wasi_web_reach`; a
+    `moybyte.os` row, whose body dereferences what it is handed, gets copies
+    of its `*~` spans because the C hands the page its signature. A new WAMR
+    call in `moy_wasi.c` needs its twin in `moy_wasi_web.c`:
+    `tests/test_wasi_web.py` names it before a `--site` build fails.
   - **Nothing waits inside a command**: the module runs inside the door's
-    crossing on the one thread, so stdin from the grid is end of file and a
-    console call cannot be answered while it runs.
+    crossing on the one thread, so stdin from the grid is end of file, a
+    `moybyte.os` row that hops (a console call, the door's Python half)
+    answers NOSYS, and the first-run question is asked at the prompt and
+    answered by the next line (`moy_sh_ask`), never read during the run.
   - The worker's command engine (about 1 KB of script gzipped) rides the
     baked bundle too; its C does not. `tests/test_web_term_e2e.py` runs
     wasi-sdk's modules in Chrome.
