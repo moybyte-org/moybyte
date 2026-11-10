@@ -474,7 +474,7 @@ class _Over(c.Structure):
                 ("signal", c.c_int8), ("values", _Span), ("check", c.c_int8),
                 ("subs", _Span), ("icons", _Span), ("counts", _Span), ("tags", _Span),
                 ("marks", _Span), ("card", c.c_int8), ("tag", _Span),
-                ("focus", _Span)]
+                ("focus", _Span), ("flags2", c.c_int32)]
 
 
 class _Line(c.Structure):

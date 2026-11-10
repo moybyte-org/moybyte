@@ -181,3 +181,47 @@ def test_what_the_module_reads_itself_draws_and_answers_as_the_face_encodes_it()
     assert lines["PIXELS"].startswith("True"), lines["PIXELS"]
     # options that fit the module's buffer cost the frame nothing
     assert lines["ALLOC"] == "0", lines["ALLOC"]
+
+
+MORE = 1 << 29                          # moy_ui_api.h's MOY_UI_O_MORE
+
+
+def _read(lib, block):
+    """The override block's keys as the engine reads it: each field, a span
+    as its text."""
+    import ctypes
+    from runtime.moy_ui_binding import _Over, _Span
+    raw = ctypes.create_string_buffer(block, len(block))
+    ov = _Over()
+    assert lib.moy_ui_over_block(ctypes.byref(ov), raw, len(block)) == 0
+    out = {}
+    for name, _t in _Over._fields_:
+        v = getattr(ov, name)
+        out[name] = ctypes.string_at(v.p, v.n) if isinstance(v, _Span) and v.p else (
+            None if isinstance(v, _Span) else v)
+    return out
+
+
+def test_the_second_flags_word_is_the_next_keys_door():
+    """Bit 29 of the block's flags word says a second word of flags follows
+    the focus's text, its keys' words after it: a block that carries one
+    reads it, and every key before it as the block without it does; a block
+    whose bit says so and ends before the word, or whose word is below 0,
+    reads none."""
+    from runtime import glass_binding, ui     # ui binds the module's calls
+    lib = glass_binding._lib()
+    o = {"id": "row", "hint": "Message", "gen": 7, "snap": True, "values": ("a", "b"),
+         "check": True, "subs": ("one", "two"), "tag": "Public", "focus": "Cancel"}
+    block = ui._block(o)
+    at = 4 * 9 + len(b"row") + 4 + len(b"Message")      # the flags word
+    fl = int.from_bytes(block[at:at + 4], "little")
+    assert not fl & MORE
+    head = block[:at] + (fl | MORE).to_bytes(4, "little") + block[at + 4:]
+    plain = _read(lib, block)
+    assert plain["flags2"] == 0
+    got = _read(lib, head + (0x40000001).to_bytes(4, "little") + b"\x05\x00\x00\x00later")
+    assert got.pop("flags2") == 0x40000001
+    plain.pop("flags2")
+    assert got == plain
+    assert _read(lib, head)["flags2"] == 0
+    assert _read(lib, head + (-1).to_bytes(4, "little", signed=True))["flags2"] == 0

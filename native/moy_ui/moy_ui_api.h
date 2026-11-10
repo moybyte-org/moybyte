@@ -231,6 +231,9 @@ typedef struct {
     // A dialog's button focus opens on, by its label (p NULL: its body's
     // first stop, else its first button).
     moy_ui_span_t focus;
+    // The block's second word of flags (MOY_UI_O_MORE; 0 none), which the
+    // keys past the first word's read.
+    int32_t flags2;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -259,6 +262,11 @@ typedef struct {
 #define MOY_UI_O_CARD 67108864      // and `card`
 #define MOY_UI_O_FOCUS 268435456    // and `focus`, its length's word and its text after the tag's
 #define MOY_UI_O_TAG 134217728      // and `tag`, its length's word and its text after the rows'
+// and a second word of flags (MOY_UI_O2_*) after the focus's text, each key
+// it names its words after it in its bits' order: the door every key past
+// the first word's takes. Bit 30 is the first word's last free one; bit 31
+// is its sign (a word below 0 is no flags).
+#define MOY_UI_O_MORE 536870912
 #define MOY_UI_OR_SUBS 1
 #define MOY_UI_OR_ICONS 2
 #define MOY_UI_OR_COUNTS 4

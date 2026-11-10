@@ -157,6 +157,7 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->tag.n = 0;
     o->focus.p = NULL;
     o->focus.n = 0;
+    o->flags2 = 0;
 }
 
 int32_t mua_word(const uint8_t *w, int i) {
@@ -325,6 +326,11 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                     o->focus.n = (uint16_t)fn;
                     at += (size_t)fn;
                 }
+                if ((fl & MOY_UI_O_MORE) && n - at >= 4u) {
+                    int32_t fl2 = mua_word(w + at, 0);
+                    at += 4u;
+                    o->flags2 = fl2 < 0 ? 0 : fl2;
+                }
             }
         }
     }
@@ -341,7 +347,7 @@ const moy_ui_over_t *mua_over(const moy_ui_over_t *o) {
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {NULL, 0},
                                        0, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0},
-                                       0, {NULL, 0}, {NULL, 0}};
+                                       0, {NULL, 0}, {NULL, 0}, 0};
     return o != NULL ? o : &none;
 }
 
