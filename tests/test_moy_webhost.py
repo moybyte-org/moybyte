@@ -322,6 +322,28 @@ def _assets():
     return gen_web_blob.asset_names()
 
 
+@pytest.mark.parametrize("root", ["carts", "files", "apps"])
+def test_a_root_past_the_path_limit_is_refused_never_cut(tmp_path, root):
+    """A cut root names another folder: every tmp_path under one long TMPDIR
+    cuts to the same prefix, so one store served another's files. A start
+    past MOY_WEB_PATH_MAX (a board's 96 bytes, the host library's 4096) is
+    refused instead."""
+    roots = {"carts": str(tmp_path / "carts"), "files": None, "apps": None}
+    roots[root] = "/" + "d/" * 2100 + root
+    with pytest.raises(OSError) as e:
+        nb.web_start(0, roots["carts"], roots["files"], [], None, [], roots["apps"])
+    assert e.value.errno == 22
+
+
+def test_a_root_a_board_could_not_hold_is_served_on_the_host(tmp_path):
+    """The host library takes a developer machine's folders, however long
+    its TMPDIR."""
+    deep = tmp_path / ("d" * 120)
+    (deep / "carts" / "hop.moy").mkdir(parents=True)
+    (deep / "carts" / "hop.moy" / "main.py").write_text("x = 1\n")
+    assert _pull(deep / "carts") == {"hop.moy/main.py": "x = 1\n"}
+
+
 def test_the_root_serves_the_console_page(tmp_path, baked):
     baked({"index.html.gz": b"\x1f\x8bpage"})
     h = _host(tmp_path)

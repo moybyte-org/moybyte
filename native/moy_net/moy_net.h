@@ -290,7 +290,12 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
 #define MOY_WEB_CLOSING_MS 5000     // the goodbye window: outlasts the page's 3 s heartbeat
 #define MOY_WEB_DEFER_MS 3000
 #define MOY_WEB_POLL_MAX 4          // new connections one poll accepts
+// The longest folder (a root or the system folder) a start takes, its NUL
+// with it: a board's are a few bytes under /sd; the host library takes a
+// developer machine's (runtime/host/host_native.py).
+#ifndef MOY_WEB_PATH_MAX
 #define MOY_WEB_PATH_MAX 96
+#endif
 #define MOY_WEB_MEDIA_PIECE 32768u  // GET /media's most bytes of a song per request
 
 // The sign-in's backoff (moy_webhost.c's header): wrong credentials a source
@@ -335,7 +340,8 @@ typedef struct {
 } moy_web_state_t;
 
 // Bind and serve: 0, the errno the bind failed with, or MOY_EINVAL for a
-// system folder past MOY_WEB_PATH_MAX. A host already serving takes the new
+// root or system folder past MOY_WEB_PATH_MAX, which is never cut short (the
+// configuration stays as it was). A host already serving takes the new
 // configuration and keeps its socket.
 int moy_web_start(const moy_web_cfg_t *cfg);
 // Stop. With `why`, answer every request with {"error":"closing","why":...}

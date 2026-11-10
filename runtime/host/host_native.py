@@ -52,6 +52,9 @@ CACHE = os.path.join(native_build.ROOT, ".build", "host")
 # face of the public UI API.
 CFLAGS = native_build.BASE_CFLAGS + [
     "-DMOY_PIXEL_RGB565=1", "-DMOY_WITH_LUA=1", "-DMOY_PLAY_HOST=1", "-DMOYCORE_UI=1",
+    # The web host's folders are a developer machine's: a tmp_path under a
+    # long TMPDIR runs past a board's 96 bytes.
+    "-DMOY_WEB_PATH_MAX=4096",
     "-Wno-double-promotion", "-Wno-float-conversion",
     # Newer compilers (GCC 14, CI's) refuse an implicit declaration; older
     # ones only warn, so a missing feature macro passed here and failed there.

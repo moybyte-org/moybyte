@@ -1998,8 +1998,8 @@ def _survival_trace(name, exe, tmp_path, tag, prelude=None):
     stage = work / "stage"
     stage.mkdir(parents=True)
     # The store's root in a short folder: the webhost refuses a system folder
-    # past MOY_WEB_PATH_MAX (96 bytes), and pytest's tmp_path runs past it.
-    store = Path(tempfile.mkdtemp(prefix="moys"))
+    # past MOY_WEB_PATH_MAX (96 bytes), and a tmp_path or TMPDIR runs past it.
+    store = Path(tempfile.mkdtemp(prefix="moys", dir="/tmp"))
     try:
         return _run_survival(driver, exe, work, stage, store, prelude)
     finally:

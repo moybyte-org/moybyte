@@ -217,6 +217,10 @@ static int ensure(void) {
     return 1;
 }
 
+static int fits(const char *dir) {
+    return dir == NULL || strlen(dir) < MOY_WEB_PATH_MAX;
+}
+
 static void copy_str(char *dst, size_t cap, const char *src) {
     snprintf(dst, cap, "%s", src ? src : "");
 }
@@ -261,9 +265,10 @@ int moy_web_start(const moy_web_cfg_t *cfg) {
     if (!ensure()) {
         return MOY_ENOMEM;
     }
-    // The sign-in reads its keys and the password under the system folder: one
-    // that does not fit is refused, never cut short.
-    if (cfg->system != NULL && strlen(cfg->system) >= MOY_WEB_PATH_MAX) {
+    // A folder that does not fit is refused, never cut short: a cut root names
+    // some other folder, which every long root with that prefix then shares.
+    if (!fits(cfg->carts) || !fits(cfg->files) || !fits(cfg->apps)
+        || !fits(cfg->system)) {
         return MOY_EINVAL;
     }
     if (W->lfd >= 0 && cfg->port != 0 && W->port != cfg->port) {

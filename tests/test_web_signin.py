@@ -604,16 +604,19 @@ def test_the_keys_outlive_a_restart_and_a_broken_file_reads_as_none(tmp_path):
     assert nb.web_keys() == []
 
 
+# Past any build's MOY_WEB_PATH_MAX: a board's 96 bytes, the host library's 4096.
+_PAST_THE_LIMIT = "/" + "d/" * 2100
+
+
 def test_a_system_folder_past_the_path_limit_is_refused_never_cut(tmp_path):
     """A folder the sign-in's path cannot hold would read a truncated path: no
     password, keys saved nowhere. The sign-in and the webhost refuse it."""
-    deep = tmp_path / ("d" * 120) / "system"
-    deep.mkdir(parents=True)
+    deep = _PAST_THE_LIMIT + "system"
     with pytest.raises(OSError) as e:
-        nb.web_auth(str(deep))
+        nb.web_auth(deep)
     assert e.value.errno == 22
     with pytest.raises(OSError) as e:
-        nb.web_start(0, str(tmp_path / "carts"), None, [], str(deep), [])
+        nb.web_start(0, str(tmp_path / "carts"), None, [], deep, [])
     assert e.value.errno == 22
     nb.web_auth(None)
 

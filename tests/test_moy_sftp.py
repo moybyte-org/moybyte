@@ -15,6 +15,7 @@ shell running in the same connection refuses it until the shell ends.
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 
 import pytest
@@ -176,7 +177,10 @@ def test_a_cart_folder_s_changes_tell_the_shelf_once_the_client_is_quiet(h, tmp_
 def test_sftp_is_the_one_face_a_shell_in_the_same_connection_holds(h, tmp_path):
     """One face at a time (native/moy_tty/README.md): a shell running on a
     multiplexed connection refuses SFTP's channel until the shell ends."""
-    sock = str(tmp_path / "mux")
+    # A unix socket's path holds 108 bytes, which a tmp_path under a long
+    # TMPDIR runs past.
+    short = tempfile.mkdtemp(prefix="mux", dir="/tmp")
+    sock = os.path.join(short, "mux")
     mux = ["-o", "ControlPath=" + sock]
     master = subprocess.Popen(["ssh"] + _auth(h)[:-2] + ["-p", str(h["port"]), "-M", "-N"]
                               + mux + ["moy@127.0.0.1"], env=SSH.env_of(h, ""),
@@ -197,3 +201,4 @@ def test_sftp_is_the_one_face_a_shell_in_the_same_connection_holds(h, tmp_path):
     finally:
         master.kill()
         master.wait()
+        shutil.rmtree(short, ignore_errors=True)
