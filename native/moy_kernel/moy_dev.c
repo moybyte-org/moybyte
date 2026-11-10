@@ -6,17 +6,23 @@
 #include <string.h>
 
 #include "moy_devbus.h"
-#include "moy_input.h"
 #include "moy_lease.h"
 
 // The kernel's input table, where a pin's edges ring: weak, for an image
-// without it, where a pin has no edges.
+// without it, and compiled out where a board denies moy_input (the Zero); in
+// both a pin has no edges.
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#define MOY_DEV_EDGES 1
 moy_input_t *moy_input_kernel(void) __attribute__((weak));
 int moy_input_reader_kept(moy_input_t *t, uint32_t kinds, int *r) __attribute__((weak));
 int moy_input_reader_only(moy_input_t *t, int r, uint32_t h) __attribute__((weak));
 int moy_input_reader_free(moy_input_t *t, int r) __attribute__((weak));
 size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n)
     __attribute__((weak));
+#else
+#define MOY_DEV_EDGES 0
+#endif
 
 enum { K_GPIO = 1, K_PINS, K_UART, K_SPI, K_I2C, K_PWM, K_ADC };
 enum { EDGE_RISING = 1, EDGE_FALLING = 2 };
@@ -233,10 +239,12 @@ static dev_t *row_new(uint32_t pid, uint8_t kind) {
 // -- gpio<n> -----------------------------------------------------------------------
 
 static void edges_off(dev_t *d) {
+#if MOY_DEV_EDGES
     moy_input_t *t = moy_input_kernel != NULL ? moy_input_kernel() : NULL;
     if (d->reader >= 0 && t != NULL) {
         moy_input_reader_free(t, d->reader);
     }
+#endif
     d->reader = -1;
     if (d->src != 0) {
         moy_lease_edge_close(d->lease, d->pin);
@@ -246,6 +254,11 @@ static void edges_off(dev_t *d) {
 }
 
 static int32_t edges_on(dev_t *d, int trigger) {
+#if !MOY_DEV_EDGES
+    (void)d;
+    (void)trigger;
+    return MOY_DEV_EABSENT;
+#else
     moy_input_t *t = moy_input_kernel != NULL ? moy_input_kernel() : NULL;
     if (t == NULL || moy_input_reader_kept == NULL) {
         return MOY_DEV_EABSENT;
@@ -265,6 +278,7 @@ static int32_t edges_on(dev_t *d, int trigger) {
     d->reader = r;
     d->trigger = (uint8_t)trigger;
     return 0;
+#endif
 }
 
 static int32_t pin_apply(int pin, const pin_cfg_t *c) {
@@ -332,6 +346,12 @@ static void put32(uint8_t *q, uint32_t v) {
 
 // The edges since the last read, as many whole records as `cap` holds.
 static int32_t gpio_read(dev_t *d, uint8_t *out, size_t cap) {
+#if !MOY_DEV_EDGES
+    (void)d;
+    (void)out;
+    (void)cap;
+    return 0;
+#else
     moy_input_t *t = moy_input_kernel != NULL ? moy_input_kernel() : NULL;
     if (d->reader < 0 || t == NULL || moy_input_events == NULL) {
         return 0;
@@ -363,6 +383,7 @@ static int32_t gpio_read(dev_t *d, uint8_t *out, size_t cap) {
         }
     }
     return (int32_t)(got * EDGE_BYTES);
+#endif
 }
 
 // -- pins ----------------------------------------------------------------------------
