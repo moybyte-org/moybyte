@@ -78,6 +78,10 @@
 // ms from now) is a timer of the same table that goes off once, posts
 // MOY_EVQ_AT instead and names its process to the console's screen wake
 // (moy_evq_woke), so a kept service's alarm goes off through a VM stop too.
+// moy_evq_at sets one at a wall time, on the caller's own task, for a
+// process whose queue was opened MOY_EVQ_ALARMS (its `alarms` permission):
+// every tier's alarm but a Python process's (moy_app's moybyte.at row, a Lua
+// service's moybyte.at).
 // An alarm keeps its wall time: where the wall clock steps (an NTP answer,
 // the first one too: native/moy_net/moy_wifi.c, sntp_sync_time) its due moves
 // by the step (moy_evq_clock), one the step passed going off at the next run.
@@ -119,6 +123,7 @@ enum {
 #define MOY_EVQ_TIMER_ID 0x40000000u    // a timer's id has this bit: apart from the console's wakes
 
 #define MOY_EVQ_VM 0x01u            // the VM's task serves it (a Python process)
+#define MOY_EVQ_ALARMS 0x02u        // its process holds `alarms` (moy_evq_at)
 
 #define MOY_EVQ_FD 31               // the event descriptor
 #define MOY_EVQ_VERSION 1           // the record's layout
@@ -221,6 +226,10 @@ uint32_t moy_evq_listening(const char *name);
 int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id);
 // An alarm: a timer due once, `ms` from now, posting MOY_EVQ_AT (listened on).
 int moy_evq_alarm(uint32_t pid, uint32_t ms, uint32_t *id);
+// An alarm at wall time `t`, Unix seconds (the clock time() reads; one already
+// past is due now): moy_evq_alarm's answers, and DENIED where `pid`'s queue
+// was not opened MOY_EVQ_ALARMS.
+int moy_evq_at(uint32_t pid, int64_t t, uint32_t *id);
 // The wall clock stepped by `step_ms` (later: positive): each alarm's due
 // moved by as much, so it keeps its wall time.
 void moy_evq_clock(int64_t step_ms);

@@ -239,7 +239,6 @@ _CALLS = {
     "moybyte.award": _moybyte.award,
     "moybyte.progress": _moybyte.progress,
     "moybyte.pick": _moybyte.pick,
-    "moybyte.at": _moybyte.at_message,
     "moybyte.service_start": _moybyte.service_start,
     "moybyte.service_stop": _moybyte.service_stop,
     "moybyte.service_running": _moybyte.service_running,
@@ -544,7 +543,9 @@ class Scheduler:
 
     def _open(self, pid, vm=True):
         """Process `pid`'s event queue opened: its app id (`app_of`, else
-        its cart's) and its manifest's `receives`; `vm` where the VM's task
+        its cart's), its manifest's `receives` and whether it holds
+        `alarms` (moy_evq.h's MOY_EVQ_ALARMS: the kernel's alarms, a
+        compiled program's and a Lua service's); `vm` where the VM's task
         serves it (a Python process)."""
         p = self.procs.get(pid)
         cart = p.cart if p is not None else None
@@ -561,7 +562,7 @@ class Scheduler:
             app = (_L.name(pid) if _L is not None else "") or "pid%d" % pid
         recv = cart.get("receives") if cart is not None else None
         recv = "\n".join(r for r in recv if isinstance(r, str)) if isinstance(recv, list) else ""
-        _E.open(pid, app, recv, vm)
+        _E.open(pid, app, recv, vm, _devices().may(pid, _moybyte.ALARMS))
 
     def _goal(self, pid, ach_id):
         """The goal of badge `ach_id` in the manifest of the cart process
@@ -935,10 +936,14 @@ class Scheduler:
         """Whether the frame's start serves messages: one queued from
         Python, a Lua service's, or (where no board loop runs `woken`) one
         the kernel queued from C for a VM process, a compiled app's send on
-        its own task (moy_evq.h, THE VM'S WAKE)."""
+        its own task (moy_evq.h, THE VM'S WAKE). There, too, a poll another
+        task wanted with no poll's wake kept runs here: a compiled app's
+        listen on a radio, which the radios' router follows."""
         w = self.wakes
         if not self.kernel_wake and not w.queued and _E.wants() & _E.WANT_MAIL:
             w.queued = 1
+        if not self.kernel_wake and not self._poll and _E.wanted(_E.WANT_POLL):
+            self.poll()
         return w.queued or self.svc_mail
 
     def woken(self):
@@ -1055,7 +1060,8 @@ class Scheduler:
         wakes' time) and an end handed to `_exit`, which its restart policy
         follows. What a service sent to the VM's processes is served at the
         next frame's start. The poll's wake goes with the last service, and
-        the radios' router is kept while one listens on a radio."""
+        the radios' router is kept while a queue not the VM's listens on a
+        radio."""
         svc = _svc()
         stepped = svc is not None and not svc.svc_tasks()
         if stepped and svc.svc_step(_ticks_ms()) == 0:
@@ -1067,7 +1073,7 @@ class Scheduler:
         self._tasks = live
         if not live and self._poll:
             self._drop_poll()
-        self._radios(live and (_E.listening("net") > 0 or _E.listening("ble") > 0))
+        self._radios(_E.listening("net") > 0 or _E.listening("ble") > 0)
 
     def _rows(self, svc, ends):
         """Each Lua and compiled service's row read: its figures, and where
@@ -1107,8 +1113,9 @@ class Scheduler:
         return live
 
     def _radios(self, on):
-        """The radios' router (moybyte's THE RADIOS) kept while a service on
-        a task of its own listens on "net" or "ble" on its own queue."""
+        """The radios' router (moybyte's THE RADIOS) kept while a process
+        whose queue is not the VM's (a service on a task of its own, a
+        compiled app) listens on "net" or "ble"."""
         if self.wakes.radio_keep != on:
             self.wakes.radio_keep = on
             self.wakes.radio_sync()
@@ -1117,7 +1124,7 @@ class Scheduler:
         """The VM's queue (moy_vmq.h): the role rows the services' tasks
         hopped with run, then the console calls they wait on answered on
         this task as their processes: a console call of `_CALLS` (the
-        moybyte module's own verbs, and `at`'s console half), or a
+        moybyte module's own verbs), or a
         function of the `env` a start was handed. A stepped service runs
         on to its next call at once."""
         for _ in range(CALLS_MAX * 4):
@@ -1574,6 +1581,14 @@ def _handles_end(pid):
         except ImportError:
             return
     dev_handles.sweep(pid)
+
+
+def _devices():
+    try:
+        import devices
+    except ImportError:  # host: the runtime package
+        from runtime import devices
+    return devices
 
 
 def _svc():

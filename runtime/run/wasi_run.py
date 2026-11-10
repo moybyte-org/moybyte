@@ -21,9 +21,11 @@ from array import array
 
 try:
     import moy_evq as _E
+    import moybyte as _moybyte
     from elf_run import IN_WORDS, fill_words, key_ring, key_sent, read_buttons
 except ImportError:  # host: the runtime package
     from runtime import moy_evq as _E
+    from runtime import moybyte as _moybyte
     from runtime.elf_run import IN_WORDS, fill_words, key_ring, key_sent, read_buttons
 
 # The longest a tick waits for a present (elf_run.WAIT_US_MAX's).
@@ -42,7 +44,11 @@ class WasiApp:
         self._w, self._h = canvas.w, canvas.h
         self._own_q = not _E.has(pid)
         if self._own_q:
-            _E.open(pid, cart.get("id") or "")
+            opener = _moybyte.WAKES.opener      # its app id, receives and alarms
+            if opener is not None:
+                opener(pid, False)
+            else:
+                _E.open(pid, cart.get("id") or "")
         _E.listen(pid, "frame", True)
         if _E.screen_open(pid, self._w, self._h, 2) != 0:
             self._release()

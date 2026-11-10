@@ -54,10 +54,11 @@ _ROWS = ("damage.all", "damage.again",
          "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", "ui.held",
          "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last",
          "ui.held_all",
-         # the kernel's messages, timers and log (native/moy_kernel/moy_evq.h,
-         # moy_log.h) and its tiers' services, counted by nothing here
-         "moybyte.send", "moybyte.every", "moybyte.after", "moybyte.cancel",
-         "moybyte.log", "moybyte.recv", "moybyte.service_running",
+         # the kernel's messages, timers, alarms and log (native/moy_kernel/
+         # moy_evq.h, moy_log.h) and its tiers' services, counted by nothing here
+         "moybyte.send", "moybyte.on", "moybyte.every", "moybyte.after",
+         "moybyte.cancel", "moybyte.log", "moybyte.recv", "moybyte.at",
+         "moybyte.service_running",
          # the crypto rows: native/moy_net/moy_crypto.h's, and the device
          # handles (native/moy_kernel/moy_dev.h), counted by nothing here
          "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256",

@@ -3,8 +3,8 @@
 // calls into the VM (moy_vmq.h) -- as the module `moy_evq`, the same names
 // runtime/host/moy_evq.py gives CPython.
 //
-//   open(pid, app, receives="", vm=False)   a process's queue (receives: one
-//                      name a line)
+//   open(pid, app, receives="", vm=False, alarms=False)   a process's queue
+//                      (receives: one name a line; alarms: MOY_EVQ_ALARMS)
 //   close(pid), has(pid), app(pid)
 //   listen(pid, name, on)                    OK, STALE or FULL
 //   hears(pid, name)                         whether its queue listens on it
@@ -51,11 +51,12 @@
 static mp_obj_t ev_open(size_t n, const mp_obj_t *a) {
     const char *recv = n > 2 && a[2] != mp_const_none ? mp_obj_str_get_str(a[2]) : NULL;
     bool vm = n > 3 && mp_obj_is_true(a[3]);
+    bool alarms = n > 4 && mp_obj_is_true(a[4]);
     int rc = moy_evq_open(mp_obj_get_int(a[0]), mp_obj_str_get_str(a[1]), recv,
-                          vm ? MOY_EVQ_VM : 0u);
+                          (vm ? MOY_EVQ_VM : 0u) | (alarms ? MOY_EVQ_ALARMS : 0u));
     return MP_OBJ_NEW_SMALL_INT(rc);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_open_obj, 2, 4, ev_open);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_open_obj, 2, 5, ev_open);
 
 static mp_obj_t ev_close(mp_obj_t pid) {
     return MP_OBJ_NEW_SMALL_INT(moy_evq_close(mp_obj_get_int(pid)));

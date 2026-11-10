@@ -672,10 +672,9 @@ class ConsoleCalls:
     A compiled app's messages are its process's own event queue
     (native/moy_kernel/moy_evq.h), opened for it at its launch
     (moybyte._compiled_events) as a native service's is (no Python wake
-    serves it): `on` is the kernel's listen here, and an alarm is the
-    system's message carrying its id (`moybyte.at`). Its `send`, `recv`,
-    `log` and timers are no console call: native/moy_app's C rows serve them
-    on the caller's own task (moy_app.c, send_row)."""
+    serves it). Its `send`, `recv`, `on`, `log`, timers and alarms are no
+    console call: native/moy_app's C rows serve them on the caller's own
+    task (moy_app.c, send_row, at_row)."""
 
     def __init__(self, ws):
         self.__ws = ws
@@ -740,26 +739,6 @@ class ConsoleCalls:
         if self.__ws.procs.pid_of(g) is None:
             return _DOOR_STALE
         return self._as(g, fn)
-
-    def on(self, g, name, on):
-        pid = self._own(g)
-        if pid is None:
-            return _DOOR_STALE
-        rc = _E.listen(pid, name, bool(on))
-        if name in _moybyte.RADIO.values():
-            _moybyte.WAKES.radio_sync()     # the radios' router, while one listens
-        return 0 if rc == _E.OK else _DOOR_FULL if rc == _E.FULL else _DOOR_STALE
-
-    def at(self, g, t):
-        return self._wake(g, _moybyte.at_message, t)
-
-    def _wake(self, g, fn, v):
-        if self._own(g) is None:
-            return _DOOR_STALE
-        try:
-            return self._as(g, fn, v)
-        except OSError as exc:
-            return _DOOR_DENIED if exc.args and exc.args[0] == _moybyte.EPERM else _DOOR_FULL
 
     def item_read(self, g, h, cap):
         it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
@@ -916,11 +895,9 @@ DOOR_ARGS = {
     "moybyte.share": "bs",
     "moybyte.award": "s",
     "moybyte.progress": "si",
-    "moybyte.on": "si",
     "moybyte.pick": "so",
     "moybyte.item_read": "ii",
     "moybyte.item_write": "ib",
-    "moybyte.at": "i",
     "moybyte.service_start": "",
     "moybyte.service_stop": "",
     "moybyte.service_running": "",

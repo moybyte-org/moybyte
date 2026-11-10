@@ -108,10 +108,9 @@ costs are #227's.
   is not append-only by index. WASI's imports (§3) keep WASI's names and are
   not rows; they and the POSIX rows (above) are the same C functions under
   two standard names, neither a second implementation. A row a compiled app
-  imports whose server is the kernel's or Python's (`moybyte.on`, `at`;
-  `send`, `log`, `every`, `after`, `cancel`, whose C runs on the caller's
-  own task) is a row of the role table too, so its import has a door to
-  cross.
+  imports whose server is the kernel's (`moybyte.on`, `at`, `send`, `log`,
+  `every`, `after`, `cancel`, whose C runs on the caller's own task) is a row
+  of the role table too, so its import has a door to cross.
 - **A native module's app calls.** The app verbs a compiled app imports are
   rows of this table too (ordinals 62 to 79 and 82 to 109): the files role
   (`moy_files_readable`, `ready`, `list`, `count`, `load`, `save`,
@@ -216,9 +215,7 @@ each message of the name (the radios' `net` and `ble` from the system,
 `between_apps.md` §4; what its app or another sends it). What enters the
 console is the VM task's: `moybyte.notify`, `open_with`, `share`,
 `award`, `progress` and `pick` (the source's console calls, §1, generated
-into the state's `moybyte` table and the scheduler's `_CALLS`), the console
-half of `moybyte.at` (a kernel alarm the console sets, heard as the system's
-message `"moybyte.at"`) and the functions the console hands a
+into the state's `moybyte` table and the scheduler's `_CALLS`) and the functions the console hands a
 system process (its `env`, whose values become globals) are CONSOLE CALLS,
 posted on the VM's queue (`native/moy_kernel/moy_vmq.h`), which yield the
 call's coroutine until the VM's task answers it at the scheduler's poll, so
@@ -297,14 +294,14 @@ builds with libc-wasi off (`native/moy_wasm/micropython.cmake`,
 A module's imports: `wasi_snapshot_preview1` for files, clocks, args, env,
 stdio and random; `moybyte.hw`, `moybyte.term` (`term_size`), `moybyte.media`
 for the rest; a WASI program's `moybyte.os` (`send`, `on`: the service
-model's, below; `notify`, `award`, `progress`, the wakes `every`,
-`after`, `at`, `cancel`, `open_with` and `pick`, the console calls a native
-service posts on the VM's queue, their natives generated from the source;
+model's, below; `notify`, `award`, `progress`, `open_with` and `pick`, the
+console calls a native service posts on the VM's queue, their natives
+generated from the source; the wakes `every`, `after`, `at` and `cancel`;
 `log`; the files, `nav_open_app`, prefs, clipboard, device-handle (`dev_*`)
 and item rows, `service_running` and `share`, each its role table row for
 the grant the program's start made, run as a C program's is: hopped to the
 VM's task, or, for a row `how` "here" (the files, prefs and clipboard-write
-rows, the device handles, `service_running`), run on the program's own task,
+rows, the device handles, the wakes, `service_running`), run on the program's own task,
 hopped only where the kernel's half answers NEEDS_VM (`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its
@@ -315,10 +312,10 @@ door and hopping to the VM's task, or, for a read of what the look and the
 clipboard write, reading in place under the seqlock, or, for a row over the
 kernel's own locked state, running in place on the app's own task, as its
 row's `how` says. The console calls are imported too (`moybyte_notify`,
-`open_with`, `share`, `pick`, `award`, `progress`, `at`), each the
+`open_with`, `share`, `pick`, `award`, `progress`), each the
 `moybyte` module's verb run as the app's process through the door
 (`runtime/shell/shell_servers.py`, ConsoleCalls), under the permission it
-names there; `send`, `log` and the wakes `every`, `after` and `cancel` are
+names there; `send`, `on`, `log` and the wakes `every`, `after`, `at` and `cancel` are
 the kernel's, C rows run on the app's own task as its process (`how`
 "here", `native/moy_app/moy_app.c`), so they need no VM, and so are the
 store's `files` and `prefs` rows and the clipboard's write, under the

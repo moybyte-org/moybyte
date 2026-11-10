@@ -48,14 +48,15 @@ enum {
     MOY_ROW_UI_RULE, MOY_ROW_UI_TEXT_VIEW, MOY_ROW_UI_TABLE_PART, MOY_ROW_UI_PART_AT,
     MOY_ROW_UI_SPLIT, MOY_ROW_UI_TABLE_DIST, MOY_ROW_UI_TABLE_FLOOR, MOY_ROW_UI_HELD,
     MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
-    MOY_ROW_UI_HELD_ALL, MOY_ROW_MOYBYTE_SEND, MOY_ROW_MOYBYTE_EVERY, MOY_ROW_MOYBYTE_AFTER,
-    MOY_ROW_MOYBYTE_CANCEL, MOY_ROW_MOYBYTE_LOG, MOY_ROW_MOYBYTE_RECV,
-    MOY_ROW_MOYBYTE_SERVICE_RUNNING, MOY_ROW_MOYBYTE_RANDOM, MOY_ROW_MOYBYTE_SHA256,
-    MOY_ROW_MOYBYTE_HMAC_SHA256, MOY_ROW_MOYBYTE_AES_GCM_SEAL, MOY_ROW_MOYBYTE_AES_GCM_OPEN,
-    MOY_ROW_MOYBYTE_X25519, MOY_ROW_MOYBYTE_DEV_OPEN, MOY_ROW_MOYBYTE_DEV_CLOSE,
-    MOY_ROW_MOYBYTE_DEV_READ, MOY_ROW_MOYBYTE_DEV_WRITE, MOY_ROW_MOYBYTE_DEV_XFER,
-    MOY_ROW_MOYBYTE_DEV_SET, MOY_ROW_MOYBYTE_DEV_GET, MOY_ROW_MOYBYTE_ED25519_PUBLIC,
-    MOY_ROW_MOYBYTE_ED25519_SIGN, MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_N,
+    MOY_ROW_UI_HELD_ALL, MOY_ROW_MOYBYTE_SEND, MOY_ROW_MOYBYTE_ON, MOY_ROW_MOYBYTE_EVERY,
+    MOY_ROW_MOYBYTE_AFTER, MOY_ROW_MOYBYTE_CANCEL, MOY_ROW_MOYBYTE_LOG, MOY_ROW_MOYBYTE_RECV,
+    MOY_ROW_MOYBYTE_AT, MOY_ROW_MOYBYTE_SERVICE_RUNNING, MOY_ROW_MOYBYTE_RANDOM,
+    MOY_ROW_MOYBYTE_SHA256, MOY_ROW_MOYBYTE_HMAC_SHA256, MOY_ROW_MOYBYTE_AES_GCM_SEAL,
+    MOY_ROW_MOYBYTE_AES_GCM_OPEN, MOY_ROW_MOYBYTE_X25519, MOY_ROW_MOYBYTE_DEV_OPEN,
+    MOY_ROW_MOYBYTE_DEV_CLOSE, MOY_ROW_MOYBYTE_DEV_READ, MOY_ROW_MOYBYTE_DEV_WRITE,
+    MOY_ROW_MOYBYTE_DEV_XFER, MOY_ROW_MOYBYTE_DEV_SET, MOY_ROW_MOYBYTE_DEV_GET,
+    MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
+    MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
     "damage.all", "damage.again", "surface.canvas", "surface.size", "surface.font_scale", \
@@ -77,12 +78,13 @@ enum {
     "ui.popover", "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", \
     "ui.table_part", "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", \
     "ui.held", "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last", "ui.held_all", \
-    "moybyte.send", "moybyte.every", "moybyte.after", "moybyte.cancel", "moybyte.log", \
-    "moybyte.recv", "moybyte.service_running", "moybyte.random", "moybyte.sha256", \
-    "moybyte.hmac_sha256", "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", \
-    "moybyte.x25519", "moybyte.dev_open", "moybyte.dev_close", "moybyte.dev_read", \
-    "moybyte.dev_write", "moybyte.dev_xfer", "moybyte.dev_set", "moybyte.dev_get", \
-    "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify", \
+    "moybyte.send", "moybyte.on", "moybyte.every", "moybyte.after", "moybyte.cancel", \
+    "moybyte.log", "moybyte.recv", "moybyte.at", "moybyte.service_running", \
+    "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256", "moybyte.aes_gcm_seal", \
+    "moybyte.aes_gcm_open", "moybyte.x25519", "moybyte.dev_open", "moybyte.dev_close", \
+    "moybyte.dev_read", "moybyte.dev_write", "moybyte.dev_xfer", "moybyte.dev_set", \
+    "moybyte.dev_get", "moybyte.ed25519_public", "moybyte.ed25519_sign", \
+    "moybyte.ed25519_verify", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -311,7 +313,7 @@ enum {
     { "moybyte.send", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_SEND }, \
     { "moybyte.award", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.progress", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.on", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.on", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ON }, \
     { "moybyte.every", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_EVERY }, \
     { "moybyte.after", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AFTER }, \
     { "moybyte.cancel", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_CANCEL }, \
@@ -320,7 +322,7 @@ enum {
     { "moybyte.recv", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_RECV }, \
     { "moybyte.item_read", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.item_write", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.at", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.at", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_AT }, \
     { "moybyte.service_start", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.service_stop", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.service_running", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_SERVICE_RUNNING }, \

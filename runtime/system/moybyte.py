@@ -176,10 +176,11 @@ is C's (hardware.md section 2). A process whose callbacks are not the VM's (a
 compiled program; a Lua service for its alarms) holds timers and alarms of
 the kernel's instead (native/moy_kernel/moy_evq.h, TIMERS: they go off with
 no VM, through an S3's VM stop), TIMERS_MAX at once, FULL past them: a
-compiled program's every, after and cancel are C rows (native/moy_app/
-moy_app.c, timer_row), and its alarm the message half `at_message`, which
-turns its wall time into the kernel's, the kernel moving it with each step
-of the wall clock (moy_evq_clock).
+compiled program's on, every, after, at and cancel are C rows (native/
+moy_app/moy_app.c, timer_row, at_row), a Lua service's at the kernel's
+(moy_evq_at, which turns a wall time into the kernel's clock, the kernel
+moving it with each step of the wall clock, moy_evq_clock), each alarm
+under the `alarms` its queue was opened with.
 
 THE REGISTRY (`WAKES`) is what the cooperative scheduler drives: once a frame
 it asks `due(now_ms, out)` for the wakes due (allocation-free, into a
@@ -704,24 +705,6 @@ def at(t, fn):
 # names of the MOY_EVQ_LISTEN a process listens on.
 AT, TIMER = "moybyte.at", "moybyte.timer"
 TIMERS_MAX = 16             # the kernel's timers and alarms one process holds (MOY_EVQ_TIMERS)
-
-
-def at_message(t):
-    """`at` for a process whose callbacks are not the VM's (a Lua service,
-    native/moycore/moycore_svc.c's ALARMS; a compiled program): a kernel
-    alarm (native/moy_kernel/moy_evq.h, TIMERS) at wall time `t`, which posts
-    it message AT from the system carrying the alarm's id, which it answers,
-    VM or no VM, and wakes the screen. FULL where the process holds
-    TIMERS_MAX timers and alarms already."""
-    pid = _pid()
-    _may_alarm(pid)
-    ms = (int(-(-t // 1)) - _wall()) * 1000
-    rc, aid = _E.alarm(pid, ms if ms > 0 else 0)
-    if rc == _E.OK:
-        return aid
-    if rc == _E.FULL and _E.has(pid):
-        return FULL
-    raise OSError(EMFILE, "process %d hears no %s" % (pid, AT))
 
 
 def cancel(wid):

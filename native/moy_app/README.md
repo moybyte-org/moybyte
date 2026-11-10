@@ -36,7 +36,9 @@ The role table is data, and every verb has one of four servers:
   service with no grant too (`moy_app_lua_open_crypto`); and the module's
   functions of the same names are Python's (`runtime/system/moybyte.py`).
   Its rows over the kernel's own locked state -- a message's `send` and
-  `recv`, `log`, and the timers `every`, `after` and `cancel` -- are the
+  `recv`, a listen's `on`, `log`, the timers `every`, `after` and `cancel`,
+  and the alarm `at` (under the `alarms` the process's event queue was
+  opened with, `moy_evq_at`) -- are the
   process's whose grant it is (the grant's owner, its pid), run where they
   are called (`how` "here"): on a compiled program's own task, never a hop,
   so they answer with no VM. A "here" row that answers `MOY_APP_NEEDS_VM`

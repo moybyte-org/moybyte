@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "moy_super.h"
 #include "moy_sync.h"
@@ -17,8 +18,6 @@
 #ifdef MOY_SYNC_RTOS
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
-#else
-#include <time.h>
 #endif
 
 // The kernel's frame (moy_loop.h's jobs): weak, for an image or a harness
@@ -779,6 +778,21 @@ int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id) {
 
 int moy_evq_alarm(uint32_t pid, uint32_t ms, uint32_t *id) {
     return timer_add(pid, ms, 0u, true, id);
+}
+
+int moy_evq_at(uint32_t pid, int64_t t, uint32_t *id) {
+    MOY_SYNC_LOCK(&s_lock);
+    int i = slot_of(pid);
+    int rc = i < 0 ? MOY_EVQ_STALE : !(s_q[i]->flags & MOY_EVQ_ALARMS) ? MOY_EVQ_DENIED
+                                                                         : MOY_EVQ_OK;
+    MOY_SYNC_UNLOCK(&s_lock);
+    if (rc != MOY_EVQ_OK) {
+        return rc;
+    }
+    int64_t s = t - (int64_t)time(NULL);
+    uint32_t ms = s <= 0 ? 0u : s >= (int64_t)(UINT32_MAX / 1000u) ? UINT32_MAX / 1000u * 1000u
+                                                                   : (uint32_t)s * 1000u;
+    return moy_evq_alarm(pid, ms, id);
 }
 
 void moy_evq_clock(int64_t step_ms) {

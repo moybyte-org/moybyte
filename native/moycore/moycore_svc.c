@@ -567,6 +567,35 @@ static int l_send(lua_State *L) {
     return 2;
 }
 
+// `moybyte.at`'s kernel half (ALARMS): the kernel's alarm at wall time `t`
+// (moy_evq_at, under the service's `alarms`), on the service's own task:
+// its id, or nil and why.
+static int l_at(lua_State *L) {
+    svc_t *s = of_state(L);
+    int64_t whole;
+    if (lua_isinteger(L, 1)) {
+        whole = (int64_t)lua_tointeger(L, 1);
+    } else {
+        // a fraction rounds up: no earlier than `t` (Lua's numbers are floats)
+        lua_Number t = luaL_checknumber(L, 1);
+        whole = t >= 4.0e9f ? (int64_t)4e9 : t <= -4.0e9f ? (int64_t)-4e9 : (int64_t)t;
+        if ((lua_Number)whole < t) {
+            whole++;
+        }
+    }
+    uint32_t id = 0;
+    int rc = moy_evq_at(s->pid, whole, &id);
+    if (rc == MOY_EVQ_OK) {
+        lua_pushinteger(L, (lua_Integer)id);
+        return 1;
+    }
+    lua_pushnil(L);
+    lua_pushstring(L, rc == MOY_EVQ_DENIED ? "moybyte.at needs \"alarms\""
+                      : rc == MOY_EVQ_FULL ? "every timer of the service is taken"
+                                           : "no queue");
+    return 2;
+}
+
 static int deliver_k(lua_State *L, int status, lua_KContext ctx) {
     (void)L;
     (void)status;
@@ -638,20 +667,21 @@ static void open_names(lua_State *L) {
     lua_pushcclosure(L, l_console, 1);      \
     lua_setfield(L, -2, name);
     MOY_APP_LUA_CALLS(CALL)
-    CALL("at")                          // the alarm's console half (ALARMS)
 #undef CALL
     lua_pushcfunction(L, l_send);       // the kernel's, not a console call
     lua_setfield(L, -2, "send");
+    lua_pushcfunction(L, l_at);         // the alarm's kernel half (ALARMS)
+    lua_setfield(L, -2, "at");
     lua_setglobal(L, "moybyte");
     if (moy_app_lua_open_crypto != NULL) {
         moy_app_lua_open_crypto(L);     // its run's role binding's, held with no grant
     }
 }
 
-// `moybyte.at(t, fn)`, an alarm, over its console half: the console's wake
-// (runtime/system/moybyte.py, at_message, under the `alarms` permission)
-// posts the service the system's message "moybyte.at" with the alarm's id,
-// which one message wake, held while an alarm is due, hears. The wake is
+// `moybyte.at(t, fn)`, an alarm, over its kernel half (l_at): the kernel's
+// alarm posts the service the system's message "moybyte.at" with the
+// alarm's id, VM or no VM, which one message wake, held while an alarm is
+// due, hears. The wake is
 // made before the call, so an alarm already due finds it listening. An
 // alarm's id is negative, apart from the service's own wakes'; cancelling
 // one cancels the kernel's alarm too (l_unalarm), giving its slot back.

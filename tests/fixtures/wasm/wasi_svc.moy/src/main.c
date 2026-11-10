@@ -21,7 +21,9 @@
 // out of its range refused EINVAL), shows it in its error state and names a
 // handle it never had, each answer printed with its errno, and keeps the
 // item until the service ends, a press in its panel heard as the system's
-// message "moybyte.status" [item, id, value]; a "wake" carrying ["timers"] asks for
+// message "moybyte.status" [item, id, value]; a "wake" carrying ["kernel"]
+// listens on "ring" (each one heard printing "rung") and sets an alarm a
+// second off, heard as "moybyte.at"; a "wake" carrying ["timers"] asks for
 // minute-long timers until the console answers FULL, printing how many it
 // got and that answer's errno, then cancels all but the first, which it keeps
 // until the service ends; a "wake" carrying ["front"] listens
@@ -368,6 +370,16 @@ int main(void) {
                    n > src && strncmp((const char *)r + src, path, strlen(path)) == 0 ? "same"
                                                                                        : "other",
                    n < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"kernel\"]") == 0) {
+            int r = moy_on("ring", 1);
+            printf("on.ring %d errno %d\n", r, r < 0 ? errno : 0);
+            r = (int)moy_at((int32_t)time(NULL) + 1);
+            printf("at.kernel %d errno %d\n", r > 0, r < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "ring") == 0) {
+            printf("rung\n");
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0
                    && strcmp(m.b + sizeof m.ev, "[\"status\"]") == 0) {

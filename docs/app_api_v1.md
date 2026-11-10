@@ -605,13 +605,15 @@ an id `moybyte.cancel` takes, refuses without the permission (Python's
 `OSError`, a Lua error), and lights the screen if the console had gone dark,
 so a background app can wake its player
 (`docs/os_2026-11/between_apps.md` §3). A Lua service's alarm is the
-console's, heard as the system's message `"moybyte.at"`
+kernel's, heard as the system's message `"moybyte.at"`
 (`native/moycore/moycore_svc.c`, ALARMS), and so is a compiled program's
 on every tier (a wasm app's `moybyte_at(t)`, a WASI program's and a C
-program's `moy_at`): the call answers the alarm's id, and the program reads
-`"moybyte.at"` from `"system"` with that id as its one argument. An alarm
-keeps its wall time when the clock steps (an NTP answer, the first one
-too), on every tier.
+program's `moy_at`): the call answers the alarm's id on the program's own
+task, with or without the VM (`native/moy_kernel/moy_evq.h`, `moy_evq_at`,
+under the `alarms` the process's event queue was opened with), and the
+program reads `"moybyte.at"` from `"system"` with that id as its one
+argument. An alarm keeps its wall time when the clock steps (an NTP answer,
+the first one too), on every tier.
 
 **Timers** need no permission. A Python and a Lua program pass a function
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`, §7); a compiled program

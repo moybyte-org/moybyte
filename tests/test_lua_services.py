@@ -312,7 +312,7 @@ def test_an_alarm_without_its_permission_is_refused(sched, monkeypatch):
     sched.start(_cart('moybyte.at(os.time(), function() end)'))
     sched.poll()
     texts = [t for _s, _t, _l, _q, t in os_log.records(since, 128)]
-    assert any("the console refused moybyte.at" in t for t in texts), texts
+    assert any('moybyte.at needs "alarms"' in t for t in texts), texts
 
 
 @pytest.fixture

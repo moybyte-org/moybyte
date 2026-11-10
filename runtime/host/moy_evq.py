@@ -33,6 +33,7 @@ BATCH = 4
 WANT_MAIL, WANT_POLL = 0x01, 0x02
 SYSTEM = "system"
 _VM = 0x01
+_ALARMS = 0x02
 _APP = 48
 _NAME = 24
 
@@ -111,9 +112,9 @@ def _b(s):
     return s.encode() if isinstance(s, str) else s
 
 
-def open(pid, app, receives="", vm=False):  # noqa: A001 -- the module's name for it
+def open(pid, app, receives="", vm=False, alarms=False):  # noqa: A001 -- the module's name
     return _lib().moy_evq_open(pid, _b(app), _b(receives) if receives else None,
-                               _VM if vm else 0)
+                               (_VM if vm else 0) | (_ALARMS if alarms else 0))
 
 
 def close(pid):

@@ -243,7 +243,7 @@ static int32_t w_os_item_write(wasm_exec_env_t e, int32_t item, const uint8_t *d
 
 static int32_t w_os_at(wasm_exec_env_t e, int32_t t) {
     const os_arg_t a[1] = { OS_I(t) };
-    return os_call(e, "moybyte.at", a, 1);
+    return os_role(e, MOY_T_MOYBYTE_AT, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_service_start(wasm_exec_env_t e) {

@@ -16,6 +16,8 @@ bool moy_evq_timer_cancel(uint32_t pid, uint32_t id) __attribute__((weak));
 int moy_evq_send(uint32_t from, const char *app, const char *name, const char *args, size_t n,
                  uint32_t *denied) __attribute__((weak));
 int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len) __attribute__((weak));
+int moy_evq_listen(uint32_t pid, const char *name, bool on) __attribute__((weak));
+int moy_evq_at(uint32_t pid, int64_t t, uint32_t *id) __attribute__((weak));
 void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
 
 // A compiled program's device handles (native/moy_kernel/moy_dev.h): weak,
@@ -34,7 +36,7 @@ uint32_t moy_dev_perm_bit(const char *perm, size_t n) __attribute__((weak));
 #define DEV_PASS (-1000)            // moy_dev.h's MOY_DEV_PASS
 
 // moy_evq.h's and moy_log.h's numbers, which this layer does not include.
-enum { EVQ_STALE = 1, EVQ_FULL = 2, EVQ_NOMEM = 3, EVQ_RANGE = 7 };
+enum { EVQ_STALE = 1, EVQ_FULL = 2, EVQ_NOMEM = 3, EVQ_DENIED = 4, EVQ_RANGE = 7 };
 #define EVQ_NAME 24u
 #define EVQ_APP 48u
 #define LOG_INFO 6
@@ -1764,6 +1766,7 @@ static int no_args(int row) {
         case MOY_ROW_CLIPBOARD_PUT_TEXT:
         case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL:
         case MOY_ROW_MOYBYTE_SEND: case MOY_ROW_MOYBYTE_LOG:
+        case MOY_ROW_MOYBYTE_ON: case MOY_ROW_MOYBYTE_AT:
         case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
         case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
         case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
@@ -1863,6 +1866,47 @@ static int32_t recv_row(moy_appabi_t *a, uint32_t h, uint8_t *ans, size_t cap) {
     size_t len = 0;
     int rc = moy_evq_read(pid, ans, cap, &len);
     return rc == 0 ? (int32_t)len : rc == EVQ_RANGE ? -MOY_APP_FULL : 0;
+}
+
+// A compiled process's listens and alarms (moybyte.on, at): the kernel's
+// too. An `on` answers 0, FULL where the process listens on MOY_EVQ_LISTEN
+// names already; an `at` (a wall time, Unix seconds) the alarm's id, which
+// `cancel` takes, DENIED without `alarms` (its queue's MOY_EVQ_ALARMS),
+// FULL past MOY_EVQ_TIMERS. An alarm wakes the screen (moy_evq_woke).
+static int32_t on_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    size_t nn;
+    const uint8_t *np = arg_field(f, &nn);
+    int32_t on = arg_int(f);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_ON);
+    if (pid == 0u || moy_evq_listen == NULL) {
+        return -MOY_APP_STALE;
+    }
+    char name[EVQ_NAME];
+    if (nn == 0u || nn >= sizeof name || memchr(np, 0, nn) != NULL) {
+        return -MOY_APP_BAD;
+    }
+    memcpy(name, np, nn);
+    name[nn] = 0;
+    int rc = moy_evq_listen(pid, name, on != 0);
+    return rc == 0 ? 0 : rc == EVQ_FULL ? -MOY_APP_FULL : -MOY_APP_STALE;
+}
+
+static int32_t at_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    int32_t t = arg_int(f);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_AT);
+    if (pid == 0u || moy_evq_at == NULL) {
+        return -MOY_APP_STALE;
+    }
+    uint32_t id = 0;
+    int rc = moy_evq_at(pid, t, &id);
+    return rc == 0 ? (int32_t)id : rc == EVQ_DENIED ? -MOY_APP_DENIED
+           : rc == EVQ_FULL ? -MOY_APP_FULL : -MOY_APP_STALE;
 }
 
 static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
@@ -2256,6 +2300,10 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return recv_row(a, g, ans, cap);
         case MOY_ROW_MOYBYTE_LOG:
             return log_row(a, g, f);
+        case MOY_ROW_MOYBYTE_ON:
+            return on_row(a, g, f);
+        case MOY_ROW_MOYBYTE_AT:
+            return at_row(a, g, f);
         case MOY_ROW_MOYBYTE_RANDOM: {
             int32_t want = arg_int(f);
             if (f->bad || f->at != f->n) {

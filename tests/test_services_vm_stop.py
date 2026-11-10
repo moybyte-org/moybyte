@@ -444,6 +444,60 @@ def test_an_elf_and_a_wasi_service_message_each_other_and_log_through_a_vm_stop(
     moy_evq.close(peer)
 
 
+def test_a_wasi_service_listens_and_its_alarm_rings_through_a_vm_stop(
+        tmp_path, wasi_built, fresh, monkeypatch):
+    """`on` and `at` are the kernel's on the program's own task
+    (native/os_calls.json, how "here"): with the VM down, a WASI service
+    listens on a name and hears it, and an alarm it sets then rings, the
+    screen's wake reaching the console's first frame back. Without `alarms`
+    its alarm is refused (DENIED, its errno EACCES)."""
+    ws = _two_ws(tmp_path, [(wasi_built, "wasi_svc.moy",
+                             {"permissions": ["alarms"], "receives": ["wake", "ring"]})])
+    s = fresh
+    since = L.next()
+    pid = S.start_cart(ws, _shelf(ws, "wasi.svc"), s)
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "t.peer", "", False) == moy_evq.OK
+    assert _polled(s, lambda: "listening" in _texts(since, pid))
+    woke = []
+    monkeypatch.setattr(moybyte.WAKES, "woke", woke.append)
+    rec, door = _stop(ws, s)
+    assert moy_evq.send(peer, "wasi.svc", "wake", '["kernel"]')[0] == 1
+    t0 = time.monotonic()
+    while "at.kernel 1 errno 0" not in _texts(since, pid):
+        assert time.monotonic() - t0 < 5, _texts(since, pid)
+        _during(10)
+    assert "on.ring 0 errno 0" in _texts(since, pid)
+    assert moy_evq.send(peer, "wasi.svc", "ring", "[]")[0] == 1
+    t0 = time.monotonic()
+    while not any(t.startswith("moybyte.at from system") for t in _texts(since, pid)):
+        assert time.monotonic() - t0 < 5, "its alarm rings during the stop: %r" % _texts(
+            since, pid)
+        _during(20)
+    assert "rung" in _texts(since, pid)
+    s2, _started = _back(ws, rec, door, monkeypatch)
+    s2.tick()
+    assert woke == [pid], "the alarm's screen wake reaches the console's next frame"
+    assert s2.stop(pid) and s2.procs[pid].code == 0
+    moy_evq.close(peer)
+
+
+def test_a_compiled_program_s_alarm_needs_alarms(tmp_path, wasi_built, fresh):
+    ws = _two_ws(tmp_path, [(wasi_built, "wasi_svc.moy", {"receives": ["wake"]})])
+    since = L.next()
+    pid = S.start_cart(ws, _shelf(ws, "wasi.svc"), fresh)
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "t.peer", "", False) == moy_evq.OK
+    assert _polled(fresh, lambda: "listening" in _texts(since, pid))
+    assert moy_evq.send(peer, "wasi.svc", "wake", '["kernel"]')[0] == 1
+    assert _polled(fresh, lambda: any(t.startswith("at.kernel") for t in _texts(since, pid)))
+    said = next(t for t in _texts(since, pid) if t.startswith("at.kernel"))
+    assert said.startswith("at.kernel 0 errno ") and not said.endswith(" 0"), said
+    assert moy_evq.timers(pid) == 0
+    assert fresh.stop(pid)
+    moy_evq.close(peer)
+
+
 def _two_ws(tmp_path, items):
     """A console over compiled service carts: (built, folder, what to set in
     its manifest's "moybyte") each."""
