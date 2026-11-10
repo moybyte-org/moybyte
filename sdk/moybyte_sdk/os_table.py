@@ -82,6 +82,7 @@ WASM_APP = {
     'ui_card': (),
     'ui_cycle': (),
     'ui_dialog': (),
+    'ui_empty': (),
     'ui_field': (),
     'ui_focus': (),
     'ui_grid': (),

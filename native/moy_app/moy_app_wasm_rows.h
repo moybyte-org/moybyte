@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 111
+#define MOY_APP_WASM_N 112
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -77,6 +77,8 @@ int32_t moy_ui_wasm_slot(void *, const uint8_t *, uint32_t, int32_t, int32_t) UI
 int32_t moy_ui_wasm_slot_next(void *) UI_WEAK;
 int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t) UI_WEAK;
 int32_t moy_ui_wasm_held_all(void *) UI_WEAK;
+int32_t moy_ui_wasm_empty(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                          const uint8_t *, uint32_t) UI_WEAK;
 
 static int32_t w_theme_token(void *e, int32_t role) {
     uint8_t q_role[4];
@@ -479,6 +481,7 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "ui_card", FN(moy_ui_wasm_card), "(*~*~*~*~)i", NULL },
     { "ui_cycle", FN(moy_ui_wasm_cycle), "(*~*~i*~)i", NULL },
     { "ui_dialog", FN(moy_ui_wasm_dialog), "(*~*~i*~)i", NULL },
+    { "ui_empty", FN(moy_ui_wasm_empty), "(*~*~*~)i", NULL },
     { "ui_field", FN(moy_ui_wasm_field), "(*~*~i*~)i", NULL },
     { "ui_focus", FN(moy_ui_wasm_focus), "(*~*~)i", NULL },
     { "ui_grid", FN(moy_ui_wasm_grid), "(*~ii*~)i", NULL },
@@ -538,10 +541,10 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_PREFS_GET, MOY_T_PREFS_SET, MOY_T_THEME_EDIT_FILE, MOY_T_THEME_GEN,
     MOY_T_THEME_LIGHT, MOY_T_THEME_NAME, MOY_T_THEME_SET, MOY_T_THEME_SET_VARIANT,
     MOY_T_THEME_TOKEN, MOY_T_THEME_VARIANT, MOY_T_UI_AT, MOY_T_UI_BAR, MOY_T_UI_BUTTON,
-    MOY_T_UI_CARD, MOY_T_UI_CYCLE, MOY_T_UI_DIALOG, MOY_T_UI_FIELD, MOY_T_UI_FOCUS,
-    MOY_T_UI_GRID, MOY_T_UI_GROUP, MOY_T_UI_HELD, MOY_T_UI_HELD_ALL, MOY_T_UI_HELD_LAST,
-    MOY_T_UI_HINTS, MOY_T_UI_ICON, MOY_T_UI_INFO, MOY_T_UI_KEYS_TAKEN, MOY_T_UI_LABEL,
-    MOY_T_UI_LINK, MOY_T_UI_LIST, MOY_T_UI_MENU, MOY_T_UI_PAGE, MOY_T_UI_PART,
+    MOY_T_UI_CARD, MOY_T_UI_CYCLE, MOY_T_UI_DIALOG, MOY_T_UI_EMPTY, MOY_T_UI_FIELD,
+    MOY_T_UI_FOCUS, MOY_T_UI_GRID, MOY_T_UI_GROUP, MOY_T_UI_HELD, MOY_T_UI_HELD_ALL,
+    MOY_T_UI_HELD_LAST, MOY_T_UI_HINTS, MOY_T_UI_ICON, MOY_T_UI_INFO, MOY_T_UI_KEYS_TAKEN,
+    MOY_T_UI_LABEL, MOY_T_UI_LINK, MOY_T_UI_LIST, MOY_T_UI_MENU, MOY_T_UI_PAGE, MOY_T_UI_PART,
     MOY_T_UI_PART_AT, MOY_T_UI_POPOVER, MOY_T_UI_PROGRESS, MOY_T_UI_RULE, MOY_T_UI_SCROLL,
     MOY_T_UI_SEG, MOY_T_UI_SLIDER, MOY_T_UI_SLOT, MOY_T_UI_SLOT_NEXT, MOY_T_UI_SLOTS,
     MOY_T_UI_SPLIT, MOY_T_UI_SWATCHES, MOY_T_UI_TABLE, MOY_T_UI_TABLE_DIST,

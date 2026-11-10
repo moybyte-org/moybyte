@@ -209,6 +209,9 @@ int32_t ui_slot_next(void) MOYBYTE_APP_IMPORT(ui_slot_next);
 int32_t ui_held_last(const char *id, uint32_t id_n, int32_t key) MOYBYTE_APP_IMPORT(ui_held_last);
 // ui.held_all
 int32_t ui_held_all(void) MOYBYTE_APP_IMPORT(ui_held_all);
+// ui.empty
+int32_t ui_empty(const char *icon, uint32_t icon_n, const char *title, uint32_t title_n,
+                 const char *lines, uint32_t lines_n) MOYBYTE_APP_IMPORT(ui_empty);
 // moybyte.notify: notifications
 int32_t moybyte_notify(const char *summary, uint32_t summary_n, const char *body,
                        uint32_t body_n) MOYBYTE_APP_IMPORT(moybyte_notify);

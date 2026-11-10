@@ -48,9 +48,9 @@ enum {
     MOY_ROW_UI_RULE, MOY_ROW_UI_TEXT_VIEW, MOY_ROW_UI_TABLE_PART, MOY_ROW_UI_PART_AT,
     MOY_ROW_UI_SPLIT, MOY_ROW_UI_TABLE_DIST, MOY_ROW_UI_TABLE_FLOOR, MOY_ROW_UI_HELD,
     MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
-    MOY_ROW_UI_HELD_ALL, MOY_ROW_MOYBYTE_NOTIFY, MOY_ROW_MOYBYTE_SEND, MOY_ROW_MOYBYTE_AWARD,
-    MOY_ROW_MOYBYTE_PROGRESS, MOY_ROW_MOYBYTE_ON, MOY_ROW_MOYBYTE_EVERY, MOY_ROW_MOYBYTE_AFTER,
-    MOY_ROW_MOYBYTE_CANCEL, MOY_ROW_MOYBYTE_LOG, MOY_ROW_MOYBYTE_RECV,
+    MOY_ROW_UI_HELD_ALL, MOY_ROW_UI_EMPTY, MOY_ROW_MOYBYTE_NOTIFY, MOY_ROW_MOYBYTE_SEND,
+    MOY_ROW_MOYBYTE_AWARD, MOY_ROW_MOYBYTE_PROGRESS, MOY_ROW_MOYBYTE_ON, MOY_ROW_MOYBYTE_EVERY,
+    MOY_ROW_MOYBYTE_AFTER, MOY_ROW_MOYBYTE_CANCEL, MOY_ROW_MOYBYTE_LOG, MOY_ROW_MOYBYTE_RECV,
     MOY_ROW_MOYBYTE_ITEM_READ, MOY_ROW_MOYBYTE_ITEM_WRITE, MOY_ROW_MOYBYTE_AT,
     MOY_ROW_MOYBYTE_SERVICE_STOP, MOY_ROW_MOYBYTE_SERVICE_RUNNING, MOY_ROW_MOYBYTE_RANDOM,
     MOY_ROW_MOYBYTE_SHA256, MOY_ROW_MOYBYTE_HMAC_SHA256, MOY_ROW_MOYBYTE_AES_GCM_SEAL,
@@ -82,16 +82,16 @@ enum {
     "ui.popover", "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", \
     "ui.table_part", "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", \
     "ui.held", "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last", "ui.held_all", \
-    "moybyte.notify", "moybyte.send", "moybyte.award", "moybyte.progress", "moybyte.on", \
-    "moybyte.every", "moybyte.after", "moybyte.cancel", "moybyte.log", "moybyte.recv", \
-    "moybyte.item_read", "moybyte.item_write", "moybyte.at", "moybyte.service_stop", \
-    "moybyte.service_running", "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256", \
-    "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519", "moybyte.dev_open", \
-    "moybyte.dev_close", "moybyte.dev_read", "moybyte.dev_write", "moybyte.dev_xfer", \
-    "moybyte.dev_set", "moybyte.dev_get", "moybyte.ed25519_public", "moybyte.ed25519_sign", \
-    "moybyte.ed25519_verify", "moybyte.status_show", "moybyte.status_state", \
-    "moybyte.status_remove", "moybyte.aes_ctr", "moybyte.aes_ccm_seal", \
-    "moybyte.aes_ccm_open", \
+    "ui.empty", "moybyte.notify", "moybyte.send", "moybyte.award", "moybyte.progress", \
+    "moybyte.on", "moybyte.every", "moybyte.after", "moybyte.cancel", "moybyte.log", \
+    "moybyte.recv", "moybyte.item_read", "moybyte.item_write", "moybyte.at", \
+    "moybyte.service_stop", "moybyte.service_running", "moybyte.random", "moybyte.sha256", \
+    "moybyte.hmac_sha256", "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", \
+    "moybyte.x25519", "moybyte.dev_open", "moybyte.dev_close", "moybyte.dev_read", \
+    "moybyte.dev_write", "moybyte.dev_xfer", "moybyte.dev_set", "moybyte.dev_get", \
+    "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify", \
+    "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove", \
+    "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -135,11 +135,11 @@ enum {
     MOY_T_UI_CARD, MOY_T_UI_POPOVER, MOY_T_UI_MENU, MOY_T_UI_TOOL, MOY_T_UI_BAR, MOY_T_UI_RULE,
     MOY_T_UI_TEXT_VIEW, MOY_T_UI_TABLE_PART, MOY_T_UI_PART_AT, MOY_T_UI_SPLIT,
     MOY_T_UI_TABLE_DIST, MOY_T_UI_TABLE_FLOOR, MOY_T_UI_HELD, MOY_T_UI_SLOTS, MOY_T_UI_SLOT,
-    MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_MOYBYTE_NOTIFY,
-    MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND, MOY_T_MOYBYTE_AWARD,
-    MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY, MOY_T_MOYBYTE_AFTER,
-    MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG, MOY_T_MOYBYTE_RECV,
-    MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
+    MOY_T_UI_SLOT_NEXT, MOY_T_UI_HELD_LAST, MOY_T_UI_HELD_ALL, MOY_T_UI_EMPTY,
+    MOY_T_MOYBYTE_NOTIFY, MOY_T_MOYBYTE_OPEN_WITH, MOY_T_MOYBYTE_SHARE, MOY_T_MOYBYTE_SEND,
+    MOY_T_MOYBYTE_AWARD, MOY_T_MOYBYTE_PROGRESS, MOY_T_MOYBYTE_ON, MOY_T_MOYBYTE_EVERY,
+    MOY_T_MOYBYTE_AFTER, MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_PICK, MOY_T_MOYBYTE_LOG,
+    MOY_T_MOYBYTE_RECV, MOY_T_MOYBYTE_ITEM_READ, MOY_T_MOYBYTE_ITEM_WRITE, MOY_T_MOYBYTE_AT,
     MOY_T_MOYBYTE_SERVICE_START, MOY_T_MOYBYTE_SERVICE_STOP, MOY_T_MOYBYTE_SERVICE_RUNNING,
     MOY_T_MOYBYTE_RANDOM, MOY_T_MOYBYTE_SHA256, MOY_T_MOYBYTE_HMAC_SHA256,
     MOY_T_MOYBYTE_AES_GCM_SEAL, MOY_T_MOYBYTE_AES_GCM_OPEN, MOY_T_MOYBYTE_X25519,
@@ -151,7 +151,7 @@ enum {
     MOY_T_MOYBYTE_AES_CCM_SEAL, MOY_T_MOYBYTE_AES_CCM_OPEN, MOY_T_MOYBYTE_NAME,
     MOY_T_MOYBYTE_KEY_MAKE, MOY_T_MOYBYTE_KEY_PUBLIC, MOY_T_MOYBYTE_KEY_SHARED,
 };
-#define MOY_APP_TABLE_N 207u
+#define MOY_APP_TABLE_N 208u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -316,6 +316,7 @@ enum {
     { "ui.slot_next", MOY_ROLE_UI, MOY_ROW_UI_SLOT_NEXT }, \
     { "ui.held_last", MOY_ROLE_UI, MOY_ROW_UI_HELD_LAST }, \
     { "ui.held_all", MOY_ROLE_UI, MOY_ROW_UI_HELD_ALL }, \
+    { "ui.empty", MOY_ROLE_UI, MOY_ROW_UI_EMPTY }, \
     { "moybyte.notify", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_NOTIFY }, \
     { "moybyte.open_with", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.share", MOY_ROLE_MOYBYTE, -1 }, \

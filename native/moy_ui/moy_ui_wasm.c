@@ -512,6 +512,13 @@ int moy_ui_run_rule(void *target) {
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_empty(void *target, moy_ui_span_t icon, moy_ui_span_t title, const uint8_t *lines,
+                     size_t n, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_empty(c, &r.s, icon, title, lines, n);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size_t n, uint32_t off,
                    int32_t *out) {
     OPEN(target);
@@ -968,6 +975,14 @@ int32_t moy_ui_wasm_bar(void *e, const uint8_t *title, uint32_t n, const uint8_t
 int32_t moy_ui_wasm_rule(void *e) {
     (void)e;
     return moy_ui_run_rule(wasm_target());
+}
+
+int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8_t *title,
+                          uint32_t n, const uint8_t *lines, uint32_t len) {
+    (void)e;
+    int32_t y = 0;
+    int rc = moy_ui_run_empty(wasm_target(), span(icon, in), span(title, n), lines, len, &y);
+    return rc == 0 ? y : rc;
 }
 
 #define FN(f) ((void *)(f))

@@ -9,7 +9,7 @@
 
 #include <stdint.h>
 
-#define MOY_UI_WASM_ROWS 43
+#define MOY_UI_WASM_ROWS 44
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t);
@@ -77,6 +77,8 @@ int32_t moy_ui_wasm_slot(void *, const uint8_t *, uint32_t, int32_t, int32_t);
 int32_t moy_ui_wasm_slot_next(void *);
 int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t);
 int32_t moy_ui_wasm_held_all(void *);
+int32_t moy_ui_wasm_empty(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                          const uint8_t *, uint32_t);
 
 #define MOY_UI_WASM_NATIVES { \
     { "ui_page", FN(moy_ui_wasm_page) }, \
@@ -122,6 +124,7 @@ int32_t moy_ui_wasm_held_all(void *);
     { "ui_slot_next", FN(moy_ui_wasm_slot_next) }, \
     { "ui_held_last", FN(moy_ui_wasm_held_last) }, \
     { "ui_held_all", FN(moy_ui_wasm_held_all) }, \
+    { "ui_empty", FN(moy_ui_wasm_empty) }, \
 }
 
 #endif // MOY_UI_WASM_ROWS_H

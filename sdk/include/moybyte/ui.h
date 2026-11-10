@@ -115,6 +115,8 @@ int32_t moy_ui_wasm_slot(void *, const uint8_t *, uint32_t, int32_t, int32_t);
 int32_t moy_ui_wasm_slot_next(void *);
 int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t);
 int32_t moy_ui_wasm_held_all(void *);
+int32_t moy_ui_wasm_empty(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                          const uint8_t *, uint32_t);
 
 // ui.page
 static inline int32_t ui_page(const char *title, uint32_t title_n, const void *o, uint32_t o_n,
@@ -352,6 +354,12 @@ static inline int32_t ui_held_last(const char *id, uint32_t id_n, int32_t key) {
 // ui.held_all
 static inline int32_t ui_held_all(void) {
     return moy_ui_wasm_held_all(moy_ui_link_target());
+}
+// ui.empty
+static inline int32_t ui_empty(const char *icon, uint32_t icon_n, const char *title,
+                               uint32_t title_n, const char *lines, uint32_t lines_n) {
+    return moy_ui_wasm_empty(moy_ui_link_target(), (const uint8_t *)icon, icon_n,
+                             (const uint8_t *)title, title_n, (const uint8_t *)lines, lines_n);
 }
 
 #ifdef __cplusplus

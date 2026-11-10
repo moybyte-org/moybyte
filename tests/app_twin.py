@@ -53,7 +53,7 @@ _ROWS = ("damage.all", "damage.again",
          "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part",
          "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", "ui.held",
          "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last",
-         "ui.held_all",
+         "ui.held_all", "ui.empty",
          # the kernel's messages, notifications and badges, items handed,
          # timers, alarms and log (native/moy_kernel/moy_evq.h, moy_notes.h,
          # moy_items.h, moy_log.h) and

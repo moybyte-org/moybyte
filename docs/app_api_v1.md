@@ -369,6 +369,18 @@ function _draw()
 end
 ```
 
+**An empty page says what is missing.** `ui.empty(icon, title, lines)`
+draws the head of a page with nothing on it yet -- the icon on a disc, the
+title, then each line dim -- and answers the y under it; the one verb that
+fills the page follows as a button:
+
+```lua
+if #log == 0 then
+  ui.empty("bubble", "No messages yet", {"Say hello to the mesh"})
+  if ui.button("Write one", "primary") then ui.focus("msg") end
+end
+```
+
 **Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
 "Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
 `cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,

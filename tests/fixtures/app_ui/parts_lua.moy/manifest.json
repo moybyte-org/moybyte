@@ -1,0 +1,13 @@
+{
+  "format": "moy-1",
+  "title": "Parts Lua",
+  "runtime": "lua",
+  "main": "main.lua",
+  "extensions": [
+    "moybyte.ui"
+  ],
+  "moybyte": {
+    "type": "app",
+    "permissions": []
+  }
+}

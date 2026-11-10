@@ -150,6 +150,9 @@ int moy_ui_run_card(void *target, moy_ui_span_t title, moy_ui_span_t sub, const 
 int moy_ui_run_tool(void *target, moy_ui_span_t icon, moy_ui_span_t label, const moy_ui_over_t *o,
                     int32_t *out);
 int moy_ui_run_rule(void *target);
+// An empty page's head (moy_ui_api_empty): *out the y under it.
+int moy_ui_run_empty(void *target, moy_ui_span_t icon, moy_ui_span_t title, const uint8_t *lines,
+                     size_t n, int32_t *out);
 int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size_t n, uint32_t off,
                    int32_t *out);
 // The host's back over the run's frame drawn last (moy_ui_api_back): 1 where
@@ -262,6 +265,9 @@ int32_t moy_ui_wasm_tool(void *e, const uint8_t *icon, uint32_t in, const uint8_
                          uint32_t n, const uint8_t *o, uint32_t on);
 // ui_rule: a divider (moy_ui_api_rule).
 int32_t moy_ui_wasm_rule(void *e);
+// ui_empty: the y under the empty page's head; `lines` NUL-separated.
+int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8_t *title,
+                          uint32_t n, const uint8_t *lines, uint32_t len);
 // ui_bar: the tool the host's bar activated (from 0), -2 its way back, -1
 // none; bit i of `off` its tool i at half strength, bit 31 the app's way back.
 int32_t moy_ui_wasm_bar(void *e, const uint8_t *title, uint32_t n, const uint8_t *tools,

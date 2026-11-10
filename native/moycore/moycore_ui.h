@@ -738,6 +738,17 @@ static int moycore_ui_rule(lua_State *L)
     return 0;
 }
 
+static int moycore_ui_empty(lua_State *L)
+{
+    size_t len = 0;
+    const char *lines = lua_isnoneornil(L, 3) ? "" : moycore_ui_items(L, 3, &len);
+    int32_t y = 0;
+    moy_ui_run_empty(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_span(L, 2),
+                     (const uint8_t *)lines, len, &y);
+    lua_pushinteger(L, y);
+    return 1;
+}
+
 static int moycore_ui_part(lua_State *L)
 {
     moy_ui_over_t o;
@@ -965,6 +976,7 @@ static void moycore_ui_open(lua_State *L)
         {"popover", moycore_ui_popover}, {"menu", moycore_ui_menu},
         {"tool", moycore_ui_tool}, {"bar", moycore_ui_bar},
         {"rule", moycore_ui_rule}, {"text_view", moycore_ui_text_view},
+        {"empty", moycore_ui_empty},
         {NULL, NULL},
     };
     luaL_newlib(L, verbs);
