@@ -157,3 +157,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # NTP (native/moy_net/moy_wifi.c) asks the moment the station has an address:
 # a handshake waits for that answer, so lwIP's random first delay is off.
 CONFIG_LWIP_SNTP_STARTUP_DELAY=n
+
+# --- Left out ----------------------------------------------------------------
+# No PPP: the board's links are its WiFi station and setup access point, and
+# nothing dials a serial modem (lwIP's PPP and MicroPython's network.PPP).
+CONFIG_LWIP_PPP_SUPPORT=n
+CONFIG_LWIP_PPP_PAP_SUPPORT=n
+CONFIG_LWIP_PPP_CHAP_SUPPORT=n
