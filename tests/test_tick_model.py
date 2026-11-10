@@ -12,7 +12,20 @@ import pytest
 
 from runtime import moy_play as tick_model
 from runtime.moy_play import Tick as TickScheduler, MAX_CATCHUP, MAX_DIV
-from ws_helpers import build_ws as _ws, select_on_home
+from ws_helpers import build_ws as _ws, seed_radios, select_on_home
+
+
+@pytest.fixture(autouse=True)
+def _radios():
+    """The seed set's radio (Mesh requires `lora`), for the Player's tests
+    that open any seed app."""
+    import os
+    undo = seed_radios(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "system_carts"))
+    yield
+    from runtime import scheduler
+    scheduler.SCHED.reset()
+    undo()
 
 
 # -- the scheduler, as arithmetic ---------------------------------------------

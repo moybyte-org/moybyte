@@ -24,7 +24,10 @@ generated or held by code, this guide points at it rather than copying it:
 Two worked examples run in the host suite, `tests/test_app_examples.py`: a
 Python app with a scrolling list and prefs (`tests/fixtures/apps/shopping.moy`)
 and a Lua service answering a message (`tests/fixtures/apps/echo_lua.moy`).
-`system_carts/moybyte.notes.moy` is the full-size app.
+`system_carts/moybyte.notes.moy` is the full-size app;
+`system_carts/moybyte.mesh.moy` is a Python window over a Lua service that
+holds the LoRa radio by handle and wakes on it (Meshtastic's default
+channel, `tests/test_mesh_app.py`).
 
 ---
 

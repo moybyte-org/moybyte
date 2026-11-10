@@ -297,7 +297,7 @@ APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcart
 # The "a running cart is not covered here" note above still holds for GAMES: a
 # game is the spec's domain and free to use rnd(). An app cart draws a settled
 # surface out of stored content, which is what every other row here does.
-APP_CARTS = (("notes", "Notes"),)
+APP_CARTS = (("notes", "Notes"), ("mesh", "Mesh"))
 
 # The public UI API's fixture page (docs/ui_api_2026-10.md), the Python app's
 # (tests/test_ui_public.py holds the Lua and compiled ones to its pixels): its
@@ -821,11 +821,16 @@ def _surface_plan(ws, cfg):
         enter = (lambda title=title: open_cart(ws, title))
         if surface == "notes":
             enter = _notes_vault(ws, enter)
+        elif surface == "mesh":
+            enter = _mesh_radio(ws, enter)
         plan.append(("app_" + surface, enter))
-    # Notes with a note open: its page of tools, the note in the look
-    plan.append(("app_notes_note", lambda: ws.run.player.ns["_open"](NOTES_VAULT[0][0])))
-    # ...and a program open: the same tools and Run
-    plan.append(("app_notes_script", lambda: ws.run.player.ns["_open"](NOTES_VAULT[1][0])))
+        if surface == "notes":
+            # Notes with a note open: its page of tools, the note in the look
+            plan.append(("app_notes_note",
+                         lambda: ws.run.player.ns["_open"](NOTES_VAULT[0][0])))
+            # ...and a program open: the same tools and Run
+            plan.append(("app_notes_script",
+                         lambda: ws.run.player.ns["_open"](NOTES_VAULT[1][0])))
 
     def park():
         if ws.webhost is None:
@@ -1046,6 +1051,22 @@ def _notes_vault(ws, enter):
         for name, body in NOTES_VAULT:
             ws.carts_store.save_file("docs", name, body, ws.carts_root)
         enter()
+    return run
+
+
+# Mesh's node, pinned: its service draws one at random where prefs hold none.
+MESH_NODE = "!0a1b2c3d"
+
+
+def _mesh_radio(ws, enter):
+    """Mesh on the stand-in radio (it requires `lora`), its node pinned."""
+    def run():
+        from runtime.host import lora_sim
+        lora_sim.install()
+        enter()
+        ns = ws.run.player.ns
+        ns["prefs"].set("node", MESH_NODE)
+        ns["_reload"]()
     return run
 
 
@@ -1865,8 +1886,10 @@ def surface_names(config_name):
         if a == "appearance" and cfg.get("appearance"):
             names += ["app_appearance_walls", "app_appearance_name"]
     names += ["script_console"]
-    names += ["app_" + a for a, _title in APP_CARTS]
-    names += ["app_notes_note", "app_notes_script"]
+    for a, _title in APP_CARTS:
+        names.append("app_" + a)
+        if a == "notes":
+            names += ["app_notes_note", "app_notes_script"]
     names += ["web_console", "app_terminal"]
     if cfg.get("appearance"):
         names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
@@ -1905,6 +1928,11 @@ def capture(config_name, carts_dir):
         notifications.NOTES.reset()    # ...and so is what it posted
         from runtime import devices
         devices.MIC[0] = 0             # ...and the microphone's holder
+        from runtime import moy_lora, moybyte
+        while moy_lora.owner():        # ...and the radio, Mesh's service's
+            moybyte.end(moy_lora.owner())
+        from runtime.host import lora_sim
+        lora_sim.remove()
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
         _ui().theme_uninstall()        # ...as is the installed package
         ui_draw.input_kind(kind[0])    # ...and the input in use

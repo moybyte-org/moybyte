@@ -1,4 +1,4 @@
-"""Mesh (tests/fixtures/apps/moybyte.mesh.moy): Meshtastic text on the LoRa radio.
+"""Mesh (system_carts/moybyte.mesh.moy): Meshtastic text on the LoRa radio.
 
 The codec in its Lua service (service.lua), run on the host's Lua VM with
 the boards' 32-bit integers (LUA_32BITS), against the Meshtastic firmware's
@@ -14,7 +14,6 @@ packets, its own echo and a repeat."""
 
 import json
 import os
-import shutil
 import struct
 
 import pytest
@@ -27,7 +26,7 @@ from runtime.host import lora_sim
 from ws_helpers import build_ws, make_drv, select_on_home
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CART = os.path.join(ROOT, "tests", "fixtures", "apps", "moybyte.mesh.moy")
+CART = os.path.join(ROOT, "system_carts", "moybyte.mesh.moy")
 H = bytes.fromhex
 DEFAULT_KEY = H("d4f1bb3a20290759f0bcffabcf4e6901")
 
@@ -181,10 +180,8 @@ def test_a_text_is_utf8_and_a_node_number_is_unsigned(c):
 
 @pytest.fixture
 def mesh(tmp_path):
-    ws = build_ws(tmp_path)
-    shutil.copytree(CART, os.path.join(ws.carts_root, "moybyte.mesh.moy"))
-    ws.carts.rescan()
     lora_sim.install()
+    ws = build_ws(tmp_path)
     S.attach(ws)
     assert select_on_home(ws, "Mesh") is not None
     ws.open()

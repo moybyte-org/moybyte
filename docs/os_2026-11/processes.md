@@ -761,7 +761,10 @@ collide.
   closes the app that posts them.
 
 The motivating case: a background mesh app wakes on `moybyte.on("lora", fn)`
-while a game plays, and posts.
+while a game plays, and posts. Mesh (`system_carts/moybyte.mesh.moy`) is
+that app's listening half: its Lua service holds the radio by handle and
+wakes on the radio's "lora" message, on its own task through an S3's VM
+stop; it does not post yet.
 
 As built (`runtime/system/notifications.py`, the service `NOTES`, every
 tier's), `moybyte.notify` answers the notification's id, or None where the

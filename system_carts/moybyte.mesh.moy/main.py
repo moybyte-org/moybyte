@@ -41,6 +41,12 @@ def send(words):
         moybyte.send(ME, "send", words)
 
 
+def _layout(w, h, fs):
+    # The page reflows in content_rect() every frame: on the desk its surface
+    # is the window's whole.
+    pass
+
+
 def _init():
     moybyte.on("heard", _reload)
     moybyte.service_start()
@@ -49,7 +55,7 @@ def _init():
 
 def _draw():
     global cur, text, region
-    ui.page("Mesh")
+    ui.page("")             # the app bar and the window name it
     ui.hints(("confirm", "Send"))
     text, enter = ui.field("Message", text, 200)
     if (enter or ui.button("Send", "primary")) and text:

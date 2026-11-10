@@ -275,5 +275,5 @@ stack (Reticulum, Meshtastic) can be an app on any tier. Decisions
 - **What a mesh stack adds later:** Reticulum's token is AES-CBC with HMAC,
   an interop row of its own added with the protocol that needs it, as
   Meshtastic's CTR and CCM were (above; the Mesh app,
-  `tests/fixtures/apps/moybyte.mesh.moy`, is their first user). HKDF is two
+  `system_carts/moybyte.mesh.moy`, is their first user). HKDF is two
   HMACs an app writes.
