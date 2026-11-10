@@ -654,17 +654,17 @@ EOF
   echo "OTA build identity: board=${board_id} channel=${OTA_CHANNEL} version=${OTA_VERSION} label='${OTA_LABEL}'"
 }
 
-# Write the frozen manifest ($1) for MODULES_DIR: the port's default frozen
-# stdlib + this board's modules. The md5 fingerprint makes the manifest CONTENT
-# change whenever any frozen source changes -- ninja rests custom commands on
-# identical manifest text, so without it a changed .py silently ships as stale
-# .mpy.
+# Write the frozen manifest ($1) for MODULES_DIR: MicroPython's own frozen
+# modules ($2, a manifest; the port's default set when absent) + this board's
+# modules. The md5 fingerprint makes the manifest CONTENT change whenever any
+# frozen source changes -- ninja rests custom commands on identical manifest
+# text, so without it a changed .py silently ships as stale .mpy.
 moybyte_frozen_manifest() {
-  local manifest="$1"
+  local manifest="$1" port_manifest="${2:-\$(PORT_DIR)/boards/manifest.py}"
   rm -rf "${MODULES_DIR}/__pycache__" "${MODULES_DIR}/moybyte/__pycache__"
   {
     cat <<EOF
-include("\$(PORT_DIR)/boards/manifest.py")
+include("${port_manifest}")
 freeze("${MODULES_DIR}", opt=3)
 EOF
     echo "# frozen-source fingerprint: $(find "${MODULES_DIR}" -type f -name '*.py' -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d' ' -f1)"

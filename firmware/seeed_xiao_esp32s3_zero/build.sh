@@ -200,9 +200,10 @@ ZERO_FIRST="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-firs
 moybyte_ota_identity xiao_zero "${REPO_ROOT}/device/moy_ota.py"
 
 # ---------------------------------------------------------------------------
-# 4) Frozen manifest + partition table + the stale-sdkconfig guard.
+# 4) Frozen manifest (MicroPython's half is boards/MOYBYTE_ZERO/manifest.py) +
+#    partition table + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
-moybyte_frozen_manifest "${MANIFEST}"
+moybyte_frozen_manifest "${MANIFEST}" "${BOARD_DIR}/manifest.py"
 moybyte_sdkconfig_guard "${BOARD_DIR}" \
   "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 

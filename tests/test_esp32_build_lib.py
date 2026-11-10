@@ -1115,11 +1115,11 @@ def test_ci_keeps_its_own_cache_settings(tmp_path):
 # -- the frozen manifest --------------------------------------------------------
 
 
-def _manifest(tmp_path):
+def _manifest(tmp_path, port_manifest=""):
     mods = tmp_path / "modules"
     mods.mkdir(exist_ok=True)
     out = tmp_path / "manifest.py"
-    r = sh("moybyte_frozen_manifest '%s'" % out, MODULES_DIR=str(mods))
+    r = sh("moybyte_frozen_manifest '%s' %s" % (out, port_manifest), MODULES_DIR=str(mods))
     assert r.returncode == 0, r.stderr
     return mods, out.read_text(encoding="utf-8")
 
@@ -1128,6 +1128,21 @@ def test_the_manifest_freezes_the_board_tree_at_opt_3(tmp_path):
     mods, text = _manifest(tmp_path)
     assert 'include("$(PORT_DIR)/boards/manifest.py")' in text
     assert 'freeze("%s", opt=3)' % mods in text
+
+
+def test_a_board_names_its_own_micropython_manifest(tmp_path):
+    """The Zero freezes MicroPython's modules through its own manifest, in
+    place of the port's default set."""
+    mods, text = _manifest(tmp_path, "/b/manifest.py")
+    assert 'include("/b/manifest.py")' in text
+    assert "boards/manifest.py" not in text
+    assert 'freeze("%s", opt=3)' % mods in text
+
+
+def test_the_zero_freezes_its_own_micropython_manifest():
+    build = (ROOT / "firmware/seeed_xiao_esp32s3_zero/build.sh").read_text(encoding="utf-8")
+    assert 'moybyte_frozen_manifest "${MANIFEST}" "${BOARD_DIR}/manifest.py"' in build
+    assert (ROOT / "firmware/seeed_xiao_esp32s3_zero/boards/MOYBYTE_ZERO/manifest.py").is_file()
 
 
 def test_the_fingerprint_moves_when_any_frozen_source_changes(tmp_path):
