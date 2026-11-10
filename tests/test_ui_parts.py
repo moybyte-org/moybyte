@@ -1821,9 +1821,9 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
         if host is not None:
             real = host.run
 
-            def spy(cv, th, rect, a, d=False, window=False, *rest, real=real):
+            def spy(cv, th, rect, a, d=False, window=False, *rest, real=real, **kw):
                 seen.append(window)
-                return real(cv, th, rect, a, d, window, *rest)
+                return real(cv, th, rect, a, d, window, *rest, **kw)
             host.run = spy
         for _ in range(2):
             make_drv(ws).frame(_DT)
