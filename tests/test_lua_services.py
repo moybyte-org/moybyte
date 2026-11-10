@@ -344,6 +344,9 @@ def test_an_alarm_without_its_permission_is_refused(sched, monkeypatch):
 
 @pytest.fixture
 def desk(tmp_path, monkeypatch):
+    # The one scheduler starts clean: a service another test left on it keeps
+    # a poll wake the sched fixture's _clear has ended, and none is armed again.
+    S.SCHED.reset()
     boot_on_fixture(monkeypatch)
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
