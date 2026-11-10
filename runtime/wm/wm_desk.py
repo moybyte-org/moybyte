@@ -330,10 +330,12 @@ class _BackdropLayer(Layer):
 
     def _look_rects(self, catalog, box, fs, dx, dy, dw, dh):
         """The column under a look (docs/history/look_2026-10.md step 25): `box`
-        tiles on the class's pitch, their centres 54 of the tile's 44 in from
-        the desk's edge or further where a label needs it, each label under
-        its tile, 2 of the 44 below it, as wide as the column: nearer its own
-        tile than the next one down. A label longer than the columns leave
+        tiles on the class's pitch, or further apart where the tile, its
+        label's line at the font scale and 6 of the 44 under it need more,
+        their centres 54 of the tile's 44 in from the desk's edge or further
+        where a label needs it, each label under its tile, 2 of the 44 below
+        it, as wide as the column: nearer its own tile than the next one
+        down. A label longer than the columns leave
         room for is cut to its band. Where the columns would still run past
         the desk's right edge (more apps than the class's tiles hold at this
         font scale), the tiles shrink, an eighth at a time, the cell and
@@ -352,9 +354,8 @@ class _BackdropLayer(Layer):
         k = b / 44
         gap = int(2 * k)
         line = _ui_draw.font("ui")[2] * fs
-        cell_h = _layout_base.metric("tile_cell", fs)
-        if b != box:
-            cell_h = max(cell_h * b // box, b + gap + line + int(6 * k))
+        cell_h = max(_layout_base.metric("tile_cell", fs) * b // box,
+                     b + gap + line + int(6 * k))
         y0 = dy + _layout_base.metric("tile_top", fs)
         bottom = dy + dh - int(6 * k)
         maxw = max((_ui_draw.text_width(label, fs, "ui") for _k, label, _c in catalog),
