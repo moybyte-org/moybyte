@@ -69,6 +69,7 @@ extern const moy_dev_ops_t moy_dev_lora;
 extern const moy_dev_ops_t moy_dev_mic;
 extern const moy_dev_ops_t moy_dev_midi;
 extern const moy_dev_ops_t moy_dev_http;
+extern const moy_dev_ops_t moy_dev_usb;
 
 // moy_dev.c's half: the device API `name` names, its kind (> 0) or 0.
 int moy_dev_kind(const char *name, size_t n);

@@ -81,7 +81,7 @@ static int alloc(void) {
     return U != NULL;
 }
 
-int moy_usb_open(uint32_t owner) {
+static int open_(uint32_t owner) {
     if (owner == 0 || !moy_usb_present()) {
         return -MOY_USB_ENODEV;
     }
@@ -123,12 +123,41 @@ int moy_usb_open(uint32_t owner) {
     return 0;
 }
 
-int moy_usb_close(uint32_t owner) {
+static int close_(uint32_t owner) {
     if (!held(owner)) {
         return -MOY_USB_EBADF;
     }
     s_owner = 0;
     return 0;
+}
+
+// Open and close hold the lease table's lock (weak: an image without the
+// kernel's table has one task at the holder), so the face on the VM's task
+// and a compiled program's handle on its own (moy_usb_dev.c) share the one
+// holder.
+void moy_lease_lock(void) __attribute__((weak));
+void moy_lease_unlock(void) __attribute__((weak));
+
+int moy_usb_open(uint32_t owner) {
+    if (moy_lease_lock != NULL) {
+        moy_lease_lock();
+    }
+    int r = open_(owner);
+    if (moy_lease_unlock != NULL) {
+        moy_lease_unlock();
+    }
+    return r;
+}
+
+int moy_usb_close(uint32_t owner) {
+    if (moy_lease_lock != NULL) {
+        moy_lease_lock();
+    }
+    int r = close_(owner);
+    if (moy_lease_unlock != NULL) {
+        moy_lease_unlock();
+    }
+    return r;
 }
 
 uint32_t moy_usb_sweep(uint32_t owner) {

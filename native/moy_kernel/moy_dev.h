@@ -105,6 +105,23 @@
 //            kept body's), ended (a window's); BAD for a URL that does not
 //            parse and for https where nothing verifies it, FULL with every
 //            request of the client's taken. Many handles a process
+//   usb      the USB host's devices (native/p4/moy_usb/moy_usb.h; its one
+//            holder shared with the process's `moybyte.usb`, BUSY while
+//            another process holds it; a device is its bus address, 1..127):
+//            set serial=<addr> (baud=<n>, 115200) opens a CDC-ACM device's
+//            line, write=<addr> names where a write goes (a serial or a
+//            USB-MIDI device); cfg the same; write: to it (BAD before a
+//            write=); read: the driver's events, whole records (FULL where
+//            the next does not fit, which waits): a 12-byte head -- the
+//            event (u16, MOY_USB_EV_*: 1 ATTACH, 2 DETACH, 3 REPORT, 4 DATA,
+//            5 SENT), n (u16), a the device's address and b the driver's
+//            value (i32 each: ATTACH's its class, 1 HID, 2 CDC, 3 MIDI, 0
+//            OTHER; REPORT's the report's length; DATA's the bytes that
+//            waited; SENT's 0 or -errno) -- then n bytes: ATTACH's the class
+//            and the kind (u8 each: a HID boot keyboard 1, mouse 2), vid and
+//            pid (u16) and the name, REPORT's the HID report, DATA's the
+//            bytes the device sent. The open reads as an ATTACH for each
+//            device already plugged in
 // A device a handle holds stays through the VM's end (moy_lease.h's THE
 // VM'S END, moy_dev_holds) and goes with its process.
 //

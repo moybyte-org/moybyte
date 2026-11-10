@@ -11,7 +11,6 @@
 #   _Handle                  the base every handle's verbs default from
 #   _Ring                    the base of the event-ring devices
 #   _Ble                     ble: GATT by handle
-#   _Usb                     usb: the USB host
 #   _Camera                  camera: a picture per read
 #   _media_roots             the folders a process's media handle plays from
 #   _Media                   media: the media service's stream by handle
@@ -21,12 +20,11 @@ WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
 `moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
 pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora,
-mic, midi and http on the calling program's own task (native/moy_kernel/moy_dev.h,
+mic, midi, http and usb on the calling program's own task (native/moy_kernel/moy_dev.h,
 which says what they answer); the other device APIs are served here, by the door's Python half as the calling
 process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
-  open(name, cfg) -> h      a device API ("ble", "usb", "camera", "media",
-                            "net"),
+  open(name, cfg) -> h      a device API ("ble", "camera", "media", "net"),
                             configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
@@ -54,20 +52,6 @@ answers:
             bytes -- ADV's the address (6 bytes, as printed) and the name
             (a the device's index, b its RSSI), READ's the value read,
             NOTIFY's the notification's (a its handle, b its length)
-  usb       the USB host's devices (a device is its bus address, 1..127):
-            set serial=<addr> (baud=<n>, 115200 by default) opens a CDC-ACM
-            device's line, write=<addr> names where a write goes (a serial
-            or a USB-MIDI device); write: to it; read: the USB face's
-            events, whole records as ble's are (FULL where the next does
-            not fit): the event (moy_usb.h's MOY_USB_EV_*: 1 ATTACH, 2
-            DETACH, 3 REPORT, 4 DATA, 5 SENT), n, a the device's address
-            and b the driver's value (ATTACH's its class, 1 HID, 2 CDC, 3
-            MIDI, 0 OTHER; REPORT's the report's length; DATA's the bytes
-            that waited; SENT's 0 or -errno), then n bytes -- ATTACH's the
-            class and the kind (u8 each: a HID boot keyboard 1, mouse 2),
-            vid and pid (u16) and the name, REPORT's the HID report,
-            DATA's the bytes the device sent. The open reads as an ATTACH
-            for each device already plugged in
   camera    read: the latest frame, w * h RGB565 pixels big-endian (the
             glass's byte order), whole (FULL where `into` cannot hold it),
             0 bytes before the first; get w, h
@@ -434,78 +418,6 @@ class _Ble(_Ring):
         self.f.sweep(pid)
 
 
-USB_RX = 1024               # MOY_USB_RX: a device's bytes kept
-USB_REPORT = 64             # MOY_USB_REPORT
-
-
-class _Usb(_Ring):
-    KIND = _moybyte.USB
-
-    def __init__(self, cfg):
-        f = _face("usb")
-        if _moybyte.WAKES.table is None:
-            raise OSError(ENODEV, "no input table")
-        f.open()
-        try:
-            self._reader(f.source())
-            self.f = f
-            self.target = None
-            for d in f.devices():
-                self.pend.append(_record(f.EV_ATTACH, d[0], d[1], self._about(d)))
-            if cfg:
-                self.set(cfg)
-        except BaseException:
-            self._free()
-            f.close()
-            raise
-
-    @staticmethod
-    def _about(d):
-        addr, cls, kind, vid, pid, name = d
-        return bytes((cls, kind)) + vid.to_bytes(2, "little") + pid.to_bytes(2, "little") + \
-            name.encode()
-
-    def set(self, cfg):
-        _only(cfg, ("serial", "baud", "write"))
-        if "baud" in cfg and "serial" not in cfg:
-            raise OSError(EINVAL, "baud is serial's")
-        if "write" in cfg:
-            self.target = _int(cfg["write"], 1, 127, "write")
-        if "serial" in cfg:
-            self.f.serial(_int(cfg["serial"], 1, 127, "serial"),
-                          _int(cfg.get("baud", 115200), 1, 4000000, "baud"))
-        return 0
-
-    def write(self, data):
-        if self.target is None:
-            raise OSError(EINVAL, "set write=<addr> first")
-        self.f.write(self.target, data)
-        return len(data)
-
-    def _rec(self, ev, a, b):
-        f = self.f
-        body = b""
-        try:
-            if ev == f.EV_ATTACH:
-                for d in f.devices():
-                    if d[0] == a:
-                        body = self._about(d)
-            elif ev == f.EV_REPORT:
-                into = bytearray(USB_REPORT)
-                body = bytes(into[:f.report(a, into)])
-            elif ev == f.EV_DATA:
-                into = bytearray(USB_RX)
-                body = bytes(into[:f.read(a, into)])
-                if not body:
-                    return None             # an earlier record carried them
-        except OSError:                     # gone before its record was read
-            pass
-        return _record(ev, a, b, body)
-
-    def close(self, pid):
-        self._free()
-        self.f.sweep(pid)
-
 
 class _Camera(_Handle):
     def __init__(self, cfg):
@@ -771,10 +683,10 @@ class _Net(_Handle):
         self._let_go(_link()[0], pid)
 
 
-_DEVICES = {"ble": _Ble, "usb": _Usb, "camera": _Camera,
+_DEVICES = {"ble": _Ble, "camera": _Camera,
             "media": _Media, "net": _Net}
 # A device with one holder: a process opens it once.
-_ONE = ("ble", "usb", "camera", "media")
+_ONE = ("ble", "camera", "media")
 # The permissions a device needs, one of them, where they are not its name.
 _PERMS = {"media": ("media", "media:url"), "net": ("multiplayer",)}
 

@@ -18,7 +18,7 @@ _USB = os.path.join(native_build.ROOT, "native", "p4", "moy_usb")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
 
-PART = native_build.Part("usb", ("moy_usb.h", "moy_usb.c"), (_USB, _INPUT, _SPINE))
+PART = native_build.Part("usb", ("moy_usb.h", "moy_usb.c", "moy_usb_dev.c"), (_USB, _INPUT, _SPINE))
 
 OTHER, HID, CDC, MIDI = 0, 1, 2, 3
 KEYBOARD, MOUSE = 1, 2

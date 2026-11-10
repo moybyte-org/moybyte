@@ -708,6 +708,7 @@ def test_a_lora_handle_refuses_a_join_it_cannot_make(radio):
 # -- USB ---------------------------------------------------------------------------------
 
 KBD, TTY = 1, 2
+USB = 1 << 5                            # moy_dev.h's MOY_DEV_P_USB
 
 
 @pytest.fixture
@@ -719,9 +720,8 @@ def bus():
     was = moybyte.WAKES.table
     moybyte.bind(mi.kernel())
     yield usb_sim
-    for pid in list(H.HANDLES):
-        moybyte.end(pid)
-    while moy_usb.owner():
+    _K().moy_dev_reset()
+    if moy_usb.owner():
         moybyte.end(moy_usb.owner())
     devices.grants = None
     usb_sim.remove()
@@ -731,7 +731,7 @@ def bus():
 
 
 def _usb(pid, h, cap=2048):
-    got = _as(pid, lambda: H.read(pid, h, cap))
+    got = _kread(pid, h, cap)
     assert not isinstance(got, int), got
     return _records(got)
 
@@ -740,19 +740,19 @@ def test_a_usb_handle_lists_reads_a_keyboard_and_talks_to_a_serial_device(bus):
     from runtime import dev_usb as U
     bus.plug(KBD, U.HID, U.KEYBOARD, 0x046d, 0xc31c, "USB Keyboard")
     pid = L.spawn("t.usb")
-    h = _open(pid, "usb")
+    h = _kopen(pid, "usb", "", USB)
     about = bytes((U.HID, U.KEYBOARD)) + struct.pack("<HH", 0x046d, 0xc31c) + b"USB Keyboard"
     assert _usb(pid, h) == [(U.EV_ATTACH, KBD, U.HID, about)]          # already plugged in
     bus.plug(TTY, U.CDC, 0, 0x2341, 0x0043, "Uno")
     bus.send(KBD, b"\x02\x00\x04\x00\x00\x00\x00\x00")                 # shift + a
-    assert _as(pid, lambda: H.read(pid, h, 8)) == H.FULL                # the record waits
+    assert _kread(pid, h, 8) == H.FULL                # the record waits
     uno = bytes((U.CDC, 0)) + struct.pack("<HH", 0x2341, 0x0043) + b"Uno"
     assert _usb(pid, h) == [(U.EV_ATTACH, TTY, U.CDC, uno),
                             (U.EV_REPORT, KBD, 8, b"\x02\x00\x04\x00\x00\x00\x00\x00")]
-    set_ = lambda cfg: _as(pid, lambda: H.set(pid, h, cfg))  # noqa: E731
-    assert _as(pid, lambda: H.write(pid, h, b"x")) == H.BAD             # no write= yet
+    set_ = lambda cfg: _kset(pid, h, cfg)  # noqa: E731
+    assert _kwrite(pid, h, b"x") == H.BAD             # no write= yet
     assert set_("serial=2 baud=31250 write=2") == 0
-    assert _as(pid, lambda: H.write(pid, h, b"hello\n")) == 6
+    assert _kwrite(pid, h, b"hello\n") == 6
     assert bus.sent(TTY) == (b"hello\n", 31250)
     bus.send(TTY, b"ok ")
     bus.send(TTY, b"42\n")
@@ -769,21 +769,19 @@ def test_a_usb_handle_lists_reads_a_keyboard_and_talks_to_a_serial_device(bus):
 def test_one_usb_holder_its_permission_its_end_and_its_absence(bus):
     a, b = L.spawn("t.a"), L.spawn("t.b")
     from runtime import moy_usb
-    h = _open(a, "usb")
+    h = _kopen(a, "usb", "", USB)
     assert h > 0 and moy_usb.owner() == a
-    assert _open(a, "usb") == H.BUSY and _open(b, "usb") == H.BUSY
+    assert _kopen(a, "usb", "", USB) == H.BUSY and _kopen(b, "usb", "", USB) == H.BUSY
     with pytest.raises(OSError) as e:
         _as(b, moybyte.usb.devices)                                     # Python's face too
     assert e.value.errno == errno.EBUSY
-    moybyte.end(a)
-    assert moy_usb.owner() == 0 and a not in H.HANDLES
-    assert _open(b, "usb", "serial=9") == H.ABSENT and moy_usb.owner() == 0   # nothing kept
-    assert _open(b, "usb", "warp=1") == H.BAD and moy_usb.owner() == 0
-    devices.grants = lambda p: ("ble",)
-    assert _open(b, "usb") == H.DENIED
-    devices.grants = None
+    _end(a)
+    assert moy_usb.owner() == 0 and _K().moy_dev_count() == 0
+    assert _kopen(b, "usb", "serial=9", USB) == H.ABSENT and moy_usb.owner() == 0
+    assert _kopen(b, "usb", "warp=1", USB) == H.BAD and moy_usb.owner() == 0
+    assert _kopen(b, "usb", "", 1 << 4) == H.DENIED
     bus.remove()
-    assert _open(b, "usb") == H.ABSENT
+    assert _kopen(b, "usb", "", USB) == H.ABSENT
 
 
 # -- MIDI --------------------------------------------------------------------------------

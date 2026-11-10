@@ -1,12 +1,14 @@
 # moy_usb: the `usb` device API's driver (moy_usb.h) -- the P4 silicon tier
 # (native/p4): the USB host on the P4's OTG port, its class drivers over
 # ESP-IDF's USB Host Library (the `usb` component, already in the esp32 port's
-# IDF_COMPONENTS). Its records go through native/moy_input's rings.
+# IDF_COMPONENTS), and a compiled program's handles on it (moy_usb_dev.c). Its
+# records go through native/moy_input's rings.
 
 add_library(usermod_moy_usb INTERFACE)
 
 target_sources(usermod_moy_usb INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_usb.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_usb_dev.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_usb_host.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_usb.c
 )

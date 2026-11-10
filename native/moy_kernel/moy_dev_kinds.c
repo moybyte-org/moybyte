@@ -16,6 +16,7 @@ extern const moy_dev_ops_t moy_dev_lora __attribute__((weak));
 extern const moy_dev_ops_t moy_dev_mic __attribute__((weak));
 extern const moy_dev_ops_t moy_dev_midi __attribute__((weak));
 extern const moy_dev_ops_t moy_dev_http __attribute__((weak));
+extern const moy_dev_ops_t moy_dev_usb __attribute__((weak));
 
 static const struct {
     const char *name;
@@ -29,6 +30,7 @@ static const struct {
     { "mic", MOY_DEV_P_MIC, MOY_LEASE_MIC, true, &moy_dev_mic },
     { "midi", MOY_DEV_P_MIDI, 0, false, &moy_dev_midi },
     { "http", MOY_DEV_P_HTTP, 0, false, &moy_dev_http },
+    { "usb", MOY_DEV_P_USB, 0, true, &moy_dev_usb },
 };
 #define NKINDS (sizeof KINDS / sizeof KINDS[0])
 
