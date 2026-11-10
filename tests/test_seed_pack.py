@@ -76,6 +76,18 @@ def test_every_cart_round_trips_through_the_blob():
         assert moy_carts.unpack_seed(blob) == cart
 
 
+def test_a_cart_s_entry_files_round_trip_through_the_blob(tmp_path):
+    """An app's service entry (docs/app_api_v1.md section 7) rides the blob
+    as [name, text] pairs: JSON's shape, so what inflates is what was packed."""
+    import shutil
+    src = os.path.join(ROOT, "tests", "fixtures", "apps", "moybyte.mesh.moy")
+    shutil.copytree(src, str(tmp_path / "moybyte.mesh.moy"))
+    (cart,) = gen.build_carts(str(tmp_path))
+    ((_title, _version, blob),) = gen.build_packed(str(tmp_path))
+    assert [name for name, _text in cart["entry_src"]] == ["service.py"]
+    assert moy_carts.unpack_seed(blob) == cart
+
+
 def test_the_packed_roster_is_much_smaller_than_the_plain_one():
     """The whole reason the Zero can carry a roster. A floor rather than a
     pinned number: this is a property of the carts, and it moves when they do.

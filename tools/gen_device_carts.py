@@ -106,7 +106,7 @@ def _read(path):
 
 
 def _entry_src(base, entries):
-    """A seed's entry files as [(name, text)] (`"moybyte": {"entries": ...}`,
+    """A seed's entry files as [[name, text]] (`"moybyte": {"entries": ...}`,
     docs/app_api_v1.md section 7), which the seed writes beside its main.
     A seed is text: an entry that is a module raises."""
     out = []
@@ -114,7 +114,7 @@ def _entry_src(base, entries):
         f = entries[name]
         if not isinstance(f, str) or not f.endswith((".py", ".lua")):
             raise ValueError("%s: a seed's entry %r is not a script" % (base, f))
-        out.append((f, _read(os.path.join(base, f))))
+        out.append([f, _read(os.path.join(base, f))])  # lists: what JSON gives back
     return out
 
 
@@ -264,7 +264,7 @@ def build_carts(system_carts_dir):
                     _seen = True
                     continue
                 (_post if _seen else _pre).append(
-                    (_n, _read(os.path.join(base, _n))))
+                    [_n, _read(os.path.join(base, _n))])
             if _pre:
                 cart["src_before"] = _pre
             if _post:

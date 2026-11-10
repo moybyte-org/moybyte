@@ -273,6 +273,7 @@ stack (Reticulum, Meshtastic) can be an app on any tier. Decisions
   TweetNaCl's slow reference arithmetic; a hand-written Ed25519 was not an
   option.
 - **What a mesh stack adds later:** Reticulum's token is AES-CBC with HMAC,
-  Meshtastic's channel AES-CTR and its direct messages AES-CCM; those modes
-  are interop rows of their own, named for the protocol that needs them,
-  added with it. HKDF is two HMACs an app writes.
+  an interop row of its own added with the protocol that needs it, as
+  Meshtastic's CTR and CCM were (above; the Mesh app,
+  `tests/fixtures/apps/moybyte.mesh.moy`, is their first user). HKDF is two
+  HMACs an app writes.
