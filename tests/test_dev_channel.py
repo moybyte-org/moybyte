@@ -340,6 +340,9 @@ def test_link_reports_and_arms_the_radio_by_hand(capsys):
     permission, so a two-board bench needs a way in from outside one."""
     ws, ch = make()
     ws.link = FakeLink()
+    held = []
+    ws.wifi_hold = lambda tag: held.append(tag)
+    ws.wifi_release = lambda tag: held.remove(tag)
 
     def said():
         """The one LINK line the command prints, parsed. Every branch reports,
@@ -355,6 +358,7 @@ def test_link_reports_and_arms_the_radio_by_hand(capsys):
 
     ch.run(ws, "link on")
     assert ws.link.active is True and said()["active"] is True
+    assert held == ["link"]                   # the radio's row, as the Player's arm takes
 
     ch.run(ws, "link cart Brick Siege")
     assert ws.link.announced == [("Brick Siege", 1)]
@@ -362,6 +366,7 @@ def test_link_reports_and_arms_the_radio_by_hand(capsys):
 
     ch.run(ws, "link off")
     assert ws.link.active is False and said()["active"] is False
+    assert held == []
 
 
 # -- `recv`: the raw upload, off the board -------------------------------------

@@ -9,16 +9,19 @@ channel's (DevChannel._recv, DevChannel._moy_put).
 def link(chan, ws, parts, line):
     # `link` alone reports; `link on|off` arms the radio by hand, which
     # is what a two-board bench needs -- the Player only arms it for a
-    # cart that declares the multiplayer permission.
+    # cart that declares the multiplayer permission. Like the Player's, the
+    # arm holds the radio's "link" row, which the off lets go.
     lk = getattr(ws, "link", None)
     if lk is None:
         print("REMOTE link: no radio on this board")
         return
     action = parts[1] if len(parts) > 1 else ""
     if action == "on":
+        ws.wifi_hold("link")
         lk.start()
     elif action == "off":
         lk.stop()
+        ws.wifi_release("link")
     elif action == "rate" and len(parts) > 2:
         lk.rate_force = int(parts[2]) if parts[2] in ("30", "60") else None
     elif action == "check" and len(parts) > 2:
