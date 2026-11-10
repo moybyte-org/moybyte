@@ -506,6 +506,13 @@ int moy_net_link(uint32_t *ip) {
     return up;
 }
 
+// THE NETWORK'S GATE (moy_net.h): the station's link holds an address, so
+// esp_netif_init (the driver's first step) brought lwIP's tcpip task up.
+int moy_net_online(void) {
+    uint32_t ip;
+    return moy_net_link(&ip);
+}
+
 // THE BOOK (moy_net.h): the mask it last followed.
 static uint32_t s_book;
 

@@ -32,6 +32,7 @@ MP3 = TONE.read_bytes()
 METAINT = 4096
 TITLES = ("First Song", "Caf\xe9 Song")       # the second sent as Latin-1
 AUDIO = audio_binding.get()
+N_DIAL_MS = 16000                       # moy_net.h MOY_NET_DIAL_MS
 
 pytestmark = pytest.mark.skipif(AUDIO is None, reason="no C compiler for the host's audio")
 
@@ -486,6 +487,45 @@ def test_the_radio_is_held_while_a_url_may_play(media, server, tmp_path):
     _as(pid, lambda: moybyte.media.play(str(TONE)))
     assert not ws.leases.held("media")            # a file needs no radio
     devices.console = None
+
+
+@pytest.fixture
+def station():
+    """The host's network as a station whose link is down (moy_net.h's THE
+    NETWORK'S GATE); the machine's open network again after."""
+    from runtime.host import net_binding as nb
+    nb._link(None)
+    nb._station(True)
+    yield nb
+    nb._station(False)
+    nb._link(None)
+
+
+def test_a_url_waits_for_the_link_and_reaches_no_network_before_it(media, server, station):
+    pid = L.spawn("t.dial")
+    _H.seen.clear()
+    _as(pid, lambda: moybyte.media.play(server + "/a.mp3"))
+    for _ in range(20):
+        _frame()
+    assert _state() == "opening" and _H.seen == []     # nothing resolved, nothing asked
+    station._link("10.0.0.7")                          # the dial came through
+    assert _drive(lambda: _state() == "ended") and ("/a.mp3", "1") in _H.seen
+
+
+def test_a_url_with_no_link_fails_no_network_once_the_dial_ran_out(media, server, station):
+    from runtime.shell import sh_roles
+    pid = L.spawn("t.dial")
+    _H.seen.clear()
+    _as(pid, lambda: moybyte.media.play(server + "/a.mp3"))
+    _frame()
+    assert _state() == "opening"
+    station._skew_clock(N_DIAL_MS)
+    assert _drive(lambda: _state() == "failed", rounds=50)
+    assert moybyte.media.last()["err"] == errno.ENETUNREACH == 101 and _H.seen == []
+    assert sh_roles._WHY[moybyte.media.last()["err"]] == "no network"
+    with pytest.raises(OSError) as e:                  # every client of the gate
+        station.http_open(server + "/a.mp3", "t")
+    assert e.value.errno == 101 and _H.seen == []
 
 
 def test_the_media_keys_answer_the_stream_from_a_game_that_owns_the_keys(media, tmp_path):

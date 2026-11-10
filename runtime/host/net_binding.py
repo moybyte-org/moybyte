@@ -936,6 +936,13 @@ def _link(ip=None):
     ctypes.c_uint32.in_dll(_lib(), "moy_net_host_link_ip").value = _ip_of(ip) if ip else 0
 
 
+def _station(on):
+    """The host's network modelled as a station (moy_net.h's THE NETWORK'S
+    GATE): open only while `_link` gives it an address. Off, it is the
+    machine's, always open."""
+    ctypes.c_int.in_dll(_lib(), "moy_net_host_station").value = 1 if on else 0
+
+
 def _pins(pins=()):
     """The host's pin table: the allowlist the /gpio route serves, every pin
     untouched again."""

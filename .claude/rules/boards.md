@@ -213,7 +213,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   poll or a link wait held the whole desk for seconds. The console asks and
   polls: `DeviceWifi.scan_poll()`/`join()`/`joined()` (Settings'
   wake), `CartNet.ready()` (Get Carts) and `dial()` (an http request, a
-  stream), whose worker task waits for the link (`moy_net_dialing`). A cart's
+  stream), whose worker task waits for the link (`moy_net_dialing`, and a
+  stream's `moy_net_await`); nothing reaches lwIP before the link is up
+  (`moy_net_online`, moy_net.h's THE NETWORK'S GATE). A cart's
   `wifi.scan()`/`connect()` still waits: its own to spend. A shell command
   does not hold the frame either (2026-11-06): its run parks on the session's
   runner while a role command waits, stepped across the door a frame at a

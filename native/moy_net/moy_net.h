@@ -441,11 +441,26 @@ size_t moy_wc_url(char *out, size_t cap, int paired);
 // The kernel's link where the image has one: whether it holds an address.
 int moy_net_link(uint32_t *ip);
 // Whether the kernel's station is asked for a network and has no address yet:
-// a request on a worker's task (the http worker's, the media service's) waits
-// for it up to MOY_NET_DIAL_MS before it resolves its host, so the console
-// asks for the link and never waits on it.
+// a request on the http worker's task waits for it up to MOY_NET_DIAL_MS before
+// it resolves its host, so the console asks for the link and never waits on
+// it (the media service's task waits on the gate itself, moy_net_await).
 int moy_net_dialing(void);
 #define MOY_NET_DIAL_MS 16000u
+
+// THE NETWORK'S GATE: whether a request may reach the network now. On a board
+// its station's link holds an address (moy_wifi.c): lwIP's tcpip task exists
+// only once the station's driver started, so nothing reaches lwIP before the
+// link is up. The host's twin (moy_net_host.c) models a station only when a
+// test asks for one; an image with neither (the unix port, the browser) has
+// no gate. moy_conn_open refuses MOY_NET_ENET behind it, so every client on
+// it (moy_httpc, the fetch worker, the media service, the updater) is gated.
+int moy_net_online(void);
+#define MOY_NET_ENET 101            // no network: ENETUNREACH
+
+// The gate waited for by a worker's task that polls it, the station's dial
+// given MOY_NET_DIAL_MS from `*since` (moy_net_ms, set by the first call):
+// 1 online, 0 to poll again, -MOY_NET_ENET when no link came.
+int moy_net_await(uint32_t *since);
 
 // -- the Zero's pins (moy_gpio.c) and the setup portal (moy_dns.c) ------------------
 

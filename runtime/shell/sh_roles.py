@@ -108,7 +108,7 @@ POLL_MS = 10
 _WHY = {1: "not permitted", 2: "not found", 5: "i/o error", 9: "not open",
         12: "out of memory", 16: "busy", 19: "this console has none",
         22: "invalid argument", 28: "no room", 93: "https is refused",
-        107: "not connected", 110: "timed out", 113: "unreachable",
+        101: "no network", 107: "not connected", 110: "timed out", 113: "unreachable",
         129: "the server's certificate is not trusted"}
 
 
@@ -671,8 +671,10 @@ def r_media(d, a):
     if not a:
         now = f.now()
         if now is None:
-            d.out("state idle\n")
-            return 0
+            end = f.last()
+            now = {"state": "idle"} if end is None or end["state"] != "failed" else end
+        if now.get("err"):
+            now = dict(now, why=_WHY.get(now["err"], "error %d" % now["err"]))
         d.out("".join("%s %s\n" % (k, now[k]) for k in sorted(now)))
         return 0
     verb = a[0]

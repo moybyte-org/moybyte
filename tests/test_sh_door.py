@@ -421,6 +421,10 @@ class _Media:
     def __init__(self):
         self.calls = []
         self.vol = 50
+        self.end = None
+
+    def last(self):
+        return self.end
 
     def play(self, src):
         self.calls.append(("play", src))
@@ -464,6 +468,10 @@ def test_device_faces_answer_through_the_door(console, monkeypatch):
     assert call(d, "role", "http", "http://x/") == 2
     io, d = door()
     assert call(d, "role", "media") == 0 and io.out == "state idle\n"
+    media.end = {"state": "failed", "err": 101, "pid": 9, "client": 1}
+    io, d = door()
+    assert call(d, "role", "media") == 0
+    assert io.out == "client 1\nerr 101\npid 9\nstate failed\nwhy no network\n"
     assert call(d, "role", "media", "play", "/music/a.mp3") == 0
     io, d = door()
     assert call(d, "role", "media", "volume", "30") == 0 and io.out == "30\n"

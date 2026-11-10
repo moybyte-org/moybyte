@@ -121,6 +121,24 @@ uint32_t moy_net_ms(void) {
     return (uint32_t)moy_net_ms64();
 }
 
+// THE NETWORK'S GATE (moy_net.h): the station's where the image has one.
+int moy_net_online(void) __attribute__((weak));
+
+static int offline(void) {
+    return moy_net_online != NULL && !moy_net_online();
+}
+
+int moy_net_await(uint32_t *since) {
+    if (!offline()) {
+        return 1;
+    }
+    uint32_t now = moy_net_ms() | 1u;
+    if (*since == 0) {
+        *since = now;
+    }
+    return now - *since < MOY_NET_DIAL_MS ? 0 : -MOY_NET_ENET;
+}
+
 static int trusted(int64_t floor, int64_t answer) {
     return answer != 0 && answer >= floor && answer - floor <= MOY_CLOCK_LEAP_MAX;
 }
@@ -591,6 +609,9 @@ static void conn_free(conn_t *c) {
 
 int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     *out = NULL;
+    if (offline()) {
+        return -MOY_NET_ENET;
+    }
     if (tls == MOY_CONN_TLS && !moy_conn_verifies()) {
         return -MOY_HTTPC_ETLS;
     }
@@ -892,6 +913,9 @@ int moy_conn_verifies(void) {
 
 int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     *out = NULL;
+    if (offline()) {
+        return -MOY_NET_ENET;
+    }
     if (tls != MOY_CONN_PLAIN) {
         return -EPROTONOSUPPORT;
     }

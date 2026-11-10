@@ -1527,31 +1527,19 @@ static void take_list(media_t *m) {
     }
 }
 
-#ifdef MEDIA_BOARD
-extern int moy_net_dialing(void) __attribute__((weak));
-
-// The station the console asked for, waited for here, a step at a time so a
-// command still reaches the task: 1 while it associates (MOY_NET_DIAL_MS at
-// most), 0 once the URL may open.
-static int awaiting_link(media_t *m) {
-    if (moy_net_dialing == NULL || !moy_net_dialing()) {
-        return 0;
-    }
-    uint32_t ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) | 1u;
-    if (m->dial_ms == 0) {
-        m->dial_ms = ms;
-    }
-    return ms - m->dial_ms < MOY_NET_DIAL_MS;
-}
-#endif
-
-// 0 while the URL waits for the link (the task polls again), else 1.
+// 0 while the URL waits for the link (the task polls again), else 1. Nothing
+// resolves its host before THE NETWORK'S GATE (moy_net.h) opens: the radio's
+// "media" row dials the station (THE BOOK), and the entry waits for it from
+// its begin, MOY_NET_DIAL_MS at most, then fails ENET (no network).
 static int open_url(media_t *m) {
-    #ifdef MEDIA_BOARD
-    if (awaiting_link(m)) {
+    int up = moy_net_await(&m->dial_ms);
+    if (up == 0) {
         return 0;
     }
-    #endif
+    if (up < 0) {
+        advance(m, -up);
+        return 1;
+    }
     LOCK(m);
     copy_text(m->pool + m->e_src[m->cur], m->url, sizeof(m->url));
     UNLOCK(m);

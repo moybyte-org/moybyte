@@ -69,7 +69,10 @@ row), the VM up or stopped; the console's frame finds a run one started
 
 THE RADIO. While a URL of the list may play, the run holds the radio's
 "media" tag under its own pid (`Workstation.wifi_hold`); its end lets it go
-in C (moy_media.c's reap), and this face settles the radio after it.
+in C (moy_media.c's reap), and this face settles the radio after it. The
+hold is taken after the C's play() begun the list, so a URL waits on the
+service's task for the link (moy_net.h's THE NETWORK'S GATE), MOY_NET_DIAL_MS
+at most, and then fails ENETUNREACH: "no network".
 
 WHAT RUNS IN C. play() is the C's (moy_media_play: the list, a playlist file
 read, the first entry begun), and a file plays with no Python at all: the
