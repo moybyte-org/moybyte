@@ -273,14 +273,22 @@ def test_the_service_keeps_another_node_s_text_with_its_signal(mesh):
     assert win.rows() == ["!a1b2c3d4 -112 dBm -8.5 dB: hello T-Deck"]
     log = pl.ns["prefs"].get("log")
     assert log == [{"from": "!a1b2c3d4", "text": "hello T-Deck", "rssi": -112, "snr": -8.5}]
-    # a repeat (a relay's copy), another channel and its own echo are dropped
+    # a repeat (a relay's copy), another channel, its own echo and a text
+    # to another node are dropped
     node = int(pl.ns["prefs"].get("node")[1:], 16)
     for again in (p, _node_packet(b"other", 0xA1B2C3D4, 4243, chash=9),
-                  _node_packet(b"echo", node, 99)):
+                  _node_packet(b"echo", node, 99),
+                  _node_packet(b"not yours", 0xA1B2C3D4, 4244, to=0x0BADCAFE)):
         assert lora_sim.air(again, 869525000, 11, bw=250000, sync=0x2B)
         N.step(0)
         _frames(drv)
     assert len(pl.ns["prefs"].get("log")) == 1
+    # a text to this node is its own to keep
+    assert lora_sim.air(_node_packet(b"yours", 0xA1B2C3D4, 4245, to=node), 869525000, 11,
+                        bw=250000, sync=0x2B)
+    N.step(0)
+    _frames(drv)
+    assert pl.ns["prefs"].get("log")[-1]["text"] == "yours"
 
 
 def test_a_new_region_retunes_the_radio(mesh):

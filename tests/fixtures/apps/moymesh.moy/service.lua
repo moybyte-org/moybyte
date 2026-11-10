@@ -395,10 +395,13 @@ local function fresh(frm, pid)
     return true
 end
 
+-- A text on the channel to everyone or to this node. One addressed to
+-- another node is not this one's to show, as a Meshtastic node's text
+-- module does not take it.
 local function heard(packet, rssi, snr)
     local h, portnum, payload = decode(packet, S.key, S.hash)
-    if h == nil or h[2] == S.node or not fresh(h[2], h[3]) or portnum ~= TEXT
-        or not utf8_ok(payload) then
+    if h == nil or h[2] == S.node or (h[1] ~= BROADCAST and h[1] ~= S.node)
+        or not fresh(h[2], h[3]) or portnum ~= TEXT or not utf8_ok(payload) then
         return
     end
     log({ from = node_name(h[2]), text = payload, rssi = rssi, snr = snr })
