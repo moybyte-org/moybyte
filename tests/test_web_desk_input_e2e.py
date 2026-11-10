@@ -183,7 +183,7 @@ def test_the_mouse_selects_and_autoscrolls_the_code_in_chrome(tmp_path, base):
         _probe("START"),
         {"move": at(0, 0)},
         {"drag": at(0, 0) + at(0, 4) + [4]}, {"wait": 300}, _probe("DRAGGED"),
-        {"click": at(1, 2), "settle": 60}, {"click": at(1, 2)}, _probe("WORD"),
+        {"dblclick": at(1, 2)}, _probe("WORD"),
         {"click": at(0, 0)}, {"click": at(0, 3), "mods": ["shift"]}, _probe("SHIFTED"),
         {"move": at(4, 10)},
         {"middle": at(4, 10) + at(4, 10)}, {"move": at(4, 10)},

@@ -45,6 +45,34 @@ def apply_ws_text(payload, apply):
         pass
 
 
+def frame_cut(events):
+    """How many of `events`, in order, one frame takes. The pointer is read
+    once a frame, so a frame takes at most one change of it: a press, the
+    held pointer's moves, or the release. A slow frame lets a whole gesture
+    reach the next one in one batch, and taking it whole would lose what
+    lies between -- a double click's second press merges into the first, a
+    drag's last place is never seen held -- so the frame stops before a
+    second press, before a move after its press (the press keeps its own
+    place), and before a release after a move; the rest waits for the next
+    frame. A press and its release together stay one frame: a click."""
+    pressed = moved = False
+    i = 0
+    for ev in events:
+        t = ev.get("type") if isinstance(ev, dict) else None
+        if t == "down":
+            if pressed:
+                return i
+            pressed = True
+        elif t == "move":
+            if pressed:
+                return i
+            moved = True
+        elif t == "up" and moved:
+            return i
+        i += 1
+    return i
+
+
 def apply_events(events, input, pointer, on_press=None, on_pan=None,
                  on_key=None, on_esc=None, on_hold=None, on_key_hold=None,
                  on_super=None, on_full=None, on_key_down=None, on_key_up=None,

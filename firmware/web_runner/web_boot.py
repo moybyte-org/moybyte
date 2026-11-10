@@ -40,7 +40,8 @@ JS contract (see worker.js):
                                      JSON string; the PIXELS travel separately
     fb_addr() / fb_len()          -> the framebuffer's wasm-heap address and
                                      byte length, read by the worker
-    apply_events_json(text)       -> feed an {"events":[...]} JSON text batch
+    apply_events_json(text)       -> queue an {"events":[...]} JSON text batch
+                                     for the next step
     open_cart(name)               -> select+run a cart by folder name or title
     gpio_enable(pins_json)        -> the host answered POST /gpio: wire the
                                      pin verbs (absent otherwise -- see #9)
@@ -960,6 +961,7 @@ def step_frame_json(dt, audio_ahead=-1.0):
         au.ahead = float(audio_ahead)
     painted_before = ws.frame_state.frames_drawn
     pulled = au.rendered if au is not None and hasattr(au, "rendered") else None
+    _feed_events()
     _S["driver"].frame(dt)
     painted = ws.frame_state.frames_drawn != painted_before
     if pulled is not None and au.rendered == pulled and _media_open():
@@ -1424,6 +1426,23 @@ def idle_collect():
 
 
 def apply_events_json(text):
-    """Feed a browser {"events":[...]} JSON text batch through the ONE shared
-    decode path (the same wire format the WS transports speak)."""
-    web_input.apply_ws_text(text, _apply)
+    """Queue a browser {"events":[...]} JSON text batch for the next frame,
+    which feeds it through the ONE shared decode path (the same wire format
+    the WS transports speak)."""
+    web_input.apply_ws_text(text, _S.setdefault("evq", []).extend)
+
+
+def _feed_events():
+    """One frame's share of the queued events, in order: all of them, or as
+    many as keep each change of the pointer its own frame; the next frame
+    takes the rest (`web_input.frame_cut`)."""
+    q = _S.get("evq")
+    if not q:
+        return
+    n = web_input.frame_cut(q)
+    if n == len(q):
+        _S["evq"] = []
+        _apply(q)
+    else:
+        _S["evq"] = q[n:]
+        _apply(q[:n])

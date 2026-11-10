@@ -13,6 +13,8 @@
 //   {"wait":ms} {"shot":"name"} {"click":[x,y]} {"move":[x,y]}
 //   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"key":"z","mods":["ctrl"]}
 //   {"key":"Meta"} (a modifier alone) {"click":[x,y],"mods":["shift"]}
+//   {"dblclick":[x,y]} (two clicks back to back, the second with Chrome's
+//                       clickCount 2, as a person's double click arrives)
 //   {"wheel":[x,y,dx,dy]} {"middle":[x0,y0,x1,y1,steps]} {"js":"..."} {"note":"..."}
 //   {"file":"path|$ENVVAR","as":"__name"}   local bytes -> window.__name
 //                                           (an ArrayBuffer, for the drop paths)
@@ -280,6 +282,16 @@ for (const step of scenario.steps || []) {
             await mouse("mousePressed", step.click[0], step.click[1], "left", 1, m);
             await sleep(80);
             await mouse("mouseReleased", step.click[0], step.click[1], "left", 1, m);
+            await sleep(step.settle ?? 400);
+        }
+        if (step.dblclick) {
+            const p = await toPage(step.dblclick[0], step.dblclick[1]);
+            for (const n of [1, 2]) {
+                for (const type of ["mousePressed", "mouseReleased"]) {
+                    await cdp("Input.dispatchMouseEvent", { type, x: p.x, y: p.y,
+                        button: "left", clickCount: n, buttons: type === "mousePressed" ? 1 : 0 });
+                }
+            }
             await sleep(step.settle ?? 400);
         }
         if (step.wheel) {
