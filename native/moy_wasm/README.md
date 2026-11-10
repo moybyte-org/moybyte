@@ -382,7 +382,14 @@ open: `[stack <low end>+<how far it has moved> bound +<the env's boundary> set
 here|elsewhere]`, the last word saying whether the env was last entered on the
 session's thread. A trap with bound and set at the guard, entered here, a
 small frame and plenty free is one the check should not have made. The P4
-suites' Deep Wasm fixture recurses without end to read them.
+suites' Deep Wasm fixture recurses without end to read them. The table the
+check reads its frame sizes from is a data section, and the loader gives a
+data section only its mapping's alignment; RISC-V code addresses an entry as
+the table's `%hi` with the entry's offset in its `%lo` alone, which reads
+4 KB away (a trap of exactly that shape) when the 16-aligned table sits 8
+bytes short of a 0x800 boundary. So the fork's ESP-IDF `os_mmap` starts
+every mapping on a 64-byte boundary, and `tests/test_wasm_module.py` holds
+every section these flags emit to it.
 
 ## A cart too big for the board
 

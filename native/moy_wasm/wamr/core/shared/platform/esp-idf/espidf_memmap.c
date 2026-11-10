@@ -52,21 +52,29 @@ mmap_caps(size_t size, int prot)
     return MALLOC_CAP_8BIT;
 }
 
+/* Where a mapping starts: a 64-byte boundary. The loader lays a module's data
+ * sections out at page-aligned offsets from the start of one mapping, so each
+ * section is as aligned as the mapping is, and the compiled code relies on a
+ * section's own alignment: the stack-size table is aligned 16, so RISC-V code
+ * addresses an entry as the table's %hi with the entry's offset in its %lo
+ * alone, which reads 4 KB away when the table sits 8 bytes short of a 0x800
+ * boundary. 64 covers every section alignment the ESP32-S3 and ESP32-P4
+ * targets emit, and is the cache line os_icache_flush syncs in. */
+#define MMAP_ALIGN 64
+
 void *
 os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
 {
-    /* heap_caps_malloc returns 4-byte aligned blocks: reserve room to align
-       to 8 and to keep the originally allocated address just below the
-       returned one, where os_free finds it. */
-    void *buf_origin =
-        heap_caps_malloc(size + 4 + sizeof(uintptr_t), mmap_caps(size, prot));
+    /* Room to align to MMAP_ALIGN and to keep the originally allocated
+       address just below the returned one, where os_munmap finds it. */
+    void *buf_origin = heap_caps_malloc(size + sizeof(uintptr_t) + MMAP_ALIGN,
+                                        mmap_caps(size, prot));
     if (!buf_origin) {
         return NULL;
     }
-    void *buf_fixed = buf_origin + sizeof(void *);
-    if ((uintptr_t)buf_fixed & (uintptr_t)0x7) {
-        buf_fixed = (void *)((uintptr_t)(buf_fixed + 4) & (~(uintptr_t)7));
-    }
+    void *buf_fixed =
+        (void *)(((uintptr_t)buf_origin + sizeof(uintptr_t) + MMAP_ALIGN - 1)
+                 & ~(uintptr_t)(MMAP_ALIGN - 1));
 
     uintptr_t *addr_field = buf_fixed - sizeof(uintptr_t);
     *addr_field = (uintptr_t)buf_origin;

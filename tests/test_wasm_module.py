@@ -127,3 +127,47 @@ def test_the_hello_module_carries_its_key(tmp_path, chip):
     assert data[:4] == b"\0aot"
     assert text.encode() in data
     assert wm.verify(data, chip, TEST_KEYS) is None
+
+
+def _alloc_section_aligns(obj):
+    """{section name: alignment} of an ELF32 object's allocated sections."""
+    import struct
+    shoff, = struct.unpack_from("<I", obj, 0x20)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", obj, 0x2e)
+    hdrs = [struct.unpack_from("<10I", obj, shoff + i * shentsize) for i in range(shnum)]
+    names = hdrs[shstrndx][4]
+
+    def name(off):
+        return obj[names + off:obj.index(b"\0", names + off)].decode()
+    return {name(h[0]): h[8] for h in hdrs if h[2] & 0x2}
+
+
+@pytest.mark.skipif(not _compilers_here(), reason="no pinned wamrc in "
+                    "experiments/wasm_aot/toolchain/dist (tools/wasm_module.py "
+                    "compilers fetches them)")
+@pytest.mark.parametrize("chip", ["esp32s3", "esp32p4"])
+def test_every_section_fits_the_alignment_a_mapping_starts_on(tmp_path, chip):
+    """The loader places a module's data sections at page-aligned offsets
+    from the start of one os_mmap mapping, so a section is only as aligned as
+    the mapping, and the compiled code relies on the section's own alignment
+    (RISC-V addresses a stack-size entry as the table's %hi with the entry's
+    offset in its %lo alone). The vendored ESP-IDF os_mmap's MMAP_ALIGN must
+    cover every allocated section these flags emit."""
+    if not (shutil.which("clang") or os.path.isfile(
+            os.path.join(wm.SPIKE, "toolchain", "wasi-sdk", "bin", "clang"))):
+        pytest.skip("no clang with a wasm32 backend")
+    import subprocess
+    memmap = open(os.path.join(ROOT, "native", "moy_wasm", "wamr", "core", "shared",
+                               "platform", "esp-idf", "espidf_memmap.c"),
+                  encoding="utf-8").read()
+    align = int(re.search(r"#define MMAP_ALIGN (\d+)", memmap).group(1))
+    target = dict(wm.fields(chip))["target"]
+    for name, wasm in (("hello", wm.hello_wasm()), ("misaligned", wm.misaligned_wasm()),
+                       ("conversions", wm.conversions_wasm())):
+        src, obj = tmp_path / (name + ".wasm"), tmp_path / (name + ".o")
+        src.write_bytes(wasm)
+        subprocess.run([wm.compiler(target)] + wm.wamrc_flags(chip)
+                       + ["--format=object", "-o", str(obj), str(src)],
+                       check=True, capture_output=True, cwd=str(tmp_path))
+        aligns = _alloc_section_aligns(obj.read_bytes())
+        assert aligns and max(aligns.values()) <= align, (name, chip, aligns)

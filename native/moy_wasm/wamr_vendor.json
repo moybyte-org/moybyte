@@ -56,7 +56,7 @@
     "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_clock.c": "65d924f720db9cd8da5f4d2437044b4e9487d5b6eb3c6905704ab0c0d12d057c",
     "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_file.c": "5796aa0c23f51610eef8f985166792eb0493afe19ed9651d6c38b9d33a33202d",
     "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_malloc.c": "7cf3b15389831ef174cde33efb3e79a9cd170c4ace57f46c7ebef5159e379a18",
-    "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_memmap.c": "615cee0e33870f18333d712e0ba720859e219fe3865ced5e5c842ae4f109f155",
+    "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_memmap.c": "adf8fe79b3fb776cad20cdd70e0cc463208065c22417855ad3ccc9cd675e90f3",
     "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_platform.c": "2c864ce304370d34486fd2c438205a0bf5f096055599e74339d54cca1be8d6da",
     "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_socket.c": "efb1b981da5f6c11014489cb200803be4681b86f465e2674cdec75145e66462e",
     "native/moy_wasm/wamr/core/shared/platform/esp-idf/espidf_thread.c": "5340de51a2bd1bae913803b8449e1e06fb93a0937e8136b6ddc536814e6ef1e9",
@@ -92,8 +92,8 @@
   },
   "upstream": {
     "branch": "moybyte-2.4.5",
-    "commit": "c207804a822d8e8a4bd78a426c1430a9293441c2",
-    "date": "2026-11-09",
+    "commit": "a7f7e18c85d347d3dd2b05b74108011dc2b50a35",
+    "date": "2026-11-10",
     "repo": "moybyte-org/wasm-micro-runtime"
   }
 }
