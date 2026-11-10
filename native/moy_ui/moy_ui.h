@@ -1042,6 +1042,11 @@ int moy_ui_row2(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_row2_t *r, 
                 int desk);
 // A two-line row's height at the scale.
 int moy_ui_row2_h(int fs, int desk);
+// The "More below" cue in the band a snapping page's foot leaves (its
+// left-out units' room): the band on the page's ground, a down chevron and
+// the words in the caption face's dim ink, centred. The band it needs.
+int moy_ui_more(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
+int moy_ui_more_h(const moy_ui_sink_t *s, int fs, int desk);
 // The signal glyph (ui.bubble's head, ui.info's `signal`): four bars,
 // bottom-aligned, from x with their feet at `foot`, `n` lit in `ink_dim`,
 // the rest `ink_dim` mixed into `under` (wire order). Its width.

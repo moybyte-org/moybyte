@@ -9,6 +9,7 @@ def _layout(w, h, fs):
 
 
 HOME = ("Srbija", "Planinari", "Ana Ridge", "Base Camp")
+CHANNELS = ("LongFast", "Planinari", "Base", "Open", "Family")
 
 
 def _draw():
@@ -71,3 +72,17 @@ def _draw():
                                "marks": ["", "lock", "lock", "lock"]})
         ui.group()
         ui.link("Nodes", "4 heard")
+    elif page == 8:
+        ui.scroll("radio", {"snap": True})
+        ui.group("This node")
+        ui.info("Name", "moybyte-beef")
+        ui.info("Short name", "BEEF")
+        ui.info("Id", "!A1B2BEEF")
+        ui.group("Mesh")
+        ui.link("Preset", "MediumFast")
+        ui.link("Region", "EU_868")
+        ui.group("Channels")
+        ui.list("", CHANNELS, 0, {"values": ["Primary", "256-bit key", "128-bit key",
+                                             "No key", "256-bit key"]})
+        ui.group()
+        ui.scroll()

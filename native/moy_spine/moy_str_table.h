@@ -4,7 +4,7 @@
 #ifndef MOY_STR_TABLE_H
 #define MOY_STR_TABLE_H
 
-#define MOY_STRINGS 76
+#define MOY_STRINGS 77
 
 // The string ids.
 enum {
@@ -84,6 +84,7 @@ enum {
     MOY_S_WEB_RESTARTING = 73,
     MOY_S_UI_ON = 74,
     MOY_S_UI_OFF = 75,
+    MOY_S_UI_MORE_BELOW = 76,
 };
 
 extern const char *const moy_str_ids[MOY_STRINGS];

@@ -449,6 +449,21 @@ local open = ui.list("", {"LongFast", "Ana Ridge"}, -1,
 ui.group()
 ```
 
+**A settings page shows whole rows.** `{snap = true}` on `ui.page` or
+`ui.scroll` leaves out a row the view's edge would cut (a group's caption
+goes with its first row, a list's rows are each a row), and the band the
+foot leaves says "More below":
+
+```lua
+ui.scroll("radio", {snap = true})
+ui.group("This node")
+ui.info("Name", name)
+ui.group("Channels")
+ch = ui.list("", channels, ch, {values = kinds})
+ui.group()
+ui.scroll()
+```
+
 **A finger's rows come by themselves.** On a board whose tap floor stands
 (the Guition S3's 3.5-inch glass), a `ui.list` row is 36 px tall and a
 bubble takes larger pads and faces; the app's code is the same on every

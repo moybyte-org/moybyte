@@ -173,6 +173,11 @@ void mua_edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int
 void mua_thumb(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
                int scroll);
 void mua_foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+// Snapping pages (moy_ui_ctx_t's snap): whether a unit's piece is left out,
+// and the page just opened snapping where its `o` says so.
+int mua_snap_out(moy_ui_ctx_t *c, int y, int h, int unit);
+void mua_snap_open(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const moy_ui_over_t *o);
+const moy_ui_over_t *mua_snap_whole(const moy_ui_over_t *o, moy_ui_over_t *copy);
 int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind);
 
 // moy_ui_api_kept.c

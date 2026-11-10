@@ -287,6 +287,8 @@ typedef struct {
     int8_t keep;
     uint8_t stop, kind;             // kind: 1 a scroll region, 2 a dialog, 3 a popover
     int16_t used;                   // a dialog or popover: the body height it was laid out for
+    int8_t snap, snap_more;         // the outer page's snap state (moy_ui_ctx_t's)
+    int16_t snap_cut, snap_cap, snap_cue_h;
 } moy_ui_nest_t;
 #define MOY_UI_API_NEST 2
 // What a verb that opens a nest (ui.scroll, ui.text_view, ui.dialog,
@@ -674,6 +676,15 @@ typedef struct {
     moy_ui_inst_t *inst;
     uint32_t scope;
     uint8_t no_foot;
+    // A page or scroll region under `snap` shows whole units only (a stacked
+    // row; a group's caption with its first row; a list's row): snap_out the
+    // row placed last is left out, snap_rows the next placement is a list
+    // whose rows are its units, snap_more its rows ran on past its foot last
+    // frame (so the foot keeps snap_cue_h for the "More below" cue);
+    // snap_cut the screen row the left-out units at its foot start at, and
+    // snap_cap a caption's top waiting for its first row (INT16_MIN none).
+    int8_t snap, snap_out, snap_rows, snap_more;
+    int16_t snap_cut, snap_cap, snap_cue_h;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one, of

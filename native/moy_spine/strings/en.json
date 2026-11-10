@@ -76,6 +76,7 @@
     "web.open": "Open this in a browser:",
     "web.restarting": "The console is restarting...",
     "ui.on": "On",
-    "ui.off": "Off"
+    "ui.off": "Off",
+    "ui.more_below": "More below"
   }
 }

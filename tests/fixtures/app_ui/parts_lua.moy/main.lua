@@ -64,5 +64,19 @@ function _draw()
              marks = {"", "lock", "lock", "lock"}})
     ui.group()
     ui.link("Nodes", "4 heard")
+  elseif page == 8 then
+    ui.scroll("radio", {snap = true})
+    ui.group("This node")
+    ui.info("Name", "moybyte-beef")
+    ui.info("Short name", "BEEF")
+    ui.info("Id", "!A1B2BEEF")
+    ui.group("Mesh")
+    ui.link("Preset", "MediumFast")
+    ui.link("Region", "EU_868")
+    ui.group("Channels")
+    ui.list("", {"LongFast", "Planinari", "Base", "Open", "Family"}, 1,
+            {values = {"Primary", "256-bit key", "128-bit key", "No key", "256-bit key"}})
+    ui.group()
+    ui.scroll()
   end
 end

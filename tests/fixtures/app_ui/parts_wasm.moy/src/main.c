@@ -181,5 +181,21 @@ EXPORT(_draw) void _draw(void) {
         ui_list("", 0, S("Srbija\0Planinari\0Ana Ridge\0Base Camp"), -1, over_buf, over_n);
         ui_group("", 0, NULL, 0);
         ui_link(S("Nodes"), S("4 heard"), NULL, 0);
+    } else if (page == 8) {
+        over_begin(2048);                   // MOY_UI_O_SNAP
+        ui_scroll(S("radio"), over_buf, over_n);
+        ui_group(S("This node"), NULL, 0);
+        ui_info(S("Name"), S("moybyte-beef"), NULL, 0);
+        ui_info(S("Short name"), S("BEEF"), NULL, 0);
+        ui_info(S("Id"), S("!A1B2BEEF"), NULL, 0);
+        ui_group(S("Mesh"), NULL, 0);
+        ui_link(S("Preset"), S("MediumFast"), NULL, 0);
+        ui_link(S("Region"), S("EU_868"), NULL, 0);
+        ui_group(S("Channels"), NULL, 0);
+        over_begin(4194304);                // MOY_UI_O_VALUES
+        over_text(S("Primary\0" "256-bit key\0" "128-bit key\0No key\0" "256-bit key"));
+        ui_list("", 0, S("LongFast\0Planinari\0Base\0Open\0Family"), 0, over_buf, over_n);
+        ui_group("", 0, NULL, 0);
+        ui_scroll("", 0, NULL, 0);
     }
 }

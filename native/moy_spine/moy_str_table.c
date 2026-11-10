@@ -80,6 +80,7 @@ const char *const moy_str_ids[MOY_STRINGS] = {
     "web.restarting",
     "ui.on",
     "ui.off",
+    "ui.more_below",
 };
 
 const char *const moy_str_en[MOY_STRINGS] = {
@@ -159,4 +160,5 @@ const char *const moy_str_en[MOY_STRINGS] = {
     "The console is restarting...",
     "On",
     "Off",
+    "More below",
 };

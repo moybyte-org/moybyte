@@ -25,6 +25,9 @@ P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
      icon, or a person's initials), title, tag or mark, time, second line
      and count badge (`o.subs`, `icons`, `values`, `tags`, `marks`,
      `counts`), then a link in no group.
+  8  a settings page in a ui.scroll region under `snap`, run on past its
+     foot: whole units only (a caption with its first row, each row, each
+     of a list's rows) and the "More below" cue in the band the foot leaves.
 """
 
 import os
@@ -42,7 +45,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2, 3, 4, 5, 6, 7)
+PAGES = (1, 2, 3, 4, 5, 6, 7, 8)
 CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 

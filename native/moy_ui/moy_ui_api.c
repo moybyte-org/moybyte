@@ -1591,6 +1591,34 @@ static void peek_note(moy_ui_ctx_t *c, int t, int h) {
     }
 }
 
+// Whether a unit's piece at screen rows y..y+h of a snapping page, its unit
+// starting at `unit`, is left out: the page's top cuts it, or its foot (less
+// the cue's band where the rows run on) cuts it or a unit before it. A unit
+// the foot cuts starts the band the cue holds. A piece taller than the view
+// is never left out.
+int mua_snap_out(moy_ui_ctx_t *c, int y, int h, int unit) {
+    int top = c->page.y, foot = top + c->page.h - (c->snap_more ? c->snap_cue_h : 0);
+    if (!c->snap || h > foot - top) {
+        return 0;
+    }
+    if (y + h > foot && unit < c->snap_cut) {
+        c->snap_cut = (int16_t)(unit > top ? unit : top);
+    }
+    return y < top || y + h > foot || unit >= c->snap_cut;
+}
+
+// A stacked row placed at screen row y, h tall, on a snapping page.
+static void snap_place(moy_ui_ctx_t *c, int y, int h) {
+    if (c->snap_rows) {
+        c->snap_rows = 0;           // a list's rows are its units: it leaves them out itself
+        c->snap_out = 0;
+        return;
+    }
+    int unit = c->snap_cap != INT16_MIN ? c->snap_cap : y;
+    c->snap_cap = INT16_MIN;
+    c->snap_out = (int8_t)mua_snap_out(c, y, h, unit);
+}
+
 // The next call's box: ui.at's, or the next row of the page. *stacked says
 // which (a row clips to the page); a row a popover's cut may peek is `row`.
 moy_ui_box_t mua_place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
@@ -1599,13 +1627,18 @@ moy_ui_box_t mua_place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
     c->row_glyph = c->icon_glyph;
     c->icon_slot = c->icon_glyph = -1;
     c->at_last = c->has_at;
+    c->snap_out = 0;
     if (c->has_at) {
         c->has_at = 0;
+        c->snap_rows = 0;
         *stacked = 0;
         return c->at;
     }
     *stacked = 1;
     moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->y - c->scroll), c->page.w, (int16_t)h};
+    if (c->snap) {
+        snap_place(c, b.y, h);
+    }
     int gap = metric(MOY_UI_M_ROW_STACK_GAP) * c->fs;
     if (c->grp_open) {
         // a group's rows sit on its card, one under the next
@@ -1981,7 +2014,7 @@ int mua_clip_row(moy_ui_ctx_t *c, clip_t *k, const moy_ui_sink_t *s, moy_ui_box_
     k->c = NULL;
     int cast = c->fl_cast;
     c->fl_cast = 0;
-    if (stacked && (b.y + b.h <= in.y || b.y >= in.y + in.h)) {
+    if (stacked && (b.y + b.h <= in.y || b.y >= in.y + in.h || c->snap_out)) {
         return 0;
     }
     if (!mua_armed(c)) {
@@ -2046,6 +2079,7 @@ void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stack
 // The open group ends: its card's foot under its last row, and the gap the
 // next group's caption keeps.
 void mua_group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    c->snap_out = 0;
     if (!c->grp_open) {
         return;
     }
@@ -2679,6 +2713,10 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags,
     c->y = 0;
     c->scroll = 0;
     c->page_keep = -1;
+    c->snap = c->snap_out = c->snap_rows = c->snap_more = 0;
+    c->snap_cut = INT16_MAX;
+    c->snap_cap = INT16_MIN;
+    int32_t rows = k != NULL ? k->b : 0;
     if (k != NULL) {
         // the rows' height less what shows of them: the page less the hint
         // band its foot gave up last frame
@@ -2696,6 +2734,7 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags,
             k->a = 0;
         }
         c->scroll = (int16_t)k->a;
+        c->snap_more = (int8_t)(rows > c->scroll + ct.h);
         k->b = 0;
         c->page_keep = (int8_t)(k - c->keep);
         if (mua_armed(c) && c->fl_stage == 0 && id == c->sh_id) {
@@ -2794,6 +2833,8 @@ void mua_page_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      const moy_ui_over_t *o, moy_ui_box_t *content) {
     o = mua_over(o);
+    moy_ui_over_t whole;
+    o = mua_snap_whole(o, &whole);
     mua_grid_end(c, s);
     mua_group_close(c, s);
     if (c->n_nest == 0) {
@@ -2834,6 +2875,7 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     // a page's id is its title, or `o.id` where two pages share one
     moy_ui_span_t pid = o->id.p != NULL ? o->id : title;
     open_page(c, mua_hash(pid.p, pid.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0, o, ct);
+    mua_snap_open(c, s, o);
     if (content != NULL) {
         *content = ct;
     }
@@ -3096,6 +3138,11 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
     if (c->n_cap_cur < MOY_UI_API_CAPS && c->page_stop != NO_PAGE) {
         c->cap_cur[c->n_cap_cur++] = (moy_ui_cap_t){b.y, b.h, c->page_stop};
     }
+    if (c->snap) {
+        // the caption and its first row are one unit
+        c->snap_out = (int8_t)mua_snap_out(c, b.y, b.h, b.y);
+        c->snap_cap = b.y;
+    }
     clip_t cl;
     moy_ui_box_t cb = b;
     if (!c->cls) {
@@ -3107,6 +3154,7 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
         moy_ui_caption(s, cb, caption, c->fs, c->cls);
         mua_clip_out(&cl);
     }
+    c->snap_out = 0;
     c->grp_open = 1;
     c->grp_n = 0;
     c->grp_top = c->y;
@@ -3330,6 +3378,9 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         moy_ui_api_label(c, s, label, NULL);
     }
     int stacked;
+    int lunit = c->snap_cap;          // a caption's top, its first row's unit
+    c->snap_cap = INT16_MIN;
+    c->snap_rows = c->snap;
     moy_ui_box_t b = mua_place(c, (count ? count : 1) * rh, &stacked);
     uint32_t id = mua_id_of(c, o, label);
     int disabled = o->disabled == 1;
@@ -3404,7 +3455,8 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                 e++;
             }
             int ry = b.y + i * rh - offset;
-            if (ry + rh > b.y && ry < b.y + b.h) {
+            if (ry + rh > b.y && ry < b.y + b.h
+                && !(stacked && mua_snap_out(c, ry, rh, i == 0 && lunit != INT16_MIN ? lunit : ry))) {
                 moy_ui_span_t t = {items + at, (uint16_t)(e - at)};
                 moy_ui_row_t r;
                 row_init(&r, t, c->fs, col);
@@ -3972,6 +4024,24 @@ int mua_pmetric(const moy_ui_ctx_t *c, int slot) {
 // Open a nested page (a scroll region, kind 1; a dialog's body, kind 2; a
 // popover's, kind 3) in
 // box b, the outer one kept until it closes.
+// A snapping view draws whole: `o` with no gen (in *copy where it had one).
+const moy_ui_over_t *mua_snap_whole(const moy_ui_over_t *o, moy_ui_over_t *copy) {
+    if (o->snap != 1 || !o->has_gen) {
+        return o;
+    }
+    *copy = *o;
+    copy->has_gen = 0;
+    return copy;
+}
+
+// The page just opened snaps where `o` says so (ui.page's, ui.scroll's `snap`).
+void mua_snap_open(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const moy_ui_over_t *o) {
+    c->snap = (int8_t)(o != NULL && o->snap == 1);
+    if (c->snap) {
+        c->snap_cue_h = (int16_t)moy_ui_more_h(s, c->fs, mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0));
+    }
+}
+
 void mua_nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int used,
                    int flags, const moy_ui_over_t *o) {
     moy_ui_box_t outer = c->page;
@@ -3983,6 +4053,11 @@ void mua_nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int u
     n->stop = c->page_stop;
     n->kind = (uint8_t)kind;
     n->used = (int16_t)used;
+    n->snap = c->snap;
+    n->snap_more = c->snap_more;
+    n->snap_cut = c->snap_cut;
+    n->snap_cap = c->snap_cap;
+    n->snap_cue_h = c->snap_cue_h;
     open_page(c, id, b, flags | (kind >= 2 || mua_in_dialog(c) ? STOP_MODAL : 0)
                         | (kind >= 2 ? STOP_CARD : 0), o, outer);
 }
@@ -4040,6 +4115,19 @@ void mua_thumb(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows
 
 void mua_foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     moy_ui_keep_t *k = mua_page_keep(c);
+    if (c->snap) {
+        // whole units, no fades: the band the foot's left-out units leave
+        // holds the "More below" cue
+        int bottom = c->page.y + c->page.h;
+        if (k != NULL && !c->no_foot && c->snap_cut < bottom) {
+            moy_ui_box_t b = {c->page.x, c->snap_cut, c->page.w, (int16_t)(bottom - c->snap_cut)};
+            clip_t kk;
+            EACH_PIECE(c, kk, s, b) {
+                moy_ui_more(s, b, c->fs, mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0));
+            }
+        }
+        return;
+    }
     if (k != NULL && !c->no_foot) {
         mua_edge_fades(c, s, c->page, k->b, c->scroll, MOY_UI_DEFAULT, 0, FADE_H * c->fs);
     }
@@ -4077,12 +4165,20 @@ int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
     c->scroll = n->scroll;
     c->page_keep = n->keep;
     c->page_stop = n->stop;
+    c->snap = n->snap;
+    c->snap_more = n->snap_more;
+    c->snap_cut = n->snap_cut;
+    c->snap_cap = n->snap_cap;
+    c->snap_cue_h = n->snap_cue_h;
+    c->snap_out = 0;
     return took;
 }
 
 int32_t moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                           const moy_ui_over_t *o) {
     o = mua_over(o);
+    moy_ui_over_t whole;
+    o = mua_snap_whole(o, &whole);
     if (id.n == 0) {
         mua_nest_close(c, s, 1);
         return 0;
@@ -4106,5 +4202,6 @@ int32_t moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     mua_nest_open(c, 1, mua_hash(id.p, id.n, SCROLL_SALT), b, used,
                   (o->nav == 0 ? STOP_NAV_OFF : 0) | (placed ? STOP_AT : 0), o);
+    mua_snap_open(c, s, o);
     return 0;
 }
