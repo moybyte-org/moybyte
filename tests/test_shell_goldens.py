@@ -855,8 +855,12 @@ def _surface_plan(ws, cfg):
 
     plan.append(("script_console", run_script))
     plan.append(("web_console", park))
+    from runtime import ui_draw
+    kind = ui_draw.input_kind(), ui_draw.hint_kind()
+    if cfg.get("appearance") and not cfg["windowed"]:
+        kind = ("tdeck", "tdeck")       # the handheld rows run on the T-Deck's keys
     plan += _terminal_plan(ws, cfg)
-    plan.append(("open_with", lambda: _open_with(ws, home)))
+    plan.append(("open_with", lambda: (_input_as_built(kind), _open_with(ws, home))))
     plan.append(("pick", lambda: _pick(ws, home)))
     plan.append(("app_files_document", lambda: _files_document(ws)))
     plan.append(("app_moymesh", _mesh_installed(ws, desktop)))
@@ -893,6 +897,15 @@ def _two_windows(ws):
         wm._resize_window(term, dw * 3 // 5, dh * 3 // 5)
         wm._move_window(term, dx + dw // 3, dy + dh // 3)
     return run
+
+
+def _input_as_built(kind):
+    """The input the config's console was built under, back after the
+    Terminal's rows left touch in use: under touch no focus mark and no hint
+    strip draws, so the surfaces after them would show none."""
+    from runtime import ui_draw
+    ui_draw.input_kind(kind[0])
+    ui_draw.hint_kind(kind[1])
 
 
 def _open_with(ws, home):
