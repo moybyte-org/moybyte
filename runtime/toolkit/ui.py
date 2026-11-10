@@ -181,6 +181,9 @@ _TUPLE = type(())
 _LIST = type([])            # `list` is the verb below
 
 
+_ROWS = ("subs", "icons", "counts", "tags", "marks")     # MOY_UI_OR_*'s order
+
+
 def _over(o):
     """The override table as the engine reads it: the dict where the module
     takes one, else its block (moy_ui_api.h); None for none."""
@@ -188,6 +191,12 @@ def _over(o):
         return None
     if _OVER_DICT:
         return o
+    return _block(o)
+
+
+def _block(o):
+    """The override block of table `o` (a frame of its own: its many locals
+    would cost the dict's path a heap frame under MicroPython)."""
     oid = o.get("id")
     idb = b"" if oid is None else str(oid).encode("utf-8")
     hint = o.get("hint")
@@ -210,11 +219,18 @@ def _over(o):
     sig = o.get("signal")
     vals = o.get("values")
     check = o.get("check")
+    rows = [o.get(k) for k in _ROWS]
+    card = o.get("card")
+    rmask = 0
+    for i in range(5):
+        if rows[i] is not None:
+            rmask |= 1 << i
     flags = None
     if (wash is not None or lead is not None or gen is not None or part is not None or bar
             or axis or snap or offset is not None or spill is not None or keep is not None
             or ov is not None or whole or across is not None or at is not None or shift
-            or fade or sig is not None or vals is not None or check):
+            or fade or sig is not None or vals is not None or check or rmask
+            or card):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
@@ -224,7 +240,8 @@ def _over(o):
                  | (262144 if at is not None else 0) | (524288 if shift else 0)
                  | (1048576 if fade else 0) | (2097152 if sig is not None else 0)
                  | (4194304 if vals is not None else 0) | (8388608 if check else 0)
-                 | (16777216 if wash == "view" else 0))
+                 | (16777216 if wash == "view" else 0) | (33554432 if rmask else 0)
+                 | (67108864 if card else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -253,6 +270,12 @@ def _over(o):
     if vals is not None:
         vb = "\0".join([str(v) for v in vals]).encode("utf-8")
         tail += _pack("<i", len(vb)) + vb
+    if rmask:
+        tail += _pack("<i", rmask)
+        for r in rows:
+            if r is not None:
+                rb = "\0".join([str(v) for v in r]).encode("utf-8")
+                tail += _pack("<i", len(rb)) + rb
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -331,7 +354,14 @@ def slider(label, v, lo, hi, o=None):
 def list(label, items, cur, o=None):
     """Rows of `items` under `label`, `cur` (from 0, -1 none) wearing the
     current mark; up and down move in it until its first or last row, and
-    activation makes the focused row current: the new `cur`."""
+    activation makes the focused row current: the new `cur`. `o.values` is
+    a text a row at its right in the dim ink, `o.check` the check icon on
+    the current row. `o.subs` makes each row two-line: its item the title,
+    its sub the caption line under it, its value the time on the title's
+    line; `o.icons` leads each row with an icon (an entry "@" and a name:
+    that person's initials on a disc), `o.counts` puts a badge at its
+    right ("" or 0 none; a row with one draws its title in `value`),
+    `o.tags` a pill after its title and `o.marks` an icon there."""
     t = _T
     k = type(items)
     b = items if _SEQ and (k is _TUPLE or k is _LIST) else \

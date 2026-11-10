@@ -468,7 +468,9 @@ class _Over(c.Structure):
                 ("over_w", c.c_int16), ("over_h", c.c_int16), ("shift", c.c_int8),
                 ("fade", c.c_int16), ("has_across", c.c_int8),
                 ("across_first", c.c_int16), ("across_pitch", c.c_int16), ("at", c.c_int16),
-                ("signal", c.c_int8), ("values", _Span), ("check", c.c_int8)]
+                ("signal", c.c_int8), ("values", _Span), ("check", c.c_int8),
+                ("subs", _Span), ("icons", _Span), ("counts", _Span), ("tags", _Span),
+                ("marks", _Span), ("card", c.c_int8)]
 
 
 class _Line(c.Structure):

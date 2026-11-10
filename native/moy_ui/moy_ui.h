@@ -1023,6 +1023,25 @@ typedef struct {
 } moy_ui_bubble_t;
 int moy_ui_bubble(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_bubble_t *bb, int fs,
                   int desk, int draw, moy_ui_box_t *out, int *cut);
+// A list's two-line row (ui.list's `subs`), its content over the frame the
+// row's own call drew: the lead `lead` (an icon in `value`, or with `person`
+// the initials of the name it is, two at most, in the caption face's
+// `value` on a `surface_alt` disc -- a light look's `panel` -- the icon's
+// size and 3 units over it each way) from b.x + pad, then `title` in the ui
+// face, its `tag` (a pill: the caption face's dim ink in a 1 unit `border`
+// ring) or its `mark` (an icon in the dim ink) after it, and `value` at the
+// right on the title's line in the caption face's dim ink; under them `sub`
+// in the caption face and, at its right, `count` as a badge (`value` under
+// `value_ink`, its ends round). A row with a count draws its title in
+// `value` and its sub line in `ink`, else in `ink` and the dim ink.
+typedef struct {
+    moy_ui_span_t lead, title, tag, mark, value, sub, count;
+    int16_t person, pad;
+} moy_ui_row2_t;
+int moy_ui_row2(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_row2_t *r, int fs,
+                int desk);
+// A two-line row's height at the scale.
+int moy_ui_row2_h(int fs, int desk);
 // The signal glyph (ui.bubble's head, ui.info's `signal`): four bars,
 // bottom-aligned, from x with their feet at `foot`, `n` lit in `ink_dim`,
 // the rest `ink_dim` mixed into `under` (wire order). Its width.

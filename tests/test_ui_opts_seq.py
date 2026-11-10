@@ -72,6 +72,10 @@ BUBBLES = (("in", {"head": "Ana Ridge", "signal": 2, "lines": 1, "id": "b0"}),
 SIGNAL = {"signal": 3}
 REGION = {"values": ("Europe", "United States", "China"), "check": True}
 POP = {"wash": "view"}
+HOME = {"values": ("2 min", "", "1 h"), "subs": ("Gate opens at seven", "Snow", ""),
+        "icons": ("bubble", "@Ana Ridge", ""), "counts": (0, 3, "12"),
+        "tags": ("Public", "", ""), "marks": ("", "lock", "lock")}
+CARD = {"card": True}
 SHORT = [False]
 OUT = [0] * 5
 
@@ -106,6 +110,9 @@ def page():
     ui.popover("pv", 200, POP)
     ui.info("Status", "Not sent")
     ui.popover()
+    ui.group("", CARD)
+    ui.list("Two", WORDS, -1, HOME)
+    ui.group()
     ui.end()
     return out
 

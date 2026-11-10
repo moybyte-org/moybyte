@@ -164,15 +164,22 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     }
     lua_pop(L, 1);
     o->check = (int8_t)(moycore_ui_flag(L, i, "check") == 1);
-    lua_getfield(L, i, "values");
-    if (lua_type(L, -1) == LUA_TTABLE) {
-        size_t vn = 0;
-        // the joined text stays on the stack under the table while the verb runs
-        const char *v = moycore_ui_items(L, lua_absindex(L, -1), &vn);
-        o->values.p = (const uint8_t *)v;
-        o->values.n = (uint16_t)(vn > 0xFFFFu ? 0xFFFFu : vn);
-    } else {
-        lua_pop(L, 1);
+    o->card = (int8_t)(moycore_ui_flag(L, i, "card") == 1);
+    /* a list's texts a row: each joined text stays on the stack over its
+     * table while the verb runs */
+    static const char *const rows[] = {"values", "subs", "icons", "counts", "tags", "marks"};
+    moy_ui_span_t *spans[] = {&o->values, &o->subs, &o->icons, &o->counts, &o->tags, &o->marks};
+    luaL_checkstack(L, 12, "ui options");
+    for (int k = 0; k < 6; k++) {
+        lua_getfield(L, i, rows[k]);
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            size_t vn = 0;
+            const char *v = moycore_ui_items(L, lua_absindex(L, -1), &vn);
+            spans[k]->p = (const uint8_t *)v;
+            spans[k]->n = (uint16_t)(vn > 0xFFFFu ? 0xFFFFu : vn);
+        } else {
+            lua_pop(L, 1);
+        }
     }
     lua_getfield(L, i, "signal");
     if (lua_isnumber(L, -1)) {

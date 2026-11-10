@@ -16,7 +16,7 @@ int32_t pmem(int32_t slot, int32_t v, int32_t write)
 // An override block (moy_ui_api.h, docs/ui_api_2026-10.md section 3) naming
 // only the id: nine words, every key but the id's length absent (-1), then
 // the id's bytes. Its length in over_n.
-static uint8_t over_buf[128];
+static uint8_t over_buf[512];
 static uint32_t over_n;
 
 static const void *over_id(const char *id, uint32_t n) {
@@ -66,6 +66,30 @@ static const void *over_flags(int32_t fl) {
     }
     over_n = 44;
     return over_buf;
+}
+
+// An override block built a word at a time: over_begin's nine words (every
+// key absent), no hint and the flags word `fl` (MOY_UI_O_*), then each word
+// or text (its length's word and its bytes) the flags name, in their order.
+static void over_word(int32_t v) {
+    for (uint32_t i = 0; i < 4; i++) {
+        over_buf[over_n++] = (uint8_t)(v >> (8 * i));
+    }
+}
+
+static void over_begin(int32_t fl) {
+    over_n = 0;
+    for (int i = 0; i < 10; i++) {
+        over_word(-1);
+    }
+    over_word(fl);
+}
+
+static void over_text(const char *t, uint32_t n) {
+    over_word((int32_t)n);
+    for (uint32_t i = 0; i < n; i++) {
+        over_buf[over_n++] = (uint8_t)t[i];
+    }
 }
 
 EXPORT(_layout) void _layout(int32_t w, int32_t h, int32_t fs) {
@@ -141,5 +165,21 @@ EXPORT(_draw) void _draw(void) {
     } else if (page == 5) {
         ui_list(S("Region"), S("EU_868\0US\0CN"), 1,
                 over_values(S("Europe\0United States\0China")), over_n);
+    } else if (page == 7) {
+        over_begin(67108864);               // MOY_UI_O_CARD
+        ui_group("", 0, over_buf, over_n);
+        // MOY_UI_O_VALUES, MOY_UI_O_ROWS, then all five of MOY_UI_OR_*
+        over_begin(4194304 | 33554432);
+        over_text(S("2 min\0" "20 min\0" "4 min\0" "1 h"));
+        over_word(31);
+        over_text(S("Base Camp: Gate opens at seven\0Milo's Deck: Snow above the hut\0"
+                    "Bring the spare headlamp, mine is dead\0You: Back by noon"));
+        over_text(S("bubble\0bubble\0@Ana Ridge\0@base camp"));
+        over_text(S("0\0" "3\0" "2\0"));
+        over_text(S("Public\0\0\0"));
+        over_text(S("\0lock\0lock\0lock"));
+        ui_list("", 0, S("Srbija\0Planinari\0Ana Ridge\0Base Camp"), -1, over_buf, over_n);
+        ui_group("", 0, NULL, 0);
+        ui_link(S("Nodes"), S("4 heard"), NULL, 0);
     }
 }

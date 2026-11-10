@@ -217,6 +217,14 @@ typedef struct {
     // current row's right, its column kept on every row.
     moy_ui_span_t values;
     int8_t check;
+    // A list's two-line rows (moy_ui.h's moy_ui_row2), each a text a row,
+    // NUL-separated (p NULL: none): `subs` (its second line; given, the rows
+    // are two-line), `icons` (its lead: an icon's name, or "@" and a
+    // person's name for their initials), `counts` (its badge; "" or "0"
+    // none), `tags` (a pill after its title) and `marks` (an icon there).
+    moy_ui_span_t subs, icons, counts, tags, marks;
+    // A group with no caption (ui.group("", {card = true})): 1 opens its card.
+    int8_t card;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -239,6 +247,15 @@ typedef struct {
 #define MOY_UI_O_VALUES 4194304     // and `values`, its length's word and its text after the signal's
 #define MOY_UI_O_CHECK 8388608      // and `check`
 #define MOY_UI_O_WASH_VIEW 16777216 // and `wash` "view" (with MOY_UI_O_WASH)
+#define MOY_UI_O_ROWS 33554432      // and a list's two-line rows: a word of MOY_UI_OR_* after
+                                    // the values', then each list it names, its length's word
+                                    // and its text, in the bits' order
+#define MOY_UI_O_CARD 67108864      // and `card`
+#define MOY_UI_OR_SUBS 1
+#define MOY_UI_OR_ICONS 2
+#define MOY_UI_OR_COUNTS 4
+#define MOY_UI_OR_TAGS 8
+#define MOY_UI_OR_MARKS 16
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);

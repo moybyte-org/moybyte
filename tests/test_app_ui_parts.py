@@ -21,6 +21,10 @@ P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
   6  ui.popover's `wash = "view"` hung from a failed bubble in a scroll
      region: the region washed, the row above it and the bubble with its
      status line and anchor ring not; the card clears the status line.
+  7  ui.list's two-line rows in a card with no caption: each row's lead (an
+     icon, or a person's initials), title, tag or mark, time, second line
+     and count badge (`o.subs`, `icons`, `values`, `tags`, `marks`,
+     `counts`), then a link in no group.
 """
 
 import os
@@ -38,7 +42,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2, 3, 4, 5, 6)
+PAGES = (1, 2, 3, 4, 5, 6, 7)
 CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 
@@ -225,3 +229,25 @@ def test_the_tap_floor_lifts_a_lists_rows(pages):
         return runs
     assert max(bands("guition")) == 36, bands("guition")
     assert max(bands("tdeck")) < 36, bands("tdeck")
+
+
+def _rules(pages, console, page):
+    """The rows of `page` on `console` that are one colour across the middle
+    of the room and differ from the rows either side: a group's rules."""
+    (w, h), px = pages[(console, "python", page)]
+    x = w // 2
+
+    def at(xx, y):
+        return px[2 * (y * w + xx):2 * (y * w + xx) + 2]
+    return [y for y in range(1, h - 1)
+            if all(at(xx, y) == at(x, y) for xx in range(x - 40, x + 40))
+            and at(x, y) != at(x, y - 1) and at(x, y) != at(x, y + 1)]
+
+
+@pytest.mark.parametrize("console,pitch", (("tdeck", 34), ("guition", 44), ("desk", 42)))
+def test_two_line_rows_take_the_consoles_height(pages, console, pitch):
+    """A two-line row is 34 px on the T-Deck, 44 under the Guition's tap
+    floor and 42 in a desk window: the rules heading its rows lie that far
+    apart."""
+    rules = _rules(pages, console, 7)
+    assert rules[:3] == [pitch, 2 * pitch, 3 * pitch], rules

@@ -1791,6 +1791,126 @@ int moy_ui_bubble(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_bubble_t 
     return h + status_h;
 }
 
+// -- a list's two-line row (ui.list's `subs`) ---------------------------------------------
+
+int moy_ui_row2_h(int fs, int desk) {
+    int k = fs < 1 ? 1 : fs;
+    return ((desk & MOY_UI_DESK) ? 42 : (desk & MOY_UI_TAP) ? 44 : 34) * k;
+}
+
+// A person's initials, two at most, from the first letter of each word of
+// `name` (an ASCII letter upper-cased) into out; their length.
+static size_t initials(moy_ui_span_t name, uint8_t *out) {
+    size_t n = 0;
+    int words = 0;
+    for (size_t i = 0; i < name.n && words < 2; i++) {
+        uint8_t ch = name.p[i];
+        if (ch == ' ' || ch == '\'' || (i > 0 && name.p[i - 1] != ' ')) {
+            continue;
+        }
+        size_t len = ch < 0x80 ? 1 : ch >= 0xF0 ? 4 : ch >= 0xE0 ? 3 : 2;
+        if (i + len > name.n) {
+            break;
+        }
+        if (len == 1 && ch >= 'a' && ch <= 'z') {
+            ch = (uint8_t)(ch - 32);
+        }
+        out[n] = ch;
+        for (size_t j = 1; j < len; j++) {
+            out[n + j] = name.p[i + j];
+        }
+        n += len;
+        words++;
+    }
+    return n;
+}
+
+// A caption-face pill ending at `right`, centred in the rows y..y+h: filled in
+// `fc` where has_fill (the text in `ink`, centred), else ringed in `ring`
+// (the text 5 units in). Its width.
+static int pill(pd_t *d, const pf_t *f, moy_ui_span_t t, int right, int y, int h, int has_fill,
+                uint16_t fc, uint16_t ring, uint16_t ink, int minw) {
+    int k = d->fs, sc = tscale(d->s);
+    int lw = tw(f, t.p, t.n, sc);
+    int ph = f->line * sc + 2 * k, pw = lw + 10 * k;
+    pw = pw < minw ? minw : pw;
+    int py = y + moy_ui_fdiv(h - ph, 2);
+    rrect_sq(d, right - pw, py, pw, ph, ph / 2, -1, has_fill, fc, has_fill ? 0 : k, ring);
+    text(d, f, t.p, t.n, right - pw + moy_ui_fdiv(pw - lw, 2), py + k, f->line * sc, ink, sc);
+    return pw;
+}
+
+// A pill's width: the text's and its pads, at least `minw`.
+static int pill_w(const pf_t *f, moy_ui_span_t t, int k, int sc, int minw) {
+    int pw = tw(f, t.p, t.n, sc) + 10 * k;
+    return pw < minw ? minw : pw;
+}
+
+int moy_ui_row2(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_row2_t *r, int fs,
+                int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s), k = d.fs;
+    pf_t fu = font_of(&d, d.tap ? MOY_UI_FONT_TAP_UI : MOY_UI_FONT_UI);
+    pf_t fc = font_of(&d, d.tap ? MOY_UI_FONT_TAP_CAPTION : MOY_UI_FONT_CAPTION);
+    int unread = r->count.n > 0 && !(r->count.n == 1 && r->count.p[0] == '0');
+    int vi = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+    int ink = tok(&d, MOY_UI_T_INK, MOY_UI_T_INK), dim = tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
+    int is = ((d.desk || d.tap) ? 16 : 14) * k;
+    int ix = b.x + r->pad + 4 * k, tx = b.x + r->pad;
+    if (r->lead.n > 0) {
+        if (r->person) {
+            int dd = is + 6 * k, cx = ix + is / 2, cy = b.y + b.h / 2;
+            int disc = dark(&d) ? tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE)
+                                : tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE);
+            rrect_sq(&d, cx - dd / 2, cy - dd / 2, dd, dd, dd / 2, -1, 1, pal(&d, disc), 0, 0);
+            uint8_t ini[8];
+            size_t n = initials(r->lead, ini);
+            int iw = tw(&fc, ini, n, sc);
+            text(&d, &fc, ini, n, cx - iw / 2, cy - fc.line * sc / 2, fc.line * sc, pal(&d, vi),
+                 sc);
+        } else {
+            moy_ui_box_t ib = {(int16_t)ix, (int16_t)(b.y + moy_ui_fdiv(b.h - is, 2)),
+                               (int16_t)is, (int16_t)is};
+            icon_d(&d, moy_ui_icon_slot(r->lead.p, r->lead.n),
+                   moy_ui_icon_glyph(r->lead.p, r->lead.n), ib, vi);
+        }
+        tx = ix + is + 6 * k;
+    }
+    int lh = fu.line * sc, ch = fc.line * sc;
+    int l1 = b.y + moy_ui_fdiv(b.h - lh - ch, 2);
+    int right = b.x + b.w - r->pad;
+    int ww = r->value.n > 0 ? tw(&fc, r->value.p, r->value.n, sc) : 0;
+    if (ww) {
+        text(&d, &fc, r->value.p, r->value.n, right - ww, l1 + k, ch, pal(&d, dim), sc);
+    }
+    int ms = ((d.desk || d.tap) ? 12 : 10) * k;
+    int mw = r->tag.n > 0 ? pill_w(&fc, r->tag, k, sc, 0) : r->mark.n > 0 ? ms : 0;
+    int room = right - tx - (ww ? ww + 8 * k : 0) - (mw ? mw + 6 * k : 0);
+    int ell = 0;
+    size_t tn = moy_text_cut_px(fu.id, r->title.p, r->title.n, room, sc, &ell);
+    int tw_ = tw(&fu, r->title.p, tn, sc) + (ell ? tw(&fu, s_dots, sizeof(s_dots), sc) : 0);
+    text_cut(&d, &fu, r->title, tx, l1 - k, lh, room, pal(&d, unread ? vi : ink), sc);
+    int ax = tx + tw_ + 6 * k;
+    if (r->tag.n > 0) {
+        pill(&d, &fc, r->tag, ax + mw, l1 - k, lh, 0, 0,
+             pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_INK_DIM)), pal(&d, dim), 0);
+    } else if (r->mark.n > 0) {
+        moy_ui_box_t mb = {(int16_t)ax, (int16_t)(l1 - k + moy_ui_fdiv(lh - ms, 2)), (int16_t)ms,
+                           (int16_t)ms};
+        icon_d(&d, moy_ui_icon_slot(r->mark.p, r->mark.n),
+               moy_ui_icon_glyph(r->mark.p, r->mark.n), mb, dim);
+    }
+    int cw = 0;
+    if (unread) {
+        cw = pill(&d, &fc, r->count, right, l1 + lh, ch + 2 * k, 1, pal(&d, vi), 0,
+                  pal(&d, tok(&d, MOY_UI_T_VALUE_INK, MOY_UI_T_PANEL)), ch + 2 * k)
+             + 6 * k;
+    }
+    text_cut(&d, &fc, r->sub, tx, l1 + lh, ch, right - tx - cw, pal(&d, unread ? ink : dim), sc);
+    return MOY_UI_OK;
+}
+
 // -- the perf HUD --------------------------------------------------------------------------
 
 // A number of tenths as digits ("33.0" with `point`, else whole), into out;

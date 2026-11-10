@@ -8,6 +8,9 @@ def _layout(w, h, fs):
     pass
 
 
+HOME = ("Srbija", "Planinari", "Ana Ridge", "Base Camp")
+
+
 def _draw():
     page = pmem(0)
     px, py, pw, ph = ui.page("Parts")
@@ -56,3 +59,15 @@ def _draw():
     elif page == 5:
         ui.list("Region", ["EU_868", "US", "CN"], 1,
                 {"values": ["Europe", "United States", "China"], "check": True})
+    elif page == 7:
+        ui.group("", {"card": True})
+        ui.list("", HOME, -1, {"values": ["2 min", "20 min", "4 min", "1 h"],
+                               "subs": ["Base Camp: Gate opens at seven",
+                                        "Milo's Deck: Snow above the hut",
+                                        "Bring the spare headlamp, mine is dead",
+                                        "You: Back by noon"],
+                               "icons": ["bubble", "bubble", "@Ana Ridge", "@base camp"],
+                               "counts": [0, 3, "2", ""], "tags": ["Public", "", "", ""],
+                               "marks": ["", "lock", "lock", "lock"]})
+        ui.group()
+        ui.link("Nodes", "4 heard")

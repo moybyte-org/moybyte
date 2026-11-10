@@ -2362,7 +2362,8 @@ static int8_t over_flag(mp_obj_t v) {
 enum {
     OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
     OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
-    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_VALUES, OV_CHECK, OV_COUNT
+    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_VALUES, OV_CHECK,
+    OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS, OV_CARD, OV_COUNT
 };
 
 // A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
@@ -2409,6 +2410,12 @@ static int over_slot(qstr q) {
         case MP_QSTR_signal: return OV_SIGNAL;
         case MP_QSTR_values: return OV_VALUES;
         case MP_QSTR_check: return OV_CHECK;
+        case MP_QSTR_subs: return OV_SUBS;
+        case MP_QSTR_icons: return OV_ICONS;
+        case MP_QSTR_counts: return OV_COUNTS;
+        case MP_QSTR_tags: return OV_TAGS;
+        case MP_QSTR_marks: return OV_MARKS;
+        case MP_QSTR_card: return OV_CARD;
         default: return -1;
     }
 }
@@ -2435,7 +2442,7 @@ static void over_vals(mp_map_t *m, mp_obj_t *v) {
 // The override table (§3) straight from the app's dict, as runtime/toolkit/ui.py's
 // block reads: no block is built, so a verb given a table allocates nothing.
 #define OPTS_BUF 512
-static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out);
+static void opts_cap(mp_obj_t o, uint8_t *buf, size_t cap, mp_buffer_info_t *out);
 
 static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     mp_obj_t vals[OV_COUNT];
@@ -2550,18 +2557,31 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         mp_int_t g = mp_obj_get_int_truncated(v);
         out->signal = (int8_t)(g < 0 ? 0 : g > 4 ? 5 : g + 1);
     }
-    v = vals[OV_VALUES];
-    if (v != MP_OBJ_NULL) {
-        // a list's secondary texts, joined into the module's own buffer
-        static uint8_t joined[OPTS_BUF];
-        mp_buffer_info_t b;
-        opts_of(v, joined, &b);
-        out->values.p = (const uint8_t *)b.buf;
-        out->values.n = (uint16_t)(b.len > 0xffff ? 0xffff : b.len);
+    // a list's texts a row, joined into the module's own buffer
+    static uint8_t joined[2 * OPTS_BUF];
+    size_t used = 0;
+    static const uint8_t keys[] = {OV_VALUES, OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS};
+    moy_ui_span_t *spans[] = {&out->values, &out->subs, &out->icons, &out->counts, &out->tags,
+                              &out->marks};
+    for (size_t i = 0; i < sizeof(keys); i++) {
+        v = vals[keys[i]];
+        if (v != MP_OBJ_NULL) {
+            mp_buffer_info_t b;
+            opts_cap(v, joined + used, sizeof(joined) - used, &b);
+            if ((uint8_t *)b.buf == joined + used) {
+                used += b.len;
+            }
+            spans[i]->p = (const uint8_t *)b.buf;
+            spans[i]->n = (uint16_t)(b.len > 0xffff ? 0xffff : b.len);
+        }
     }
     v = vals[OV_CHECK];
     if (v != MP_OBJ_NULL) {
         out->check = mp_obj_is_true(v);
+    }
+    v = vals[OV_CARD];
+    if (v != MP_OBJ_NULL) {
+        out->card = mp_obj_is_true(v);
     }
 }
 
@@ -2583,11 +2603,33 @@ static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
 }
 
 // A verb's options as the engine reads them, NUL-separated: bytes as they
-// are, or a list or tuple of the items, each as str() makes it, joined into
-// `buf` (OPTS_BUF bytes, the caller's) or, where they run longer, into the
-// heap. runtime/toolkit/ui.py's `_opts` hands a sequence straight over where the
-// module takes one (`opts_seq`), so a verb given its options builds nothing.
-static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
+// are, or a list or tuple of the items, each as str() makes it (a small int
+// written here), joined into `buf` (`cap` bytes, the caller's) or, where
+// they run longer, into the heap. runtime/toolkit/ui.py's `_opts` hands a
+// sequence straight over where the module takes one (`opts_seq`), so a verb
+// given its options, texts or small ints, builds nothing.
+static size_t int_text(mp_int_t v, uint8_t *out) {
+    uint8_t tmp[24];
+    size_t n = 0, k = 0;
+    mp_uint_t u = v < 0 ? (mp_uint_t)(-v) : (mp_uint_t)v;
+    do {
+        tmp[n++] = (uint8_t)('0' + u % 10);
+        u /= 10;
+    } while (u);
+    if (v < 0) {
+        tmp[n++] = '-';
+    }
+    while (n) {
+        if (out != NULL) {
+            out[k] = tmp[n - 1];
+        }
+        k++;
+        n--;
+    }
+    return k;
+}
+
+static void opts_cap(mp_obj_t o, uint8_t *buf, size_t cap, mp_buffer_info_t *out) {
     if (!mp_obj_is_type(o, &mp_type_list) && !mp_obj_is_type(o, &mp_type_tuple)) {
         mp_get_buffer_raise(o, out, MP_BUFFER_READ);
         return;
@@ -2596,7 +2638,7 @@ static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
     mp_obj_t *it;
     mp_obj_get_array(o, &n, &it);
     for (size_t i = 0; i < n; i++) {
-        if (!mp_obj_is_str(it[i])) {
+        if (!mp_obj_is_str(it[i]) && !mp_obj_is_small_int(it[i])) {
             mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(n, NULL));
             for (size_t j = 0; j < n; j++) {
                 mp_obj_t v = it[j];
@@ -2609,22 +2651,34 @@ static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
     size_t len = n ? n - 1 : 0;
     for (size_t i = 0; i < n; i++) {
         size_t k;
-        mp_obj_str_get_data(it[i], &k);
+        if (mp_obj_is_small_int(it[i])) {
+            k = int_text(MP_OBJ_SMALL_INT_VALUE(it[i]), NULL);
+        } else {
+            mp_obj_str_get_data(it[i], &k);
+        }
         len += k;
     }
-    uint8_t *dst = len <= OPTS_BUF ? buf : m_new(uint8_t, len);
+    uint8_t *dst = len <= cap ? buf : m_new(uint8_t, len);
     size_t at = 0;
     for (size_t i = 0; i < n; i++) {
-        size_t k;
-        const char *p = mp_obj_str_get_data(it[i], &k);
         if (i) {
             dst[at++] = 0;
         }
+        if (mp_obj_is_small_int(it[i])) {
+            at += int_text(MP_OBJ_SMALL_INT_VALUE(it[i]), dst + at);
+            continue;
+        }
+        size_t k;
+        const char *p = mp_obj_str_get_data(it[i], &k);
         memcpy(dst + at, p, k);
         at += k;
     }
     out->buf = dst;
     out->len = len;
+}
+
+static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
+    opts_cap(o, buf, OPTS_BUF, out);
 }
 
 // api_size() -> the bytes a context takes

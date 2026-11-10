@@ -53,5 +53,16 @@ function _draw()
   elseif page == 5 then
     ui.list("Region", {"EU_868", "US", "CN"}, 2,
             {values = {"Europe", "United States", "China"}, check = true})
+  elseif page == 7 then
+    ui.group("", {card = true})
+    ui.list("", {"Srbija", "Planinari", "Ana Ridge", "Base Camp"}, -1,
+            {values = {"2 min", "20 min", "4 min", "1 h"},
+             subs = {"Base Camp: Gate opens at seven", "Milo's Deck: Snow above the hut",
+                     "Bring the spare headlamp, mine is dead", "You: Back by noon"},
+             icons = {"bubble", "bubble", "@Ana Ridge", "@base camp"},
+             counts = {0, 3, "2", ""}, tags = {"Public", "", "", ""},
+             marks = {"", "lock", "lock", "lock"}})
+    ui.group()
+    ui.link("Nodes", "4 heard")
   end
 end

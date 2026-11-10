@@ -147,6 +147,12 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->values.p = NULL;
     o->values.n = 0;
     o->check = 0;
+    moy_ui_span_t *rows[] = {&o->subs, &o->icons, &o->counts, &o->tags, &o->marks};
+    for (int i = 0; i < 5; i++) {
+        rows[i]->p = NULL;
+        rows[i]->n = 0;
+    }
+    o->card = 0;
 }
 
 int32_t mua_word(const uint8_t *w, int i) {
@@ -276,6 +282,25 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
                     at += (size_t)vn;
                 }
                 o->check = (int8_t)((fl & MOY_UI_O_CHECK) != 0);
+                o->card = (int8_t)((fl & MOY_UI_O_CARD) != 0);
+                if ((fl & MOY_UI_O_ROWS) && n - at >= 4u) {
+                    int32_t m = mua_word(w + at, 0);
+                    at += 4u;
+                    moy_ui_span_t *rows[] = {&o->subs, &o->icons, &o->counts, &o->tags, &o->marks};
+                    for (int i = 0; i < 5; i++) {
+                        if (!(m & (1 << i))) {
+                            continue;
+                        }
+                        int32_t rn = n - at >= 4u ? mua_word(w + at, 0) : -1;
+                        at += 4u;
+                        if (rn < 0 || (size_t)rn > n - at || rn > 0xffff) {
+                            return MOY_UI_BAD;
+                        }
+                        rows[i]->p = w + at;
+                        rows[i]->n = (uint16_t)rn;
+                        at += (size_t)rn;
+                    }
+                }
             }
         }
     }
@@ -291,6 +316,7 @@ const moy_ui_over_t *mua_over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
                                        -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0,
                                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {NULL, 0},
+                                       0, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0},
                                        0};
     return o != NULL ? o : &none;
 }
@@ -3048,7 +3074,10 @@ void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 
 void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t caption,
                       const moy_ui_over_t *o) {
-    (void)o;
+    if (caption.n == 0 && o != NULL && o->card == 1) {
+        moy_ui_api_group_card(c, s);
+        return;
+    }
     mua_grid_end(c, s);
     mua_group_close(c, s);
     c->has_at = 0;
@@ -3263,6 +3292,9 @@ void mua_rows_note(moy_ui_ctx_t *c, uint32_t id, int row, int top) {
 
 // Field i of NUL-separated `t` (empty past its end).
 static moy_ui_span_t list_field(moy_ui_span_t t, int i) {
+    if (t.p == NULL) {
+        return t;
+    }
     size_t at = 0;
     int k = 0;
     for (size_t j = 0; j <= t.n; j++) {
@@ -3287,7 +3319,9 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
     if (len && items[len - 1] != 0) {
         count++;
     }
-    int rh = mua_row_h(c);
+    int two = o->subs.p != NULL;
+    int pflags = mua_ground_of(c) | (c->tap ? MOY_UI_TAP : 0);
+    int rh = two ? moy_ui_row2_h(c->fs, pflags) : mua_row_h(c);
     if (c->tap && rh < MOY_UI_TAP_ROW) {
         rh = MOY_UI_TAP_ROW;        // a row a finger aims at meets the board's floor
     }
@@ -3377,7 +3411,13 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                 moy_ui_box_t ib = {b.x, (int16_t)ry, b.w, (int16_t)rh};
                 int rpad = mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
                 int cs = (c->cls ? 14 : 12) * c->fs;
-                if (o->values.p != NULL) {
+                if (two) {
+                    r.label.n = 0;
+                    if (i > 0 && stacked && c->grp_open) {
+                        // a group's two-line rows are its rows: a rule heads each
+                        moy_ui_group_band(s, mua_card_of(c), ib, 0, c->fs, mua_ground_of(c));
+                    }
+                } else if (o->values.p != NULL) {
                     r.value = list_field(o->values, i);
                     r.value_ink = (int16_t)moy_ui_token(s->look, MOY_UI_T_INK_DIM);
                 }
@@ -3395,6 +3435,23 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                          : (st & MOY_UI_ST_HOVER) ? MOY_UI_HOVER : -1;
                 }
                 moy_ui_row(s, ib, MOY_UI_K_ROW_LIST, f, ia, &r, MOY_UI_PHASE_ALL);
+                if (two) {
+                    moy_ui_row2_t r2;
+                    r2.title = t;
+                    r2.lead = list_field(o->icons, i);
+                    r2.person = (int16_t)(r2.lead.n > 0 && r2.lead.p[0] == '@');
+                    if (r2.person) {
+                        r2.lead.p++;
+                        r2.lead.n--;
+                    }
+                    r2.tag = list_field(o->tags, i);
+                    r2.mark = list_field(o->marks, i);
+                    r2.value = list_field(o->values, i);
+                    r2.sub = list_field(o->subs, i);
+                    r2.count = list_field(o->counts, i);
+                    r2.pad = (int16_t)rpad;
+                    moy_ui_row2(s, ib, &r2, c->fs, pflags);
+                }
                 if (o->check == 1 && i == cur) {
                     moy_ui_box_t cb = {(int16_t)(ib.x + ib.w - rpad - cs),
                                        (int16_t)(ry + moy_ui_fdiv(rh - cs, 2)), (int16_t)cs,

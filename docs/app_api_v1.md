@@ -431,6 +431,24 @@ region = ui.list("Region", {"EU_868", "US"}, region,
                  {values = {"Europe", "United States"}, check = true})
 ```
 
+**A conversation is a two-line row.** `o.subs` makes each `ui.list` row
+two lines: its item the title, its sub the caption line under it, and its
+value the time at the right of the title. `o.icons` leads each row with an
+icon, or with `"@"` and a name, that person's initials on a disc;
+`o.counts` puts the unread badge at the row's right (`""` or 0 none), and a
+row with one draws its title in your colour; `o.tags` sets a pill after
+the title and `o.marks` an icon there. `{card = true}` opens a group with
+no caption around it:
+
+```lua
+ui.group("", {card = true})
+local open = ui.list("", {"LongFast", "Ana Ridge"}, -1,
+                     {subs = {"Base Camp: Gate opens at seven", "Back by noon"},
+                      values = {"2 min", "1 h"}, icons = {"bubble", "@Ana Ridge"},
+                      counts = {0, 2}, tags = {"Public", ""}, marks = {"", "lock"}})
+ui.group()
+```
+
 **A finger's rows come by themselves.** On a board whose tap floor stands
 (the Guition S3's 3.5-inch glass), a `ui.list` row is 36 px tall and a
 bubble takes larger pads and faces; the app's code is the same on every
