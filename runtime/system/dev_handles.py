@@ -9,7 +9,6 @@
 #   sweep                    a process's end closes every handle it held
 #   words                    a cfg string of `key=value` words as a dict
 #   _Handle                  the base every handle's verbs default from
-#   _Http                    http: a fetch's body, kept or windowed
 #   _Ring                    the base of the event-ring devices
 #   _Ble                     ble: GATT by handle
 #   _Usb                     usb: the USB host
@@ -22,12 +21,12 @@ WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
 `moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
 pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora,
-mic and midi on the calling program's own task (native/moy_kernel/moy_dev.h,
+mic, midi and http on the calling program's own task (native/moy_kernel/moy_dev.h,
 which says what they answer); the other device APIs are served here, by the door's Python half as the calling
 process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
-  open(name, cfg) -> h      a device API ("http", "ble", "usb", "camera",
-                            "media", "net"),
+  open(name, cfg) -> h      a device API ("ble", "usb", "camera", "media",
+                            "net"),
                             configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
@@ -40,11 +39,6 @@ process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 address, a UUID, a name and bytes (in hex) stay text. What each handle
 answers:
 
-  http      cfg url (required) cap (a body kept up to cap bytes) or window
-            (a body of any length through a window of that many bytes); read:
-            the body's next bytes, 0 while it runs and at its end; get status
-            (0 while it runs, the HTTP status, IO where it got no response),
-            errno (why), length (a kept body's), ended (a window's)
   ble       set: one action a set, its outcome a record --
             scan=<ms>, connect=aa:bb:cc:dd:ee:ff | off, find=<uuid> (16-bit
             hex, 0x.. or not, or the 128-bit string), read=<handle>,
@@ -121,7 +115,7 @@ A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
 name needs (a device's own, `media` or `media:url` for media), BUSY where
 another process holds the device (a Python program's object, or another
-compiled program's handle; a process opens every device API but http once), BAD for a name, a
+compiled program's handle; a process opens every device API but net once), BAD for a name, a
 key or a value this console does not take, ABSENT for a handle not open, a
 device this console lacks and a radio verb that needs a connection or a
 join, FULL where `into` cannot hold one record or a table has no room, IO
@@ -255,59 +249,6 @@ class _Handle:
 
     def close(self, pid):
         pass
-
-
-class _Http(_Handle):
-    def __init__(self, cfg):
-        _only(cfg, ("url", "cap", "window"))
-        url = cfg.get("url")
-        if not isinstance(url, str):
-            raise OSError(EINVAL, "an http handle names its url")
-        f = _face("http")
-        self.f = f
-        if "window" in cfg:
-            self.req = f.stream(url, cfg["window"])
-            self.stream = True
-        else:
-            self.req = f.get(url, cfg.get("cap", 16384))
-            self.stream = False
-        self.at = 0
-        self.err = 0
-
-    def _state(self):
-        if self.err:
-            return None
-        try:
-            return self.req.state()
-        except OSError as exc:
-            self.err = exc.args[0] if exc.args and isinstance(exc.args[0], int) else EIO
-            return None
-
-    def read(self, cap):
-        if cap <= 0 or self._state() is None:
-            return b""
-        buf = bytearray(cap)
-        if self.stream:
-            n = self.req.readinto(buf)
-        else:
-            n = self.req.readinto(buf, self.at)
-            self.at += n
-        return bytes(buf[:n])
-
-    def get(self, what):
-        st = self._state()
-        if what == "status":
-            return IO if self.err else 0 if st is None else st[0]
-        if what == "errno":
-            return self.err
-        if what == "length":
-            return 0 if st is None or st[1] is None else st[1]
-        if what == "ended":
-            return int(self.stream and st is not None and self.req.ended())
-        raise OSError(EINVAL, "no %s" % what)
-
-    def close(self, pid):
-        self.req.close()
 
 
 HEAD = 12                   # a record's head: event, n (u16), a, b (i32)
@@ -830,7 +771,7 @@ class _Net(_Handle):
         self._let_go(_link()[0], pid)
 
 
-_DEVICES = {"http": _Http, "ble": _Ble, "usb": _Usb, "camera": _Camera,
+_DEVICES = {"ble": _Ble, "usb": _Usb, "camera": _Camera,
             "media": _Media, "net": _Net}
 # A device with one holder: a process opens it once.
 _ONE = ("ble", "usb", "camera", "media")

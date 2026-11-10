@@ -1,6 +1,6 @@
 # moy_net: the links: WiFi, the ESP-NOW link, the HTTP core, the webhost, the
 # sync RPC, the updater, the `http` device API (moy_fetch.c, the module
-# moy_http) and the `lora` one (moy_lora.c over the LoRaWAN MAC moy_lorawan.c
+# moy_http, a compiled program's handles moy_fetch_dev.c) and the `lora` one (moy_lora.c over the LoRaWAN MAC moy_lorawan.c
 # and moy_aes.c, the module moy_lora, a compiled program's handles
 # moy_lora_dev.c) (docs/history/kernel_survival_2026-10.md section 6). Its
 # CPython face is runtime/host/net_binding.py over the same C.
@@ -34,6 +34,7 @@ target_sources(usermod_moy_net INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_gpio.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_dns.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_fetch.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_fetch_dev.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_http.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_aes.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_lorawan.c

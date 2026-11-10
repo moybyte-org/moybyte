@@ -299,12 +299,37 @@ int moy_fetch_tls(void) {
 
 static int open_slot(uint32_t owner, const char *url, uint32_t cap, int stream, uint32_t *h);
 
+// The client's lock, the lease table's (moy_lease.h, weak: an image without
+// the kernel's table has one client task): the face on the VM's task and a
+// compiled program's handle on its own (moy_fetch_dev.c) take and give slots
+// under it. The worker changes a slot's state under LOCK alone.
+void moy_lease_lock(void) __attribute__((weak));
+void moy_lease_unlock(void) __attribute__((weak));
+
+static void client_lock(void) {
+    if (moy_lease_lock != NULL) {
+        moy_lease_lock();
+    }
+}
+
+static void client_unlock(void) {
+    if (moy_lease_unlock != NULL) {
+        moy_lease_unlock();
+    }
+}
+
 int moy_fetch_open(uint32_t owner, const char *url, uint32_t cap, uint32_t *h) {
-    return open_slot(owner, url, cap, 0, h);
+    client_lock();
+    int r = open_slot(owner, url, cap, 0, h);
+    client_unlock();
+    return r;
 }
 
 int moy_fetch_stream(uint32_t owner, const char *url, uint32_t window, uint32_t *h) {
-    return open_slot(owner, url, window, 1, h);
+    client_lock();
+    int r = open_slot(owner, url, window, 1, h);
+    client_unlock();
+    return r;
 }
 
 static int open_slot(uint32_t owner, const char *url, uint32_t cap, int stream, uint32_t *h) {
@@ -426,7 +451,7 @@ int moy_fetch_take(uint32_t h, void *buf, uint32_t n) {
     return (int)k;
 }
 
-int moy_fetch_close(uint32_t h) {
+static int close_(uint32_t h) {
     slot_t *s = slot_at(h);
     if (s == NULL || s->closing) {
         return -MOY_FETCH_EBADF;
@@ -447,14 +472,23 @@ int moy_fetch_close(uint32_t h) {
     return 0;
 }
 
+int moy_fetch_close(uint32_t h) {
+    client_lock();
+    int r = close_(h);
+    client_unlock();
+    return r;
+}
+
 uint32_t moy_fetch_sweep(uint32_t owner) {
+    client_lock();
     uint32_t k = 0;
     for (int i = 0; s_slot != NULL && i < MOY_FETCH_SLOTS; i++) {
         if (s_slot[i].state != MOY_FETCH_FREE && !s_slot[i].closing && s_slot[i].owner == owner
-            && moy_fetch_close(handle_of(i)) == 0) {
+            && close_(handle_of(i)) == 0) {
             k++;
         }
     }
+    client_unlock();
     return k;
 }
 

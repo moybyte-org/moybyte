@@ -18,7 +18,7 @@ except ImportError:                     # loaded flat, runtime/ on sys.path
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 
-PART = native_build.Part("http", ("moy_fetch.h", "moy_fetch.c"), (_NET, _INPUT))
+PART = native_build.Part("http", ("moy_fetch.h", "moy_fetch.c", "moy_fetch_dev.c"), (_NET, _INPUT))
 
 QUEUED, RUNNING, DONE, FAILED, STREAM = 1, 2, 3, 4, 5
 CAP_MAX = 256 * 1024

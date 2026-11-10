@@ -499,7 +499,9 @@ class SpineVerbs:
         (the Get Carts app while it fetches), "ssh" (the SSH server while it
         serves, ssh_service.py). A process's, held with its `pid`
         (`PROC_TAGS`): "cart" (a run with the "network" permission), "http"
-        (its `moybyte.http` requests while one runs, dev_http.py), "media"
+        (its `moybyte.http` requests while one runs, dev_http.py, or a
+        compiled program's http handles from its first to its last, held in
+        the kernel, native/moy_net/moy_fetch_dev.c), "media"
         (the media service's run, under the run's pid, while a URL of its
         list may play, dev_media.py), "native"
         (a native process from its first socket to its end, elf_run.py),

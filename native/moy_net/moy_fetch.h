@@ -13,6 +13,9 @@
 //
 // A request belongs to its owner (a pid): moy_fetch_sweep(owner) closes every
 // one it left, and a request the worker is serving is closed when it ends.
+// Opening, closing and sweeping hold the lease table's lock, so the face on
+// the VM's task and a compiled program's handle on its own (moy_fetch_dev.c)
+// share the slots; a request is read by its one holder.
 
 #ifndef MOY_FETCH_H
 #define MOY_FETCH_H

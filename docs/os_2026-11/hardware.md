@@ -138,9 +138,11 @@ module) are the same objects held by HANDLE: the `moybyte.dev_*` rows
 whose driver has a C face safe on any task are the kernel's handle table's
 (`native/moy_kernel/moy_dev.h`: every lease, `gpio<n>`, `pins`, `uart<n>`,
 `spi<n>`, `i2c`, `pwm<n>` and `adc<n>`, over ESP-IDF's drivers in
-`native/moy_kernel/moy_devbus.h`, and the device APIs `lora`, `mic` and
-`midi`, over their drivers' verbs in `native/moy_net/moy_lora_dev.c`,
-`native/moy_audio/moy_mic_dev.c` and `native/moy_input/moy_midi_dev.c`), served on the calling
+`native/moy_kernel/moy_devbus.h`, and the device APIs `lora`, `mic`, `midi`
+and `http`, over their drivers' verbs in `native/moy_net/moy_lora_dev.c`,
+`native/moy_audio/moy_mic_dev.c`, `native/moy_input/moy_midi_dev.c` and
+`native/moy_net/moy_fetch_dev.c`, an `http` handle holding the radio's book
+under its process's pid), served on the calling
 program's own task under its grant's device permissions, so they answer with
 no VM and through an S3's VM stop; a pin's edges are read through an input
 reader the stop keeps. The other device APIs are the door's Python half's, hopped
@@ -616,7 +618,7 @@ Leases (Python gets them as `machine` objects, §1:
 subset every tier may hold), and on the compiled tiers leases and the
 `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices, the
 `pins` and the radio link's ports (`net`) by handle (`native/moy_kernel/moy_dev.h`
-for the leases, `pins`, `lora`, `mic` and `midi`, `runtime/system/dev_handles.py` for the
+for the leases, `pins`, `lora`, `mic`, `midi` and `http`, `runtime/system/dev_handles.py` for the
 other devices and `net`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
@@ -683,7 +685,7 @@ pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,
 | design piece | today | what changes |
 |---|---|---|
 | hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1), with `uart1` and `spi2` riding them, offered as `MOY_LEASE_ROWS` | |
-| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects (Pin, UART, SPI, PWM, ADC, a SoftI2C on the pins), `pins` (P2.3; `tests/test_leases.py`); the compiled tiers' handles, `native/moy_kernel/moy_dev.h` (the leases, a hardware I²C unit among them, `lora`, `mic` and `midi`) and `runtime/system/dev_handles.py` (the other devices) (`tests/test_dev_handles.py`, and each tier's fixture) | a hardware I²C unit as a class of the table |
+| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects (Pin, UART, SPI, PWM, ADC, a SoftI2C on the pins), `pins` (P2.3; `tests/test_leases.py`); the compiled tiers' handles, `native/moy_kernel/moy_dev.h` (the leases, a hardware I²C unit among them, `lora`, `mic`, `midi` and `http`) and `runtime/system/dev_handles.py` (the other devices) (`tests/test_dev_handles.py`, and each tier's fixture) | a hardware I²C unit as a class of the table |
 | the link ring | `native/moy_net/moy_link.h`, counting its drops | the link's records a ring source's (LINK) |
 | GPIO edges | `native/moy_input/moy_edge.h`: a leased pin's edges as an ISR ring source, opened through `moy_lease_edge` and closed by the drop (P2.3) | |
 | brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the backlight is a `class` row naming `brightness` on every console (P2.1), whose API is P2.3's |

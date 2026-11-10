@@ -434,40 +434,73 @@ class _Web(http.server.BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def web(tmp_path):
-    from runtime import dev_http
-    from ws_helpers import build_ws
+def web():
+    from runtime import moy_http
     s = http.server.HTTPServer(("127.0.0.1", 0), _Web)
     threading.Thread(target=s.serve_forever, daemon=True).start()
-    build_ws(tmp_path)
-    devices.grants = None
     yield "http://127.0.0.1:%d" % s.server_address[1]
-    for pid in list({r.owner for r in dev_http._open.values()}):
-        dev_http.sweep(pid)
-    devices.grants = None
+    _K().moy_dev_reset()
+    moy_http.reset()
     s.shutdown()
 
 
+HTTP = 1 << 10                          # moy_dev.h's MOY_DEV_P_HTTP
+
+
+def _held_http(pid):
+    from runtime import moy_lease
+    return "http:%d" % pid in moy_lease.Wifi().holders()
+
+
 def test_an_http_handle_reads_its_body_in_chunks(web):
-    from runtime import dev_http
+    from runtime import moy_http
     pid = L.spawn("t.http")
-    h = _open(pid, "http", "url=%s/hello cap=1024" % web)
-    assert h > 0
-    assert H.get(pid, h, "status") == 200 and H.get(pid, h, "length") == 14
+    h = _kopen(pid, "http", "url=%s/hello cap=1024" % web, HTTP)
+    assert h > 0 and _held_http(pid)                              # the radio's book
+    assert _kget(pid, h, "status") == 0                           # queued, not served yet
+    moy_http.run()
+    assert _kget(pid, h, "status") == 200 and _kget(pid, h, "length") == 14
     got = b""
     while True:
-        c = _as(pid, lambda: H.read(pid, h, 5))
+        c = _kread(pid, h, 5)
         if not c:
             break
         got += c
     assert got == b"hello, moybyte"
-    miss = _open(pid, "http", "url=%s/nope" % web)
-    assert H.get(pid, miss, "status") == 404 and H.read(pid, miss, 8) == b""
-    assert _open(pid, "http", "cap=10") == H.BAD
-    moybyte.end(pid)
-    assert not [r for r in dev_http._open.values() if r.owner == pid]
-    devices.grants = lambda p: ()
-    assert _open(pid, "http", "url=%s/hello" % web) == H.DENIED
+    miss = _kopen(pid, "http", "url=%s/nope" % web, HTTP)
+    moy_http.run()
+    assert _kget(pid, miss, "status") == 404 and _kread(pid, miss, 8) == b""
+    assert _kclose(pid, h) == 0 and _held_http(pid)              # the other keeps the hold
+    for bad in ("cap=10", "url=%s/hello cap=10 window=10" % web, "url=nowhere",
+                "url=%s/hello cap=0" % web, "url=%s/hello warp=1" % web):
+        assert _kopen(pid, "http", bad, HTTP) == H.BAD, bad
+    _end(pid)
+    assert moy_http.count(pid) == 0 and not _held_http(pid)
+    assert _kopen(pid, "http", "url=%s/hello" % web, 0) == H.DENIED
+
+
+def test_an_http_handle_streams_a_body_through_its_window(web):
+    from runtime import moy_http
+    pid = L.spawn("t.http")
+    h = _kopen(pid, "http", "url=%s/hello window=4" % web, HTTP)
+    got = b""
+    for _ in range(64):
+        moy_http.run()
+        got += _kread(pid, h, 3)
+        if _kget(pid, h, "ended") and not _kread(pid, h, 0):
+            got += _kread(pid, h, 64)
+            break
+    assert got == b"hello, moybyte" and _kget(pid, h, "status") == 200
+    assert _kget(pid, h, "length") == 0 and _kclose(pid, h) == 0 and not _held_http(pid)
+
+
+def test_an_http_handle_that_got_no_response_reads_io(web):
+    from runtime import moy_http
+    pid = L.spawn("t.http")
+    h = _kopen(pid, "http", "url=http://127.0.0.1:1/x", HTTP)
+    moy_http.run()
+    assert _kget(pid, h, "status") == H.IO and _kget(pid, h, "errno") > 0
+    assert _kread(pid, h, 8) == b""
 
 
 # -- BLE --------------------------------------------------------------------------------

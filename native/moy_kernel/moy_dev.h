@@ -54,7 +54,7 @@
 //            holds): get value (0..65535)
 //
 // THE DEVICE APIS (each its permission, MOY_DEV_P_*; one handle a process
-// but midi's, BUSY for a second):
+// but midi's and http's, BUSY for a second):
 //   lora     the LoRa radio (native/moy_net/moy_lora.h; its one holder the
 //            lease table's MOY_LEASE_LORA, BUSY while another process holds
 //            it): cfg freq sf bw cr power sync preamble (868100000, 9, 125000,
@@ -94,6 +94,17 @@
 //            driver's), state (0 while a BLE port connects, 1 once messages
 //            flow, 2 failed or gone); a write to a BLE port before it is
 //            ready is ABSENT. Many handles a process
+//   http     a GET (native/moy_net/moy_fetch.h, served off the caller's task
+//            by the client's worker; the process holds the radio's book,
+//            tag "http", from its first handle to its last, moy_lease.h's
+//            THE RADIO): cfg url (required) cap (a body kept up to cap
+//            bytes, 16384) or window (a body of any length through a window
+//            of that many bytes); read: the body's next bytes, 0 while it
+//            runs and at its end; get status (0 while it runs, the HTTP
+//            status, IO where it got no response), errno (why), length (a
+//            kept body's), ended (a window's); BAD for a URL that does not
+//            parse and for https where nothing verifies it, FULL with every
+//            request of the client's taken. Many handles a process
 // A device a handle holds stays through the VM's end (moy_lease.h's THE
 // VM'S END, moy_dev_holds) and goes with its process.
 //
