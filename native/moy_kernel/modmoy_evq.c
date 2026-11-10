@@ -33,6 +33,7 @@
 //   status_get, status_reset           the status items (moy_status.h)
 //   notes_id, notes_waiting, notes_take, notes_goal, notes_award,
 //   notes_progress, notes_run, notes_end, notes_reset   the notes (moy_notes.h)
+//   items_hand, items_end, items_reset the items handed to processes (moy_items.h)
 //   timer_cancel(pid, id) -> bool, timers(pid) -> n
 //   timers_run() -> ms to the next      the due ones posted
 //   want(bits), wanted(mask) -> bits    THE VM'S WAKE: bits wanted, and those
@@ -49,6 +50,7 @@
 
 #include "moy_evq.h"
 #include "moy_screen_slot.h"
+#include "moy_items.h"
 #include "moy_notes.h"
 #include "moy_status.h"
 #include "moy_super.h"
@@ -419,6 +421,30 @@ static mp_obj_t ev_notes_reset(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_notes_reset_obj, ev_notes_reset);
 
+// The items (moy_items.h): items_hand(pid, h, kind, name, rw) -> bool;
+// items_end(pid, h=0); items_reset().
+static mp_obj_t ev_items_hand(size_t n, const mp_obj_t *a) {
+    (void)n;
+    size_t kn, nn;
+    const char *k = mp_obj_str_get_data(a[2], &kn);
+    const char *nm = mp_obj_str_get_data(a[3], &nn);
+    return mp_obj_new_bool(moy_items_hand(mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), k, kn, nm,
+                                          nn, mp_obj_is_true(a[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_items_hand_obj, 5, 5, ev_items_hand);
+
+static mp_obj_t ev_items_end(size_t n, const mp_obj_t *a) {
+    moy_items_end(mp_obj_get_int(a[0]), n > 1 ? mp_obj_get_int(a[1]) : 0);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_items_end_obj, 1, 2, ev_items_end);
+
+static mp_obj_t ev_items_reset(void) {
+    moy_items_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_items_reset_obj, ev_items_reset);
+
 static mp_obj_t ev_termed(void) {
     return mp_obj_new_int_from_uint(moy_evq_termed());
 }
@@ -520,6 +546,9 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&ev_alarm_obj) },
     { MP_ROM_QSTR(MP_QSTR_woke), MP_ROM_PTR(&ev_woke_obj) },
     { MP_ROM_QSTR(MP_QSTR_termed), MP_ROM_PTR(&ev_termed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_items_hand), MP_ROM_PTR(&ev_items_hand_obj) },
+    { MP_ROM_QSTR(MP_QSTR_items_end), MP_ROM_PTR(&ev_items_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_items_reset), MP_ROM_PTR(&ev_items_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_notes_id), MP_ROM_PTR(&ev_notes_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_notes_waiting), MP_ROM_PTR(&ev_notes_waiting_obj) },
     { MP_ROM_QSTR(MP_QSTR_notes_take), MP_ROM_PTR(&ev_notes_take_obj) },

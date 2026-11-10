@@ -269,7 +269,7 @@ int32_t moy_os_moy_item_read(int32_t item, void *data, size_t data_cap) {
         { NULL, 0u, item, MOY_OS_ARG_INT },
         { NULL, 0u, (int32_t)(data_cap < 0x7fffffffu ? data_cap : 0x7fffffffu), MOY_OS_ARG_INT },
     };
-    return moy_os_call(174u, MOY_OS_HOP, a, 2, data, data_cap);   // moybyte.item_read
+    return moy_os_call(174u, MOY_OS_HERE, a, 2, data, data_cap);   // moybyte.item_read
 }
 
 int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len) {
@@ -277,7 +277,7 @@ int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len) {
         { NULL, 0u, item, MOY_OS_ARG_INT },
         { data, data_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(175u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.item_write
+    return moy_os_call(175u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.item_write
 }
 
 int32_t moy_os_moy_dev_open(const char *name, const char *cfg) {

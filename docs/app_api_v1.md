@@ -861,8 +861,11 @@ and `moy_open`, which it listens on with `moybyte_on`, and its wakes,
 `moybyte.at` and `moybyte.timer` (the wake's id, §9), which it listens on
 by asking for one. `moy_open` carries the item's handle, its type, its
 mode and its name (a cancelled pick's handle 0), the item read and written by its handle with
-`moybyte_item_read(h, buf, cap)` and `moybyte_item_write(h, data)`. Each
-console call runs on the VM's task, a hop from a board's session thread. The app is
+`moybyte_item_read(h, buf, cap)` and `moybyte_item_write(h, data)`, on
+the app's own task under the store's lock where the item is a user file
+(the kernel's table of the items handed, `native/moy_kernel/moy_items.h`)
+and through the console otherwise. Each console call runs on the VM's task,
+a hop from a board's session thread. The app is
 cart-shaped: fullscreen, its loop the cart's, and on the desk a fixed canvas
 in its player window, which the WM scales. `tools/wasm_cart.py` builds the
 folder (`src/main.wat`, or C or Rust through wasi-sdk or `wasm32-wasip1`; a

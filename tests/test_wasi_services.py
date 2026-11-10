@@ -330,18 +330,26 @@ def test_a_wasi_service_s_app_rows_answer_under_its_permissions(svc, perms):
 
 
 @pytest.mark.parametrize("perms", [("launch", "front"), ()])
-def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms):
+def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms, monkeypatch):
     """moybyte.os `nav_open_app`, `share` and `pick` pass the front's gate
     (runtime/system/front.py) as the service's process: `open_app` needs
     `launch` (ACCES without), a document shared reaches the app that opens
     it, and the picker goes up for a process holding `front`; the item
     picked reaches the service as "moy_open" (moybyte.hand_item), its handle
-    what `item_read` and `item_write` take, and a handle it was never given
-    NOENT. In the background without `front`, the share and the pick wait
+    what `item_read` and `item_write` take, read and written on its own
+    task (native/moy_kernel/moy_items.h: no console call), and a handle it
+    was never given NOENT, the console's answer. In the background without `front`, the share and the pick wait
     as the process's notification (its latest request), the picker not up."""
     from runtime import intents as I
     from runtime import notifications
+    from runtime import shell_servers as ss
     ws, s, cart, peer = svc
+    door = []
+    for verb in ("item_read", "item_write"):
+        real = getattr(ss.ConsoleCalls, verb)
+        monkeypatch.setattr(ss.ConsoleCalls, verb,
+                            lambda self, g, h, x, _v=verb, _r=real: door.append(_v)
+                            or _r(self, g, h, x))
     notifications.NOTES.reset()
     ws.carts_store.save_file("docs", "picked", "# picked\n", ws.carts_root)
     since = L.next()
@@ -362,6 +370,7 @@ def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms):
         assert re.match(r'^moy_open \[[1-9][0-9]*, "text/markdown", "rw", "picked.md"\]$', got[0])
         assert got[1:] == ["item_read # picked errno 0", "item_write 1 errno 0",
                            "item_read.again # kept errno 0", "item_read.none -1 errno 44"], got
+        assert door == ["item_read"], "the picked file's rows ran on its task, `none` the door's"
         assert ws.carts_store.load_file("docs", "picked", ws.carts_root) == "# kept\n"
     else:
         assert _texts(since, pid)[-3:] == [

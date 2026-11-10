@@ -104,9 +104,12 @@ The role table is data, and every verb has one of four servers:
   (`runtime/shell/shell_servers.py`'s `ConsoleCalls`), so the permission it
   names is that process's. A native command reaches them through the door; a
   Lua service and a WASI program through the VM's queue; a compiled app
-  through its imports, which also reach Python's rows of the `moybyte` role
-  (`on`, `at`) and its own reads (`item_read`, `item_write`) through the
-  door. The door hands the Python half an answer buffer's capacity as a
+  through its imports. The rows the kernel answers first reach the door
+  where it has no answer: an item a compiled program was handed
+  (`item_read`, `item_write`) that is not a user file in the kernel's table
+  (`native/moy_kernel/moy_items.h`), or a store its task cannot reach;
+  `service_stop` and `service_running` for a service no kernel tier runs.
+  The door hands the Python half an answer buffer's capacity as a
   number field, so a read that does not fit keeps what it read. An import of the `moybyte` role is admitted
   for every grant (`MOY_ROLE_FLOOR`); the permission a call names is checked
   at the call.

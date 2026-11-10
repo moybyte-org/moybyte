@@ -36,6 +36,11 @@ int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char 
 int32_t moy_notes_award(uint32_t pid, const char *id, size_t n) __attribute__((weak));
 int32_t moy_notes_progress(uint32_t pid, const char *id, size_t n, int32_t value)
     __attribute__((weak));
+
+// The items handed to processes (native/moy_kernel/moy_items.h): weak, for a
+// build of the layer alone, where an item row is the door's.
+bool moy_items_get(uint32_t pid, int32_t h, char *kind, size_t kcap, char *name, size_t ncap,
+                   bool *rw) __attribute__((weak));
 void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
 
 // A compiled program's device handles (native/moy_kernel/moy_dev.h): weak,
@@ -1789,6 +1794,7 @@ static int no_args(int row) {
         case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
         case MOY_ROW_MOYBYTE_STATUS_REMOVE:
         case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
+        case MOY_ROW_MOYBYTE_ITEM_READ: case MOY_ROW_MOYBYTE_ITEM_WRITE:
         case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
         case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
         case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
@@ -2001,6 +2007,56 @@ static int32_t note_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
         return moy_notes_award(pid, (const char *)p0, n0);
     }
     return moy_notes_progress(pid, (const char *)p0, n0, v);
+}
+
+// A compiled process's item_read and item_write: an item handed to it as a
+// user file (moy_items.h, the table the console fills at the handout) read
+// or written whole through the user-files layer under the store's lock, as
+// the process the grant names, on its own task. A write of an item handed
+// "r" answers 0 (nothing written), a read past `cap` FULL. An item the table
+// does not hold, or a store this task cannot reach, is the door's (the
+// console's ConsoleCalls), on the VM's task.
+static int32_t item_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
+                        size_t cap) {
+    int32_t item = arg_int(f);
+    size_t dn = 0;
+    const uint8_t *d = NULL;
+    if (row == MOY_ROW_MOYBYTE_ITEM_READ) {
+        (void)arg_int(f);           // the answer's capacity, the door's to read
+    } else {
+        d = arg_field(f, &dn);
+    }
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, row);
+    if (pid == 0u) {
+        return -MOY_APP_STALE;
+    }
+    char kind[MOY_UF_NAME_MAX + 1u], name[MOY_UF_NAME_MAX + 1u];
+    bool rw;
+    if (moy_items_get != NULL && a->uf != NULL
+        && moy_items_get(pid, item, kind, sizeof kind, name, sizeof name, &rw)) {
+        if (row == MOY_ROW_MOYBYTE_ITEM_WRITE && !rw) {
+            return 0;
+        }
+        if (gate_on(a) == 0) {
+            if (row == MOY_ROW_MOYBYTE_ITEM_READ) {
+                moy_buf_t b = {NULL, 0};
+                int bin;
+                int rc = gate_off(a, a->uf->load(a->root, kind, name, &b, &bin));
+                return ans_buf(a, rc, &b, ans, cap);
+            }
+            char out[MOY_UF_NAME_MAX + 1u];
+            int rc = gate_off(a, a->uf->save(a->root, kind, name, (const char *)d, dn, out));
+            return rc == MOY_APP_OK ? 1 : rc == MOY_APP_IO ? 0 : -rc;
+        }
+        t_gated = -1;
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
 }
 
 static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
@@ -2424,6 +2480,8 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return status_row(a, g, row, f);
         case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
             return note_row(a, g, row, f);
+        case MOY_ROW_MOYBYTE_ITEM_READ: case MOY_ROW_MOYBYTE_ITEM_WRITE:
+            return item_row(a, g, row, f, ans, cap);
         case MOY_ROW_MOYBYTE_RANDOM: {
             int32_t want = arg_int(f);
             if (f->bad || f->at != f->n) {

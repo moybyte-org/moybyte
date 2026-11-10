@@ -232,13 +232,13 @@ static int32_t w_os_pick(wasm_exec_env_t e, const char *mime, uint32_t mime_n, c
 
 static int32_t w_os_item_read(wasm_exec_env_t e, int32_t item, uint8_t *data, uint32_t data_cap) {
     const os_arg_t a[2] = { OS_I(item), OS_CAP(data_cap) };
-    return os_role(e, MOY_T_MOYBYTE_ITEM_READ, OS_HOP, a, 2, data, data_cap);
+    return os_role(e, MOY_T_MOYBYTE_ITEM_READ, OS_HERE, a, 2, data, data_cap);
 }
 
 static int32_t w_os_item_write(wasm_exec_env_t e, int32_t item, const uint8_t *data,
                                uint32_t data_n) {
     const os_arg_t a[2] = { OS_I(item), OS_O((const char *)data, data_n) };
-    return os_role(e, MOY_T_MOYBYTE_ITEM_WRITE, OS_HOP, a, 2, NULL, 0);
+    return os_role(e, MOY_T_MOYBYTE_ITEM_WRITE, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_at(wasm_exec_env_t e, int32_t t) {

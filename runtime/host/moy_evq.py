@@ -21,7 +21,7 @@ _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 PART = native_build.Part("evq", ("moy_sync.h", "moy_evq.h", "moy_evq.c", "moy_super.h",
                                  "moy_super.c", "moy_vmq.h", "moy_vmq.c", "moy_screen_slot.h",
                                  "moy_screen_slot.c", "moy_status.h", "moy_status.c",
-                                 "moy_notes.h", "moy_notes.c"),
+                                 "moy_notes.h", "moy_notes.c", "moy_items.h", "moy_items.c"),
                          (_KERNEL,))
 
 OK, STALE, FULL, NOMEM, DENIED, DEAF, EMPTY, RANGE = range(8)
@@ -109,6 +109,9 @@ _SIGS = (
     ("moy_notes_run", [], _U32),
     ("moy_notes_end", [_U32], None),
     ("moy_notes_reset", [], None),
+    ("moy_items_hand", [_U32, ctypes.c_int32, _P, _SZ, _P, _SZ, _B], _B),
+    ("moy_items_end", [_U32, ctypes.c_int32], None),
+    ("moy_items_reset", [], None),
     ("moy_evq_clock", [ctypes.c_int64], None),
     ("moy_evq_timers", [_U32], _U32),
     ("moy_evq_timers_run", [], _U32),
@@ -396,6 +399,19 @@ def notes_end(pid):
 
 def notes_reset():
     _lib().moy_notes_reset()
+
+
+def items_hand(pid, h, kind, name, rw):
+    k, n = _b(kind), _b(name)
+    return bool(_lib().moy_items_hand(int(pid), int(h), k, len(k), n, len(n), bool(rw)))
+
+
+def items_end(pid, h=0):
+    _lib().moy_items_end(int(pid), int(h))
+
+
+def items_reset():
+    _lib().moy_items_reset()
 
 
 def timer_cancel(pid, tid):

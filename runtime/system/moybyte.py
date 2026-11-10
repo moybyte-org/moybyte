@@ -907,8 +907,11 @@ ENDS.append(_intents_end)
 
 
 # An item handed to a process: the message `moy_open` its queue takes, and
-# a granted item a handle its item_read and item_write take
-# (runtime/shell/shell_servers.py, ConsoleCalls) until its process ends. A
+# a granted item a handle its item_read and item_write take until its
+# process ends: a user file's the kernel's table's too (native/moy_kernel/
+# moy_items.h), so a compiled program reads and writes it on its own task,
+# and everything else the door's (runtime/shell/shell_servers.py,
+# ConsoleCalls). A
 # compiled app (runtime/run/player.py, a wasm app that declares the
 # moybyte.app extension) hears its window events as messages the same way.
 _ITEMS = {}                 # pid -> {handle: grant}
@@ -926,9 +929,12 @@ def hand_item(pid, g):
     _ITEM_NEXT[0] = h + 1
     held = _ITEMS.setdefault(pid, {})
     held[h] = g
+    if g.file is not None and g.kind is not None:
+        _E.items_hand(pid, h, g.kind, g.file, g.mode == "rw")
     if WAKES.post(pid, "moy_open", (h, g.mime, g.mode, g.name)):
         return True
     del held[h]
+    _E.items_end(pid, h)
     return False
 
 
@@ -955,6 +961,7 @@ def _compiled_events(ns, pid):
 
 def _items_end(pid):
     _ITEMS.pop(pid, None)
+    _E.items_end(pid)
 
 
 ENDS.append(_items_end)

@@ -372,6 +372,7 @@ def _processes_reset():
     E = sys.modules.get("runtime.moy_evq")
     if E is not None and E._LIB[0] is not None:
         E.notes_reset()             # the kernel's notifications and badges (moy_notes.h)
+        E.items_reset()             # ...and the items handed to processes (moy_items.h)
     SI = sys.modules.get("runtime.status_items")
     if SI is not None:
         SI.ITEMS.sync()

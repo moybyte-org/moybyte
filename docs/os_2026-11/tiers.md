@@ -341,7 +341,9 @@ the system's messages (`_minimise`, `_restore`, `moy_action`, `moy_open`;
 `moybyte.at` and `moybyte.timer`, the wake's id), an item handed to it a handle its `moybyte_item_read` and
 `item_write` take (`runtime/system/moybyte.py`: `hand_item`, which hands an
 item to any process with a queue, a native command's and a service's too, and
-`_compiled_events`). **Its leases and devices are handles it polls too
+`_compiled_events`), a user file read and written on its own task under the
+store's lock (`native/moy_kernel/moy_items.h`, the table `hand_item` fills),
+anything else through the door. **Its leases and devices are handles it polls too
 (2026-11-09)**: the `dev_*` rows on all three compiled tiers
 (`hardware.md` §1 and §4), whose `dev_read`
 takes a ring's records (a pin's edges, a packet, samples, MIDI messages,
