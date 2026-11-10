@@ -2,7 +2,9 @@
 (firmware/web_runner/media_link.py): the listing the worker writes, and a
 reader over the worker's spool segments, which reads a segment as far as it
 has grown, removes it once it is whole and read, and raises the worker's
-errno only once every byte that came is read."""
+errno only once every byte that came is read; and a station asked for its
+ICY metadata, read again without asking where the page could not read the
+answer."""
 
 import json
 import sys
@@ -26,6 +28,7 @@ def net(tmp_path, monkeypatch):
     spool.mkdir()
     monkeypatch.setattr(media_link, "SPOOL", str(spool))
     monkeypatch.setattr(media_link, "LISTING", str(spool / "media.json"))
+    monkeypatch.setattr(media_link, "PLAIN", set())
     link = carts_link.CartsLink()
     return media_link, link, media_link.WebMediaNet(link, MUSIC), spool
 
@@ -33,6 +36,20 @@ def net(tmp_path, monkeypatch):
 def _jobs(link):
     text = link.poll_json()
     return json.loads(text) if text else []
+
+
+URL = "http://radio.example/live"
+HEAD = ["icy-metaint", "icy-name"]
+
+
+def _asked(rid, icy):
+    return {"op": "mget", "id": rid, "url": URL, "send": {"Icy-MetaData": "1"} if icy else {},
+            "head": HEAD, "probe": not icy}
+
+
+def _head(link, r, metaint=None, name=None, status=200):
+    link.event_json(json.dumps({"id": r.rid, "status": status, "size": None,
+                                "head": {"icy-metaint": metaint, "icy-name": name}}))
 
 
 def test_the_listing_names_the_songs_and_follows_the_workers_rewrite(net):
@@ -50,22 +67,24 @@ def test_a_song_and_a_url_are_asked_of_the_worker(net):
     _mod, link, n, spool = net
     (spool / "media.json").write_text(json.dumps({"a b.mp3": 1234}))
     song = n.open(MUSIC + "/a b.mp3")
-    url = n.open("http://radio.example/live")
+    url = n.open(URL)
     assert song.size == 1234 and url.size is None
     assert _jobs(link) == [{"op": "mget", "id": song.rid, "song": "a b.mp3", "size": 1234, "at": 0},
-                           {"op": "mget", "id": url.rid, "url": "http://radio.example/live"}]
+                           _asked(url.rid, True)]
     url.close()
     assert _jobs(link) == [{"op": "drop", "id": url.rid}]
 
 
 def test_the_reader_walks_the_segments_as_they_grow_and_removes_each(net):
     _mod, link, n, spool = net
-    r = n.open("http://radio.example/live")
+    r = n.open(URL)
     buf = bytearray(8)
     assert r.readinto(buf) is None                       # nothing yet
-    link.event_json(json.dumps({"id": r.rid, "status": 200, "size": None}))
     seg0 = spool / ("m%d.0" % r.rid)
     seg0.write_bytes(b"abc")
+    assert r.readinto(buf) is None                       # nor before its head
+    _head(link, r, "16000", "Moy FM")
+    assert r.icy == (16000, "Moy FM")
     assert r.readinto(buf) == 3 and bytes(buf[:3]) == b"abc"
     assert r.readinto(buf) is None                       # the segment may grow yet
     with open(seg0, "ab") as f:
@@ -83,11 +102,53 @@ def test_the_reader_walks_the_segments_as_they_grow_and_removes_each(net):
 
 def test_an_error_is_raised_only_once_the_bytes_that_came_are_read(net):
     _mod, link, n, spool = net
-    r = n.open("http://radio.example/live")
+    r = n.open(URL)
+    _head(link, r, "8192")
     (spool / ("m%d.0" % r.rid)).write_bytes(b"xy")
-    link.event_json(json.dumps({"id": r.rid, "error": "cors", "errno": 13}))
+    link.event_json(json.dumps({"id": r.rid, "error": "cut", "errno": 5}))
     buf = bytearray(8)
     assert r.readinto(buf) == 2
     with pytest.raises(OSError) as e:
         r.readinto(buf)
+    assert e.value.args[0] == 5
+
+
+def test_a_station_whose_metaint_the_page_cannot_read_is_read_again_without_asking(net):
+    """Its bytes may carry metadata nothing could take out, so the asking
+    read is dropped unread and the URL asked plainly; once that answers, the
+    URL is not asked again."""
+    _mod, link, n, spool = net
+    r = n.open(URL)
+    first = r.rid
+    assert _jobs(link) == [_asked(first, True)]
+    (spool / ("m%d.0" % first)).write_bytes(b"META")
+    _head(link, r, None, None)                           # not exposed
+    assert r.rid != first and r.icy is None
+    assert _jobs(link) == [{"op": "drop", "id": first}, _asked(r.rid, False)]
+    link.event_json(json.dumps({"id": first, "seg": 1}))  # the dropped read's: unheard
+    buf = bytearray(8)
+    assert r.readinto(buf) is None
+    _head(link, r, None, "Moy FM")
+    assert r.icy == (0, "Moy FM")
+    (spool / ("m%d.0" % r.rid)).write_bytes(b"tone")
+    assert r.readinto(buf) == 4 and bytes(buf[:4]) == b"tone"
+    again = n.open(URL)
+    assert _jobs(link) == [_asked(again.rid, False)]
+
+
+def test_a_station_that_refuses_the_asking_fetch_is_read_again_and_its_refusal_raised(net):
+    """The request header makes the fetch preflighted, which a station may
+    refuse: the asking fetch's failure is not the station's answer, the
+    plain one's is, and a URL that never answered is asked again next time."""
+    _mod, link, n, _spool = net
+    r = n.open(URL)
+    first = r.rid
+    _jobs(link)
+    link.event_json(json.dumps({"id": first, "error": "preflight", "errno": 5}))
+    assert _jobs(link) == [{"op": "drop", "id": first}, _asked(r.rid, False)]
+    link.event_json(json.dumps({"id": r.rid, "error": "cors", "errno": 13}))
+    with pytest.raises(OSError) as e:
+        r.readinto(bytearray(8))
     assert e.value.args[0] == 13
+    again = n.open(URL)
+    assert _jobs(link) == [_asked(again.rid, True)]

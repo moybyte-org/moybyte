@@ -245,6 +245,16 @@ nor those docs will warn you about:
     https address redirects to http cannot play there. The fetch names no
     page (`referrerPolicy: "no-referrer"`): SomaFM answers a Referer naming a
     github.io or localhost page with an empty 403.
+  - **A station is asked for its ICY metadata as a board asks
+    (`Icy-MetaData: 1`), which makes the fetch PREFLIGHTED**, and its
+    `icy-metaint` is readable only where the station exposes it
+    (Access-Control-Expose-Headers). `media_link.py` decides: a refused
+    asking fetch, or an answer with no readable `icy-metaint` (its bytes may
+    carry metadata nothing can take out), is read again without asking, so
+    a station that played before still plays, with no now-playing text. The
+    head reaches the C through `moy_media_feed_icy`, and the feed takes the
+    metadata out with the board's own demux. The worker only sends the
+    headers it is given and reads back the ones it is named.
 - **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
   what it does depends on whether that board has glass. Headless: the strip IS
   the update screen — two taps, then a polled progress read, because the board

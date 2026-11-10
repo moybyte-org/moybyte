@@ -83,6 +83,7 @@ _SIGS = (
     ("moy_media_feed_end", [_U32], _I),
     ("moy_media_feed_fail", [_U32, _I], _I),
     ("moy_media_feed_size", [_U32, _U32], _I),
+    ("moy_media_feed_icy", [_U32, _U32, ctypes.c_char_p], _I),
     ("moy_media_status", [ctypes.POINTER(_St)], _I),
     ("moy_media_text", [_I, ctypes.c_char_p, _SZ], _I),
     ("moy_media_entry", [_I, ctypes.c_char_p, _SZ, ctypes.c_char_p, _SZ], _I),
@@ -220,6 +221,10 @@ def feed_fail(gen, err):
 
 def feed_size(gen, size):
     return _lib().moy_media_feed_size(gen, size)
+
+
+def feed_icy(gen, metaint, station):
+    return _lib().moy_media_feed_icy(gen, metaint, str(station).encode("utf-8"))
 
 
 def status():

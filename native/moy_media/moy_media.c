@@ -64,6 +64,7 @@ void moy_loop_job_drop(bool (*fn)(void *), void *arg) __attribute__((weak));
 #define NO_TITLE 0xffffu
 #define RD_BYTES 4096u
 #define META_MAX (255u * 16u)
+#define ICY_INT_MAX (1u << 20)             // the longest metadata interval taken
 #define NO_SEEK 0xffffffffu
 #define READ_CHUNK (8u * 1024u)         // one read of a file, under the lock
 
@@ -1053,25 +1054,106 @@ static void in_put(media_t *m, const uint8_t *p, uint32_t n) {
     STORE(&m->in_w, w + n);
 }
 
+static void set_text(media_t *m, char *dst, const char *s, size_t n) {
+    char t[MOY_MEDIA_TEXT_MAX];
+    to_utf8(s, n, t, sizeof(t));
+    LOCK(m);
+    if (strcmp(dst, t) != 0) {
+        strcpy(dst, t);
+        m->text_gen++;
+    }
+    UNLOCK(m);
+}
+
+// A stream's bytes, its ICY metadata taken out, into the stream buffer (the
+// connection's on a board, the face's feed in the browser): the length of
+// the last StreamTitle a metadata block carried, copied into `title`, else -1.
+static int demux(media_t *m, const uint8_t *p, uint32_t k, char *title, size_t cap) {
+    int tn = -1;
+    while (k > 0) {
+        if (m->icy_int == 0) {
+            in_put(m, p, k);
+            return tn;
+        }
+        if (m->in_meta) {
+            uint32_t t = m->meta_need - m->meta_got;
+            t = t < k ? t : k;
+            memcpy(m->meta + m->meta_got, p, t);
+            m->meta_got += t;
+            p += t;
+            k -= t;
+            if (m->meta_got == m->meta_need) {
+                int n = moy_media_icy_title(m->meta, m->meta_got, title, cap);
+                if (n >= 0) {
+                    tn = n;
+                }
+                m->in_meta = 0;
+                m->icy_left = m->icy_int;
+            }
+        } else if (m->icy_left == 0) {
+            m->meta_need = (uint32_t)p[0] * 16u;
+            m->meta_got = 0;
+            p++;
+            k--;
+            if (m->meta_need > 0) {
+                m->in_meta = 1;
+            } else {
+                m->icy_left = m->icy_int;
+            }
+        } else {
+            uint32_t t = m->icy_left < k ? m->icy_left : k;
+            in_put(m, p, t);
+            m->icy_left -= t;
+            p += t;
+            k -= t;
+        }
+    }
+    return tn;
+}
+
 int moy_media_feed(uint32_t gen, const void *buf, size_t n) {
     media_t *m = s_m;
     if (m == NULL) {
         return -MOY_MEDIA_EBADF;
     }
     uint32_t k = 0;
+    char title[MOY_MEDIA_TEXT_MAX];
+    int tn = -1;
     LOCK(m);
     if (gen != 0 && m->armed == gen && m->face_gen == gen && !m->fed_end) {
         k = in_room(m);
         if (k > n) {
             k = (uint32_t)n;
         }
-        in_put(m, buf, k);
+        tn = demux(m, buf, k, title, sizeof(title));
     }
     UNLOCK(m);
+    if (tn >= 0) {
+        set_text(m, m->title, title, (size_t)tn);
+    }
     if (k > 0) {
         WAKE(m);
     }
     return (int)k;
+}
+
+int moy_media_feed_icy(uint32_t gen, uint32_t metaint, const char *station) {
+    media_t *m = s_m;
+    if (m == NULL) {
+        return -MOY_MEDIA_EBADF;
+    }
+    LOCK(m);
+    int ours = gen != 0 && m->armed == gen && m->face_gen == gen && !m->fed_end;
+    if (ours) {
+        m->icy_int = metaint <= ICY_INT_MAX ? metaint : 0;
+        m->icy_left = m->icy_int;
+        m->in_meta = 0;
+    }
+    UNLOCK(m);
+    if (ours && station != NULL && station[0] != '\0') {
+        set_text(m, m->station, station, strlen(station));
+    }
+    return 0;
 }
 
 int moy_media_feed_fail(uint32_t gen, int err) {
@@ -1237,19 +1319,6 @@ static uint32_t url_len(const media_t *m) {
 #endif
 }
 
-#if MOY_MEDIA_CLIENT
-static void set_text(media_t *m, char *dst, const char *s, size_t n) {
-    char t[MOY_MEDIA_TEXT_MAX];
-    to_utf8(s, n, t, sizeof(t));
-    LOCK(m);
-    if (strcmp(dst, t) != 0) {
-        strcpy(dst, t);
-        m->text_gen++;
-    }
-    UNLOCK(m);
-}
-#endif
-
 // The entry moves on by itself: again for a URL that played and has retries
 // left, else the next. A command since wins.
 static void advance(media_t *m, int err) {
@@ -1344,7 +1413,7 @@ static int header_int(int h, const char *name) {
     int x = 0;
     for (const char *p = v; *p >= '0' && *p <= '9'; p++) {
         x = x * 10 + (*p - '0');
-        if (x > 1 << 20) {
+        if (x > (int)ICY_INT_MAX) {
             return 0;
         }
     }
@@ -1441,49 +1510,6 @@ static int open_url(media_t *m) {
     return 1;
 }
 
-// A connection's bytes, its ICY metadata taken out, into the stream buffer.
-static void demux(media_t *m, const uint8_t *p, uint32_t k) {
-    while (k > 0) {
-        if (m->icy_int == 0) {
-            in_put(m, p, k);
-            return;
-        }
-        if (m->in_meta) {
-            uint32_t t = m->meta_need - m->meta_got;
-            t = t < k ? t : k;
-            memcpy(m->meta + m->meta_got, p, t);
-            m->meta_got += t;
-            p += t;
-            k -= t;
-            if (m->meta_got == m->meta_need) {
-                char title[MOY_MEDIA_TEXT_MAX];
-                int tn = moy_media_icy_title(m->meta, m->meta_got, title, sizeof(title));
-                if (tn >= 0) {
-                    set_text(m, m->title, title, (size_t)tn);
-                }
-                m->in_meta = 0;
-                m->icy_left = m->icy_int;
-            }
-        } else if (m->icy_left == 0) {
-            m->meta_need = (uint32_t)p[0] * 16u;
-            m->meta_got = 0;
-            p++;
-            k--;
-            if (m->meta_need > 0) {
-                m->in_meta = 1;
-            } else {
-                m->icy_left = m->icy_int;
-            }
-        } else {
-            uint32_t t = m->icy_left < k ? m->icy_left : k;
-            in_put(m, p, t);
-            m->icy_left -= t;
-            p += t;
-            k -= t;
-        }
-    }
-}
-
 // 1: bytes came; 0: none yet.
 static int read_url(media_t *m) {
     if (m->h <= 0 || m->eof) {
@@ -1503,7 +1529,11 @@ static int read_url(media_t *m) {
         conn_close(m);
         return 1;
     }
-    demux(m, m->rd, (uint32_t)k);
+    char title[MOY_MEDIA_TEXT_MAX];
+    int tn = demux(m, m->rd, (uint32_t)k, title, sizeof(title));
+    if (tn >= 0) {
+        set_text(m, m->title, title, (size_t)tn);
+    }
     return 1;
 }
 

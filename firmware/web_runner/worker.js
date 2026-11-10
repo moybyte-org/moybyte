@@ -1841,14 +1841,18 @@ async function mediaUrl(j, live, mine, put, room, fail) {
     // A station's request names no page: SomaFM's servers answer 403 to a
     // Referer naming a github.io or localhost page, and a board's request
     // names none either.
+    // `send` are the request's headers and `head` the response's to read
+    // back, null where the station does not expose one; without `probe` a
+    // failed fetch is reported as it failed.
     let url = j.url;
     if (self.location.protocol === "https:" && /^http:/i.test(url)) url = "https:" + url.slice(5);
     const how = { cache: "no-store", referrerPolicy: "no-referrer" };
     let r;
     try {
-        r = await fetch(url, Object.assign({ signal: live.ac.signal }, how));
+        r = await fetch(url, Object.assign({ signal: live.ac.signal, headers: j.send || {} }, how));
     } catch (e) {
         if (!mine()) return;
+        if (!j.probe) { fail(EIO, String((e && e.message) || e)); return; }
         // CORS and no network look the same from here; a no-cors fetch that
         // answers says the station is there and will not let a page read it.
         let there = false;
@@ -1864,7 +1868,9 @@ async function mediaUrl(j, live, mine, put, room, fail) {
     }
     if (!mine()) return;
     const len = r.headers.get("Content-Length");
-    cartsSay({ id: j.id, status: r.status, size: len !== null && /^\d+$/.test(len) ? +len : null });
+    const head = {};
+    for (const h of j.head || []) head[h] = r.headers.get(h);
+    cartsSay({ id: j.id, status: r.status, size: len !== null && /^\d+$/.test(len) ? +len : null, head });
     if (r.status !== 200 || !r.body) {
         try { live.ac.abort(); } catch (e) { }
         fail(EIO, "HTTP " + r.status);

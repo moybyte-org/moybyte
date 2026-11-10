@@ -11,6 +11,7 @@
 //   clear() add(src, title) playlist(text, base)
 //   go(i) stop() pause(on) volume(v)
 //   feed(gen, buf) -> n  feed_end(gen)  feed_fail(gen, err)  feed_size(gen, size)
+//   feed_icy(gen, metaint, station)
 //   status() -> tuple (FIELDS' order) | None   text(which) -> str
 //   entry(i) -> (src, title) | None   run() -> bool   pump()
 //   probe(path) -> (seconds, title, artist) | None
@@ -187,6 +188,11 @@ static mp_obj_t media_feed_size(mp_obj_t gen, mp_obj_t size) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(media_feed_size_obj, media_feed_size);
 
+static mp_obj_t media_feed_icy(mp_obj_t gen, mp_obj_t metaint, mp_obj_t station) {
+    return rc(moy_media_feed_icy(u32(gen), u32(metaint), mp_obj_str_get_str(station)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(media_feed_icy_obj, media_feed_icy);
+
 static mp_obj_t media_status(void) {
     moy_media_status_t s;
     if (!moy_media_status(&s)) {
@@ -308,6 +314,7 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_feed_end), MP_ROM_PTR(&media_feed_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_fail), MP_ROM_PTR(&media_feed_fail_obj) },
     { MP_ROM_QSTR(MP_QSTR_feed_size), MP_ROM_PTR(&media_feed_size_obj) },
+    { MP_ROM_QSTR(MP_QSTR_feed_icy), MP_ROM_PTR(&media_feed_icy_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&media_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_stamp), MP_ROM_PTR(&media_stamp_obj) },
     { MP_ROM_QSTR(MP_QSTR_key), MP_ROM_PTR(&media_key_obj) },

@@ -16,7 +16,10 @@ RADIO (site): a station is the page's fetch. One that sends CORS headers
 plays; one that does not says so ("Blocks browsers"). The station refuses a
 request that names its page, as SomaFM's do, so the fetch names none. A desk
 that booted into the Editor (the project site's hero) plays one from Music
-once the Editor is closed.
+once the Editor is closed. A station asked for its ICY metadata that lets
+the page read its `icy-metaint` shows its now-playing text and name; one
+that answers but hides the header plays, read again without asking, with
+none.
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_music_e2e.py
 """
@@ -145,10 +148,27 @@ def test_site_a_dropped_song_is_kept_in_opfs_and_plays_from_it(tmp_path):
         server.wait(timeout=10)
 
 
-def _station(tmp_path, cors):
-    host = web_e2e.Host(cors=cors, referer=False)
+def _station(tmp_path, cors, expose=False):
+    host = web_e2e.Host(cors=cors, referer=False, expose=expose)
     host.files["/live"] = LONG
     return host
+
+
+ICY_INT = 4096
+ICY_TITLE = "Moy Song"
+
+
+def _icy_body(title=ICY_TITLE):
+    """LONG with an ICY metadata block every ICY_INT bytes, each carrying
+    the StreamTitle `title`."""
+    meta = ("StreamTitle='%s';" % title).encode()
+    meta += b"\0" * (-len(meta) % 16)
+    out = b""
+    for i in range(0, len(LONG), ICY_INT):
+        out += LONG[i:i + ICY_INT]
+        if len(LONG[i:i + ICY_INT]) == ICY_INT:
+            out += bytes([len(meta) // 16]) + meta
+    return out
 
 
 def _add_station(url):
@@ -188,6 +208,36 @@ def test_site_a_station_plays_when_it_lets_a_page_read_it_and_says_so_when_not(
             assert media and last is None, js
             ended = _tagged(js, "LAST")
             assert ended and ended["state"] == "failed" and ended["err"] == 13, (js, out[-3000:])
+    finally:
+        station.stop()
+        server.terminate()
+        server.wait(timeout=10)
+
+
+@pytest.mark.parametrize("expose", [True, False])
+def test_site_a_stations_now_playing_text_shows_where_the_page_can_read_its_icy_head(
+        tmp_path, expose):
+    station = _station(tmp_path, True, expose)
+    station.icy["/live"] = (ICY_INT, _icy_body(), "Moy FM")
+    server, base = _site(tmp_path)
+    try:
+        url = station.base + "/live"
+        out, js = web_e2e.run(tmp_path, "icy", "?dev=1&handheld=1&cart=Music",
+                              [{"js": _SPY}, {"wait": 1500}] + _add_station(url) + [
+            _playing(), {"wait": 1000}, {"js": _MEDIA}, {"js": _PCM}, {"shot": "icy"},
+        ], base, tmp_path / "chrome", boot_ms=30000)
+        media = _tagged(js, "MEDIA")
+        assert media and media["src"] == url and media["state"] == "playing", (js, out[-3000:])
+        assert station.preflights, "asking for the metadata is a preflighted fetch"
+        if expose:
+            assert media["title"] == ICY_TITLE and media["station"] == "Moy FM", media
+            assert station.asked_icy == [("/live", True)], station.asked_icy
+        else:
+            # the metadata it may carry cannot be taken out: read again plainly
+            assert media["title"] != ICY_TITLE and media["station"] == "", media
+            assert station.asked_icy == [("/live", True), ("/live", False)], station.asked_icy
+        # the metadata never reached the decoder: the page's audio is the tone
+        _assert_tone(_tagged(js, "PCM"), out)
     finally:
         station.stop()
         server.terminate()

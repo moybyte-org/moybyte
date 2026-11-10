@@ -46,7 +46,9 @@
 // handed to the face rather than failed. feed_size gives a URL its length
 // (the response's Content-Length), and one with none is a live stream, opened
 // again as a board's is. A URL entry is OPENING until its first bytes or its
-// feed's end. It reads no ICY metadata: a page's fetch may not ask for it.
+// feed's end. A station's ICY head, where the page could read it, reaches
+// the service through feed_icy(): its metadata interval, which the feed's
+// bytes are taken apart by as a board's connection's are, and its name.
 //
 // THE MEMORY is the MEDIA row of THE SHARES (native/moy_play/moy_play.h):
 // open() takes moy_media_share() from it and refuses with -ENOSPC where the
@@ -268,6 +270,11 @@ int moy_media_feed_fail(uint32_t gen, int err);
 // The fed entry's size in bytes for generation `gen`, which its length is
 // read from: the bytes its decoded frames took against the frames they made.
 int moy_media_feed_size(uint32_t gen, uint32_t size);
+// The fed URL's ICY head for generation `gen`, before its first bytes: the
+// response's `icy-metaint` (0: its bytes carry no metadata), which the feed
+// then takes each metadata block out by, its StreamTitle the T_TITLE text,
+// and its `icy-name` (NULL or "" for none), the T_STATION text.
+int moy_media_feed_icy(uint32_t gen, uint32_t metaint, const char *station);
 
 int moy_media_status(moy_media_status_t *st);
 enum {

@@ -192,10 +192,18 @@ class Host:
     it, and written down in `preflights` -- a page that needed one could not
     have read the host. `referer` False refuses a request that names its
     page (a Referer) with an empty 403, as SomaFM's stations refuse one from a
-    github.io or localhost page, and writes it down in `refused`."""
+    github.io or localhost page, and writes it down in `refused`.
 
-    def __init__(self, cors, referer=True):
+    A station in `icy` ({path: (metaint, body with its metadata, name)})
+    answers a request asking for its ICY metadata (`Icy-MetaData: 1`) with
+    that body and its `icy-metaint` and `icy-name`, which the page can read
+    where `expose`; with CORS it answers the preflight that asking makes, as
+    Radio Paradise's do. `asked_icy` writes down whether each GET asked."""
+
+    def __init__(self, cors, referer=True, expose=False):
         self.files = {}
+        self.icy = {}
+        self.asked_icy = []
         self.asked = []
         self.ranges = []
         self.preflights = []
@@ -208,13 +216,34 @@ class Host:
 
             def do_OPTIONS(self):
                 host.preflights.append(self.path)
-                self.send_response(405)
+                if cors and host.icy:
+                    self.send_response(204)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Access-Control-Allow-Headers", "Icy-MetaData")
+                else:
+                    self.send_response(405)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
             def do_GET(self):
                 path = self.path.split("?", 1)[0]
                 host.asked.append(path)
+                ask = self.headers.get("Icy-MetaData") == "1"
+                host.asked_icy.append((path, ask))
+                icy = host.icy.get(path) if ask else None
+                if icy is not None and not (not referer and self.headers.get("Referer")):
+                    metaint, body, name = icy
+                    self.send_response(200)
+                    if cors:
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                    if expose:
+                        self.send_header("Access-Control-Expose-Headers", "icy-metaint, icy-name")
+                    self.send_header("icy-metaint", str(metaint))
+                    self.send_header("icy-name", name)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if not referer and self.headers.get("Referer"):
                     host.refused.append((path, self.headers.get("Referer")))
                     self.send_response(403)

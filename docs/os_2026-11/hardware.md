@@ -592,8 +592,11 @@ range a request (`native/moy_net/moy_webhost.c`, THE MEDIA ROUTE), since the
 sync wire carries no binaries. So a URL's bytes, and a song's, are the
 page's: the C arms the entry for the face, which feeds it from the page's
 reader (`ws.media_net`, `firmware/web_runner/media_link.py`) from the byte
-the C asks for (a seek's), with no ICY metadata (a page may not ask for it);
-a file that is in the VFS the frame's job reads, as on a board. A station plays
+the C asks for (a seek's); a file that is in the VFS the frame's job reads,
+as on a board. A station is asked for its ICY metadata as a board asks it,
+and its now-playing text and name show where the station lets a page read
+its `icy-metaint` header (Access-Control-Expose-Headers); one that does not
+is read again without asking and plays with none. A station plays
 only if it sends CORS headers; one that does not fails with EACCES, which
 Music shows as "Blocks browsers".
 

@@ -83,7 +83,9 @@ bytes of a URL, and of a song the page holds (its OPFS store's, or a serving
 board's), are the page's (`ws.media_net`, firmware/web_runner/media_link.py):
 a reader the worker fills between frames, from the byte the C asks for (a
 seek's), which answers None until bytes come and raises OSError with EACCES
-for a station that does not let a page read it."""
+for a station that does not let a page read it. A station's reader carries
+its ICY head (`icy`: the metadata interval and the station's name) where the
+page could read it, which the face hands the C before the first bytes."""
 
 try:
     import moy_media as _N
@@ -129,7 +131,7 @@ _STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the C's jo
 
 # The run the face follows and what the face's wake holds for it.
 _s = {"pid": 0, "wake": None, "every": 0, "file": None, "gen": 0, "eof": False,
-      "sized": False, "radio": 0}
+      "sized": False, "fed": False, "radio": 0}
 _buf = [None]
 _HEARD = [None]                 # the console's fn(), told when the face finds a run
 
@@ -435,6 +437,7 @@ def _feed(gen, room, at):
         _s["gen"] = gen
         _s["eof"] = False
         _s["sized"] = False
+        _s["fed"] = False
         net = _net()
         src = _N.text(_N.T_SRC)
         if net is None or not (_is_url(src) or net.holds(src)):
@@ -465,6 +468,13 @@ def _feed(gen, room, at):
         if not n:
             _ended(gen)
             return
+        if not _s["fed"]:
+            # a station's ICY head, where the page could read it, before
+            # the bytes it takes apart
+            _s["fed"] = True
+            icy = getattr(f, "icy", None)
+            if icy is not None:
+                _N.feed_icy(gen, icy[0], icy[1] or "")
         k = _N.feed(gen, mv[:n])
         room -= max(k, 0)
         if k < n:

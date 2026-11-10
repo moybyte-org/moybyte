@@ -689,6 +689,35 @@ def test_a_song_the_page_reads_seeks_from_the_byte_the_c_asks_for(media, page):
     assert _drive(lambda: _state() == "ended")
 
 
+def test_a_page_readers_icy_head_takes_the_metadata_out_of_its_bytes(media, page):
+    """A station's reader in the browser carries the ICY head the page read
+    (its `icy`): the face hands it to the C before the first bytes, the C
+    takes each metadata block out of the feed as a board's connection's,
+    and its StreamTitle and name are the now-playing text and station."""
+    path = "/moy/files/Music/Radio.mp3"
+    net = _Net({path: _icy_body()})
+    page.media_net = net
+    real = net.open
+
+    def open_icy(src, at=0):
+        r = real(src, at)
+        r.icy = (METAINT, "Moy FM")
+        read = r.readinto
+        r.readinto = lambda buf: read(memoryview(buf)[:1024])   # as a network's reads come
+        return r
+    net.open = open_icy
+    pid = L.spawn("t.pageicy")
+    _as(pid, lambda: moybyte.media.play(path))
+    assert _drive(lambda: (moybyte.media.now() or {}).get("title") == TITLES[0])
+    assert moybyte.media.now()["station"] == "Moy FM"
+    pcm = array("h")
+    assert _drive(lambda: moybyte.media.now()["title"] == TITLES[1], out=pcm)
+    assert _drive(lambda: _state() == "ended", out=pcm)
+    # The metadata never reached the decoder: what the mix played is the tone.
+    start = next(i for i, v in enumerate(pcm) if v)
+    assert abs(_freq(pcm[start:], AUDIO.rate()) - 1000) < 20
+
+
 def test_a_reader_that_refuses_fails_the_entry_with_its_errno(media, page):
     path = "/moy/files/Music/Tone.mp3"
     page.media_net = _Net({path: MP3}, err=errno.EACCES)
