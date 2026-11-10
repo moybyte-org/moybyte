@@ -43,7 +43,7 @@
 -- 0x7fffffff is negative here, packs and prints as the same 32 bits, and
 -- compares unsigned through math.ult.
 
-ME = "moybyte.mesh"
+ME = "mesh"
 BROADCAST = 0xFFFFFFFF
 TEXT = 1                                -- portnums.proto: TEXT_MESSAGE_APP
 KEEP = 30                               -- messages the log keeps

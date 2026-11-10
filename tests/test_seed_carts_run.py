@@ -28,7 +28,7 @@ import shutil
 import pytest
 
 import host_app
-from ws_helpers import seed_radios, shelf  # noqa: E402
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
@@ -53,15 +53,11 @@ def console(tmp_path_factory):
         if name.endswith(".moy"):
             shutil.copytree(os.path.join(SYSTEM_CARTS, name),
                             os.path.join(str(store), name))
-    radios = seed_radios(str(store))
     ws = host_app.build_workstation(str(store))
     driver = host_app.ConsoleDriver(ws)
     ws.launcher.items = shelf(ws.carts_root)
     assert ws.launcher.items, "no carts in the store -- this would pass vacuously"
-    yield ws, driver
-    from runtime import scheduler
-    scheduler.SCHED.reset()
-    radios()
+    return ws, driver
 
 
 def _titles():

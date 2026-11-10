@@ -2,15 +2,13 @@
   "format": "moy-1",
   "version": 1,
   "title": "Mesh",
-  "id": "moybyte.mesh",
-  "runtime": "python",
-  "main": "main.py",
+  "id": "mesh",
+  "runtime": "lua",
+  "main": "main.lua",
   "canvas": "320x240",
   "description": "Meshtastic text messages on the LoRa radio, on the default LongFast channel.",
   "moybyte": {
     "type": "app",
-    "system": true,
-    "order": 365,
     "permissions": [
       "lora",
       "prefs"

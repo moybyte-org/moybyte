@@ -24,10 +24,11 @@ generated or held by code, this guide points at it rather than copying it:
 Two worked examples run in the host suite, `tests/test_app_examples.py`: a
 Python app with a scrolling list and prefs (`tests/fixtures/apps/shopping.moy`)
 and a Lua service answering a message (`tests/fixtures/apps/echo_lua.moy`).
-`system_carts/moybyte.notes.moy` is the full-size app;
-`system_carts/moybyte.mesh.moy` is a Python window over a Lua service that
-holds the LoRa radio by handle and wakes on it (Meshtastic's default
-channel, `tests/test_mesh_app.py`).
+`system_carts/moybyte.notes.moy` is the full-size app. Mesh, an installable
+app in moybyte-org/carts (`carts/mesh/`, `pkg install mesh`), is the whole
+app in Lua: a window over a service that holds the LoRa radio by handle and
+wakes on it (Meshtastic's default channel); its copy
+`tests/fixtures/apps/mesh.moy` runs in `tests/test_mesh_app.py`.
 
 ---
 
@@ -217,10 +218,12 @@ answers four values.
 
 **The canvas: fixed by default, responsive by opt-in.** The manifest's
 `canvas` is the raster, and the console centres and integer-scales it, as it
-does a game's. A cart that defines a top-level `_layout(w, h, fs)` opts into
-the whole surface: it draws on the system canvas, is called before `_init`
-and again whenever the size or font scale changes, and gets the responsive
-bar. A cart that also declares a small `canvas` keeps the fixed raster and
+does a game's. A Python cart that defines a top-level `_layout(w, h, fs)` opts
+into the whole surface (the opt-in is Python's: `system_api.wants_layout`
+probes for its `def`, so a Lua app's canvas is fixed, on the desk a scaled
+raster like a game's rather than a window): it draws on the system canvas,
+is called before `_init` and again whenever the size or font scale changes,
+and gets the responsive bar. A cart that also declares a small `canvas` keeps the fixed raster and
 is told so through `_layout`'s arguments. On the desk the cart gets a window
 surface of its own, `_layout` and `content_rect()` being the window's
 content (`Workstation.app_window_canvas`); from the fullscreen Library, the

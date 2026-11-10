@@ -78,10 +78,18 @@ def test_every_cart_round_trips_through_the_blob():
 
 def test_a_cart_s_entry_files_round_trip_through_the_blob(tmp_path):
     """An app's service entry (docs/app_api_v1.md section 7) rides the blob
-    as [name, text] pairs: JSON's shape, so what inflates is what was packed."""
+    as [name, text] pairs: JSON's shape, so what inflates is what was packed.
+    Mesh (an installable app, its copy a fixture) stands in for a seed with a
+    service, marked a seed as one is."""
+    import json
     import shutil
-    src = os.path.join(ROOT, "system_carts", "moybyte.mesh.moy")
-    shutil.copytree(src, str(tmp_path / "moybyte.mesh.moy"))
+    src = os.path.join(ROOT, "tests", "fixtures", "apps", "mesh.moy")
+    dst = tmp_path / "moybyte.mesh.moy"
+    shutil.copytree(src, str(dst))
+    man = json.loads((dst / "manifest.json").read_text())
+    man["id"] = "moybyte.mesh"
+    man["moybyte"].update(system=True, order=1)
+    (dst / "manifest.json").write_text(json.dumps(man))
     (cart,) = gen.build_carts(str(tmp_path))
     ((_title, _version, blob),) = gen.build_packed(str(tmp_path))
     assert [name for name, _text in cart["entry_src"]] == ["service.lua"]

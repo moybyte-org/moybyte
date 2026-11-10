@@ -9,7 +9,6 @@ variant (a clock-pinning quiesce, a frame-first driver) keeps its local
 wrapper, ideally calling these.
 """
 
-import os
 from pathlib import Path
 
 from runtime import host_app
@@ -387,31 +386,3 @@ def seed_stories(ws, n=14):
             for f in files:
                 os.utime(os.path.join(dirpath, f), (t, t))
             os.utime(dirpath, (t, t))
-
-
-def seed_radios(carts_dir):
-    """The host's stand-in radio, installed where a seed cart in `carts_dir`
-    requires `lora` (Mesh): a board without one refuses the cart, so a
-    console that opens every seed needs one. Answers the undo, a function
-    that ends the radio's holder and removes the stand-in."""
-    import json
-    needs = False
-    for name in os.listdir(carts_dir):
-        try:
-            with open(os.path.join(carts_dir, name, "manifest.json")) as f:
-                man = json.load(f)
-        except (OSError, ValueError):
-            continue
-        if "lora" in ((man.get("moybyte") or {}).get("required") or ()):
-            needs = True
-    if not needs:
-        return lambda: None
-    from runtime import moy_lora, moybyte
-    from runtime.host import lora_sim
-    lora_sim.install()
-
-    def undo():
-        while moy_lora.owner():
-            moybyte.end(moy_lora.owner())
-        lora_sim.remove()
-    return undo

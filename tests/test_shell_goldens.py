@@ -297,7 +297,12 @@ APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcart
 # The "a running cart is not covered here" note above still holds for GAMES: a
 # game is the spec's domain and free to use rnd(). An app cart draws a settled
 # surface out of stored content, which is what every other row here does.
-APP_CARTS = (("notes", "Notes"), ("mesh", "Mesh"))
+APP_CARTS = (("notes", "Notes"),)
+
+# Mesh, an installable app (moybyte-org/carts' carts/mesh/, its copy the
+# fixture): a Lua window over a Lua service, installed into the store last,
+# so every surface before it draws the seed set alone.
+MESH_APP = str(Path(__file__).resolve().parent / "fixtures" / "apps" / "mesh.moy")
 
 # The public UI API's fixture page (docs/ui_api_2026-10.md), the Python app's
 # (tests/test_ui_public.py holds the Lua and compiled ones to its pixels): its
@@ -821,8 +826,6 @@ def _surface_plan(ws, cfg):
         enter = (lambda title=title: open_cart(ws, title))
         if surface == "notes":
             enter = _notes_vault(ws, enter)
-        elif surface == "mesh":
-            enter = _mesh_radio(ws, enter)
         plan.append(("app_" + surface, enter))
         if surface == "notes":
             # Notes with a note open: its page of tools, the note in the look
@@ -856,6 +859,7 @@ def _surface_plan(ws, cfg):
     plan.append(("open_with", lambda: _open_with(ws, home)))
     plan.append(("pick", lambda: _pick(ws, home)))
     plan.append(("app_files_document", lambda: _files_document(ws)))
+    plan.append(("app_mesh", _mesh_installed(ws, desktop)))
     return plan
 
 
@@ -1066,17 +1070,23 @@ MESH_LOG = [
 ]
 
 
-def _mesh_radio(ws, enter):
-    """Mesh on the stand-in radio (it requires `lora`), its node and its
-    messages pinned."""
+def _mesh_installed(ws, desktop):
+    """Mesh installed and open on the stand-in radio (it requires `lora`),
+    its node and its messages pinned: from the home, or alone on the desk."""
     def run():
         from runtime.host import lora_sim
+        ws.go_home()                     # the desk's windows close
+        if desktop:
+            ws.open_desk()
+        shutil.copytree(MESH_APP, os.path.join(str(ws.carts_root), "mesh.moy"))
+        ws.carts.rescan()
         lora_sim.install()
-        enter()
-        ns = ws.run.player.ns
-        ns["prefs"].set("node", MESH_NODE)
-        ns["prefs"].set("log", MESH_LOG)
-        ns["_reload"]()
+        open_cart(ws, "Mesh")
+        pl = ws.run.player
+        assert pl.ns is not None, pl.cart_error
+        pl.ns["prefs"].set("node", MESH_NODE)
+        pl.ns["prefs"].set("log", MESH_LOG)
+        assert pl._lua.exec("_reload()", "golden") is None
     return run
 
 
@@ -1898,8 +1908,7 @@ def surface_names(config_name):
     names += ["script_console"]
     for a, _title in APP_CARTS:
         names.append("app_" + a)
-        if a == "notes":
-            names += ["app_notes_note", "app_notes_script"]
+    names += ["app_notes_note", "app_notes_script"]
     names += ["web_console", "app_terminal"]
     if cfg.get("appearance"):
         names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
@@ -1907,7 +1916,7 @@ def surface_names(config_name):
             names.append("app_terminal_touch")
         names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
                   "app_terminal_colours"]
-    names += ["open_with", "pick", "app_files_document"]
+    names += ["open_with", "pick", "app_files_document", "app_mesh"]
     return names
 
 
@@ -1932,6 +1941,7 @@ def capture(config_name, carts_dir):
                 % (config_name, name, len(bytes(ws.glass_canvas._buf)), expect_bytes))
             out[name] = _render(ws, name, config_name)
     finally:
+        ws.go_home()                   # the run in front ends: its canvas is the glass's
         from runtime import scheduler
         scheduler.SCHED.reset()        # a service a plan started is process-wide too
         from runtime import notifications

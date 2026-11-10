@@ -1,4 +1,5 @@
-"""Mesh (system_carts/moybyte.mesh.moy): Meshtastic text on the LoRa radio.
+"""Mesh (tests/fixtures/apps/mesh.moy, moybyte-org/carts' carts/mesh/):
+Meshtastic text on the LoRa radio, a Lua window over a Lua service.
 
 The codec in its Lua service (service.lua), run on the host's Lua VM with
 the boards' 32-bit integers (LUA_32BITS), against the Meshtastic firmware's
@@ -14,6 +15,7 @@ packets, its own echo and a repeat."""
 
 import json
 import os
+import shutil
 import struct
 
 import pytest
@@ -26,7 +28,7 @@ from runtime.host import lora_sim
 from ws_helpers import build_ws, make_drv, select_on_home
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CART = os.path.join(ROOT, "system_carts", "moybyte.mesh.moy")
+CART = os.path.join(ROOT, "tests", "fixtures", "apps", "mesh.moy")
 H = bytes.fromhex
 DEFAULT_KEY = H("d4f1bb3a20290759f0bcffabcf4e6901")
 
@@ -178,10 +180,39 @@ def test_a_text_is_utf8_and_a_node_number_is_unsigned(c):
 # -- the app on the console -------------------------------------------------------------
 
 
+def _install(ws):
+    """Mesh into `ws`'s store, as `pkg install mesh` leaves it."""
+    shutil.copytree(CART, os.path.join(ws.carts_root, "mesh.moy"))
+    ws.carts.rescan()
+
+
+class _Window:
+    """The window's Lua state: its globals read, its functions called."""
+
+    def __init__(self, pl):
+        self.lua = pl._lua
+        assert self.lua is not None, pl.cart_error
+
+    def get(self, name):
+        return self.lua.get_global(name)
+
+    def run(self, src):
+        err = self.lua.exec(src, "test")
+        assert err is None, err
+
+    def row(self, i):
+        self.run("__R = rows[%d]" % i)
+        return self.get("__R")
+
+    def rows(self):
+        return [self.row(i + 1) for i in range(self.lua.get_global_len("rows"))]
+
+
 @pytest.fixture
 def mesh(tmp_path):
     lora_sim.install()
     ws = build_ws(tmp_path)
+    _install(ws)
     S.attach(ws)
     assert select_on_home(ws, "Mesh") is not None
     ws.open()
@@ -191,7 +222,7 @@ def mesh(tmp_path):
     for _ in range(6):
         drv.frame(1 / 30)
         S.SCHED.poll()
-    svc = S.SCHED.find("moybyte.mesh")
+    svc = S.SCHED.find("mesh")
     assert svc is not None and svc.state != S.EXITED
     yield ws, pl, drv, svc
     S.SCHED.stop(svc.pid)
@@ -210,11 +241,12 @@ def _frames(drv, n=4):
 
 def test_the_service_holds_the_radio_and_sends_what_the_window_typed(mesh):
     ws, pl, drv, svc = mesh
+    win = _Window(pl)
     assert N.owner() == svc.pid
     name = pl.ns["prefs"].get("node")
     node = int(name[1:], 16)
-    assert 3 < node < 0xFFFFFFFF and pl.ns["node"] == name == "!%08x" % node
-    pl.ns["send"]("hi from moybyte")
+    assert 3 < node < 0xFFFFFFFF and win.get("node") == name == "!%08x" % node
+    win.run('send("hi from moybyte")')
     _frames(drv)
     packet, freq, sf, bw, sync, iq, pre = lora_sim.sent()
     assert (freq, sf, bw, sync, iq, pre) == (869525000, 11, 250000, 0x2B, False, 16)
@@ -224,16 +256,17 @@ def test_the_service_holds_the_radio_and_sends_what_the_window_typed(mesh):
     assert _ctr(DEFAULT_KEY, block, packet[16:]) == b"\x08\x01\x12\x0fhi from moybyte"
     N.step(0)
     _frames(drv)
-    assert pl.ns["rows"][0] == "me: hi from moybyte"
+    assert win.row(1) == "me: hi from moybyte"
 
 
 def test_the_service_keeps_another_node_s_text_with_its_signal(mesh):
     ws, pl, drv, svc = mesh
+    win = _Window(pl)
     p = _node_packet(b"hello T-Deck", 0xA1B2C3D4, 4242)
     assert lora_sim.air(p, 869525000, 11, rssi=-112, snr=-34, bw=250000, sync=0x2B)
     N.step(0)
     _frames(drv)
-    assert pl.ns["rows"] == ["!a1b2c3d4: hello T-Deck  -112 dBm -8.5 dB"]
+    assert win.rows() == ["!a1b2c3d4: hello T-Deck  -112 dBm -8.5 dB"]
     log = pl.ns["prefs"].get("log")
     assert log == [{"from": "!a1b2c3d4", "text": "hello T-Deck", "rssi": -112, "snr": -8.5}]
     # a repeat (a relay's copy), another channel and its own echo are dropped
@@ -248,20 +281,23 @@ def test_the_service_keeps_another_node_s_text_with_its_signal(mesh):
 
 def test_a_new_region_retunes_the_radio(mesh):
     ws, pl, drv, svc = mesh
+    win = _Window(pl)
     pl.ns["prefs"].set("region", "US")
-    moybyte.send("moybyte.mesh", "retune")
+    moybyte.send("mesh", "retune")
     _frames(drv)
     assert not lora_sim.air(_node_packet(b"eu", 1234, 1), 869525000, 11)
     assert lora_sim.air(_node_packet(b"us", 1234, 2), 906875000, 11)
     N.step(0)
     _frames(drv)
-    assert pl.ns["rows"][0].startswith("!000004d2: us")
+    assert win.row(1).startswith("!000004d2: us")
+    assert win.get("region") == 3, "the window's region is the one prefs name"
 
 
 def test_the_manifest_asks_for_the_radio_and_names_its_service():
     with open(os.path.join(CART, "manifest.json")) as f:
         man = json.load(f)
-    assert man["id"] == "moybyte.mesh" and man["moybyte"]["type"] == "app"
+    assert man["id"] == "mesh" and man["moybyte"]["type"] == "app"
+    assert (man["runtime"], man["main"]) == ("lua", "main.lua")
     assert man["moybyte"]["entries"] == {"service": "service.lua"}
     assert set(man["moybyte"]["required"]) == {"lora", "prefs"}
 
@@ -270,6 +306,7 @@ def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True)
+    _install(ws)
 
     def titles(rows):
         return [c.get("title") for c in rows if c]
@@ -280,36 +317,38 @@ def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
     lora_sim.install()
     try:
         assert "Mesh" in titles(ws._launcher_items(ws.carts.all, "apps"))
-        assert "Mesh" in titles(c for _k, _l, c in desk._icon_catalog())
+        assert ("mesh", "Mesh") in [(k, lb) for k, lb, _c in desk._icon_catalog()], \
+            "its tile is the mesh icon slot"
     finally:
         lora_sim.remove()
 
 
 def test_on_the_handheld_the_window_opens_on_the_field_below_the_bar(tmp_path):
     from runtime import host_app
-    from runtime import ui
-    page, seen = ui.page, []
     lora_sim.install()
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(320, 240))
     try:
+        _install(ws)
         assert select_on_home(ws, "Mesh") is not None
         ws.open()
-        ns = ws.run.player.ns
-        assert ns["ui"] is ui
-
-        def spy(*a):
-            seen.append((page(*a), ns["content_rect"]()))
-            return seen[-1][0]
-        ui.page = spy
+        win = _Window(ws.run.player)
+        win.run("local page = ui.page\n"
+                "ui.page = function(...)\n"
+                "  PX, PY, PW, PH = page(...)\n"
+                "  CX, CY, CW, CH = content_rect()\n"
+                "  FOCUS = ui.focus()\n"
+                "  return PX, PY, PW, PH\n"
+                "end")
         drv = make_drv(ws)
         for _ in range(3):
             ws.mark_dirty()
             drv.frame(1 / 30)
-        got, room = seen[-1]
+        got = [win.get(k) for k in ("PX", "PY", "PW", "PH")]
+        room = [win.get(k) for k in ("CX", "CY", "CW", "CH")]
         assert room[1] > 0 and got == room          # the page lies below the bar
-        assert ui.focus() == "Message"
+        win.run("FOCUS = ui.focus()")
+        assert win.get("FOCUS") == "Message"
     finally:
-        ui.page = page
         while N.owner():
             moybyte.end(N.owner())
         lora_sim.remove()
