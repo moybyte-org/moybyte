@@ -992,6 +992,8 @@ def test_the_board_transport_polls_the_link_it_dialled(monkeypatch):
     state["up"] = False
     assert net.ready() is None and state["dials"] == 2
     clock.ms = moy_ota.ONLINE_WAIT_MS
+    assert net.ready() is None              # a polled dial outlasts the blocking wait's budget
+    clock.ms = moy_ota.DIAL_MS
     assert net.ready() is False
     net.dial()
     assert state["dials"] == 3

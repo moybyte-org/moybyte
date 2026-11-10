@@ -36,6 +36,11 @@ UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its
 # already given up and returned False.
 ONLINE_WAIT_MS = 12000
 ONLINE_STEP_MS = 250
+# How long poll_online() lets a dial run. A polled wait holds no frame, so it
+# outlasts the driver's fourth attempt (native/moy_net/moy_wifi.c's backoff):
+# on a P4 an association that expires and a retry that fails put the link on
+# the third attempt, which can land past ONLINE_WAIT_MS.
+DIAL_MS = 20000
 
 
 def keep_alive():
@@ -99,7 +104,7 @@ def poll_online(online, autoconnect, since):
     """wait_online for a caller that must not wait (a pump that asks again
     next frame): `(True, None)` with the link up; `(None, since)` while the
     dial runs -- `since` None dials now (`autoconnect`, best-effort) and
-    starts the budget; `(False, None)` once ONLINE_WAIT_MS of it passed."""
+    starts the budget; `(False, None)` once DIAL_MS of it passed."""
     if online():
         return True, None
     import time
@@ -110,7 +115,7 @@ def poll_online(online, autoconnect, since):
             except Exception:  # noqa: BLE001 -- the budget decides
                 pass
         return None, time.ticks_ms()
-    if time.ticks_diff(time.ticks_ms(), since) < ONLINE_WAIT_MS:
+    if time.ticks_diff(time.ticks_ms(), since) < DIAL_MS:
         return None, since
     return False, None
 
