@@ -4205,11 +4205,14 @@ def wasm_app_reaches_its_roles(board, root):
 _UI_FRAMES, _UI_FAIL, _UI_HASH = 0, 8, 9
 
 
-def _app_ui_host_pmem(look):
+def _app_ui_host_pmem(look, tier):
     """The fixture's pmem after its first frames on the host's WAMR in the
-    board's look (theme, variant) and its input in use (moy_ui.input(): the
-    hints draw that input's keys): the page's pixel hash the board's must
-    equal."""
+    board's look (theme, variant), its input in use (moy_ui.input(): the
+    hints draw that input's keys) and its tier (the system canvas's w and h,
+    whether the desk is the windowed WM's: where the game canvas is the
+    system's, the bar over the app is the system layout's, sized for that
+    input; on a desk it is the game canvas's 18 rows): the page's pixel hash
+    the board's must equal."""
     import tempfile
     from runtime import host_app, wasm_host
     from tools import wasm_cart
@@ -4220,7 +4223,7 @@ def _app_ui_host_pmem(look):
     host_app.moy_carts.ensure_dirs(root)
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"),
                     os.path.join(root, "app_ui.moy"))
-    ws = host_app.build_workstation(root)
+    ws = host_app.build_workstation(root, sys_size=(tier[0], tier[1]), windowed=tier[2])
     ws.pointer.visible = False
     ws.look.set_theme(look[0], persist=False, variant=look[1])
     from runtime import ui_draw
@@ -4252,6 +4255,8 @@ def wasm_app_draws_the_toolkit(board, root):
 def _wasm_app_draws_the_toolkit(board, root):
     host = _app_ui_host_pmem(board.pyval(
         "(ws.look.theme_name, ws.look.theme_variant, __import__('moy_ui').input())",
+        strict=True), board.pyval(
+        "(ws.sys_canvas.w, ws.sys_canvas.h, type(ws.wm).__name__ == 'WindowedWM')",
         strict=True))
     pm_expr = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
                "(__import__('array').array('i', bytearray(1024)))")
