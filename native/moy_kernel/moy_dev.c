@@ -3,6 +3,7 @@
 
 #include "moy_dev.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "moy_devbus.h"
@@ -22,6 +23,12 @@ size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n)
     __attribute__((weak));
 #else
 #define MOY_DEV_EDGES 0
+#endif
+
+// A board is known by the header it has (moy_lease.c does the same).
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define DEV_PSRAM 1
 #endif
 
 enum { K_GPIO = 1, K_PINS, K_UART, K_SPI, K_I2C, K_PWM, K_ADC };
@@ -50,7 +57,10 @@ typedef struct {
     } cfg;
 } dev_t;
 
-static dev_t s_dev[MOY_DEV_HANDLES];
+// MOY_DEV_HANDLES rows, PSRAM on a board, made at the first open and kept:
+// a boot whose programs open no device holds none of it, and a row's gen
+// outlives its close.
+static dev_t *s_dev;
 
 static int32_t lease_rc(int rc) {
     switch (rc) {
@@ -210,7 +220,8 @@ static dev_t *row_of(uint32_t pid, int32_t h) {
         return NULL;
     }
     uint32_t slot = (uint32_t)h & 0xffu, gen = ((uint32_t)h >> 8) & 0xffu;
-    if (slot >= MOY_DEV_HANDLES || s_dev[slot].pid != pid || s_dev[slot].gen != gen) {
+    if (s_dev == NULL || slot >= MOY_DEV_HANDLES || s_dev[slot].pid != pid
+        || s_dev[slot].gen != gen) {
         return NULL;
     }
     return &s_dev[slot];
@@ -221,6 +232,14 @@ static int32_t handle_of(const dev_t *d) {
 }
 
 static dev_t *row_new(uint32_t pid, uint8_t kind) {
+    if (s_dev == NULL) {
+        #ifdef DEV_PSRAM
+        s_dev = heap_caps_calloc(MOY_DEV_HANDLES, sizeof *s_dev, MALLOC_CAP_SPIRAM);
+        #endif
+        if (s_dev == NULL && (s_dev = calloc(MOY_DEV_HANDLES, sizeof *s_dev)) == NULL) {
+            return NULL;
+        }
+    }
     for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
         dev_t *d = &s_dev[i];
         if (d->pid == 0) {
@@ -460,7 +479,7 @@ static int32_t pins_open(uint32_t pid, uint32_t perms, const char *cfg, size_t c
     if (at < 0 || moy_lease_offer_at((uint32_t)at, &o) != MOY_LEASE_OK || o.pins == 0) {
         return MOY_DEV_EABSENT;
     }
-    for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
+    for (uint32_t i = 0; s_dev != NULL && i < MOY_DEV_HANDLES; i++) {
         if (s_dev[i].pid == pid && s_dev[i].kind == K_PINS) {
             return MOY_DEV_EBUSY;
         }
@@ -986,7 +1005,7 @@ uint32_t moy_dev_sweep(uint32_t pid) {
         return 0;
     }
     moy_lease_lock();
-    for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
+    for (uint32_t i = 0; s_dev != NULL && i < MOY_DEV_HANDLES; i++) {
         if (s_dev[i].pid == pid) {
             close_row(&s_dev[i]);
             n++;
@@ -999,7 +1018,7 @@ uint32_t moy_dev_sweep(uint32_t pid) {
 uint32_t moy_dev_count(void) {
     uint32_t n = 0;
     moy_lease_lock();
-    for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
+    for (uint32_t i = 0; s_dev != NULL && i < MOY_DEV_HANDLES; i++) {
         n += s_dev[i].pid != 0;
     }
     moy_lease_unlock();
@@ -1008,7 +1027,7 @@ uint32_t moy_dev_count(void) {
 
 void moy_dev_reset(void) {
     moy_lease_lock();
-    for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
+    for (uint32_t i = 0; s_dev != NULL && i < MOY_DEV_HANDLES; i++) {
         if (s_dev[i].pid != 0) {
             close_row(&s_dev[i]);
         }
