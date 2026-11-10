@@ -125,6 +125,32 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
         seen.append(pill)
 
 
+@pytest.mark.parametrize("size,fs", _WINDOWED)
+@pytest.mark.parametrize("n", (14, 40))
+def test_any_number_of_apps_keeps_every_desk_icon_on_the_canvas(tmp_path, size, fs, n):
+    """Each app a user adds is a tile: where the columns would run past the
+    desk's edge the tiles shrink until they fit, never off the canvas and
+    never over each other."""
+    ws = _desk_on_open_machine(tmp_path, size, fs)
+    desk = ws.wm._backdrop_layer
+    base = desk._icon_catalog()
+    extra = [("app%d" % i, "APP %d" % i, None) for i in range(n - len(base))]
+    monkey = desk._icon_catalog
+    desk._icon_catalog = lambda: base + extra
+    try:
+        rects = desk._icon_rects()
+    finally:
+        desk._icon_catalog = monkey
+    assert len(rects) == max(n, len(base))
+    cv = ws.sys_canvas
+    seen = []
+    for key, box, pill, _label, _cart in rects:
+        assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
+        assert not any(_overlaps(pill, p) or _overlaps(box, b) or _overlaps(box, p)
+                       for b, p in seen), key
+        seen.append((box, pill))
+
+
 def test_desk_bar_has_no_context_x(tmp_path):
     ws = _ws(tmp_path)
     _drv(ws)

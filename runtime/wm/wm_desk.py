@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # down and right.
 _WALL_SHADOW_A = 204
 _NONE = -2147483648
+_TILE_MIN = 12              # the smallest a desk tile shrinks to (`_look_rects`)
 
 
 def _set(v):
@@ -333,32 +334,50 @@ class _BackdropLayer(Layer):
         the desk's edge or further where a label needs it, each label under
         its tile, 2 of the 44 below it, as wide as the column: nearer its own
         tile than the next one down. A label longer than the columns leave
-        room for is cut to its band, so every column stays on the desk."""
-        k = box / 44
+        room for is cut to its band. Where the columns would still run past
+        the desk's right edge (more apps than the class's tiles hold at this
+        font scale), the tiles shrink, an eighth at a time, the cell and
+        margins with them and the labels kept a line, until they fit: every
+        app keeps a tile on the desk, however many there are."""
+        b = box
+        while True:
+            out, right = self._look_grid(catalog, b, box, fs, dx, dy, dh, dw)
+            if right <= dx + dw or b <= _TILE_MIN:
+                return out
+            b -= max(1, b // 8)
+
+    def _look_grid(self, catalog, b, box, fs, dx, dy, dh, dw):
+        """`_look_rects`' columns of tiles `b` across (`box` the class's),
+        and the rightmost pixel they reach."""
+        k = b / 44
+        gap = int(2 * k)
+        line = _ui_draw.font("ui")[2] * fs
         cell_h = _layout_base.metric("tile_cell", fs)
+        if b != box:
+            cell_h = max(cell_h * b // box, b + gap + line + int(6 * k))
         y0 = dy + _layout_base.metric("tile_top", fs)
         bottom = dy + dh - int(6 * k)
-        line = _ui_draw.font("ui")[2] * fs
         maxw = max((_ui_draw.text_width(label, fs, "ui") for _k, label, _c in catalog),
                    default=0)
-        rows = max(1, (bottom - y0 - box - int(2 * k) - line) // cell_h + 1)
+        rows = max(1, (bottom - y0 - b - gap - line) // cell_h + 1)
         cols = max(1, (len(catalog) + rows - 1) // rows)
         maxw = min(maxw, (dw - int(54 * k)) * 2 // (2 * cols - 1) - int(20 * k))
-        pitch = max(box + int(20 * k), maxw + int(20 * k))
+        pitch = max(b + int(20 * k), maxw + int(20 * k))
         cx = dx + max(int(54 * k), (maxw + 1) // 2 + int(10 * k))
-        gap = int(2 * k)
         y = y0
         out = []
+        right = dx
         for key, label, cart in catalog:
-            if y + box + gap + line > bottom and y > y0:
+            if y + b + gap + line > bottom and y > y0:
                 y = y0
                 cx += pitch
             out.append((key,
-                        (cx - box // 2, y, box, box),
-                        (cx - pitch // 2, y + box + gap, pitch, line),
+                        (cx - b // 2, y, b, b),
+                        (cx - pitch // 2, y + b + gap, pitch, line),
                         label, cart))
+            right = max(right, cx - b // 2 + b, cx - pitch // 2 + pitch)
             y += cell_h
-        return out
+        return out, right
 
     def _draw_look_icons(self, ws, cv, th):
         """Each tile as the look's part (`ui.bar_part`'s BAR_TILE) in its
