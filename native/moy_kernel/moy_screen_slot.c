@@ -44,7 +44,7 @@ typedef struct {
     moy_sync_who_t console;     // the console's task waiting on `shown`
 } slot_t;
 
-static slot_t s_slots[MOY_SCREEN_SLOTS];
+static slot_t (*s_slots)[MOY_SCREEN_SLOTS];     // made at the first open (moy_sync.h's THE TABLE)
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
 
 static int64_t now_us(void) {
@@ -58,9 +58,10 @@ static int64_t now_us(void) {
 }
 
 static slot_t *slot_of(uint32_t pid) {
-    for (uint32_t i = 0; i < MOY_SCREEN_SLOTS; i++) {
-        if (pid != 0u && s_slots[i].pid == pid) {
-            return &s_slots[i];
+    slot_t (*t)[MOY_SCREEN_SLOTS] = MOY_SYNC_AT(s_slots);
+    for (uint32_t i = 0; t != NULL && i < MOY_SCREEN_SLOTS; i++) {
+        if (pid != 0u && (*t)[i].pid == pid) {
+            return &(*t)[i];
         }
     }
     return NULL;
@@ -70,11 +71,14 @@ int moy_screen_slot_open(uint32_t pid, int w, int h, int depth) {
     if (pid == 0u || w <= 0 || h <= 0 || depth < 1 || depth > 2) {
         return -EINVAL;
     }
+    if (MOY_SYNC_TABLE(s_slots) == NULL) {
+        return -ENOMEM;
+    }
     slot_t *s = slot_of(pid);
     if (s == NULL) {
         for (uint32_t i = 0; i < MOY_SCREEN_SLOTS && s == NULL; i++) {
-            if (s_slots[i].pid == 0u) {
-                s = &s_slots[i];
+            if ((*s_slots)[i].pid == 0u) {
+                s = &(*s_slots)[i];
             }
         }
         if (s == NULL) {

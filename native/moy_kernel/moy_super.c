@@ -25,7 +25,7 @@ typedef struct {
     uint8_t held;
 } row_t;
 
-static row_t s_row[MOY_SUPER_ROWS];
+static row_t (*s_row)[MOY_SUPER_ROWS];  // made at the first overrun (moy_sync.h's THE TABLE)
 static uint32_t s_age;
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
 
@@ -35,11 +35,12 @@ static void say(int level, uint32_t pid, const char *text) {
     }
 }
 
-// `pid`'s row, made where `make` (the oldest forgotten). Under the lock.
+// `pid`'s row, made where `make` (the oldest forgotten): NULL for none, or
+// no table. Under the lock.
 static row_t *row_of(uint32_t pid, bool make) {
     row_t *oldest = NULL;
-    for (uint32_t i = 0; i < MOY_SUPER_ROWS; i++) {
-        row_t *r = &s_row[i];
+    for (uint32_t i = 0; s_row != NULL && i < MOY_SUPER_ROWS; i++) {
+        row_t *r = &(*s_row)[i];
         if (r->pid == pid) {
             return r;
         }
@@ -47,7 +48,7 @@ static row_t *row_of(uint32_t pid, bool make) {
             oldest = r;
         }
     }
-    if (!make) {
+    if (!make || oldest == NULL) {
         return NULL;
     }
     memset(oldest, 0, sizeof *oldest);
@@ -58,6 +59,9 @@ static row_t *row_of(uint32_t pid, bool make) {
 int moy_super_charge(uint32_t pid, uint32_t cost_us, bool aborted) {
     if (pid <= 1u || (!aborted && cost_us <= MOY_SUPER_SLICE_US)) {
         return MOY_SUPER_FINE;
+    }
+    if (MOY_SYNC_TABLE(s_row) == NULL) {
+        return MOY_SUPER_FINE;          // no memory for the rows: nothing kept to strike
     }
     int rung;
     uint32_t strikes;
@@ -141,7 +145,9 @@ void moy_super_forget(uint32_t pid) {
 
 void moy_super_reset(void) {
     MOY_SYNC_LOCK(&s_lock);
-    memset(s_row, 0, sizeof s_row);
+    if (s_row != NULL) {
+        memset(s_row, 0, sizeof *s_row);
+    }
     s_age = 0;
     MOY_SYNC_UNLOCK(&s_lock);
 }

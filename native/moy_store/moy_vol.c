@@ -6,7 +6,13 @@
 #define _XOPEN_SOURCE 700
 #endif
 
+#include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
+
+#if defined(__has_include) && __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#endif
 
 #include "moy_vol.h"
 
@@ -251,7 +257,22 @@ typedef struct {
     void *fs;
 } mount_t;
 
-static mount_t s_table[MOY_VOL_TABLE_N];
+// Made at the first mount and kept: PSRAM where there is any, out of the
+// internal RAM the idle desk pays for.
+static mount_t (*s_table)[MOY_VOL_TABLE_N];
+
+// Under the store's lock.
+static bool table_made(void) {
+    if (s_table == NULL) {
+        #if defined(__has_include) && __has_include("esp_heap_caps.h")
+        s_table = heap_caps_calloc(1, sizeof *s_table, MALLOC_CAP_SPIRAM);
+        #endif
+        if (s_table == NULL) {
+            s_table = calloc(1, sizeof *s_table);
+        }
+    }
+    return s_table != NULL;
+}
 
 int moy_vol_table_set(const char *at, uint8_t kind, void *fs) {
     size_t n = strlen(at);
@@ -262,10 +283,14 @@ int moy_vol_table_set(const char *at, uint8_t kind, void *fs) {
         return MOY_EINVAL;
     }
     moy_store_lock();
+    if (!table_made()) {
+        moy_store_unlock();
+        return MOY_ENOMEM;
+    }
     mount_t *free_slot = NULL;
     int rc = MOY_ENOSPC;
     for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
-        mount_t *m = &s_table[i];
+        mount_t *m = &(*s_table)[i];
         if (m->len == n && memcmp(m->at, at, n) == 0) {
             free_slot = m;
             break;
@@ -288,9 +313,9 @@ int moy_vol_table_set(const char *at, uint8_t kind, void *fs) {
 
 void moy_vol_table_drop(void *fs) {
     moy_store_lock();
-    for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
-        if (s_table[i].len != 0u && s_table[i].fs == fs) {
-            memset(&s_table[i], 0, sizeof s_table[i]);
+    for (size_t i = 0; s_table != NULL && i < MOY_VOL_TABLE_N; i++) {
+        if ((*s_table)[i].len != 0u && (*s_table)[i].fs == fs) {
+            memset(&(*s_table)[i], 0, sizeof (*s_table)[i]);
         }
     }
     moy_store_unlock();
@@ -298,7 +323,9 @@ void moy_vol_table_drop(void *fs) {
 
 void moy_vol_table_clear(void) {
     moy_store_lock();
-    memset(s_table, 0, sizeof s_table);
+    if (s_table != NULL) {
+        memset(s_table, 0, sizeof *s_table);
+    }
     moy_store_unlock();
 }
 
@@ -308,8 +335,8 @@ int moy_vol_table_at(const char *path, moy_vol_t *v, const char **rest) {
     }
     moy_store_lock();
     const mount_t *best = NULL;
-    for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
-        const mount_t *m = &s_table[i];
+    for (size_t i = 0; s_table != NULL && i < MOY_VOL_TABLE_N; i++) {
+        const mount_t *m = &(*s_table)[i];
         if (m->len == 0u || (best != NULL && m->len <= best->len)) {
             continue;
         }
@@ -336,7 +363,11 @@ int moy_vol_table_at(const char *path, moy_vol_t *v, const char **rest) {
 int moy_vol_table_mounts(int (*fn)(void *arg, const char *name), void *arg) {
     mount_t t[MOY_VOL_TABLE_N];
     moy_store_lock();
-    memcpy(t, s_table, sizeof t);
+    if (s_table != NULL) {
+        memcpy(t, s_table, sizeof t);
+    } else {
+        memset(t, 0, sizeof t);
+    }
     moy_store_unlock();
     for (size_t i = 0; i < MOY_VOL_TABLE_N; i++) {
         if (t[i].len <= 1u) {
