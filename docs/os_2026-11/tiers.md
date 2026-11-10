@@ -192,7 +192,8 @@ role binding** is `native/moy_app/moy_app_lua.c` (P5.1, 2026-11-07), over the ro
 table and the ROLE door (`moy_app_role`) the wasm adapter reaches, for the
 state's own run (§3): the Player makes a Lua app's run, its state's open
 copies it into the state, and the state opens with the names its
-permissions grant (`files`, `prefs`, `set_theme`, `open_app`: the source's
+permissions grant (`files`, `prefs`, `set_theme`, `open_app`, and the device
+handles `moybyte.dev_open` to `dev_get` under a device permission: the source's
 Lua names, §1, generated into `native/moy_app/moy_app_lua_rows.h`), each
 answering as the Python face does (the roles trace for a Lua app,
 `tests/test_semantic_traces.py`), and no others. With it Lua's **`io` and

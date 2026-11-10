@@ -196,6 +196,51 @@ def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
     moy_evq.close(peer)
 
 
+RADIO_SVC = '''
+local h = moybyte.dev_open("lora", "sf=7")
+moybyte.on("lora", function(_, ev)
+    if ev ~= 1 then return end
+    local p = moybyte.dev_read(h)
+    print("heard " .. p)
+    moybyte.dev_write(h, "re:" .. p)
+end)
+'''
+
+
+@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+def test_a_lua_service_hears_and_answers_its_radio_through_a_vm_stop(
+        tmp_path, fresh, monkeypatch):
+    """A Lua service's radio is the kernel's handle and its wake the kernel's
+    message "lora" (native/moy_net/moy_lora.c), so it hears a packet and
+    sends its answer while no VM runs (the Mesh app's service)."""
+    from runtime import moy_lora as N
+    from runtime.host import lora_sim
+    lora_sim.install()
+    try:
+        _cart(tmp_path / "carts", "t.radio", "service.lua", RADIO_SVC, ("autostart", "lora"))
+        ws = build_ws(tmp_path)
+        since = L.next()
+        pid = S.boot(ws)[0]
+        assert N.owner() == pid
+        rec, door = _stop(ws, fresh)
+        assert [k[0] for k in rec["keep"]] == [pid]
+        assert lora_sim.air(b"ping", 868100000, 7)
+        N.step(0)
+        t0 = time.monotonic()
+        while "heard ping" not in _texts(since, pid):
+            assert time.monotonic() - t0 < 3, "the packet wakes it during the stop"
+            _during(10, _lua_step)
+        N.step(0)
+        assert lora_sim.sent()[0] == b"re:ping"
+        s, _started = _back(ws, rec, door, monkeypatch)
+        assert s.procs[pid].native and N.owner() == pid
+        assert s.stop(pid)
+    finally:
+        while N.owner():
+            moybyte.end(N.owner())
+        lora_sim.remove()
+
+
 ALARM_SVC = '''
 local ids = {}
 moybyte.on("set", function(_, secs, tag)

@@ -25,6 +25,13 @@
 //                                clear(key), each value JSON in the settings row
 //   set_theme (appearance)       set_theme(name[, variant])
 //   open_app (launch)            open_app(id)
+//   the device handles           moybyte.dev_open(name[, cfg]) / dev_close(h) /
+//   (lease, http, lora, ...)     dev_read(h[, cap]) / dev_write(h, bytes) /
+//                                dev_xfer(h, bytes[, cap]) / dev_set(h, cfg) /
+//                                dev_get(h, what), the kernel's table
+//                                (moy_dev.h) under the grant's device
+//                                permissions: the answer, or nil and the
+//                                code's name; a read's bytes as a string
 //
 // and with files, `io` (open, lines, close, type; a file's read, write, lines,
 // seek, flush and close) and `os.remove` / `os.rename`: a path is a NAME of

@@ -194,7 +194,10 @@ static void role_here(void *arg) {
     c->why = moy_app_why(c->run->a);
 }
 
-static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
+// Row `k` into an answer of `cap` bytes, grown eightfold while it answers FULL
+// where `grow`.
+static int32_t row_call_cap(lua_State *L, int k, const buf_t *b, size_t cap, int grow,
+                            const uint8_t **ans) {
     lrun_t *u = lrun(L);
     int row = k;
     if (u == NULL || row < 0) {
@@ -202,7 +205,6 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
         *ans = NULL;
         return -MOY_APP_STALE;
     }
-    size_t cap = 1024u;
     for (;;) {
         uint8_t *p = lua_newuserdatauv(L, cap, 0);
         role_t c = { &u->run, (uint32_t)row, b != NULL ? b->p : NULL, b != NULL ? b->n : 0u,
@@ -214,13 +216,17 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
             on_vm(L, u->hop, role_run, &c);
         }
         u->why = c.why;
-        if (c.r != -MOY_APP_FULL || cap >= (64u << 20)) {
+        if (!grow || c.r != -MOY_APP_FULL || cap >= (64u << 20)) {
             *ans = p;
             return c.r;
         }
         lua_pop(L, 1);
         cap *= 8u;
     }
+}
+
+static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
+    return row_call_cap(L, k, b, 1024u, 1, ans);
 }
 
 // A grant problem is an error, as the Python face raises it.
@@ -955,6 +961,143 @@ int moy_app_lua_open_crypto(lua_State *L) {
     return 1;
 }
 
+// -- the device handles (moy_dev.h; the door's Python half for the kinds it serves) -----
+
+// Each answers as the row does, an error as nil and its name: the handle, the
+// bytes written, 0 for a close or a set, the bytes read as a string (at most
+// `cap`, 4096 when not given), and dev_get's number as it is (an RSSI is
+// negative).
+
+#define DEV_CAP 4096
+
+static void field_int(buf_t *b, int32_t v) {
+    uint8_t q[4] = { (uint8_t)v, (uint8_t)(v >> 8), (uint8_t)(v >> 16), (uint8_t)(v >> 24) };
+    buf_field(b, q, 4);
+}
+
+static int dev_fail(lua_State *L, int32_t r) {
+    static const char *const names[] = {
+        NULL, "STALE", "FULL", "NOMEM", "DENIED", "NOSTORE", "IO", "BAD", "ABSENT",
+        "NEEDS_VM", "FORGED", "BUSY",
+    };
+    lua_pushnil(L);
+    if (-r > 0 && -r < (int32_t)(sizeof names / sizeof names[0])) {
+        lua_pushstring(L, names[-r]);
+    } else {
+        lua_pushinteger(L, r);
+    }
+    return 2;
+}
+
+static int dev_number(lua_State *L, int k, buf_t *b) {
+    const uint8_t *ans;
+    int32_t r = row_call_cap(L, k, b, 16u, 0, &ans);
+    if (r < 0) {
+        return dev_fail(L, r);
+    }
+    lua_pushinteger(L, r);
+    return 1;
+}
+
+static int dev_bytes(lua_State *L, int k, buf_t *b, size_t cap) {
+    const uint8_t *ans;
+    int32_t r = row_call_cap(L, k, b, cap ? cap : 1u, 0, &ans);
+    if (r < 0) {
+        return dev_fail(L, r);
+    }
+    lua_pushlstring(L, (const char *)ans, (size_t)r);
+    return 1;
+}
+
+static size_t dev_cap(lua_State *L, int i) {
+    lua_Integer c = luaL_optinteger(L, i, DEV_CAP);
+    if (c < 0 || c > (64 << 20)) {
+        luaL_argerror(L, i, "a capacity the row refuses");
+    }
+    return (size_t)c;
+}
+
+// moybyte.dev_open(name[, cfg]) -> h | nil, why
+static int l_moybyte_dev_open(lua_State *L) {
+    lua_settop(L, 2);
+    buf_t b;
+    buf_init(L, &b, 128u);
+    field_arg(L, &b, 1);
+    field_opt(L, &b, 2);
+    return dev_number(L, MOY_T_MOYBYTE_DEV_OPEN, &b);
+}
+
+// moybyte.dev_close(h) -> 0 | nil, why
+static int l_moybyte_dev_close(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    lua_settop(L, 1);
+    buf_t b;
+    buf_init(L, &b, 16u);
+    field_int(&b, h);
+    return dev_number(L, MOY_T_MOYBYTE_DEV_CLOSE, &b);
+}
+
+// moybyte.dev_read(h[, cap]) -> bytes | nil, why
+static int l_moybyte_dev_read(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    size_t cap = dev_cap(L, 2);
+    lua_settop(L, 2);
+    buf_t b;
+    buf_init(L, &b, 16u);
+    field_int(&b, h);
+    field_int(&b, (int32_t)cap);
+    return dev_bytes(L, MOY_T_MOYBYTE_DEV_READ, &b, cap);
+}
+
+// moybyte.dev_write(h, bytes) -> n | nil, why
+static int l_moybyte_dev_write(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    lua_settop(L, 2);
+    buf_t b;
+    buf_init(L, &b, 64u);
+    field_int(&b, h);
+    field_arg(L, &b, 2);
+    return dev_number(L, MOY_T_MOYBYTE_DEV_WRITE, &b);
+}
+
+// moybyte.dev_xfer(h, bytes[, cap]) -> bytes | nil, why
+static int l_moybyte_dev_xfer(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    size_t cap = dev_cap(L, 3);
+    lua_settop(L, 3);
+    buf_t b;
+    buf_init(L, &b, 64u);
+    field_int(&b, h);
+    field_arg(L, &b, 2);
+    field_int(&b, (int32_t)cap);
+    return dev_bytes(L, MOY_T_MOYBYTE_DEV_XFER, &b, cap);
+}
+
+// moybyte.dev_set(h, cfg) -> 0 | nil, why
+static int l_moybyte_dev_set(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    lua_settop(L, 2);
+    buf_t b;
+    buf_init(L, &b, 64u);
+    field_int(&b, h);
+    field_arg(L, &b, 2);
+    return dev_number(L, MOY_T_MOYBYTE_DEV_SET, &b);
+}
+
+// moybyte.dev_get(h, what) -> the number as the row answers it, a code too
+// (an SNR of -1 dB is -4, as DENIED is)
+static int l_moybyte_dev_get(lua_State *L) {
+    int32_t h = (int32_t)luaL_checkinteger(L, 1);
+    lua_settop(L, 2);
+    buf_t b;
+    buf_init(L, &b, 32u);
+    field_int(&b, h);
+    field_arg(L, &b, 2);
+    const uint8_t *ans;
+    lua_pushinteger(L, row_call_cap(L, MOY_T_MOYBYTE_DEV_GET, &b, 16u, 0, &ans));
+    return 1;
+}
+
 // -- io and os over the grant's kind ---------------------------------------------------
 
 #define FILE_MT "moybyte.file"
@@ -1558,7 +1701,7 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
     }
     for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++) {
         const lname_t *nm = &NAMES[i];
-        uint32_t has = nm->read ? o.held : roles;
+        uint32_t has = nm->read ? o.held : roles | MOY_ROLE_FLOOR;
         if (!((has >> nm->role) & 1u) || (nm->role == MOY_ROLE_FILES && !files)) {
             continue;
         }

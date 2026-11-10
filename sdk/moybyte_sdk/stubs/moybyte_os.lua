@@ -106,6 +106,20 @@ function moybyte.aes_gcm_seal(...) end
 function moybyte.aes_gcm_open(...) end
 --- moybyte.x25519(secret: bytes, peer: bytes): the row moybyte.x25519
 function moybyte.x25519(...) end
+--- moybyte.dev_open(name: str, cfg: str?): the row moybyte.dev_open; needs lease or http or lora or mic or ble or usb or midi or camera or media or media:url or pins or multiplayer
+function moybyte.dev_open(...) end
+--- moybyte.dev_close(h: int): the row moybyte.dev_close; needs lease or http or lora or mic or ble or usb or midi or camera or media or media:url or pins or multiplayer
+function moybyte.dev_close(...) end
+--- moybyte.dev_read(h: int): the row moybyte.dev_read; needs lease or http or lora or mic or ble or usb or midi or camera or media or media:url or pins or multiplayer
+function moybyte.dev_read(...) end
+--- moybyte.dev_write(h: int, data: bytes): the row moybyte.dev_write; needs lease or http or lora or mic or ble or usb or midi or camera or media or media:url or pins or multiplayer
+function moybyte.dev_write(...) end
+--- moybyte.dev_xfer(h: int, data: bytes): the row moybyte.dev_xfer; needs lease or http or lora or mic or ble or usb or midi or camera or media or media:url or pins or multiplayer
+function moybyte.dev_xfer(...) end
+--- moybyte.dev_set(h: int, cfg: str): the row moybyte.dev_set; needs lease or http or lora or mic or ble or usb or midi or camera or media or media:url or pins or multiplayer
+function moybyte.dev_set(...) end
+--- moybyte.dev_get(h: int, what: str): the row moybyte.dev_get; needs lease or http or lora or mic or ble or usb or midi or camera or media or media:url or pins or multiplayer
+function moybyte.dev_get(...) end
 --- moybyte.ed25519_public(secret: bytes): the row moybyte.ed25519_public
 function moybyte.ed25519_public(...) end
 --- moybyte.ed25519_sign(secret: bytes, msg: bytes): the row moybyte.ed25519_sign

@@ -211,7 +211,7 @@ handle, the media service -- and a VM stop keeps the rows; the station's address
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process
-on. A compiled program holds `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` by handle
+on. A compiled program and a Lua program hold `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` by handle
 through the same rows as its leases (above): an `http` handle a GET whose
 body it reads in chunks (`cfg` `url=... cap=N`, or `window=N` for a body of
 any length), a `lora` handle the radio's raw packets and LoRaWAN's join,
@@ -630,13 +630,14 @@ moybyte.media.play(src) / pause() / resume() / stop() / next() / prev() / seek(s
 
 Leases (Python gets them as `machine` objects, §1:
 `moybyte.lease(name, **cfg)` and `moybyte.pins()`; `pins` is the digital
-subset every tier may hold), and on the compiled tiers leases and the
+subset every tier may hold), and on the compiled tiers and Lua leases and the
 `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices, the
 `pins` and the radio link's ports (`net`) by handle (`native/moy_kernel/moy_dev.h`
 for the leases, `pins`, `lora`, `mic`, `midi`, `http`, `usb`, `ble` and `media`,
 on the program's own task, the VM up or stopped; `runtime/system/dev_handles.py`
 for `camera` and `net`;
-moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
+moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`, Lua's
+`moybyte.dev_*`):
 
 ```
 dev_open(name, cfg) -> h              BUSY while another holds it; cfg "key=value ..."
@@ -664,7 +665,9 @@ lora  freq=<Hz> sf=<7..12> bw=<62500|125000|250000|500000> cr=<5..8> power=<dBm>
       join=otaa dev_eui=<hex> join_eui=<hex> app_key=<hex> [dr]
       send=<port>|raw [confirmed=0|1 dr]: what dev_write sends, an uplink or a packet
       dev_read: the next packet or downlink; dev_get: rssi (dBm) and snr (dB x 4)
-      of the packet read last, port, joined, fcnt, busy
+      of the packet read last, port, joined, fcnt, busy; a holder listening
+      on "lora" is posted the system's message "lora" [event, length] for each
+      event (moy_lora.h)
 usb   serial=<addr> [baud=<n>]  write=<addr>: where dev_write goes
       dev_read: the USB face's events, whole records with ble's head (a the address):
                 ATTACH (one for each device plugged in at the open) its class,

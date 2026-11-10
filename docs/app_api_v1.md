@@ -391,9 +391,9 @@ opens a text file from Files with (Notes).
 | `notifications` | `moybyte.notify` posts (below) | python, lua, wasm, elf |
 | `front` | nothing by name: from the background, `open_app`, `open_with`, `share` and `pick` go straight through (§5) | python, lua, wasm, elf |
 | `autostart` | a service starts with the console (§7) | python, lua, wasm, elf |
-| `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1); by handle on the compiled tiers (§10) | python, wasm, elf |
+| `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1); by handle on the compiled tiers (§10) | python, lua, wasm, elf |
 | `full_access` | what a native (ELF) cart must ask for, and what admits an unsigned compiled module (§10) | wasm, elf |
-| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); by handle on the compiled tiers too, `lora` with LoRaWAN (§10, Devices by handle) | python, wasm, elf |
+| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); by handle on the compiled tiers too, `lora` with LoRaWAN (§10, Devices by handle) | python, lua, wasm, elf |
 | `alarms` | `moybyte.at` (§9) | python, lua, wasm, elf |
 | `editor`, `calc`, `terminal`, `getcarts`, `storybook`, `myart`, `artwork`, `music` | nothing: a marker, a shipped app's claim on its own cart (§13) | python |
 <!-- END GENERATED -->
@@ -776,13 +776,13 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
 | `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
 | `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
-| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
-| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
-| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
-| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
-| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
-| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
-| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  |  | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
+| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_open` | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
+| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_close` | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
+| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_read` | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
+| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_write` | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
+| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_xfer` | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
+| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_set` | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
+| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_get` | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
 | `moybyte.ed25519_public` | none | `moybyte.ed25519_public` | `moybyte.ed25519_public` | `moybyte_ed25519_public`, `moybyte.os.ed25519_public` | `moy_ed25519_public` |
 | `moybyte.ed25519_sign` | none | `moybyte.ed25519_sign` | `moybyte.ed25519_sign` | `moybyte_ed25519_sign`, `moybyte.os.ed25519_sign` | `moy_ed25519_sign` |
 | `moybyte.ed25519_verify` | none | `moybyte.ed25519_verify` | `moybyte.ed25519_verify` | `moybyte_ed25519_verify`, `moybyte.os.ed25519_verify` | `moy_ed25519_verify` |
@@ -886,8 +886,8 @@ C app as a reactor, its memory the manifest's `memory` pages,
 module; `native/moy_wasm/README.md` is the tier.
 
 **Devices by handle.** A compiled program (a compiled app, a WASI program,
-a native module) holds a lease or a device API by a handle where a Python
-program holds an object (`native/moy_kernel/moy_dev.h` is the authority
+a native module) and a Lua program (an app or a service) hold a lease or a
+device API by a handle where a Python program holds an object (`native/moy_kernel/moy_dev.h` is the authority
 on the leases' names, keys and answers, `runtime/system/dev_handles.py` on
 the device APIs'). `dev_open(name, cfg)` answers the handle:
 `name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
@@ -905,7 +905,23 @@ are read through the handle on every tier, never posted as messages: a
 pin's edges (`dev_set(h, "edges=both")`, then 8 bytes an edge from
 `dev_read`), a packet the radio heard, the microphone's samples, the BLE
 face's events. A program polls its handles where it polls its messages, in
-`_update` or on a timer.
+`_update` or on a timer. The radio also says when it has something: the
+holder of a `lora` handle that listens on `"lora"` (`moybyte.on("lora",
+fn)`, a compiled program's `moy_on`) is posted the system's message
+`"lora"` with the event (1 a packet heard, 2 one sent, then LoRaWAN's
+joined, join failed, downlink and uplink done) and a length for each, so a
+service sleeps until a packet comes; the packet is still read through the
+handle.
+
+Lua holds the rows as `moybyte.dev_open(name[, cfg])`,
+`dev_close(h)`, `dev_read(h[, cap])`, `dev_write(h, bytes)`,
+`dev_xfer(h, bytes[, cap])`, `dev_set(h, cfg)` and `dev_get(h, what)`
+(`native/moy_app/moy_app_lua.c`): a read answers the bytes as a string (at
+most `cap`, 4096 by default), an error is nil and its name (`"BUSY"`,
+`"DENIED"`, `"BAD"`, `"ABSENT"`, `"FULL"`, ...), and `dev_get` answers the
+number as the row does. A Lua service calls them on its own task, so its
+radio, its pins and its other kernel handles keep working through an S3's
+VM stop.
 
 The radios act by `dev_set` words, one action a set, and `dev_write`
 carries the bytes to where a word pointed it. A `ble` handle scans

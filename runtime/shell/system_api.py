@@ -428,16 +428,25 @@ def service_api(ctx_factory, cart, perms, owner):
     run of the same app is handed them (the same policy, the same app id,
     files kind and prefs namespace), on a run grant of its own whose owner
     is its pid; the names its Python namespace holds (`granted_names`).
-    `(None, (), {})` where the permissions grant no role. A service has no
-    canvas, so it holds no drawing rider and no `open_editor`."""
+    `(None, (), {})` where the permissions grant no role and no device (a
+    device handle's row answers under the grant's, `grant_devices`). A
+    service has no canvas, so it holds no drawing rider and no
+    `open_editor`."""
     roles, kind = _moy_app.policy(perms)
-    if not roles:
+    if not roles and not any(str(p).split(":")[0] in DEVICE_PERMS for p in perms or ()):
         return None, (), {}
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)
     ctx = ctx_factory(app_id, roles, app_id, run=True, kind=kind, owner=owner)
     grant_devices(ctx, perms, cart)
     return ctx, roles, granted_names(ctx, roles, kind)
+
+
+# The permissions a device handle answers under (native/os_calls.json's
+# moybyte.dev_* rows' perm, `lease` and `media` also as lease:<row> and
+# media:url).
+DEVICE_PERMS = ("lease", "http", "lora", "mic", "ble", "usb", "midi", "camera", "media",
+                "pins", "multiplayer")
 
 
 def grant_devices(ctx, perms, cart=None):

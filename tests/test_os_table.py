@@ -53,7 +53,7 @@ def test_the_http_prompt_says_it_reaches_the_local_network():
     src = next(p for p in gen_os_table.load()["permissions"] if p["perm"] == "http")
     assert src["prompt"] == "Fetch pages from the internet and your network"
     assert app_perms.row("http")[app_perms.PROMPT] == src["prompt"]
-    assert app_perms.prompt({"runtime": "lua", "permissions": ["http"]}) is None
+    assert app_perms.prompt({"runtime": "lua", "permissions": ["http"]}) == [src["prompt"]]
     assert app_perms.prompt({"runtime": "wasm", "permissions": ["http"]}) == [src["prompt"]]
 
 
@@ -196,3 +196,11 @@ def test_a_signed_module_carries_the_native_scheme(chip, tmp_path):
     assert sig == b"s" * 256
     assert signed == [wasm_module.signed_text(body, chip, elf_cart.sig_scheme())]
     assert signed[0].startswith(b"moybyte-elf-sig 1\n%s\n" % chip.encode())
+
+
+def test_a_service_s_device_permissions_are_the_handle_rows():
+    """A service granted only devices still gets a grant to open them under
+    (system_api.service_api): its list is the dev rows' permissions."""
+    from runtime.shell import system_api
+    row = next(r for r in gen_os_table.load()["rows"] if r["name"] == "moybyte.dev_open")
+    assert set(system_api.DEVICE_PERMS) == {p.split(":")[0] for p in row["perm"]}

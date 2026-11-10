@@ -12,7 +12,8 @@
 #   _Camera                  camera: a picture per read
 #   _Net                     net: the radio link's messages on a port
 """Leases and device APIs by handle: what a compiled program (a wasm app, a
-WASI program, an ELF module) holds where a Python program holds an object
+WASI program, an ELF module) and a Lua program hold where a Python program
+holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
 `moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
 pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora,

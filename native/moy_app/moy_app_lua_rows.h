@@ -42,6 +42,13 @@
     X(MOY_ROLE_MOYBYTE, "moybyte", "aes_gcm_seal", l_moybyte_aes_gcm_seal, MOY_T_MOYBYTE_AES_GCM_SEAL, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "aes_gcm_open", l_moybyte_aes_gcm_open, MOY_T_MOYBYTE_AES_GCM_OPEN, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "x25519", l_moybyte_x25519, MOY_T_MOYBYTE_X25519, 1) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "dev_open", l_moybyte_dev_open, MOY_T_MOYBYTE_DEV_OPEN, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "dev_close", l_moybyte_dev_close, MOY_T_MOYBYTE_DEV_CLOSE, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "dev_read", l_moybyte_dev_read, MOY_T_MOYBYTE_DEV_READ, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "dev_write", l_moybyte_dev_write, MOY_T_MOYBYTE_DEV_WRITE, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "dev_xfer", l_moybyte_dev_xfer, MOY_T_MOYBYTE_DEV_XFER, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "dev_set", l_moybyte_dev_set, MOY_T_MOYBYTE_DEV_SET, 0) \
+    X(MOY_ROLE_MOYBYTE, "moybyte", "dev_get", l_moybyte_dev_get, MOY_T_MOYBYTE_DEV_GET, 0) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_public", l_moybyte_ed25519_public, MOY_T_MOYBYTE_ED25519_PUBLIC, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_sign", l_moybyte_ed25519_sign, MOY_T_MOYBYTE_ED25519_SIGN, 1) \
     X(MOY_ROLE_MOYBYTE, "moybyte", "ed25519_verify", l_moybyte_ed25519_verify, MOY_T_MOYBYTE_ED25519_VERIFY, 1) \
@@ -75,5 +82,12 @@
     X(MOY_T_PREFS_SET) \
     X(MOY_T_PREFS_CLEAR) \
     X(MOY_T_CLIPBOARD_PUT_TEXT) \
+    X(MOY_T_MOYBYTE_DEV_OPEN) \
+    X(MOY_T_MOYBYTE_DEV_CLOSE) \
+    X(MOY_T_MOYBYTE_DEV_READ) \
+    X(MOY_T_MOYBYTE_DEV_WRITE) \
+    X(MOY_T_MOYBYTE_DEV_XFER) \
+    X(MOY_T_MOYBYTE_DEV_SET) \
+    X(MOY_T_MOYBYTE_DEV_GET) \
 
 #endif // MOY_APP_LUA_ROWS_H

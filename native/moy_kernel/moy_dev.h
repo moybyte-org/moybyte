@@ -1,7 +1,8 @@
 // moy_dev: a compiled program's device handles, the kernel's (docs/os_2026-11/
 // hardware.md section 4; native/os_calls.json's `moybyte.dev_*` rows, how
-// "here"). A WASI program, an ELF module and a compiled app hold a lease or a
-// device by HANDLE where a Python program holds an object; this table serves
+// "here"). A WASI program, an ELF module, a compiled app and a Lua app or
+// service hold a lease or a device by HANDLE where a Python program holds an
+// object; this table serves
 // every lease kind and the device APIs below, each over a driver that is
 // safe on the caller's own task, so they answer with no VM, through an S3's
 // VM stop too, on every image that links moy_app (each links this kernel

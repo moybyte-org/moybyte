@@ -438,3 +438,94 @@ def test_the_vm_a_board_runs_steps_its_services_alike(tmp_path):
 
 def test_the_vm_a_board_runs_routes_messages_and_console_calls(tmp_path):
     assert _vm(tmp_path, VM_MSG) == ["0 5", "(1, 1)", "(9, 'day', '[]')", "4 16", "False"]
+
+
+RADIO = """
+local h = moybyte.dev_open("lora", "freq=869525000 sf=11 bw=250000 sync=0x2b preamble=16")
+print("open " .. tostring(h & 0x40000000 ~= 0) .. " " .. tostring(select(2, moybyte.dev_open("lora"))))
+moybyte.on("lora", function(who, ev, n)
+    if ev ~= 1 then return end
+    local p = moybyte.dev_read(h)
+    print(who .. " heard " .. p .. " " .. n .. " " .. moybyte.dev_get(h, "rssi") .. " "
+          .. moybyte.dev_get(h, "snr"))
+    print("wrote " .. moybyte.dev_write(h, "pong") .. " " .. #moybyte.dev_read(h))
+end)
+"""
+
+
+@pytest.fixture
+def radio():
+    from runtime import moy_input as mi
+    from runtime import moy_lora as N
+    from runtime.host import lora_sim
+    lora_sim.install()
+    yield N, lora_sim
+    while N.owner():
+        moybyte.end(N.owner())
+    lora_sim.remove()
+
+
+def test_a_lua_service_holds_the_radio_by_handle_and_wakes_on_it(desk, radio):
+    """A Lua service under `lora` opens the radio by handle on its own task
+    (the kernel's table, native/moy_kernel/moy_dev.h), hears the system's
+    message "lora" for each packet the radio heard, reads it through the
+    handle with its RSSI and SNR, and sends back."""
+    N, sim = radio
+    ws, drv = desk
+    since = L.next()
+    cart = dict(_cart(RADIO), permissions=["lora"])
+    pid = S.SCHED.start(cart, have=("lora",), ws=ws)
+    _frames(drv, 20)
+    assert N.owner() == pid
+    assert sim.air(b"ping", 869525000, 11, rssi=-97, snr=-26, bw=250000, sync=0x2B)
+    N.step(0)
+    _frames(drv, 20)
+    assert _texts(since, pid)[1:] == ["open true BUSY",
+                                      "system heard ping 4 -97 -26", "wrote 4 0"]
+    assert sim.sent()[0] == b"pong"
+
+
+def test_a_lua_service_without_the_permission_is_denied_the_radio(desk, radio):
+    """Under a grant without `lora` the row answers DENIED; with no grant at
+    all the names are not there."""
+    N, sim = radio
+    ws, drv = desk
+    since = L.next()
+    src = ('print(moybyte.dev_open and select(2, moybyte.dev_open("lora")))\n'
+           'moybyte.every(1000, function() end)')
+    a = S.SCHED.start(dict(_cart(src, "t.a"), permissions=["prefs"]), have=("lora",), ws=ws)
+    b = S.SCHED.start(_cart(src, "t.b"), have=("lora",), ws=ws)
+    _frames(drv, 20)
+    assert N.owner() == 0
+    assert (_texts(since, a)[1:], _texts(since, b)[1:]) == (["DENIED"], ["nil"])
+
+
+def test_a_lua_app_holds_the_radio_by_handle(tmp_path, radio):
+    """A Lua app's run holds the same rows (its role binding, moy_app_lua.c),
+    called on the VM's task."""
+    import json
+    from ws_helpers import build_ws, select_on_home
+    N, sim = radio
+    d = tmp_path / "carts" / "Radio.moy"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps(
+        {"title": "Radio", "canvas": "320x240", "runtime": "lua", "main": "main.lua",
+         "moybyte": {"type": "app", "permissions": ["graphics", "lora"]}}))
+    (d / "main.lua").write_text(
+        'H = moybyte.dev_open("lora", "sf=7")\n'
+        'function _update() if H then GOT = moybyte.dev_read(H) end end\n'
+        'function _draw() end\n')
+    (d / "config.json").write_text("{}")
+    ws = build_ws(tmp_path)
+    assert select_on_home(ws, "Radio") is not None
+    ws.open()
+    ws.input.begin_frame()
+    ws.frame(_DT)
+    pl = ws.run.player
+    assert pl.cart_error is None, pl.cart_error
+    assert N.owner() == pl.pid
+    assert sim.air(b"hi", 868100000, 7)
+    N.step(0)
+    ws.input.begin_frame()
+    ws.frame(_DT)
+    assert pl._lua.get_global("GOT") == "hi"

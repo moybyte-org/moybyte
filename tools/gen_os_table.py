@@ -103,7 +103,7 @@ TIERS = ("python", "lua", "wasm", "elf")
 SPEC_TIERS = ("python", "lua", "wasm")
 
 ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "door", "wasm", "wasi", "elf",
-              "lua", "lua_own", "py", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
+              "lua", "lua_own", "py", "py_face", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
               "u"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 PERM_FIELDS = {"perm", "grants", "prompt", "needs", "py", "doc", "tiers", "spec"}
@@ -632,7 +632,9 @@ def check(src):
         lua, py = r.get("lua") or [], list(r.get("py") or [])
         if role_of(r) in ctx_roles(src):
             py.append(r["name"])
-        if not set(lua) <= set(py):
+        if r.get("py_face", "devices") != "devices":
+            raise TableError("%s: py_face names devices or is absent" % name)
+        if not set(lua) <= set(py) and not r.get("py_face"):
             raise TableError("%s: Lua's names are Python's, verbatim: %s" % (
                 name, sorted(set(lua) - set(py))))
         for p in perms_of(r, src):

@@ -19,7 +19,7 @@
 //   on while it listens.
 // The SX1262 runs off its TCXO (DIO3, 1.8 V), DIO2 switching its RF path,
 // DC-DC, and DIO1 raising its interrupts, which wake the driver's task on
-// core 0. Without the input table (the Zero) no events post: the holder
+// core 0. Without the input table (the Zero) no records post: the holder
 // polls recv().
 //
 // THE STATE MACHINE is moy_lora_step(now_ms): the board's task calls it on
@@ -27,7 +27,10 @@
 // from a test's clock. Every event posts a LORA record on the ring source
 // "lora" (moy_input.h): `id` the event (MOY_LORA_EV_*), `a` a length, `b`
 // the packet's RSSI (dBm, low 16 bits signed) and SNR (dB x 4, high 16 bits
-// signed) where it has them.
+// signed) where it has them. A holder whose event queue listens on "lora"
+// (moy_evq.h; a Lua service's moybyte.on("lora", fn)) is also posted the
+// system's message "lora" [event, a] for each, so a program on a task of its
+// own wakes on its radio with no VM; the packet is read through the handle.
 //
 // THE STAND-IN (the host): the radio is a record of what it was told, its
 // transmissions an outbox the "air" reads (moy_lora_sim_sent) and its

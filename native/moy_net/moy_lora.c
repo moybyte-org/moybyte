@@ -119,7 +119,33 @@ static void radio_unlock(void) {
 
 // -- events ---------------------------------------------------------------------------
 
+// The holder's event queue (native/moy_kernel/moy_evq.h): weak, for an image
+// without it.
+bool moy_evq_hears(uint32_t pid, const char *name) __attribute__((weak));
+int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args, size_t n)
+    __attribute__((weak));
+
 static void post(uint8_t ev, uint16_t a, int16_t rssi, int8_t snr) {
+    uint32_t to = R->owner;
+    if (moy_evq_hears != NULL && to != 0 && moy_evq_hears(to, "lora")) {
+        char args[16];
+        int n = 0;
+        uint32_t v = a;
+        char d[6];
+        int k = 0;
+        do {
+            d[k++] = (char)('0' + v % 10u);
+            v /= 10u;
+        } while (v != 0u);
+        args[n++] = '[';
+        args[n++] = (char)('0' + ev);
+        args[n++] = ',';
+        while (k > 0) {
+            args[n++] = d[--k];
+        }
+        args[n++] = ']';
+        moy_evq_post(to, 0u, "lora", args, (size_t)n);
+    }
     #ifdef LORA_EVENTS
     moy_input_t *t = moy_input_kernel();
     if (t != NULL && R->src != 0) {
