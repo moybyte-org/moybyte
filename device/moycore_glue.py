@@ -556,7 +556,8 @@ class MoycoreRun:
         except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
             x = y = st = 0
         bits = _moy_play.frame(self._run, n, dt, draw, x, y, st,
-                               getattr(ws, "windowed_chrome", False))
+                               getattr(ws, "windowed_chrome", False),
+                               ws.run.player.ui_room())
         if bits:
             if bits & _moy_play.QUIT:
                 inp.cart_quit = True

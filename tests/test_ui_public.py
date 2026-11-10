@@ -33,6 +33,7 @@ _DT = 1.0 / 30.0
 P_FRAMES, P_SOUND, P_VOL, P_CUR, P_SAVES, P_KEYS, P_PART, P_FOCUS, P_FAIL = range(9)
 P_PANE, P_SIZE, P_TAP, P_HELD = 10, 11, 12, 13     # the panes (ui.split, ui.part_at)
 P_XCUR = 14                                     # the row of parts (o.axis "x")
+P_PAGE = 15                                     # the page's top
 
 # -- one page, three runtimes ----------------------------------------------------------
 
@@ -102,14 +103,14 @@ def _pixels(ws):
 def _pmem(ws):
     lua = getattr(ws.run.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
-        return list(lua._run.pmem()[1])[:15]
+        return list(lua._run.pmem()[1])[:16]
     if lua is not None:
         import sys
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
-        return list(img)[:15]
+        return list(img)[:16]
     pm = ws.run.player.ns["pmem"]
-    return [pm(i) for i in range(15)]
+    return [pm(i) for i in range(16)]
 
 
 def _script(ws):
@@ -192,6 +193,20 @@ def test_the_page_is_one_page_in_every_runtime(page_runs):
             assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
     if "wasm" in page_runs:
         assert all(s[1][P_FAIL] == 0 for s in page_runs["wasm"]), "a ui row failed"
+
+
+def test_an_apps_page_lies_in_its_content_rect_in_every_runtime(page_runs, tmp_path):
+    """An app's `ui` frame is its content_rect() on every tier: on this
+    320x240 console the bar lies over the canvas's top rows, and each
+    runtime's page begins below it, not under it."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    try:
+        top = ws.app_content_rect()[1]
+    finally:
+        ws.exit()
+    assert top > 0
+    for name, shots in page_runs.items():
+        assert all(s[1][P_PAGE] == top for s in shots), (name, [s[1][P_PAGE] for s in shots])
 
 
 def test_the_compiled_page_runs_with_no_vm(page_runs):

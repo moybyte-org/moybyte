@@ -147,11 +147,28 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
             in[MOY_UI_IN_KEY] = snap[MOYCORE_UI_SNAP_KEY];
         }
         in[MOY_UI_IN_DT] = moycore_ui_dt_take();   // the ticks' clock since the last frame
+        // an app's frame is its content_rect() (the snapshot's room), a
+        // game's the whole canvas
         moy_ui_box_t surf = s_ctx->surface;
         if (c != NULL) {
             surf.x = surf.y = 0;
             surf.w = (int16_t)c->w;
             surf.h = (int16_t)c->h;
+            if (snap != NULL && snap[MOYCORE_UI_SNAP_ROOM_W] > 0
+                && snap[MOYCORE_UI_SNAP_ROOM_H] > 0) {
+                int x = snap[MOYCORE_UI_SNAP_ROOM_X], y = snap[MOYCORE_UI_SNAP_ROOM_Y];
+                int x1 = x + snap[MOYCORE_UI_SNAP_ROOM_W], y1 = y + snap[MOYCORE_UI_SNAP_ROOM_H];
+                x = x < 0 ? 0 : x;
+                y = y < 0 ? 0 : y;
+                x1 = x1 > c->w ? c->w : x1;
+                y1 = y1 > c->h ? c->h : y1;
+                if (x1 > x && y1 > y) {
+                    surf.x = (int16_t)x;
+                    surf.y = (int16_t)y;
+                    surf.w = (int16_t)(x1 - x);
+                    surf.h = (int16_t)(y1 - y);
+                }
+            }
         }
         moy_ui_api_begin(s_ctx, in, surf, flags, 1);
         s_tick = tick;

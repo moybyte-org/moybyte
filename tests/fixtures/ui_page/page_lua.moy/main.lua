@@ -7,7 +7,8 @@
 -- pane (from 0), 11 the first pane's size, 12 where a tap activated the second
 -- pane's part (x * 256 + y + 1; 0 none), 13 where the pointer held on it
 -- last was while pressed (the same; a part with nav off keeps a held press).
--- 14 the row of parts' current row (from 0). A row of parts above the Save
+-- 14 the row of parts' current row (from 0), 15 the page's top (an app's ui
+-- frame is its content_rect(), below the host's bar). A row of parts above the Save
 -- button lies side by side. A table at the right draws its rows as parts
 -- (ui.table_part); two panes at the foot (ui.split) have a divider the script
 -- drags and a part in the second it taps and drags across (ui.part_at).
@@ -24,7 +25,7 @@ tap = 0
 xcur = 1
 
 function _draw()
-  ui.page("UI page")
+  local _, top = ui.page("")
   ui.label("Hello")
   sound = ui.toggle("Sound", sound)
   vol = ui.slider("Volume", vol, 0, 10)
@@ -76,4 +77,5 @@ function _draw()
   pmem(12, tap)
   pmem(13, held)
   pmem(14, xcur - 1)
+  pmem(15, top)
 end

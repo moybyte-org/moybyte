@@ -284,6 +284,8 @@ typedef struct {
     int32_t x, y;               // the pointer in the cart's own coordinates
     int32_t touch;              // touch()'s flags: 1 live, 2 held, 4 the press edge
     int32_t window;             // 1: the run's surface is a window's body (the desk)
+    int32_t room[4];            // an app's ui frame, its content_rect() (x, y, w, h);
+                                // w 0, a game's: the whole canvas
 } moy_play_in_t;
 
 typedef struct {

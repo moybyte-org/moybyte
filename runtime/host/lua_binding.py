@@ -184,7 +184,8 @@ _SIGS = (
     ("hl_play_launch", [_C, _I, ctypes.POINTER(_U32)], _I),
     ("hl_play_bind", [_U32, _P, _U32, _P], _I),
     ("hl_play_open", [_U32], _I),
-    ("hl_play_frame", [_U32, _I, _F, _I, _I, _I, _I, _I, ctypes.POINTER(_U32)], _I),
+    ("hl_play_frame", [_U32, _I, _F, _I, _I, _I, _I, _I, _I, _I, _I, _I,
+                       ctypes.POINTER(_U32)], _I),
     ("hl_play_end", [_U32, _I], _I),
     ("hl_play_info", [_U32, _P], _I),
     ("hl_play_last", [], _U32),
@@ -258,12 +259,13 @@ def _lib():
     return _LIB[0] or None
 
 
-SNAP_LEN = 15
+SNAP_LEN = 19
 SNAP_BTN, SNAP_BTNP, SNAP_BTN_P1, SNAP_BTNP_P1 = 0, 1, 2, 3
 SNAP_PLAYERS, SNAP_TIME_MS = 4, 5
 SNAP_TOUCH_X, SNAP_TOUCH_Y, SNAP_TOUCH_DOWN, SNAP_TOUCH_MS = 6, 7, 8, 9
 SNAP_KEY, SNAP_KEY_DOWN, SNAP_TEXTMODE, SNAP_QUIT = 10, 11, 12, 13
 SNAP_WINDOW = 14
+SNAP_ROOM_X, SNAP_ROOM_Y, SNAP_ROOM_W, SNAP_ROOM_H = 15, 16, 17, 18
 AQ_SLOTS = 4
 AQ_MAX = 32
 AQ_SFX, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME = range(6)

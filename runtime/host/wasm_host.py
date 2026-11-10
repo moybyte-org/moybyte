@@ -341,7 +341,8 @@ class WasmHostRun:
         except Exception:  # noqa: BLE001 -- no pointer this frame
             x = y = st = 0
         bits = moy_play.frame(self._prun, n, dt, draw, x, y, st,
-                              getattr(ws, "windowed_chrome", False))
+                              getattr(ws, "windowed_chrome", False),
+                              ws.run.player.ui_room())
         if bits:
             if bits & moy_play.QUIT:
                 inp.cart_quit = True

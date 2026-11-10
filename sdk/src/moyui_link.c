@@ -20,7 +20,7 @@
 #include "moybyte/os.h"
 
 // The run's snapshot as moycore_run.h lays it out (SNAP_LEN words).
-#define SNAP_LEN 15
+#define SNAP_LEN 19
 
 static moy_canvas s_cv;
 static moy_pixel *s_px;
@@ -72,6 +72,10 @@ int moy_ui_link_frame(moy_frame_t *f) {
     s_snap[MOYCORE_UI_SNAP_PTR] = f->in[MOY_FRAME_PTR];
     s_snap[MOYCORE_UI_SNAP_KEY] = f->in[MOY_FRAME_KEY];
     s_snap[MOYCORE_UI_SNAP_WINDOW] = f->in[MOY_FRAME_WINDOW];
+    s_snap[MOYCORE_UI_SNAP_ROOM_X] = f->in[MOY_FRAME_ROOM_X];
+    s_snap[MOYCORE_UI_SNAP_ROOM_Y] = f->in[MOY_FRAME_ROOM_Y];
+    s_snap[MOYCORE_UI_SNAP_ROOM_W] = f->in[MOY_FRAME_ROOM_W];
+    s_snap[MOYCORE_UI_SNAP_ROOM_H] = f->in[MOY_FRAME_ROOM_H];
     if (f->in[MOY_FRAME_SWAP] != s_swap) {
         uint16_t wire[MOY_PALETTE];
         for (int i = 0; i < MOY_PALETTE; i++) {

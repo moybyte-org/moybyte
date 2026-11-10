@@ -1226,6 +1226,14 @@ class Player(PlayerDiag):
         self._net = net
         return wifi, net, gpio, console
 
+    def ui_room(self):
+        """The rect the run's `ui` frame lies in: an app's `content_rect()`,
+        its surface less the host's bars, so `ui.page` lies below them on
+        every tier (each tier's begin reads it here: this Player's
+        `_ui_begin`, the snapshot of a Lua or compiled run, a native or WASI
+        app's frame words); None, the whole canvas, for a game."""
+        return self.ws.app_content_rect() if self._app_id is not None else None
+
     def _ui_begin(self, ws, render=True):
         """Begin a Python app's frame of `ui` verbs (runtime/toolkit/ui.py) over the
         input its btn() and touch() read, in the run snapshot's shape, before
@@ -1268,11 +1276,6 @@ class Player(PlayerDiag):
         # an app on the whole surface (a desk's window, or its glass) lays out
         # on the desk's rows there; the fixed raster is the handheld's
         desk = self.run.app_full_canvas and _layout_base.metric_class() == _layout_base.DESK
-        # a responsive app's frame is its surface less the host's bars
-        # (`content_rect()`), so `ui.page` lies below them wherever its
-        # surface is, the handheld's shared raster included; a game's and a
-        # fixed app's is their whole canvas
-        room = ws.app_content_rect() if self._app_layout is not None else None
         ed = self._note() if render and not self._bg_on else None
         if ed is None or (self._over[2] and ed.meets(self._over)):
             host.whole()                # nothing vouches for the page's pixels
@@ -1289,7 +1292,7 @@ class Player(PlayerDiag):
         if own:
             _ui_draw.window_frame(2)
         try:
-            settled = host.run(cv, ws.theme_colors, room, a, desk, ws.windowed_chrome,
+            settled = host.run(cv, ws.theme_colors, self.ui_room(), a, desk, ws.windowed_chrome,
                                fed is not None)
         finally:
             if own:

@@ -71,7 +71,8 @@ from array import array
 
 # moy_os.h's MOY_OS_FRAME_IN_*: an app's input words.
 IN_X, IN_Y, IN_PTR, IN_KEY, IN_WINDOW, IN_SWAP = range(6)
-IN_WORDS = 6
+IN_ROOM_X, IN_ROOM_Y, IN_ROOM_W, IN_ROOM_H = range(6, 10)
+IN_WORDS = 10
 
 
 def read_buttons(inp, masks, out):
@@ -129,6 +130,14 @@ def fill_words(ws, words, ptr, ring):
     words[IN_KEY] = ring[2 + ring[0]] if ring[1] else 0
     words[IN_WINDOW] = 1 if getattr(ws, "windowed_chrome", False) else 0
     words[IN_SWAP] = 1 if getattr(ws.run.canvas, "swapped565", False) else 0
+    room = ws.run.player.ui_room()
+    if room is None:
+        words[IN_ROOM_X] = words[IN_ROOM_Y] = words[IN_ROOM_W] = words[IN_ROOM_H] = 0
+    else:
+        words[IN_ROOM_X] = room[0]
+        words[IN_ROOM_Y] = room[1]
+        words[IN_ROOM_W] = room[2]
+        words[IN_ROOM_H] = room[3]
 
 
 def stop_text(code, fault=None):
