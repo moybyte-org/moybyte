@@ -202,10 +202,10 @@ except ImportError:  # host / CPython: the runtime package
     from runtime.moy_fs import _crc32
 
 try:
-    from moy_net import encode_batch, sync_batch, sync_apply
+    from moy_net import encode_batch, sync_batch, sync_apply, sync_path, sync_song
 except ImportError:  # pragma: no cover - host package lane
     from runtime.net_binding import (encode_batch, sync_batch,
-                                     sync_apply)
+                                     sync_apply, sync_path, sync_song)
 try:
     from moy_store_base import apps_root, cart_path, store_path, USER_NS_KEY
 except ImportError:  # host / CPython: the runtime package
@@ -558,17 +558,55 @@ def root_by_id(root_id):
     return _ROOT_BY_ID.get(root_id)
 
 
+# The files root's folder of songs (moy_net.h's MOY_SYNC_MUSIC): a browser's
+# store keeps them and the VFS never holds one (firmware/web_runner/media_link.py).
+MUSIC = "Music"
+
+
 def roots_json(carts_root):
-    """The registry as the browser's store reads it (moy_store.mjs's
-    `setRoots`), each root's directory under `carts_root`."""
+    """The registry as the browser's store reads it (moy_store.mjs's `bind`),
+    each root's directory under `carts_root`; the files root names its folder
+    of songs."""
     out = []
     for r in SYNC_ROOTS:
-        lo, hi = r.dc if r.dc is not None else (None, None)
-        out.append({"id": r.id, "vfs": r.path(carts_root),
-                    "endpoint": r.endpoint.lstrip("/"), "dcMin": lo, "dcMax": hi,
-                    "top": list(r.top) if r.top is not None else None,
-                    "binary": r.binary, "site": r.site})
+        d = {"id": r.id, "vfs": r.path(carts_root),
+             "endpoint": r.endpoint.lstrip("/"),
+             "top": list(r.top) if r.top is not None else None,
+             "binary": r.binary, "site": r.site}
+        if r.id == FILES_ROOT_ID:
+            d["songs"] = MUSIC
+        out.append(d)
     return _json.dumps(out)
+
+
+def local_segs(root_id, rel, dc=False):
+    """How many segments `rel` has as a path the browser's store of record
+    for `root_id` keeps (moy_store.mjs), 0 when it keeps none there: the
+    receiving C's path rule with the journal kept (`sync_path`), then the
+    root's shape -- a whole-folder delete (`dc`) within the root's arity, one
+    of the named files of a root of them, an app's `<id>/<key>` with no '~',
+    else a file inside a folder (a top-level file of a carts or files store is
+    system state beside it, never the kid's work)."""
+    root = root_by_id(root_id)
+    n = sync_path(rel, 1) if root is not None else 0
+    if not n:
+        return 0
+    if dc:
+        if root.dc is None or n < root.dc[0] or (root.dc[1] is not None and n > root.dc[1]):
+            return 0
+        return n
+    if root.top is not None:
+        return n if rel in root.top else 0
+    if root_id == APPS_ROOT_ID:
+        return n if n == 2 and "~" not in rel else 0
+    return n if n >= 2 else 0
+
+
+def local_song(rel):
+    """Whether `rel` of a files store is a song of its music folder, which
+    the browser's store keeps out of the VFS (`MUSIC`, moy_sync_song)."""
+    folder, _, name = rel.partition("/")
+    return folder == MUSIC and sync_path(rel, 1) == 2 and sync_song(name)
 
 
 # The cart folders the served bundle held when the carts root was seeded

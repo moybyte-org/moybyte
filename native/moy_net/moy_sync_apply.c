@@ -124,35 +124,52 @@ static int part_of(const char *op, const char *op_end) {
     return moy_json_truthy(v, ve) ? 1 : 0;
 }
 
-static int safe_rel(op_t *o, const char *p, size_t n) {
-    if (n == 0 || n > REL_BYTES || chars(p, n) > REL_CHARS) {
+// The path rule (moy_net.h's moy_sync_path), each segment's offset and
+// length into seg/seg_n when they are not NULL.
+static int split_rel(const char *rel, size_t n, int history, uint16_t *seg,
+                     uint16_t *seg_n) {
+    if (n == 0 || n > REL_BYTES || chars(rel, n) > REL_CHARS) {
         return 0;
     }
-    memcpy(o->rel, p, n);
-    o->rel[n] = '\0';
-    o->rel_n = n;
-    o->nseg = 0;
+    int nseg = 0;
     size_t a = 0;
     for (size_t i = 0; i <= n; i++) {
-        if (i < n && o->rel[i] != '/') {
-            char c = o->rel[i];
+        if (i < n && rel[i] != '/') {
+            char c = rel[i];
             if (c == '\\' || c == '\0' || c == '\r' || c == '\n') {
                 return 0;
             }
             continue;
         }
         size_t k = i - a;
-        if (k == 0 || (k == 1 && o->rel[a] == '.')
-            || (k == 2 && o->rel[a] == '.' && o->rel[a + 1] == '.')
-            || moy_store_skip(o->rel + a, k, 0)) {
+        if (k == 0 || (k == 1 && rel[a] == '.')
+            || (k == 2 && rel[a] == '.' && rel[a + 1] == '.')
+            || moy_store_skip(rel + a, k, history)) {
             return 0;
         }
-        o->seg[o->nseg] = (uint16_t)a;
-        o->seg_n[o->nseg] = (uint16_t)k;
-        o->nseg++;
+        if (seg != NULL) {
+            seg[nseg] = (uint16_t)a;
+            seg_n[nseg] = (uint16_t)k;
+        }
+        nseg++;
         a = i + 1;
     }
-    return 1;
+    return nseg;
+}
+
+int moy_sync_path(const char *p, size_t n, int history) {
+    return split_rel(p, n, history, NULL, NULL);
+}
+
+static int safe_rel(op_t *o, const char *p, size_t n) {
+    if (n == 0 || n > REL_BYTES) {
+        return 0;
+    }
+    memcpy(o->rel, p, n);
+    o->rel[n] = '\0';
+    o->rel_n = n;
+    o->nseg = split_rel(o->rel, n, 0, o->seg, o->seg_n);
+    return o->nseg > 0;
 }
 
 // `<dir>/<the first k segments><suffix>` into out (NUL-terminated), or 0.

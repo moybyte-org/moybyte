@@ -59,7 +59,7 @@ FEATURES = {
               "dist/ predates the browser store (no moy_store.mjs)"),
     # The apps' private folders as a sync root (the store takes the VM's
     # registry, which has it), and the worker's `open`.
-    "apps": (lambda: ("setRoots" in (DIST / "moy_store.mjs").read_text()
+    "apps": (lambda: ("roots_json" in (DIST / "worker.js").read_text()
                       and 'm.t === "open"' in (DIST / "worker.js").read_text()),
              "dist/ predates the apps root (no registry from the VM, or no "
              "open message in the worker)"),

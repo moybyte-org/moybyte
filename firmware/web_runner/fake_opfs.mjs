@@ -119,23 +119,70 @@ export async function loadTree(tree, sync = true) {
     return root;
 }
 
-// The two rules a worker hands the store from its VM (worker.js, bindStore),
-// read here from CPython's copy of the same modules: the registry
-// (moy_sync.roots_json) and the skip predicate (moy_pack.pack_skip, the
-// native store's twin), over every name the store asks about.
+// The rules a worker hands the store from its VM (worker.js, bindStore),
+// answered here by CPython's copy of the same modules over the same C
+// (moy_sync.roots_json and local_segs/local_song, cart_index.plain_name and
+// its names, moy_pack.pack_skip over the native store's skip): one long-lived
+// process the store asks synchronously, as the worker asks its VM, through
+// two FIFOs. Returns what it handed the store.
+const RULES_PY = `
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from runtime import cart_index, moy_pack, moy_sync
+fns = {"skip": moy_pack.pack_skip, "path": moy_sync.local_segs,
+       "song": moy_sync.local_song, "plain": cart_index.plain_name}
+asks = open(sys.argv[2])
+out = open(sys.argv[3], "w")
+out.write(json.dumps({"roots": json.loads(moy_sync.roots_json("/moy/carts")),
+                      "record": cart_index.RECORD_NAME,
+                      "stage": cart_index.STAGE_DIR}) + "\\n")
+out.flush()
+for line in asks:
+    fn, args = json.loads(line)
+    out.write(json.dumps(fns[fn](*args)) + "\\n")
+    out.flush()
+`;
+
 export async function vmRules(store) {
-    const { execFileSync } = await import("node:child_process");
+    const { execFileSync, spawn } = await import("node:child_process");
+    const fs = await import("node:fs");
+    const os = await import("node:os");
     const repo = new URL("../..", import.meta.url).pathname;
-    const out = execFileSync(process.env.MOY_PY || "python3", ["-c",
-        "import sys, json; sys.path.insert(0, sys.argv[1])\n"
-        + "from runtime import moy_sync\n"
-        + "print(json.dumps({'roots': json.loads(moy_sync.roots_json('/moy/carts')),"
-        + " 'wire': [list(moy_sync.SKIP_DIRS + moy_sync.SKIP_FILES), list(moy_sync.SKIP_SUFFIXES)],"
-        + " 'site': [list(moy_sync.SITE_SKIP_DIRS + moy_sync.SITE_SKIP_FILES)]}))", repo],
-        { encoding: "utf-8" });
-    const r = JSON.parse(out);
-    store.setRoots(r.roots);
-    const [wire, suffixes] = r.wire, site = r.site[0];
-    store.setSkip((name, history) => (history ? site : wire).includes(name)
-        || suffixes.some((s) => name.endsWith(s)));
+    const dir = fs.mkdtempSync(os.tmpdir() + "/moy-rules-");
+    const ask = dir + "/ask", say = dir + "/say";
+    execFileSync("mkfifo", [ask, say]);
+    const py = spawn(process.env.MOY_PY || "python3", ["-c", RULES_PY, repo, ask, say],
+                     { stdio: ["ignore", "inherit", "inherit"] });
+    py.unref();
+    const w = fs.openSync(ask, "w"), r = fs.openSync(say, "r");
+    fs.rmSync(dir, { recursive: true });
+    const buf = Buffer.alloc(65536);
+    let held = "";
+    const line = () => {
+        for (;;) {
+            const at = held.indexOf("\n");
+            if (at >= 0) {
+                const got = held.slice(0, at);
+                held = held.slice(at + 1);
+                return got;
+            }
+            const n = fs.readSync(r, buf, 0, buf.length, null);
+            if (!n) throw new Error("the rules process ended");
+            held += buf.toString("utf-8", 0, n);
+        }
+    };
+    const call = (fn, ...args) => {
+        fs.writeSync(w, JSON.stringify([fn, args]) + "\n");
+        return JSON.parse(line());
+    };
+    const first = JSON.parse(line());
+    const rules = {
+        roots: first.roots, record: first.record, stage: first.stage,
+        skip: (name, history) => call("skip", name, !!history),
+        path: (id, rel, dc) => call("path", id, rel, !!dc),
+        song: (rel) => call("song", rel),
+        plain: (name) => call("plain", name),
+    };
+    store.bind(rules);
+    return rules;
 }

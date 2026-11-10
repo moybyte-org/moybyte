@@ -83,8 +83,11 @@ nor those docs will warn you about:
   `moy_sync.roots_json`, `moy_store.skip`, `moy_pack` through `web_boot`),
   and the VM is up before the store is seeded (the worker's `bindStore`). A rule that must
   run before it is exported from the wasm's C, never copied into JavaScript.
-  `tests/test_web_io_ratchet.py` files every `moy_store.mjs` name; the
-  mirrors it lists only shrink (the audit: `docs/moycore_direction.md` §3).
+  The store holds no rule: what a path, a song, an install's name or a root
+  is reaches it through `bind`. `tests/test_web_io_ratchet.py` holds its
+  exports to a list that only shrinks, every string it holds to a filed word
+  (no file, folder or suffix) and its patterns to the channel's one (the
+  audit: `docs/moycore_direction.md` §3).
 - **The substrate is OPFS, not IndexedDB**: the ops ARE file writes at paths, so a
   cart folder stays a cart folder. No OPFS (private window, blocked site data,
   `file://`) runs in memory and **the page says so**; a quota failure requeues, and

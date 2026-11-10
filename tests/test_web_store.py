@@ -36,27 +36,31 @@ def test_the_browser_store_passes_its_own_suite():
 
 
 def test_the_browser_store_takes_its_rules_from_the_vm():
-    """The page's store holds no copy of the skip predicate, the binary rule or
-    the root registry: the worker hands it the native store's `skip` and
-    `moy_sync.roots_json` before any store is opened (bindStore), and a copy
-    could rot -- a file the sweep ships but the local store refuses vanishes on
-    the next reload."""
+    """The page's store holds no copy of a rule: the worker hands it the
+    registry, the native store's `skip`, the path and song rules over the
+    receiving C (`moy_sync.local_segs`, `local_song`) and an install's name
+    rule (`cart_index.plain_name`) before any store is opened (bindStore), and
+    a copy could rot -- a file the sweep ships but the local store refuses
+    vanishes on the next reload."""
     js = _read("firmware", "web_runner", "moy_store.mjs")
     worker = _read("firmware", "web_runner", "worker.js")
-    for gone in ("SKIP_DIRS", "SITE_SKIP_DIRS", "BINARY_FILES", "export const ROOTS"):
+    for gone in ("SKIP_DIRS", "SITE_SKIP_DIRS", "BINARY_FILES", "export const ROOTS",
+                 "safeSegments", "isSong", "const RECORD_NAME", "const STAGE_DIR"):
         assert gone not in js, gone
     bind = worker[worker.index("function bindStore()"):]
     bind = bind[:bind.index("\n}\n")]
-    assert "moy_sync.roots_json" in bind and "store.setRoots(" in bind
-    assert 'mp.pyimport("moy_store")' in bind and "store.setSkip(" in bind
+    for rule in ("moy_sync.roots_json", 'mp.pyimport("moy_store")', "native.skip(",
+                 "sync.local_segs(", "sync.local_song(", "ci.plain_name(",
+                 "ci.RECORD_NAME", "ci.STAGE_DIR", "store.bind("):
+        assert rule in bind, rule
     init = worker[worker.index("async function init("):]
     assert init.index("bindStore()") < init.index("initStore({")
 
 
 def test_the_root_registry_the_browser_reads_is_the_receivers():
     """`moy_sync.roots_json` is what the browser's store iterates: each root's
-    VFS path and endpoint from the registry, and the whole-folder-delete arity
-    (`Root.dc`) the receiving C applies, which this holds against the C."""
+    VFS path and endpoint from the registry, and the files root's music
+    folder."""
     import json
     from runtime import moy_sync
 
@@ -67,9 +71,7 @@ def test_the_root_registry_the_browser_reads_is_the_receivers():
         assert entry["vfs"] == root.path("/moy/carts"), entry
         assert entry["top"] == (list(root.top) if root.top else None), entry
         assert entry["binary"] == root.binary and entry["site"] == root.site, entry
-        lo, hi = entry["dcMin"], entry["dcMax"]
-        assert [n for n in (1, 2, 3, 4) if lo is not None and n >= lo
-                and (hi is None or n <= hi)] == _dc_depths(root), entry
+    assert {r["id"]: r.get("songs") for r in got}["files"] == moy_sync.MUSIC
 
 
 def _dc_depths(root):
@@ -89,6 +91,50 @@ def _dc_depths(root):
             if applied:
                 ok.append(n)
         return ok
+
+
+def test_the_local_store_keeps_what_the_receiving_c_takes():
+    """`moy_sync.local_segs` is the browser store's path rule, and it is the
+    receiving C's (moy_sync_path, moy_sync_apply.c's): every path the C
+    applies into a root, the local store keeps, and every path it refuses as
+    a path, the local store refuses -- the journal aside, which a store of
+    record keeps. A whole-folder delete reaches the depths the C deletes."""
+    import tempfile
+    from runtime import moy_sync
+
+    paths = ("a.moy/main.py", "a.moy/x/y.py", "a.moy", "../a.moy/x", "a.moy/../x",
+             "a.moy//x", "a.moy/./x", "a.moy/x.bak", "a.moy/thumbs/t.png",
+             "a\\b/x", "a.moy/x\r", "a.moy/" + "x" * 300, "a.moy/~x",
+             "Pictures/a/b.json", "Music/a.mp3", "doom/doomsav0.dsg", "doom/k~part")
+    for root_id in ("carts", "files", "apps"):
+        for p in paths:
+            with tempfile.TemporaryDirectory() as d:
+                applied, _errs, _shelf = moy_sync.apply_ops(
+                    d, [{"p": p, "b": "eA=="} if root_id == "apps" else {"p": p, "t": "x"}],
+                    root_id)
+            local = moy_sync.local_segs(root_id, p)
+            if applied:
+                assert local, (root_id, p)
+            elif moy_sync.sync_path(p, 0) == 0:
+                assert not local, (root_id, p)
+    assert moy_sync.local_segs("carts", "a.moy/journal/journal.jsonl") == 3
+    assert moy_sync.sync_path("a.moy/journal/journal.jsonl", 0) == 0
+    for root in moy_sync.SYNC_ROOTS:
+        depths = [n for n in (1, 2, 3, 4) if moy_sync.local_segs(
+            root.id, "/".join(["Pictures"] + ["x%d" % i for i in range(n - 1)]), True)]
+        assert depths == _dc_depths(root), root.id
+
+
+def test_a_song_is_the_media_routes():
+    """The browser store's songs are the board's media route's
+    (moy_sync_song): a name of the music folder, no dot first, ".mp3" in any
+    case."""
+    from runtime import moy_sync
+    keep = ("Music/a.mp3", "Music/B.MP3", "Music/x y.Mp3")
+    leave = ("Music/.a.mp3", "Music/a.mp3.txt", "Music/mp3", "Music/x/a.mp3",
+             "a.mp3", "Pictures/a.mp3", "Music/.mp3", "Music/../a.mp3")
+    assert all(moy_sync.local_song(r) for r in keep)
+    assert not any(moy_sync.local_song(r) for r in leave)
 
 
 def test_the_journal_crosses_only_into_the_local_store():
@@ -199,15 +245,14 @@ def test_the_mode_is_decided_before_anything_is_written():
 def test_get_carts_layout_agrees_across_languages():
     """Get Carts in the browser (#124) splits one layout between Python and
     the worker: the record and the staging folder beside the carts store
-    (cart_index's names, which OPFS keeps under the same ones), and the
-    spool directory the worker streams a fetch into and carts_link reads.
-    A drift is an install the next boot cannot find, or a response nobody
-    reads."""
+    (cart_index's names, which the worker hands the store and OPFS keeps
+    under the same ones), and the spool directory the worker streams a fetch
+    into and carts_link reads. A drift is an install the next boot cannot
+    find, or a response nobody reads."""
     import sys
-    from runtime import cart_index
+    from runtime import cart_index, moy_sync
     from runtime.moy_store_base import _sibling_path
 
-    js = _read("firmware", "web_runner", "moy_store.mjs")
     worker = _read("firmware", "web_runner", "worker.js")
 
     def const(src, name):
@@ -215,15 +260,15 @@ def test_get_carts_layout_agrees_across_languages():
         assert m, "no %s" % name
         return m.group(1)
 
-    assert const(js, "RECORD_NAME") == cart_index.RECORD_NAME
-    assert const(js, "STAGE_DIR") == cart_index.STAGE_DIR
-    # The worker derives the VFS record from the carts root the same way
-    # moy_store_base._sibling_path does.
-    assert "store.RECORD_NAME" in worker
-    assert _sibling_path("/moy/carts", cart_index.RECORD_NAME) == "/moy/installed.json"
+    # The worker writes the record into the system root's directory, the
+    # carts folder's sibling as moy_store_base._sibling_path places it.
+    assert 'store.rootById("system").vfs' in worker and "installRecord" in worker
+    assert _sibling_path("/moy/carts", cart_index.RECORD_NAME) == (
+        moy_sync.system_root("/moy/carts") + "/" + cart_index.RECORD_NAME)
     sys.path.insert(0, _RUNNER)
     try:
         import carts_link
     finally:
         sys.path.remove(_RUNNER)
     assert const(worker, "NET_DIR") == carts_link.SPOOL
+

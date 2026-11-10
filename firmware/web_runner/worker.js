@@ -631,14 +631,13 @@ function mkdirs(p) {
 // places every other root (bindStore). Only the carts-specific export/import
 // code below names a root directly; everything else iterates store.roots().
 const CARTS_ROOT = "/moy/carts";
-// Get Carts' record, beside the carts folder as on every console
-// (runtime/carts/cart_index.py's RECORD_NAME, moy_store_base._sibling_path).
-const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.RECORD_NAME;
-// The files compiled carts wrote (moy-spec SPEC.md 16.12), beside the carts
-// folder too (runtime/carts/cart_files.py), and their store of record in OPFS:
-// site mode only, where a page keeps its own carts.
-const WRITTEN_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.WRITTEN_ROOT;
+// The files compiled carts wrote (moy-spec SPEC.md 16.12), the apps root, and
+// their store of record in OPFS: site mode only, where a page keeps its own
+// carts.
 let writtenStore = null;
+// Get Carts' record, beside the carts folder as on every console
+// (cart_index.RECORD_NAME, from the VM by bindStore).
+let installRecord = null;
 // The storage every store opens through: the origin's, or the page's channel's
 // (moy_store.channelNav), set by init before anything is seeded.
 let opfsNav = navigator;
@@ -731,8 +730,9 @@ async function seedRoot(root, data, site) {
             if (n) console.log("[moy] carts: " + n + " interrupted install(s) finished");
             const rec = await store.readRecord(s);
             if (rec !== null) {
-                mkdirs(RECORD_VFS.slice(0, RECORD_VFS.lastIndexOf("/")));
-                mp.FS.writeFile(RECORD_VFS, rec);
+                const at = store.rootById("system").vfs;
+                mkdirs(at);
+                mp.FS.writeFile(at + "/" + installRecord, rec);
             }
         }
         return await seedLocal(root, s, data);
@@ -768,16 +768,25 @@ async function seedLocal(root, s, data) {
     return got.first ? "seed" : "load";
 }
 
-// The store module's two rules, from the VM before any store is opened: the
-// registry (moy_sync.roots_json) and the skip predicate (the native
-// store's, moy_fs.h's moy_store_skip).
+// The store module's rules, from the VM before any store is opened
+// (moy_store.mjs's `bind`).
 function bindStore() {
     mp.runPython("import moy_sync\n_moy_roots = moy_sync.roots_json("
                  + JSON.stringify(CARTS_ROOT) + ")\n");
-    store.setRoots(JSON.parse(mp.globals.get("_moy_roots")));
+    const roots = JSON.parse(mp.globals.get("_moy_roots"));
     mp.runPython("del _moy_roots");
-    const native = mp.pyimport("moy_store");
-    store.setSkip((name, history) => native.skip(name, history));
+    const native = mp.pyimport("moy_store"), sync = mp.pyimport("moy_sync");
+    const ci = mp.pyimport("cart_index");
+    installRecord = ci.RECORD_NAME;
+    store.bind({
+        roots,
+        skip: (name, history) => native.skip(name, history),
+        path: (id, rel, dc) => sync.local_segs(id, rel, dc),
+        song: (rel) => sync.local_song(rel),
+        plain: (name) => ci.plain_name(name),
+        record: installRecord,
+        stage: ci.STAGE_DIR,
+    });
 }
 
 // Decide the world and seed EVERY registered root. Runs BEFORE the console
@@ -838,12 +847,12 @@ async function initStore(fetched) {
 // The written files OPFS keeps, into the VFS before the console boots, with
 // every write a reload interrupted finished or discarded first.
 async function seedWritten() {
-    writtenStore = await store.openWritten(opfsNav);
+    writtenStore = await store.openStore(opfsNav, "apps");
     if (!writtenStore) return;
     try {
         const files = await store.readWritten(writtenStore);
         for (const rel in files) {
-            const full = WRITTEN_VFS + "/" + rel;
+            const full = writtenStore.root.vfs + "/" + rel;
             mkdirs(full.slice(0, full.lastIndexOf("/")));
             mp.FS.writeFile(full, files[rel]);
         }
@@ -858,7 +867,7 @@ async function seedWritten() {
 function writtenKeep(j) {
     if (!writtenStore) return;
     let data;
-    try { data = mp.FS.readFile(WRITTEN_VFS + "/" + j.cart + "/" + j.key); }
+    try { data = mp.FS.readFile(writtenStore.root.vfs + "/" + j.cart + "/" + j.key); }
     catch (e) { return; }
     opfsSerial(() => store.commitWritten(writtenStore, j.cart, j.key, data))
         .then(() => cartsRoom())

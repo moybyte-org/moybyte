@@ -128,7 +128,7 @@ extern int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal)
 #define READ_CHUNK 4096
 #define BIN_CHUNK 3072              // READ_CHUNK * 3 / 4: whole base64 quanta
 #define WALK_DEPTH 16
-#define MEDIA_DIR "Music"
+#define MEDIA_DIR MOY_SYNC_MUSIC
 #define MEDIA_NAME_MAX 128
 #define IO_TRIES 3
 #define IO_BACKOFF_MS 20
@@ -1141,14 +1141,10 @@ static void pull(out_t *o, const char *root, const char *kinds, int bytes) {
 
 // -- the media route (the header's THE MEDIA ROUTE) --------------------------------------
 
-static int is_song(const char *name, size_t n) {
-    return n > 4 && name[0] != '.' && strncasecmp(name + n - 4, ".mp3", 4) == 0;
-}
-
 static int list_songs(void *ctx, const char *name, size_t len, int is_dir, uint32_t size) {
     out_t *o = ((void **)ctx)[0];
     int *first = ((void **)ctx)[1];
-    if (is_dir || !is_song(name, len) || moy_store_skip(name, len, 0) || o->err) {
+    if (is_dir || !moy_sync_song(name, len) || moy_store_skip(name, len, 0) || o->err) {
         return 0;
     }
     char num[16];
@@ -1203,7 +1199,7 @@ static int song_path(const char *t, size_t tn, char *path, size_t cap) {
         }
     }
     name[n] = '\0';
-    if (!is_song(name, n) || moy_store_skip(name, n, 0) || !moy_utf8_valid(name, n)) {
+    if (!moy_sync_song(name, n) || moy_store_skip(name, n, 0) || !moy_utf8_valid(name, n)) {
         return 0;
     }
     int k = snprintf(path, cap, "%s/" MEDIA_DIR "/%s", W->files, name);

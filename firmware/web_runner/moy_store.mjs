@@ -36,18 +36,35 @@
 // Everything here is deliberately free of the VM and of the Worker globals, so
 // node can drive it directly (worker_persist_test.mjs) against a fake OPFS.
 
-// What never crosses THE WIRE (`skipName`) and what never reaches THE LOCAL
-// STORE (`skipLocal`, which keeps the journal: in mode 1 this store is of
-// record, and the undo history lives with it) are the native store's one
-// predicate, `moy_store.skip(name, history)` in the VM (moy_fs.h), handed in
-// by `setSkip` before any store is opened.
-let skipFn = null;
+// THE VM'S RULES, handed in by the worker's `bind` before any store is
+// opened: every decision about what a path, a name or a root is.
+//   roots           the sync roots (moy_sync.roots_json): each root's id, VFS
+//                   path and served endpoint, the named files a root of them
+//                   IS (`top`), whether every file is bytes (`binary`) and
+//                   whether a site-mode page leaves it to another keeper
+//                   (`site: false`, the apps' folders: commitWritten below);
+//                   the files root names its folder of `songs`
+//   skip(name, history)
+//                   what never crosses THE WIRE (false) and what never reaches
+//                   THE LOCAL STORE (true, which keeps the journal: in mode 1
+//                   this store is of record, and the undo history lives with
+//                   it): the native store's moy_store.skip (moy_fs.h)
+//   path(root id, rel, dc)
+//                   how many segments a root's store keeps `rel` as, 0 for
+//                   none (moy_sync.local_segs: the receiving C's path rule and
+//                   the root's shape)
+//   song(rel)       a files store's song (moy_sync.local_song)
+//   plain(name)     a name an install may write (cart_index.plain_name)
+//   record, stage   the names of Get Carts' record and of the folder an
+//                   install is built in, beside the carts store
+//                   (cart_index.RECORD_NAME, STAGE_DIR)
+let rules = null;
 
-export function setSkip(fn) { skipFn = fn; }
+export function bind(r) { rules = r; }
 
-export function skipName(name) { return !!skipFn(name, false); }
+export function skipName(name) { return !!rules.skip(name, false); }
 
-export function skipLocal(name) { return !!skipFn(name, true); }
+export function skipLocal(name) { return !!rules.skip(name, true); }
 
 export function fromBase64(b) {
     const s = atob(b);
@@ -74,49 +91,18 @@ export function fileData(v) {
     return null;
 }
 
-// THE SYNC ROOTS, as the VM's registry hands them (moy_sync.roots_json, by
-// `setRoots` before any store is opened): each root's id, VFS path and
-// served endpoint, its whole-folder delete arity (`dcMin`/`dcMax`, null: no
-// folder delete), the named files a root of them IS (`top`), whether every
-// file is bytes (`binary`) and whether a site-mode page leaves it to another
-// keeper (`site: false`, the apps' folders: commitWritten below).
-let rootList = [];
-
-export function setRoots(list) { rootList = list; }
-
-export function roots() { return rootList; }
+export function roots() { return rules.roots; }
 
 export function rootById(id) {
-    for (const r of rootList) if (r.id === id) return r;
+    for (const r of rules.roots) if (r.id === id) return r;
     return null;
 }
 
-// A path the local store will accept: the JS half of the receiving C's path
-// rule (native/moy_net/moy_sync_apply.c).
-// An allowlist of shape, not a blocklist of tricks -- the store is a real
-// filesystem and `..` in a cart name must never resolve. `skip` defaults to the
-// WIRE's rule; every store-side caller here passes `skipLocal`, so a journal
-// path lands locally and still cannot be shipped.
-export function safeSegments(rel, skip = skipName) {
-    if (typeof rel !== "string" || !rel || rel.length > 256) return null;
-    const parts = rel.split("/");
-    for (const seg of parts) {
-        if (!seg || seg === "." || seg === "..") return null;
-        if (/[\\\0\r\n]/.test(seg)) return null;
-        if (skip(seg)) return null;
-    }
-    return parts;
-}
-
-// The segments of a path THIS root's store holds, or null: a file inside a
-// folder for carts and files (a top-level file there is system state beside
-// the store, never the kid's work in it), one of the named files for a root
-// of top-level files.
-function localParts(root, rel) {
-    const parts = safeSegments(rel, skipLocal);
-    if (!parts) return null;
-    if (root.top) return root.top.includes(parts.join("/")) ? parts : null;
-    return parts.length < 2 ? null : parts;
+// The segments `rel` is in a store of `rootId`, or null when the VM's rule
+// keeps no such path there.
+function partsIn(rootId, rel, dc) {
+    if (typeof rel !== "string" || !rel || !rules.path(rootId, rel, !!dc)) return null;
+    return rel.split("/");
 }
 
 // ---------------------------------------------------------------------------
@@ -232,13 +218,6 @@ const enc = new TextEncoder();
 // and the BOM kept, so writing the string back gives the same bytes.
 const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
-// The record of what Get Carts installed, and the folder an install is built
-// in, as siblings of the carts store -- runtime/carts/cart_index.py's RECORD_NAME
-// and STAGE_DIR, the same layout as beside a board's carts folder. Pinned
-// against the Python by tests/test_web_store.py.
-export const RECORD_NAME = "installed.json";
-export const STAGE_DIR = "install";
-
 // THE CHANNEL'S STORAGE ROOT. Pages that share an origin share its OPFS: the
 // stable site (/moybyte/) and the dev site (/moybyte/dev/) both live on
 // moybyte-org.github.io. A page published for a channel (site/build.py
@@ -350,25 +329,19 @@ export async function applyOps(store, ops) {
 
 async function applyOne(store, op) {
     if (!op || typeof op !== "object") return "not an op";
-    // skipLocal, not skipName: in site mode the sweep ships this store's own
-    // journal to this store, and the wire predicate would refuse every line of
-    // it -- silently, as "bad path" errors nobody reads.
-    const parts = safeSegments(op.p || "", skipLocal);
-    if (!parts) return "bad path";
+    // The local rule, not the wire's: in site mode the sweep ships this
+    // store's own journal to this store.
     const r = store.root;
     if (op.dc) {
-        // Whole-folder delete arity from the root descriptor -- a cart is one
-        // segment, a files item a kind/name or a recording folder below it.
-        const n = parts.length;
-        if (r.dcMin === null || n < r.dcMin || (r.dcMax !== null && n > r.dcMax))
-            return "bad dc target";
+        // A whole folder within the root's arity: a cart is one segment, a
+        // files item a kind/name or a recording folder below it.
+        const parts = partsIn(r.id, op.p, true);
+        if (!parts) return "bad dc target";
         try { await removeAt(store, parts, true); } catch (e) { /* already gone */ }
         return null;
     }
-    // A cart store never takes a top-level file (wifi.json and its siblings are
-    // system state beside the carts, not the kid's work: moy_sync draws the
-    // same line), and the console's own store takes its named files alone.
-    if (!localParts(r, op.p)) return r.top ? "not a system file" : "not a cart file";
+    const parts = partsIn(r.id, op.p);
+    if (!parts) return "bad path";
     const key = parts.join("/");
     // The console's own documents are written so a reload at any moment finds
     // the old copy or the new one (`commitFile`): a torn settings file would boot
@@ -446,7 +419,7 @@ export async function readAll(store) {
         }
         return out;
     }
-    await walk(store.carts, "", out, 0, store.root.id === "files" ? isSong : null);
+    await walk(store.carts, "", out, 0, store.root.songs ? rules.song : null);
     return out;
 }
 
@@ -479,22 +452,15 @@ async function walk(dir, prefix, out, depth, leave) {
 // THE SONGS: a files store's music folder keeps MP3s the VFS never holds
 // (readAll leaves them out); Music reads one a range at a time
 // (media_link.py), so a library never sits in the page's memory.
-export const MUSIC_DIR = "Music";
-
-export function isSong(rel) {
-    const parts = String(rel).split("/");
-    const name = parts[parts.length - 1];
-    return parts.length === 2 && parts[0] === MUSIC_DIR && name[0] !== "."
-        && /\.mp3$/i.test(name);
-}
 
 // {name: size} of the store's songs.
 export async function songs(store) {
     const out = {};
+    const music = store.root.songs;
     let dir;
-    try { dir = await store.carts.getDirectoryHandle(MUSIC_DIR); } catch (e) { return out; }
+    try { dir = await store.carts.getDirectoryHandle(music); } catch (e) { return out; }
     for await (const [name, handle] of dir.entries()) {
-        if (handle.kind !== "file" || !isSong(MUSIC_DIR + "/" + name)) continue;
+        if (handle.kind !== "file" || !rules.song(music + "/" + name)) continue;
         out[name] = (await handle.getFile()).size;
     }
     return out;
@@ -502,9 +468,10 @@ export async function songs(store) {
 
 // A song's File (a Blob to slice), or null.
 export async function songFile(store, name) {
-    if (!isSong(MUSIC_DIR + "/" + name)) return null;
+    const music = store.root.songs;
+    if (typeof name !== "string" || !rules.song(music + "/" + name)) return null;
     try {
-        const dir = await store.carts.getDirectoryHandle(MUSIC_DIR);
+        const dir = await store.carts.getDirectoryHandle(music);
         return await (await dir.getFileHandle(name)).getFile();
     } catch (e) { return null; }
 }
@@ -512,15 +479,14 @@ export async function songFile(store, name) {
 // A dropped song kept: its name, or null for one that is not a song.
 export async function keepSong(store, name, bytes) {
     const base = String(name).slice(String(name).lastIndexOf("/") + 1);
-    if (!isSong(MUSIC_DIR + "/" + base) || !safeSegments(MUSIC_DIR + "/" + base, skipLocal))
-        return null;
-    await writeText(store, [MUSIC_DIR, base], bytes);
+    if (!rules.song(store.root.songs + "/" + base)) return null;
+    await writeText(store, [store.root.songs, base], bytes);
     return base;
 }
 
 // One file of a cart store removed; one already gone is no error.
 export async function removeFile(store, rel) {
-    const parts = localParts(store.root, rel);
+    const parts = partsIn(store.root.id, rel);
     if (!parts) return;
     try { await removeAt(store, parts, false); } catch (e) { /* already gone */ }
 }
@@ -529,7 +495,7 @@ export async function removeFile(store, rel) {
 export async function seed(store, carts) {
     let n = 0;
     for (const rel in carts) {
-        const parts = localParts(store.root, rel);
+        const parts = partsIn(store.root.id, rel);
         const data = fileData(carts[rel]);
         if (!parts || data === null) continue;
         if (store.root.top) await commitFile(...await namedAt(store, rel, true), data);
@@ -561,19 +527,14 @@ export async function seed(store, carts) {
 // marker that never finished writing does not parse, and counts as none.
 // ---------------------------------------------------------------------------
 
-function plainName(name) {
-    return typeof name === "string" && !!name && name.indexOf("/") < 0
-        && name.indexOf("\\") < 0 && name.indexOf("\0") < 0 && name[0] !== ".";
-}
-
 // `store` is the carts store (openStore(nav, "carts")); `files` is
 // [{name, data: Uint8Array}], the staged folder's whole contents; `record` is
 // the record's new text. Resolves once the install is durable; throws, having
 // changed nothing on the shelf, when it could not be made so.
 export async function commitInstall(store, folder, files, record) {
-    if (!plainName(folder)) throw new Error("bad folder " + folder);
-    for (const f of files) if (!plainName(f.name)) throw new Error("bad file " + f.name);
-    const stage = await store.dir.getDirectoryHandle(STAGE_DIR, { create: true });
+    if (!rules.plain(folder)) throw new Error("bad folder " + folder);
+    for (const f of files) if (!rules.plain(f.name)) throw new Error("bad file " + f.name);
+    const stage = await store.dir.getDirectoryHandle(rules.stage, { create: true });
     try { await stage.removeEntry(folder + ".commit"); } catch (e) { /* none */ }
     try { await stage.removeEntry(folder, { recursive: true }); } catch (e) { /* none */ }
     try {
@@ -610,7 +571,7 @@ async function rollForward(store, stage, folder) {
             if (h.kind !== "file") continue;
             await writeIn(into, name, new Uint8Array(await (await h.getFile()).arrayBuffer()));
         }
-        await writeIn(store.dir, RECORD_NAME, m.record);
+        await writeIn(store.dir, rules.record, m.record);
     }
     await stage.removeEntry(folder + ".commit");
     if (from) await stage.removeEntry(folder, { recursive: true });
@@ -622,7 +583,7 @@ async function rollForward(store, stage, folder) {
 // that never reached its marker) goes. Returns how many rolled forward.
 export async function recoverInstalls(store) {
     let stage;
-    try { stage = await store.dir.getDirectoryHandle(STAGE_DIR); } catch (e) { return 0; }
+    try { stage = await store.dir.getDirectoryHandle(rules.stage); } catch (e) { return 0; }
     const names = [];
     for await (const [name, h] of stage.entries()) names.push([name, h.kind]);
     let n = 0;
@@ -640,12 +601,12 @@ export async function recoverInstalls(store) {
 
 // The record alone (a removal), or null when there is none.
 export async function writeRecord(store, text) {
-    await writeIn(store.dir, RECORD_NAME, text);
+    await writeIn(store.dir, rules.record, text);
 }
 
 export async function readRecord(store) {
     try {
-        const fh = await store.dir.getFileHandle(RECORD_NAME);
+        const fh = await store.dir.getFileHandle(rules.record);
         return await (await fh.getFile()).text();
     } catch (e) {
         return null;
@@ -725,46 +686,27 @@ async function settleFiles(dir) {
 // copy or the new one.
 // ---------------------------------------------------------------------------
 
-export const WRITTEN_ROOT = "apps";
-
-// The written store, or null with no OPFS (the console then keeps written
-// files in this tab alone, like every other edit there).
-export async function openWritten(nav) {
-    const st = nav && nav.storage;
-    if (!st || typeof st.getDirectory !== "function") return null;
-    try {
-        const dir = await st.getDirectory();
-        return { dir: await dir.getDirectoryHandle(WRITTEN_ROOT, { create: true }) };
-    } catch (e) {
-        return null;
-    }
-}
-
-// A cart id or a key as a name in one folder: what cart_files.py writes, and
-// never a path.
-function writtenName(n) {
-    return typeof n === "string" && !!n && n !== "." && n !== ".." && !/[\/\\\0]/.test(n);
-}
+// The written store is the apps root's (openStore(nav, "apps")).
 
 // Make one written file durable. Throws, with the old copy in place, when it
 // could not be.
 export async function commitWritten(w, cart, key, bytes) {
-    if (!writtenName(cart) || !writtenName(key) || key.includes("~"))
+    if (typeof cart !== "string" || !partsIn(w.root.id, cart + "/" + key))
         throw new Error("bad written file " + cart + "/" + key);
-    const dir = await w.dir.getDirectoryHandle(cart, { create: true });
+    const dir = await w.carts.getDirectoryHandle(cart, { create: true });
     await commitFile(dir, key, bytes);
 }
 
 // One written file gone, or with `key` null every file the cart wrote.
 export async function dropWritten(w, cart, key) {
-    if (!writtenName(cart)) return;
     if (key === null || key === undefined) {
-        try { await w.dir.removeEntry(cart, { recursive: true }); } catch (e) { /* none */ }
+        if (!partsIn(w.root.id, cart, true)) return;
+        try { await w.carts.removeEntry(cart, { recursive: true }); } catch (e) { /* none */ }
         return;
     }
-    if (!writtenName(key)) return;
+    if (typeof cart !== "string" || !partsIn(w.root.id, cart + "/" + key)) return;
     let dir;
-    try { dir = await w.dir.getDirectoryHandle(cart); } catch (e) { return; }
+    try { dir = await w.carts.getDirectoryHandle(cart); } catch (e) { return; }
     try { await dir.removeEntry(key); } catch (e) { /* none */ }
 }
 
@@ -773,9 +715,9 @@ export async function dropWritten(w, cart, key) {
 export async function readWritten(w) {
     const out = {};
     const carts = [];
-    for await (const [name, h] of w.dir.entries()) if (h.kind === "directory") carts.push(name);
+    for await (const [name, h] of w.carts.entries()) if (h.kind === "directory") carts.push(name);
     for (const cart of carts) {
-        const dir = await w.dir.getDirectoryHandle(cart);
+        const dir = await w.carts.getDirectoryHandle(cart);
         for (const n of await settleFiles(dir)) {
             const fh = await dir.getFileHandle(n);
             out[cart + "/" + n] = new Uint8Array(await (await fh.getFile()).arrayBuffer());

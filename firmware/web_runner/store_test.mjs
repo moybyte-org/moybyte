@@ -17,7 +17,7 @@ function ok(name, cond, extra = "") {
 }
 
 const enc = new TextEncoder(), dec = new TextDecoder();
-await vmRules(store);
+const rules = await vmRules(store);
 
 // ---- mode detection ---------------------------------------------------------
 const reply = (status) => async () => ({ ok: status >= 200 && status < 300, status });
@@ -374,7 +374,7 @@ for (const sync of [true, false]) {
        && all["jet.moy/main.wasm"] instanceof Uint8Array, JSON.stringify(Object.keys(all)));
     ok("...with its record", await store.readRecord(s0) === OLD_REC);
     ok("...and leaves no staging", (await (async () => {
-        const st = await s0.dir.getDirectoryHandle(store.STAGE_DIR);
+        const st = await s0.dir.getDirectoryHandle(rules.stage);
         for await (const _e of st.entries()) return false;
         return true; })()));
     ok("a text file still reads back as text", typeof all["jet.moy/manifest.json"] === "string");
@@ -398,7 +398,7 @@ for (const sync of [true, false]) {
         all = await store.readAll(s);
         const rec = await store.readRecord(s);
         const left = [];
-        for await (const [n] of (await s.dir.getDirectoryHandle(store.STAGE_DIR)).entries())
+        for await (const [n] of (await s.dir.getDirectoryHandle(rules.stage)).entries())
             left.push(n);
         if (same(all, OLD) && rec === OLD_REC) olds++;
         else if (same(all, NEW) && rec === NEW_REC) news++;
@@ -451,14 +451,11 @@ ok("both still refuse thumbs and the crash-safety artifacts",
    store.skipName("thumbs") && store.skipLocal("thumbs")
    && store.skipName("x.bak") && store.skipLocal("x.bak")
    && store.skipName("x.tmp") && store.skipLocal("x.tmp"));
-ok("safeSegments takes the predicate it is given",
-   store.safeSegments("a.moy/journal/journal.jsonl") === null
-   && (store.safeSegments("a.moy/journal/journal.jsonl", store.skipLocal) || []).length === 3);
 
 // ---- a compiled cart's written files (moy-spec SPEC.md 16.12) -----------------
 {
     const OLD = enc.encode("old save"), NEW = enc.encode("the new, longer save");
-    const w = await store.openWritten(fakeNav(true));
+    const w = await store.openStore(fakeNav(true), "apps");
     await store.commitWritten(w, "doom", "doomsav0.dsg", OLD);
     let got = await store.readWritten(w);
     ok("a written file reads back as it was written",
@@ -466,7 +463,7 @@ ok("safeSegments takes the predicate it is given",
        JSON.stringify(Object.keys(got)));
     // A reload at every change commitWritten makes: the file is the old save or
     // the new one, whole, and nothing of the attempt is left behind.
-    let probe = await store.openWritten(fakeNav(true));
+    let probe = await store.openStore(fakeNav(true), "apps");
     await store.commitWritten(probe, "doom", "doomsav0.dsg", OLD);
     crash.at = { left: 1e9 };
     await store.commitWritten(probe, "doom", "doomsav0.dsg", NEW);
@@ -474,7 +471,7 @@ ok("safeSegments takes the predicate it is given",
     crash.at = null;
     let torn = 0, newer = 0;
     for (let k = 0; k < steps; k++) {
-        const s = await store.openWritten(fakeNav(true));
+        const s = await store.openStore(fakeNav(true), "apps");
         await store.commitWritten(s, "doom", "doomsav0.dsg", OLD);
         crash.at = { left: k };
         try { await store.commitWritten(s, "doom", "doomsav0.dsg", NEW); } catch (e) { }
@@ -483,7 +480,7 @@ ok("safeSegments takes the predicate it is given",
         const text = after["doom/doomsav0.dsg"] ? dec.decode(after["doom/doomsav0.dsg"]) : null;
         if (text !== "old save" && text !== "the new, longer save") torn++;
         if (text === "the new, longer save") newer++;
-        const d = await s.dir.getDirectoryHandle("doom");
+        const d = await s.carts.getDirectoryHandle("doom");
         for await (const [n] of d.entries()) if (n.includes("~")) torn++;
     }
     ok("a reload at any of " + steps + " steps of a write leaves the old save or the new, whole",
@@ -525,10 +522,10 @@ ok("safeSegments takes the predicate it is given",
     await store.writeRecord(dev, '{"dev":1}');
     ok("the install record is the channel's too", (await store.readRecord(stable)) === null
        && (await store.readRecord(dev)) === '{"dev":1}');
-    await store.commitWritten(await store.openWritten(devNav), "c", "k", new Uint8Array([1]));
+    await store.commitWritten(await store.openStore(devNav, "apps"), "c", "k", new Uint8Array([1]));
     ok("a compiled cart's written files are the channel's too",
-       !Object.keys(await store.readWritten(await store.openWritten(nav))).length &&
-       Object.keys(await store.readWritten(await store.openWritten(devNav))).length === 1);
+       !Object.keys(await store.readWritten(await store.openStore(nav, "apps"))).length &&
+       Object.keys(await store.readWritten(await store.openStore(devNav, "apps"))).length === 1);
     const root = await nav.storage.getDirectory();
     const top = [];
     for await (const [name] of root.entries()) top.push(name);

@@ -213,6 +213,13 @@ typedef struct {
 // serve, or `ops` that is not an array.
 int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b);
 
+// The files root's folder of songs, and whether `name` (n bytes) is one of
+// its songs: a name of the folder, no dot first, ending ".mp3" in any case.
+// The media route serves these and a browser's store keeps them
+// (moy_sync.local_song).
+#define MOY_SYNC_MUSIC "Music"
+int moy_sync_song(const char *name, size_t n);
+
 // -- the sync apply (moy_sync_apply.c, over native/moy_store) ------------------
 
 #define MOY_SYNC_PART_MAX (16 * 1024)
@@ -252,6 +259,13 @@ typedef struct {
         char why[40];
     } err[MOY_SYNC_ERRS];
 } moy_sync_result_t;
+
+// The segments of a store path `p` (n bytes) the receiver takes, or 0 for a
+// path it refuses. The rule is an allowlist of shape: at most 256 characters,
+// forward slashes only, no empty or dot segment, no backslash, NUL, CR or LF
+// in one, and no segment moy_store_skip(.., history) keeps home -- 0 the
+// wire's rule, 1 a store of record's, which keeps the journal.
+int moy_sync_path(const char *p, size_t n, int history);
 
 // Apply the ops array at [ops, ops_end) into `root` of `s`, one op at a time:
 // a bad op is refused with its reason and never aborts the batch. A system

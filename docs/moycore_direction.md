@@ -142,9 +142,10 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   before the store is seeded (only the web MODE is decided first, by the
   `GET /sync` probe), so a rule that seems to run "before the console" runs in
   the VM anyway, and one that truly cannot is exported from the wasm's C,
-  never copied. `tests/test_web_io_ratchet.py` files every name in
-  `moy_store.mjs` as plumbing or as a remaining mirror; the mirrors only
-  shrink. The audit (2026-11-09):
+  never copied. `moy_store.mjs` holds no rule of its own: the worker's
+  `bind` hands it every one, and `tests/test_web_io_ratchet.py` holds its
+  exports to a list that only shrinks and its strings to a filed vocabulary.
+  The audit (2026-11-09, 2026-11-10):
 
   | JavaScript rule | twin | divergence | now |
   |---|---|---|---|
@@ -156,7 +157,10 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   | `SKIP_*`, `skipName`; `SITE_SKIP_*`, `skipLocal` | `moy_sync._skip` and its site list, C `moy_store_skip` | none | the VM's: the worker hands the store the wasm's `moy_store.skip` |
   | `BINARY_*`, `isBinary` | `moy_sync.BINARY_*` | none | gone: `readAll` hands text or bytes, and the ops are the VM's own sweep |
   | `ROOTS`, `rootById` | `moy_sync.SYNC_ROOTS` | the delete arity lived only in the page and the C | the VM's: `moy_sync.roots_json`, `Root.dc` held to the C |
-  | `safeSegments`, `localParts` | `moy_sync_apply.c`'s path rule | not compared | mirror: the OPFS write guard |
+  | `safeSegments`, `localParts` | `moy_sync_apply.c`'s path rule | the page counted a path's length in UTF-16 units, and took an app's key the skip rule keeps home | the VM's: `moy_sync.local_segs` over the C's `moy_sync_path` |
+  | `plainName`, `writtenName` | `cart_index.plain_name`; the apps root's shape in `moy_sync_apply.c` | none | the VM's: `plain_name`, `local_segs("apps", ..)` |
+  | `isSong`, `MUSIC_DIR` | `moy_webhost.c`'s song rule, `media_link.MUSIC` | none | the C's: `moy_sync_song` (the webhost's too), by `moy_sync.local_song` |
+  | `RECORD_NAME`, `STAGE_DIR`, `WRITTEN_ROOT` | `cart_index.RECORD_NAME`/`STAGE_DIR`, the apps root | none | the VM's: `bind`'s `record`/`stage` from `cart_index`, the registry's apps root |
   | `isEmpty` (roots other than carts) | `seed_folders`' `first` | none | the VM's: `moy_sync.seed_store` (`moy_seed.adopt_bundle`) |
   | `probeMode` | the boards' `GET /sync` | none | JavaScript's: it decides what the VFS is seeded from |
 

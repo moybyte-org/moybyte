@@ -55,9 +55,13 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
+try:
+    from moy_sync import MUSIC         # the files root's folder of songs
+except ImportError:  # host / CPython: the runtime package
+    from runtime.moy_sync import MUSIC
+
 SPOOL = "/moy/net"
 LISTING = SPOOL + "/media.json"
-MUSIC = "Music"                    # the files root's folder of songs
 EIO = 5
 ICY_ASK = {"Icy-MetaData": "1"}
 ICY_HEAD = ["icy-metaint", "icy-name"]

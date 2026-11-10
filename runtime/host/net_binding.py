@@ -134,6 +134,8 @@ _SIGS = (
     ("moy_sync_decode", [ctypes.c_void_p, _Z, ctypes.POINTER(_Env)], _I),
     ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z], _Z),
     ("moy_sync_batch", [ctypes.c_void_p, _Z, ctypes.POINTER(_Batch)], _I),
+    ("moy_sync_path", [_P, _Z, _I], _I),
+    ("moy_sync_song", [_P, _Z], _I),
     ("moy_sync_apply", [ctypes.POINTER(_Store), _I, ctypes.c_void_p,
                         ctypes.c_void_p, ctypes.POINTER(_Result)], None),
     ("moy_web_start", [ctypes.POINTER(_WebCfg)], _I),
@@ -381,6 +383,19 @@ def sync_batch(body):
     base = ctypes.addressof(buf)
     ops = raw[b.ops - base:b.ops_end - base].decode("utf-8")
     return (_ROOT_NAMES[b.root], ops)
+
+
+def sync_path(rel, history):
+    """The segments of a store path the receiver takes, 0 for one it
+    refuses (moy_net.h's moy_sync_path)."""
+    raw = _bytes(rel)
+    return _lib().moy_sync_path(raw, len(raw), 1 if history else 0)
+
+
+def sync_song(name):
+    """Whether `name` is a song of the music folder (moy_sync_song)."""
+    raw = _bytes(name)
+    return bool(_lib().moy_sync_song(raw, len(raw)))
 
 
 def _names(names):

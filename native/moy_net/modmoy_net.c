@@ -622,6 +622,23 @@ static mp_obj_t mod_sync_batch(mp_obj_t body) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_batch_obj, mod_sync_batch);
 
+// sync_path(rel, history) -> the segments of a store path the receiver
+// takes, 0 for one it refuses (moy_net.h's moy_sync_path).
+static mp_obj_t mod_sync_path(mp_obj_t rel, mp_obj_t history) {
+    size_t n;
+    const char *p = mp_obj_str_get_data(rel, &n);
+    return MP_OBJ_NEW_SMALL_INT(moy_sync_path(p, n, mp_obj_is_true(history)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_sync_path_obj, mod_sync_path);
+
+// sync_song(name) -> whether `name` is a song of the music folder.
+static mp_obj_t mod_sync_song(mp_obj_t name) {
+    size_t n;
+    const char *p = mp_obj_str_get_data(name, &n);
+    return mp_obj_new_bool(moy_sync_song(p, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_song_obj, mod_sync_song);
+
 // sync_apply(carts, files, kinds, root id, ops JSON, journal[, apps])
 //   -> (applied, [(index, reason)], shelf, refused)
 static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
@@ -1212,6 +1229,8 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_apply), MP_ROM_PTR(&mod_sync_apply_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_path), MP_ROM_PTR(&mod_sync_path_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_song), MP_ROM_PTR(&mod_sync_song_obj)},
     {MP_ROM_QSTR(MP_QSTR_pw_hash), MP_ROM_PTR(&mod_pw_hash_obj)},
     #if MOY_NET_SERVE
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},

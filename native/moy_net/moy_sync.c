@@ -2,6 +2,7 @@
 // applies a batch and the browser that sends one.
 
 #include <string.h>
+#include <strings.h>
 
 #include "moy_json.h"
 #include "moy_net.h"
@@ -101,4 +102,16 @@ int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b) {
     b->ops = e.ops;
     b->ops_end = e.ops_end;
     return MOY_SYNC_OK;
+}
+
+int moy_sync_song(const char *name, size_t n) {
+    if (n <= 4 || name[0] == '.' || strncasecmp(name + n - 4, ".mp3", 4) != 0) {
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (name[i] == '/' || name[i] == '\\' || name[i] == '\0') {
+            return 0;
+        }
+    }
+    return 1;
 }
