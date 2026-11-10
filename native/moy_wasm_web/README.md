@@ -53,6 +53,42 @@ cart's `snd` goes to `moy_audio`'s stream (`moy_audio_snd.h`), which the web
 runner's per-frame `render()` mixes after the synth, so the samples ride the
 same finished PCM the page plays through its AudioWorklet.
 
+## A WASI command here
+
+The site's console (`firmware/web_runner/build.sh --site`) runs the shell
+itself, and a WASI command typed in its Terminal runs here too: the boards'
+adapter, `native/moy_wasm/moy_wasi.c`, compiled for this build
+(`MOY_WASI_WEB`, under `MOY_WEB_SHELL=1` only) over `moy_wasi_web.h`, the
+names of WAMR's API it calls answered by the page's engine. So stdio, args,
+the session's exported variables, exit codes, the files its permissions
+reach, the clocks and random (the page's, through emscripten's libc), Ctrl-C
+and the budget are one copy of C on every tier; the shell door
+(`runtime/shell/sh_door.py`) and `moycore_glue.WasmRuntime` are the boards'.
+
+| piece | where |
+|---|---|
+| `command_start`, `command_step`, `command_stop` | `modmoy_wasm_web.c`, the boards' surface in shape |
+| WAMR's names over the page's engine, the rows' registry | `moy_wasi_web.c` |
+| the module, its imports, `_start` | `firmware/web_runner/worker.js`'s command engine (`installCommandEngine`) |
+
+The start reads the module through the VFS, has the page compile it and list
+its imports and exports, checks it as a board does (`moy_wasi_check`) and has
+the page instantiate it, one import per registered row, called by its table
+index with the module's own arguments. A pointer is an offset in the
+module's memory, which is what a native's pointer is here; a row's body
+reaches the bytes behind one by copy (`moy_wasi_web_reach`), and the page
+writes the bytes the body changed back when the row returns, then throws
+through the module where the C says it unwinds (`proc_exit`, Ctrl-C, the
+budget). The first step runs `_start` to its end inside the door's crossing:
+the page has one thread and the line's run holds it already
+(`MOY_SH_RUN_BUDGET_S`), so a terminal read is end of file and a run past 3 s
+is stopped at its next import.
+
+`moybyte.os`'s rows are linked to one answering NOSYS: they reach the console
+through the VM's queue and its hop (`moy_vmq.h`), which a run holding the
+VM's one thread cannot wait on, and their bodies take pointers into the
+engine's memory. A module importing them runs; a call of one fails.
+
 ## What does not apply here
 
 A board's compiled module is NATIVE code, trusted by provenance: a key naming

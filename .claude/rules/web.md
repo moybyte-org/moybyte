@@ -221,6 +221,21 @@ nor those docs will warn you about:
   - **The site-mode sweep must pass a file it cannot carry by stat**
     (`moy_sync.StoreWatcher`, crc None): when it re-read every binary file on
     every sweep, an installed Doom drew a frame a second.
+- **The site's Terminal runs WASI commands on the BROWSER'S engine, through
+  the boards' adapter**, compiled into the site's wasm alone; the README of
+  `native/moy_wasm_web` says how ("A WASI command here"). What bites:
+  - **A row's pointer is an offset in the module's memory, never one into
+    the VM's.** A row whose body dereferences what it is handed would read
+    the VM at that number, so those rows (`moybyte.os`'s, today) are linked
+    to NOSYS, not to their bodies. A new WAMR call in `moy_wasi.c` needs its
+    twin in `moy_wasi_web.c`: `tests/test_wasi_web.py` names it before a
+    `--site` build fails.
+  - **Nothing waits inside a command**: the module runs inside the door's
+    crossing on the one thread, so stdin from the grid is end of file and a
+    console call cannot be answered while it runs.
+  - The worker's command engine (about 1 KB of script gzipped) rides the
+    baked bundle too; its C does not. `tests/test_web_term_e2e.py` runs
+    wasi-sdk's modules in Chrome.
 - **Music plays in the browser on the boards' decoder (#251)**: `moy_media`
   is in the wasm with no task and no HTTP client (`moy_media.h`, THE
   BROWSER): the frame's C job decodes, and what the VFS does not hold (a

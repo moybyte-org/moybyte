@@ -255,11 +255,15 @@ PYEOF
   # what compiles moycore's libmoy/moy_wasm.c and its compiled-cart half for
   # it. moycore includes the session header, which lives with the boards'
   # engine (native/moy_wasm, never staged here: no WAMR rides the browser),
-  # so the one header is copied in beside this engine.
+  # so the one header is copied in beside this engine. So is the WASI
+  # adapter (moy_wasi.c, its header and its moybyte.os rows), which the
+  # fragment compiles for the site's build only, whose console runs the shell
+  # and its WASI commands (moy_wasm_web/README.md, "A WASI command here").
   cp -r "${REPO_ROOT}/native/moy_wasm_web" \
         "${USERMODS_DIR}/moy_wasm_web"
-  cp "${REPO_ROOT}/native/moy_wasm/moy_wasm_session.h" \
-     "${USERMODS_DIR}/moy_wasm_web/moy_wasm_session.h"
+  for f in moy_wasm_session.h moy_wasi.c moy_wasi.h moy_wasi_os_rows.h; do
+    cp "${REPO_ROOT}/native/moy_wasm/${f}" "${USERMODS_DIR}/moy_wasm_web/${f}"
+  done
 
   "${PY}" "${REPO_ROOT}/tools/board_config.py" mirror "${USERMODS_DIR}" \
     "${BUILD_DIR}/usermods"

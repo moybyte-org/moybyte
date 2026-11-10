@@ -42,7 +42,7 @@ _Static_assert(MOY_EVQ_FD >= 3 && MOY_EVQ_FD < MOY_WASI_FDS, "the event descript
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #else
-#include <sys/random.h>
+#include <sys/random.h>             // getrandom; emscripten's declares getentropy
 #endif
 
 // -- WASI's numbers (preview1's witx) ---------------------------------------------
@@ -169,6 +169,13 @@ static uint64_t real_ns(void) {
 static void fill_random(uint8_t *p, size_t n) {
 #ifdef MOY_WASI_BOARD
     moy_seal_random(p, n);
+#elif defined(__EMSCRIPTEN__)
+    for (size_t k; n > 0; p += k, n -= k) {
+        k = n < 256 ? n : 256;          // getentropy's most a call: the page's crypto
+        if (getentropy(p, k) != 0) {
+            break;
+        }
+    }
 #else
     while (n > 0) {
         ssize_t got = getrandom(p, n, 0);
@@ -481,13 +488,18 @@ static uint32_t go(wasm_exec_env_t env, body_fn fn, call_t *c) {
     return c->r;
 }
 
-// `n` bytes of the module's memory at `off`, or NULL.
+// `n` bytes of the module's memory at `off`, or NULL. The page's engine
+// reaches them by copy, written back when the call returns (moy_wasi_web.h).
 static void *mem(call_t *c, uint32_t off, uint64_t n) {
+#ifdef MOY_WASI_WEB
+    return moy_wasi_web_reach(c->inst, off, n);
+#else
     uint64_t lo, hi;
     if (!wasm_runtime_get_app_addr_range(c->inst, off, &lo, &hi) || (uint64_t)off + n > hi) {
         return NULL;
     }
     return wasm_runtime_addr_app_to_native(c->inst, off);
+#endif
 }
 
 static bool put32(call_t *c, uint32_t off, uint32_t v) {

@@ -108,6 +108,13 @@ FEATURES = {
     "site_shell": (lambda: ((DIST_SITE / "micropython.wasm").exists()
                             and b"neofetch" in (DIST_SITE / "micropython.wasm").read_bytes()),
                    "no dist_site/ with the shell in it -- build it with %s --site" % BUILD),
+    # ...and its WASI commands: the worker's command engine, and the
+    # adapter's rows exported from the site's wasm.
+    "site_wasi": (lambda: ((DIST_SITE / "worker.js").exists()
+                           and "moyCommand" in (DIST_SITE / "worker.js").read_text()
+                           and "moy_web_cmd_row" in (DIST_SITE / "micropython.mjs").read_text()),
+                  "dist_site/ predates WASI commands in the browser -- build it with "
+                  "%s --site" % BUILD),
 }
 
 

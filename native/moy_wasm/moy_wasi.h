@@ -46,7 +46,9 @@
 // NOTCAPABLE, whichever preopen it came through.
 //
 // WHERE IT RUNS. A native is called on the thread running the module: a
-// board's session thread (moy_wasm_session.h), the host's job thread. Its
+// board's session thread (moy_wasm_session.h), the host's job thread, the
+// page's one thread in the browser's site build, where the engine is the
+// page's own (MOY_WASI_WEB, native/moy_wasm_web/moy_wasi_web.h). Its
 // body touches the session, so it runs where the session may be touched:
 // through `hop` (a board's moy_wasm_on_vm, the MicroPython task the door's
 // crossing runs on), in place where `hop` is NULL. A clock's wait
@@ -97,7 +99,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef MOY_WASI_WEB
+#include "moy_wasi_web.h"         // the page's engine under WAMR's names (native/moy_wasm_web)
+#else
 #include "wasm_export.h"
+#endif
 #include "moy_app_run.h"
 #include "moy_sh.h"
 

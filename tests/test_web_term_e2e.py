@@ -328,3 +328,127 @@ def test_the_site_s_terminal_runs_the_shell_on_the_browser_s_store(tmp_path):
         assert "back" in "\n".join(_tagged(js, "BACK"))
     finally:
         p.terminate()
+
+
+def _site_with(tmp_path, carts):
+    """dist_site/ as a static site whose bundled shelf also carries `carts`
+    (built cart folders, {folder name: path}), each file as the bundle
+    carries one: text, or a binary file's base64."""
+    site = tmp_path / "site"
+    site.mkdir()
+    for name in os.listdir(web_e2e.DIST_SITE):
+        if name != "carts.json":
+            os.symlink(web_e2e.DIST_SITE / name, site / name)
+    bundle = json.loads((web_e2e.DIST_SITE / "carts.json").read_text())
+    for folder, path in carts.items():
+        for dp, dn, fn in os.walk(path):
+            dn[:] = [d for d in dn if d != "src"]
+            for f in fn:
+                full = os.path.join(dp, f)
+                rel = os.path.relpath(full, path).replace(os.sep, "/")
+                data = open(full, "rb").read()
+                bundle[folder + "/" + rel] = ({"b": base64.b64encode(data).decode()}
+                                              if rel.endswith(".wasm") else data.decode())
+    (site / "carts.json").write_text(json.dumps(bundle))
+    return site
+
+
+def _wasi_carts(tmp_path):
+    """The WASI fixtures (tests/fixtures/wasm), built by wasi-sdk: the probe
+    with no permission (so its first run asks nothing: the browser's run
+    gets no keys), and cat with `files`, in a folder of the built-ins'
+    namespace, which the seed's roster holds and so never asks."""
+    from tools import jet_cart, wasm_cart
+    try:
+        jet_cart.wasi_sdk(fetch=True)
+    except Exception as exc:  # noqa: BLE001
+        if os.environ.get("CI"):
+            pytest.fail("no wasi-sdk: %s" % exc)
+        pytest.skip("no wasi-sdk: %s" % exc)
+    fixtures = ROOT / "tests" / "fixtures" / "wasm"
+    probe = tmp_path / "built" / "wasi_probe.moy"
+    cat = tmp_path / "built" / "wasi_cat.moy"
+    wasm_cart.build(str(fixtures / "wasi_probe.moy"), str(probe))
+    wasm_cart.build(str(fixtures / "wasi_cat.moy"), str(cat))
+    man = json.loads((probe / "manifest.json").read_text())
+    man["moybyte"]["permissions"] = []
+    (probe / "manifest.json").write_text(json.dumps(man))
+    return {"wasi_probe.moy": probe, "moybyte.wasi_cat.moy": cat}
+
+
+def _after(js, tag, line):
+    """The grid's lines under tag `tag` after the typed command `line`'s
+    echo (its prompt's line and the lines it wrapped onto), blank ones and
+    the next prompt dropped."""
+    lines = [re.sub("\x1b\\[[0-9;]*m", "", ln).rstrip() for ln in _tagged(js, tag) or []]
+    want = line.replace(" ", "")
+    for i in range(len(lines) - 1, -1, -1):
+        if "$ " not in lines[i]:
+            continue
+        echo = lines[i].split("$ ", 1)[1].replace(" ", "")
+        j = i + 1
+        while len(echo) < len(want) and j < len(lines):
+            echo += lines[j].replace(" ", "")
+            j += 1
+        if echo == want:
+            return [ln for ln in lines[j:] if ln and not ln.endswith("$")]
+    raise AssertionError("no %r on the grid:\n%s" % (line, "\n".join(lines)))
+
+
+def test_the_site_s_terminal_runs_a_wasi_command_on_the_page_s_engine(tmp_path):
+    """A WASI module (wasi-sdk's, unchanged) typed in the site's Terminal runs
+    on the browser's own WebAssembly engine, its rows the boards' adapter
+    (native/moy_wasm/moy_wasi.c over native/moy_wasm_web/moy_wasi_web.h):
+    args, the session's exported variables, stdout and stderr on the grid,
+    the exit code in $?, a pipe on stdin, the page's clocks and random, and
+    the store's files, which a reload finds again out of OPFS."""
+    web_e2e.require("site_shell", "site_wasi")
+    site = _site_with(tmp_path, _wasi_carts(tmp_path))
+    server, base = web_e2e.serve(site, web_e2e.free_port())
+    lines = []
+
+    def line(tag, text):
+        lines.append(text)
+        return _typed(text) + [{"key": "Enter"}, {"wait": 800}, _lines(tag)]
+
+    try:
+        steps = ([{"note": "the site's shell", "wait": 1500}]
+                 + line("ARGS", 'wasi.probe/probe args one "two words"')
+                 + line("ENV", "export GREETING=hi; wasi.probe/probe env GREETING")
+                 + line("EXIT", "wasi.probe/probe exit 7; echo status $?")
+                 + line("ERR", "wasi.probe/probe nothing; echo status $?")
+                 + line("STDIN", "printf 'a\\nbc\\n' | wasi.probe/probe stdin")
+                 + line("CLOCK", "wasi.probe/probe clock; wasi.probe/probe random")
+                 + line("FILES", "mkdir -p /files/Documents; cd /files/Documents; printf 'hello\\nweb\\n' > n.txt; "
+                                 "wasi.cat/cat n.txt > m.txt; wasi.cat/cat m.txt")
+                 + line("TERM", "wasi.probe/probe term")
+                 + line("TRAP", "wasi.probe/probe trap; echo status $?")
+                 + line("OS", "wasi.probe/probe app | head -n 1")
+                 + _typed("wasi.probe/probe spin") + [{"key": "Enter"}, {"wait": 4500}]
+                 + line("SPIN", "echo status $?")
+                 + [{"wait": 3000}])
+        _out, js = _play(tmp_path, "term_wasi", base, steps, profile="wasi")
+        assert _after(js, "ARGS", lines[0]) == ["0=probe", "1=args", "2=one", "3=two words"], js
+        assert _after(js, "ENV", lines[1]) == ["hi"]
+        assert _after(js, "EXIT", lines[2]) == ["leaving with 7", "status 7"]
+        assert _after(js, "ERR", lines[3]) == ["probe: no verb nothing", "status 64"]
+        assert _after(js, "STDIN", lines[4]) == ["5 bytes 2 lines"]
+        assert _after(js, "CLOCK", lines[5]) == ["since 2000 yes, slept yes", "random yes"]
+        assert _after(js, "FILES", lines[6]) == ["hello", "web"]
+        term = _after(js, "TERM", lines[7])
+        assert len(term) == 1 and re.fullmatch(r"0 \d+ \d+", term[0]), term
+        trap = _after(js, "TRAP", lines[8])
+        assert trap[-1] == "status 134" and "unreachable" in trap[0], trap
+        # moybyte.os is not served in the browser: its rows answer NOSYS
+        assert _after(js, "OS", lines[9]) == ["files.ready -1 errno 52"]
+        # a run past the browser's budget is stopped at its next import, as Ctrl-C stops it
+        spin = [re.sub("\x1b\\[[0-9;]*m", "", ln).strip() for ln in _tagged(js, "SPIN")]
+        assert "[stopped: a command in the browser runs for 3 s at most]" in spin, spin
+        assert _after(js, "SPIN", lines[10]) == ["status 130"]
+        again = (_typed("cat /files/Documents/m.txt") + [{"key": "Enter"}, {"wait": 800},
+                                                          _lines("AGAIN")])
+        _out, js = _play(tmp_path, "term_wasi_again", base,
+                         [{"note": "reloaded", "wait": 1500}] + again, profile="wasi")
+        assert _after(js, "AGAIN", "cat /files/Documents/m.txt") == ["hello", "web"], js
+    finally:
+        server.terminate()

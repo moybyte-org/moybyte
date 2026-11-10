@@ -494,6 +494,115 @@ export function installCartEngine(M) {
     };
 }
 
+// A WASI COMMAND the site's shell runs (native/moy_wasm_web/moy_wasi_web.h):
+// the module compiled and instantiated here, a sibling of the VM as a
+// compiled cart is, its imports the rows the VM's C registers
+// (moy_web_cmd_row), each called with the module's own arguments -- a
+// pointer is an offset in the module's memory. What a row's C reaches of that
+// memory is copied into the VM's (span) and its changed bytes copied back
+// when the row returns; then, where the C says the module unwinds (proc_exit,
+// Ctrl-C, the budget), it is thrown through the module. `_start` runs inside
+// the shell door's crossing, to its end. Every decision is the C's: this only
+// compiles, instantiates, calls and moves bytes.
+class CommandEnd extends Error {}
+
+export function installCommandEngine(M) {
+    let C = null, run = 0, module = null, instance = null, spans = [];
+    const bytes = () => new Uint8Array(instance.exports.memory.buffer);
+    const cstr = (p) => {
+        const h = M.HEAPU8;
+        let e = p;
+        while (h[e]) e++;
+        return new TextDecoder().decode(h.subarray(p, e));
+    };
+    M.moyCommand = {
+        load(code) {
+            try {
+                module = new WebAssembly.Module(code);
+            } catch (e) {
+                return { why: "load: " + String((e && e.message) || e) };
+            }
+            const out = [];
+            for (const i of WebAssembly.Module.imports(module))
+                out.push(["i", i.kind, i.module, i.name].join("\t"));
+            for (const x of WebAssembly.Module.exports(module))
+                out.push(["e", x.kind, x.name].join("\t"));
+            return { listing: out.map((l) => l + "\n").join("") };
+        },
+        instantiate(r, vm) {
+            C = vm;
+            run = r;
+            const imports = {};
+            const at = C.malloc(8);
+            try {
+                for (let i = 0; ; i++) {
+                    const fi = C.row(i, at, at + 4);
+                    if (fi < 0) break;
+                    const h = new Uint32Array(M.HEAPU8.buffer, at, 2);
+                    const mod = cstr(h[0]), name = cstr(h[1]), fn = C.fn(fi);
+                    (imports[mod] = imports[mod] || {})[name] = (...a) => {
+                        const outer = spans;
+                        spans = [];
+                        let r;
+                        try {
+                            r = fn(run, ...a);
+                            for (const [off, p, was] of spans) {
+                                const mem = bytes(), now = M.HEAPU8;
+                                for (let k = 0; k < was.length; k++)
+                                    if (now[p + k] !== was[k]) mem[off + k] = now[p + k];
+                            }
+                        } finally {
+                            for (const s of spans) C.free(s[1]);
+                            spans = outer;
+                        }
+                        if (C.thrown(run)) throw new CommandEnd("exit");
+                        return r;
+                    };
+                }
+            } finally {
+                C.free(at);
+            }
+            try {
+                instance = new WebAssembly.Instance(module, imports);
+            } catch (e) {
+                instance = null;
+                const msg = String((e && e.message) || e);
+                return (e instanceof RangeError ? "out of memory: " : "instantiate: ") + msg;
+            }
+            if (!(instance.exports.memory instanceof WebAssembly.Memory)) {
+                instance = null;
+                return "instantiate: the module exports no memory";
+            }
+            return "";
+        },
+        // `_start` to its end: null, or what it threw. Only an Error is the
+        // module's: anything else is the VM's own unwinding, and is rethrown.
+        run() {
+            try {
+                instance.exports._start();
+                return null;
+            } catch (e) {
+                if (!(e instanceof Error)) throw e;
+                return String(e.message || e);
+            }
+        },
+        span(off, n) {
+            const mem = bytes();
+            if (off + n > mem.length) return 0;
+            const p = C.malloc(n > 0 ? n : 1);
+            if (!p) return 0;
+            const was = mem.slice(off, off + n);
+            M.HEAPU8.set(was, p);
+            spans.push([off, p, was]);
+            return p;
+        },
+        close() {
+            module = instance = null;
+            run = 0;
+        },
+    };
+}
+
 function mkdirs(p) {
     let cur = "";
     for (const part of p.split("/")) {
@@ -1160,6 +1269,7 @@ async function init(search, coarse, channel, scheme, signin) {
     mp = await loadMicroPython({ heapsize: 16 * 1024 * 1024,
         stdout: (l) => console.log("[moy]", l) });
     installCartEngine(mp._module);
+    installCommandEngine(mp._module);
     say("loading console...");
     // FROZEN-first, like the page was: a ship build bakes the console into the wasm
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into

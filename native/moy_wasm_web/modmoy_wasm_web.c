@@ -297,6 +297,208 @@ static mp_obj_t mod_mem(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
 
+// -- a WASI command (native/moy_wasm/moy_wasi.h) ---------------------------------
+//
+// The site's build only (MOY_WASI_WEB, `build.sh --site`): the console that
+// runs the shell. The boards' surface in shape (native/moy_wasm/modmoy_wasm.c):
+// command_start(path, want_sha, interp, allow_unsigned, argv, roots, bg_pid,
+// budget_ms[, run]) -> (0, None) or (-3, why), command_step(max_ms) and
+// command_stop() -> (-100, None) while it goes on, else (the exit status,
+// None) or (-1, the trap). The one adapter (moy_wasi.c) serves its rows, over
+// the page's engine (moy_wasi_web.h): the start compiles, checks and
+// instantiates the module in the shell session the door's crossing runs in;
+// the first step runs `_start` to its end inside that crossing, its rows
+// served in place, since the page has one thread and the line's run already
+// holds it (MOY_SH_RUN_BUDGET_S); so no step ever finds `_start` in flight.
+// One command at a time.
+#if MOY_WASI_WEB
+
+#include "py/nlr.h"
+#include "moy_wasi.h"
+
+#define CMD_ERR 192
+
+typedef struct {
+    moy_wasi_t *w;
+    moy_wasi_web_module_t module;
+    moy_wasi_web_run_t run;
+    bool ran;
+    int status;
+    char err[CMD_ERR];
+} cmd_t;
+
+static cmd_t *g_cmd;
+
+static bool cmd_done(void *job)
+{
+    (void)job;
+    return true;
+}
+
+static void cmd_serve(void *job, int64_t us)
+{
+    (void)job;
+    (void)us;
+}
+
+static void cmd_terminate(void *job)
+{
+    (void)job;
+}
+
+static const moy_wasi_runner_t cmd_runner = { cmd_done, cmd_serve, cmd_terminate };
+
+static mp_obj_t cmd_answer(int status, const char *err)
+{
+    mp_obj_t out[2] = {
+        mp_obj_new_int(status),
+        status < 0 && status != MOY_WASI_RUNNING ? mp_obj_new_str(err, strlen(err))
+                                                 : mp_const_none,
+    };
+    return mp_obj_new_tuple(2, out);
+}
+
+static void cmd_free(cmd_t *c)
+{
+    moy_wasi_web_close(&c->module);
+    moy_wasi_unregister();
+    moy_wasi_free(c->w);
+    free(c);
+}
+
+static mp_obj_t cmd_end(void)
+{
+    cmd_t *c = g_cmd;
+    int code = moy_wasi_status(c->w, c->status);
+    int status = code == MOY_WASI_TRAPPED ? -1 : code < 0 ? -3 : code;
+    char err[CMD_ERR];
+    snprintf(err, sizeof err, "%s", c->err);
+    g_cmd = NULL;
+    cmd_free(c);
+    return cmd_answer(status, err);
+}
+
+static const moy_app_run_t *run_arg(mp_obj_t o)
+{
+    if (o == mp_const_none) {
+        return NULL;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
+    if (b.len != sizeof(moy_app_run_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("not a run"));
+    }
+    return (const moy_app_run_t *)b.buf;
+}
+
+static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
+{
+    const char *path = mp_obj_str_get_str(args[0]);
+    size_t argc;
+    mp_obj_t *items;
+    mp_obj_get_array(args[4], &argc, &items);
+    const char *roots = args[5] == mp_const_none ? NULL : mp_obj_str_get_str(args[5]);
+    uint32_t bg_pid = (uint32_t)mp_obj_get_int(args[6]);
+    uint32_t budget = (uint32_t)mp_obj_get_int(args[7]);
+    const moy_app_run_t *run = n_args > 8 ? run_arg(args[8]) : NULL;
+    moy_sh_t *s = moy_sh_running();
+    if (s == NULL) {
+        return cmd_answer(-3, "no shell session is running");
+    }
+    if (g_cmd != NULL) {
+        return cmd_answer(-3, "a command is running");
+    }
+    uint8_t *file = NULL;
+    uint32_t len = 0;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        read_module(path, &file, &len);
+        nlr_pop();
+    } else {
+        return cmd_answer(-3, "the module file will not read");
+    }
+    cmd_t *c = calloc(1, sizeof *c);
+    const char **argv = calloc(argc ? argc : 1, sizeof *argv);
+    if (c == NULL || argv == NULL) {
+        free(c);
+        free(argv);
+        free(file);
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    for (size_t i = 0; i < argc; i++) {
+        argv[i] = mp_obj_str_get_str(items[i]);
+    }
+    c->status = -3;
+    c->w = moy_wasi_new(s, (int)argc, argv, roots, bg_pid, budget, NULL);
+    free(argv);
+    char why[CMD_ERR];
+    why[0] = 0;
+    int rc = c->w == NULL ? (snprintf(why, sizeof why, "out of memory"), 1) : 0;
+    if (!rc && moy_wasi_register() != 0) {
+        snprintf(why, sizeof why, "out of memory: the WASI table would not register");
+        rc = 1;
+    }
+    if (!rc) {
+        moy_wasi_set_run(c->w, run);
+        rc = moy_wasi_web_load(file, len, &c->module, why, sizeof why);
+    }
+    free(file);
+    if (!rc) {
+        char e[CMD_ERR - 16];
+        if (moy_wasi_check(&c->module, e, sizeof e) != 0) {
+            snprintf(why, sizeof why, "refused: %s", e);
+            rc = 1;
+        }
+    }
+    if (!rc) {
+        c->run.module = &c->module;
+        rc = moy_wasi_web_instantiate(&c->run, why, sizeof why);
+    }
+    if (rc) {
+        if (c->w != NULL) {
+            cmd_free(c);
+        } else {
+            free(c);
+        }
+        return cmd_answer(-3, why);
+    }
+    g_cmd = c;
+    return cmd_answer(0, "");
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_start_obj, 8, 9, mod_command_start);
+
+static mp_obj_t mod_command_step(mp_obj_t max_ms_in)
+{
+    cmd_t *c = g_cmd;
+    if (c == NULL) {
+        return cmd_answer(-3, "no command is running");
+    }
+    if (!c->ran) {
+        c->ran = true;
+        c->status = moy_wasi_main(c->w, &c->run, c->err, sizeof c->err);
+    }
+    uint32_t max_us = (uint32_t)mp_obj_get_int(max_ms_in) * 1000u;
+    if (moy_wasi_step(c->w, &cmd_runner, c, max_us) == MOY_WASI_RUNNING) {
+        return cmd_answer(MOY_WASI_RUNNING, "");
+    }
+    return cmd_end();
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_command_step_obj, mod_command_step);
+
+static mp_obj_t mod_command_stop(void)
+{
+    cmd_t *c = g_cmd;
+    if (c == NULL) {
+        return cmd_answer(-3, "no command is running");
+    }
+    c->ran = true;
+    moy_wasi_stop(c->w, &cmd_runner, c);
+    return cmd_end();
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_command_stop_obj, mod_command_stop);
+
+#endif // MOY_WASI_WEB
+
 static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_wasm) },
     // No compiled-module tier: a cart's main.wasm is what runs, at full speed.
@@ -305,6 +507,11 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     { MP_ROM_QSTR(MP_QSTR_interp_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
+#if MOY_WASI_WEB
+    { MP_ROM_QSTR(MP_QSTR_command_start), MP_ROM_PTR(&mod_command_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_step), MP_ROM_PTR(&mod_command_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_stop), MP_ROM_PTR(&mod_command_stop_obj) },
+#endif
 };
 static MP_DEFINE_CONST_DICT(moy_wasm_globals, moy_wasm_globals_table);
 
