@@ -231,6 +231,16 @@ def rest_holders(board):
     return ["ssh"] if serving is True else []
 
 
+def station_up(board):
+    """Whether the kernel's WiFi driver has the station started
+    (`moy_net.wifi_status()`): the radio itself, which the console's view
+    (`state`'s `wifi`) stops seeing once the last hold lets it go. None on an
+    image with no kernel driver."""
+    got = board.pyval("getattr(__import__('moy_net'), 'wifi_status', lambda: None)()",
+                      strict=True)
+    return None if got is None else bool(got[1])
+
+
 def wifi_is_off_at_rest(board):
     """The radio is a LEASE (2026-09-07): a console that is not serving the
     web, updating, in the WIFI panel, running a network cart or in a match
@@ -245,6 +255,7 @@ def wifi_is_off_at_rest(board):
         st["wifi_held"],)
     if not rest:
         assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
+        assert station_up(board) is not True, "the station is up with nothing holding it"
 
 
 def the_bar_wifi_widget_opens_the_wifi_panel(board):
@@ -282,6 +293,8 @@ def the_bar_wifi_widget_opens_the_wifi_panel(board):
         board.pyexec("ws.sysmenu.close()\nws.popover_touch()", strict=True)
         board.drain(1.0)
     assert board.state().get("wifi_held") == rest, "the radio outlived the panel"
+    if not rest:
+        assert station_up(board) is not True, "the station outlived the panel"
     _home_desk(board)
 
 
@@ -1353,6 +1366,8 @@ def pkg_installs_a_cart_from_the_carts_repo(board, ident="teapot"):
     st, out = _sh(board, "pkg list", timeout=60)
     assert any(l.split()[:3][::2] == [ident, "installed"] for l in out), out
     assert _sh(board, "pkg remove %s" % ident, timeout=60) == (0, [ident + " removed"])
+    if not rest_holders(board):
+        assert station_up(board) is not True, "the station outlived pkg's holds"
 
 
 def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
@@ -3595,6 +3610,8 @@ def wasm_low_water_with_radios_up(board, paths):
             # The radio holds about 45 KB of internal RAM while it is up, and
             # left up it cost the next TLS download its memory (2026-10-02).
             board.pyval("%s.stop()" % _ble(board), timeout=30)
+    if not rest_holders(board):
+        assert station_up(board) is not True, "the station outlived the dev hold"
     assert r["ok"], r["error"]
     cost = r["sram_before"] - r["sram_min"]
     print("\nWASM with WiFi+BLE up: internal before %d, low-water %d (run cost "
