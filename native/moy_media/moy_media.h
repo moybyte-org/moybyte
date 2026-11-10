@@ -26,7 +26,7 @@
 // `media` permission, `media:url` for a URL) sends it, last command wins.
 // take() names the client whose command sets what plays (its pid, its name
 // and its own label for it), and answers the client it took over from while
-// that one's list still played, which the face tells the user of.
+// that one's list still played, which tell() tells the user of.
 //
 // A FILE the console keeps is the service's to read: a job of the console's
 // frame (moy_loop.h's moy_loop_job, the VM's task on a board, the frame's
@@ -63,7 +63,13 @@
 //
 // WHO RUNS WHAT. The VM's thread opens, closes, commands and feeds; the
 // frame's job reads a file on that same thread, so a store op never runs on
-// the service's PSRAM stack. On a board a task on core 0 below the flush
+// the service's PSRAM stack. A compiled program's media handle (moy_media_dev.c,
+// native/moy_kernel/moy_dev.h's media row) opens, plays, probes and commands
+// on the program's own task, the VM up or stopped, holding the lease table's
+// lock (moy_lease_lock) for the whole call: open() takes that lock too, and
+// the run's end unlinks it under it, judging it over once more there, so no
+// run is freed under a client's command and none a command moved on is
+// ended. On a board a task on core 0 below the flush
 // priority (MOY_MEDIA_PRIO) reads the connection and decodes; it never runs a
 // flash operation, so its stack is PSRAM. The host and the browser have no
 // task: the frame's job runs moy_media_run(), one pass of its loop. The mix's
@@ -71,10 +77,11 @@
 // has one writer (the task) and one reader (the pull); the stream buffer one
 // writer (the task for a URL, the frame's job for a file, the face's feed for
 // the page's bytes) and one reader (the task). Commands and texts change
-// under the service's mutex. A TEARDOWN (close, the lease's end) and the
-// frame's job take turns at the life gate, so a teardown on a task other
-// than the job's frees nothing the job reads; the job, finding no service or
-// ending it, answers false and the loop drops it on its own task.
+// under the service's mutex. A TEARDOWN (close) and the frame's job take
+// turns at the life gate, so a teardown on a task other than the job's frees
+// nothing the job reads; the lease's end only stops the run, for the job to
+// end; the job, finding no service or ending it, answers false and the loop
+// drops it on its own task.
 //
 // A STREAM'S LIFE. go(i) makes entry i current: the task drops what it held,
 // and opens it. A URL whose response is a playlist (by its type or its path)
@@ -204,7 +211,8 @@ uint32_t moy_media_share(void);
 int moy_media_present(void);
 
 // A run started, decoding to `rate` Hz and `channels` (1 or 2), the host's: a
-// board's are its output's. 0 (a run already going is 0 and changes
+// board's are its output's, and a rate of 0 is the last run's elsewhere
+// (22050 Hz mono before any). 0 (a run already going is 0 and changes
 // nothing), -EBUSY when the MEDIA lease is another's, -ENOSPC when the MEDIA
 // row is absent or full, -ENODEV, -ENOMEM.
 int moy_media_open(int rate, int channels);
@@ -213,8 +221,8 @@ int moy_media_open(int rate, int channels);
 int moy_media_close(void);
 // The run's pid (the MEDIA lease's holder), 0 while none runs.
 uint32_t moy_media_pid(void);
-// Its lease dropped from outside (moy_lease.h's DEVICES): the run stops and
-// ends, now or once its task lets go.
+// Its lease dropped from outside (moy_lease.h's DEVICES): the run stops, and
+// the frame's job ends it once its task lets go.
 void moy_media_lease_end(uint32_t owner);
 
 // How the last run ended: `runs` counts the ends since boot, `state` ENDED or
@@ -234,12 +242,25 @@ void moy_media_last(moy_media_end_t *out);
 // (none, the same client, or no run).
 uint32_t moy_media_take(uint32_t client, const char *who, const char *label);
 
+// Process `was`, which take() answered, told why its music changed: a
+// notification as the system (moy_notes_system) naming take()'s client and
+// what it now plays (its label's last tab-separated field, else the current
+// source's file name). 1 when posted, 0 for none to tell.
+int moy_media_tell(uint32_t was);
+
 // `src` played from its start, replacing the list: a URL, a playlist file (by
 // its path: its entries, relative ones beside it) or a song. `held`: the
 // page holds the song though the VFS does not (the browser), so a missing
 // file is the face's to feed. The entries, or -ENOENT for a file that is not
 // there, -EINVAL for a playlist with none, -EIO.
 int moy_media_play(const char *src, int held);
+// Whether the file at `path` is there to play: 0, or a positive errno
+// (EINVAL for a folder), read through the store's volume seam.
+int moy_media_stat(const char *path);
+// Whether an https:// URL plays here: its server's certificate verifies
+// (native/moy_net's client, moy_fetch_tls), or the page's fetch does (the
+// browser).
+int moy_media_tls(void);
 // The page holds songs the VFS does not: an entry that will not open is the
 // face's to feed rather than failed (the browser's face sets it at open).
 int moy_media_page(int on);
@@ -277,11 +298,17 @@ int moy_media_feed_size(uint32_t gen, uint32_t size);
 int moy_media_feed_icy(uint32_t gen, uint32_t metaint, const char *station);
 
 int moy_media_status(moy_media_status_t *st);
+// One small int over what a player shows -- the state, pause, entry, volume,
+// error, the texts' generation and the place and length in whole seconds --
+// that moves when any of them does: a poll that finds it still reads nothing
+// else. -1 with no run.
+int32_t moy_media_stamp(void);
 enum {
     MOY_MEDIA_T_SRC = 0, MOY_MEDIA_T_TITLE, MOY_MEDIA_T_STATION, MOY_MEDIA_T_ENTRY,
     MOY_MEDIA_T_SONG, MOY_MEDIA_T_ARTIST, MOY_MEDIA_T_WHO, MOY_MEDIA_T_LABEL,
 };
-// A text into `out` (UTF-8, NUL-ended): the current entry's source, the
+// A text into `out` (UTF-8, NUL-ended): the current entry's source (the
+// entry a go() made current, before the task has begun it too), the
 // stream's now-playing title (ICY StreamTitle), its station (icy-name), the
 // entry's own title (a playlist's), or its file's tag's title and artist
 // (ID3v2 TIT2 and TPE1), or take()'s client's name and label. Its length.

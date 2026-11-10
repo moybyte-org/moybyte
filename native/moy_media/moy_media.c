@@ -4,12 +4,14 @@
 #include "moy_lease.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "minimp3.h"
 #include "moy_input.h"
 #include "moy_log.h"
+#include "moy_notes.h"
 #include "moy_play.h"
 #include "moy_vol.h"
 
@@ -17,6 +19,9 @@
 // harness without the loop: open() then refuses (-ENODEV).
 bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
 void moy_loop_job_drop(bool (*fn)(void *), void *arg) __attribute__((weak));
+// The kernel's notification queue (moy_notes.h); weak, for an image without it.
+int32_t moy_notes_system(const char *summary, size_t sn, const char *body, size_t bn)
+    __attribute__((weak));
 
 #if defined(__has_include)
 // ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
@@ -176,6 +181,8 @@ typedef struct {
     TaskHandle_t task;
     StaticTask_t *tcb;                  // internal, as a TCB must be
     StackType_t *stack;                 // PSRAM, MOY_MEDIA_STACK
+#elif !defined(__EMSCRIPTEN__)
+    pthread_mutex_t mtx;                // a client's task beside the frame's job
 #endif
 } media_t;
 
@@ -189,13 +196,17 @@ static moy_input_t *s_keys_t;           // the table the media keys come on; NUL
 #define LOCK(m) xSemaphoreTake((m)->mtx, portMAX_DELAY)
 #define UNLOCK(m) xSemaphoreGive((m)->mtx)
 #define WAKE(m) xTaskNotifyGive((m)->task)
+#elif !defined(__EMSCRIPTEN__)
+#define LOCK(m) pthread_mutex_lock(&(m)->mtx)
+#define UNLOCK(m) pthread_mutex_unlock(&(m)->mtx)
+#define WAKE(m) ((void)(m))
 #else
 #define LOCK(m) ((void)(m))
 #define UNLOCK(m) ((void)(m))
 #define WAKE(m) ((void)(m))
 #endif
 
-// The service's life: a teardown (close, the lease's end, the VM's end) and
+// The service's life: a teardown (close) and
 // the frame's job run one at a time, so a teardown on any task frees nothing
 // the job reads. The gate is made by the first open and never freed: with no
 // gate there has been no service.
@@ -927,6 +938,31 @@ static int vol_read_at(const char *path, uint32_t at, uint8_t *buf, size_t cap, 
     return rc != 0 ? rc : rc2;
 }
 
+int moy_media_stat(const char *path) {
+    moy_vol_t v;
+    const char *r;
+    moy_vol_stat_t st;
+    int g = moy_vol_gate_enter(path);
+    int e = moy_vol_at(path, &v, &r);
+    if (e == 0) {
+        e = moy_vol_stat(&v, r, &st);
+    }
+    moy_vol_gate_leave(g);
+    return e == 0 && st.is_dir ? MOY_MEDIA_EINVAL : e;
+}
+
+#if MOY_MEDIA_CLIENT
+int moy_fetch_tls(void) __attribute__((weak));
+#endif
+
+int moy_media_tls(void) {
+#if MOY_MEDIA_CLIENT
+    return moy_fetch_tls != NULL && moy_fetch_tls();
+#else
+    return 1;                           // the page's fetch verifies its own
+#endif
+}
+
 int moy_media_play(const char *src, int held) {
     media_t *m = s_m;
     if (m == NULL) {
@@ -961,18 +997,7 @@ int moy_media_play(const char *src, int held) {
         }
         moy_store_free(buf, MOY_MEDIA_LIST_FILE);
     } else {
-        moy_vol_t v;
-        const char *r;
-        moy_vol_stat_t st;
-        int g = moy_vol_gate_enter(src);
-        int e = moy_vol_at(src, &v, &r);
-        if (e == 0) {
-            e = moy_vol_stat(&v, r, &st);
-        }
-        moy_vol_gate_leave(g);
-        if (e == 0 && st.is_dir) {
-            e = MOY_MEDIA_EINVAL;
-        }
+        int e = moy_media_stat(src);
         if (e != 0 && !held) {
             return -e;
         }
@@ -1235,6 +1260,59 @@ int moy_media_status(moy_media_status_t *st) {
     return 1;
 }
 
+int32_t moy_media_stamp(void) {
+    moy_media_status_t s;
+    if (!moy_media_status(&s)) {
+        return -1;
+    }
+    uint32_t h = (uint32_t)s.state * 2u + (s.paused ? 1u : 0u);
+    h = h * 31u + (uint32_t)s.entry;
+    h = h * 31u + (uint32_t)s.volume;
+    h = h * 31u + (uint32_t)s.err;
+    h = h * 31u + s.text_gen;
+    h = h * 31u + s.at_ms / 1000u;
+    h = h * 31u + s.len_ms / 1000u;
+    return (int32_t)(h & 0x3fffffffu);
+}
+
+// A process's name for the person: the OS log's, else its pid.
+static const char *who_of(uint32_t pid, char *buf, size_t cap) {
+    const char *n = moy_log_name(pid);
+    if (n != NULL && *n != 0) {
+        return n;
+    }
+    snprintf(buf, cap, "pid %u", (unsigned)pid);
+    return buf;
+}
+
+int moy_media_tell(uint32_t was) {
+    media_t *m = s_m;
+    uint32_t client = m != NULL ? m->client : 0u;
+    if (was == 0u || client == 0u || was == client) {
+        return 0;
+    }
+    char label[MOY_MEDIA_TEXT_MAX], src[MOY_MEDIA_SRC_MAX], a[16], b[16];
+    char summary[MOY_NOTES_SUMMARY + 1u], body[MOY_NOTES_BODY + 1u];
+    moy_media_text(MOY_MEDIA_T_LABEL, label, sizeof label);
+    const char *tab = strrchr(label, '\t');
+    const char *name = tab != NULL ? tab + 1 : label;
+    if (*name == 0) {
+        moy_media_text(MOY_MEDIA_T_SRC, src, sizeof src);
+        const char *slash = strrchr(src, '/');
+        name = slash != NULL ? slash + 1 : src;
+    }
+    int sn = snprintf(summary, sizeof summary, "%s took over the music",
+                      who_of(client, a, sizeof a));
+    int bn = snprintf(body, sizeof body, "%s now plays in place of what %s played.", name,
+                      who_of(was, b, sizeof b));
+    if (sn < 0 || bn < 0 || moy_notes_system == NULL) {
+        return 0;
+    }
+    moy_notes_system(summary, (size_t)sn < sizeof summary ? (size_t)sn : sizeof summary - 1u,
+                     body, (size_t)bn < sizeof body ? (size_t)bn : sizeof body - 1u);
+    return 1;
+}
+
 static int copy_text(const char *s, char *out, size_t cap) {
     size_t n = strlen(s);
     if (cap == 0) {
@@ -1258,7 +1336,7 @@ int moy_media_text(int which, char *out, size_t cap) {
     }
     int n = 0;
     LOCK(m);
-    int i = m->cur;
+    int i = m->gen != m->seen ? m->entry : m->cur;     // a go() the task has not begun
     if (which == MOY_MEDIA_T_TITLE) {
         n = copy_text(m->title, out, cap);
     } else if (which == MOY_MEDIA_T_STATION) {
@@ -2094,22 +2172,26 @@ static void task(void *arg) {
 
 static int media_open(uint32_t pid, int rate, int channels);
 
+// A board's rate and channels are its output's; elsewhere a run opened at 0
+// takes the last run's (the host's mix's, which its face opens with).
+static int s_rate = 22050, s_channels = 1;
+
 int moy_media_open(int rate, int channels) {
-    if (s_m != NULL) {
-        return 0;
+    moy_lease_lock();                   // a client on another task opens with it held
+    int rc = 0;
+    if (s_m == NULL) {
+        uint32_t pid = moy_log_spawn("media");
+        int lr = moy_lease_hold(pid, MOY_LEASE_MEDIA);
+        if (lr != MOY_LEASE_OK) {
+            rc = lr == MOY_LEASE_BUSY ? -MOY_MEDIA_EBUSY : -MOY_MEDIA_ENOMEM;
+        } else if ((rc = media_open(pid, rate, channels)) != 0) {
+            moy_lease_let(pid, MOY_LEASE_MEDIA);
+        } else {
+            moy_log_say(MOY_LOG_INFO, pid, "start");
+        }
     }
-    uint32_t pid = moy_log_spawn("media");
-    int lr = moy_lease_hold(pid, MOY_LEASE_MEDIA);
-    if (lr != MOY_LEASE_OK) {
-        return lr == MOY_LEASE_BUSY ? -MOY_MEDIA_EBUSY : -MOY_MEDIA_ENOMEM;
-    }
-    int rc = media_open(pid, rate, channels);
-    if (rc != 0) {
-        moy_lease_let(pid, MOY_LEASE_MEDIA);
-        return rc;
-    }
-    moy_log_say(MOY_LOG_INFO, pid, "start");
-    return 0;
+    moy_lease_unlock();
+    return rc;
 }
 
 static int media_open(uint32_t pid, int rate, int channels) {
@@ -2117,6 +2199,11 @@ static int media_open(uint32_t pid, int rate, int channels) {
     moy_aud_out_start();
     rate = moy_aud_out_rate();
     channels = moy_aud_out_channels();
+#else
+    if (rate == 0) {
+        rate = s_rate;
+        channels = s_channels;
+    }
 #endif
     if (!moy_media_present()) {
         return -MOY_MEDIA_ENODEV;
@@ -2124,6 +2211,8 @@ static int media_open(uint32_t pid, int rate, int channels) {
     if (rate < 8000 || rate > 96000 || channels < 1 || channels > 2) {
         return -MOY_MEDIA_EINVAL;
     }
+    s_rate = rate;
+    s_channels = channels;
     uint32_t share = share_of(channels);
     if (moy_share_take(MOY_SHARE_MEDIA, share) != MOY_PLAY_OK) {
         return -MOY_MEDIA_ENOSPC;
@@ -2171,6 +2260,8 @@ static int media_open(uint32_t pid, int rate, int channels) {
         moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
     }
+#elif !defined(__EMSCRIPTEN__)
+    pthread_mutex_init(&m->mtx, NULL);
 #endif
 #if MOY_MEDIA_MIX
     moy_aud_lock();
@@ -2200,23 +2291,36 @@ static void task_end(media_t *m) {
 }
 #endif
 
-// Everything the run held given back: the task, the pull, the buffers, the
+// The run unlinked, when it is still idle: no command reaches it after. Under
+// the lease table's lock, which a client on another task holds for its whole
+// call (moy_dev.h's handles), so a go() it made since the run was judged
+// done keeps the run: false.
+static bool unlink_run(media_t *m) {
+    moy_lease_lock();
+    bool idle = m->idle;
+    if (idle) {
+#if MOY_MEDIA_MIX
+        moy_aud_bg(NULL);
+        moy_aud_lock();
+        s_m = NULL;
+        moy_aud_unlock();
+#else
+        s_m = NULL;
+#endif
+    }
+    moy_lease_unlock();
+    return idle;
+}
+
+// Everything the unlinked run held given back: the task, the buffers, the
 // MEDIA row, the lease and the radio's "media" row. The station itself is
 // powered down by the console at its next release (moy_lease.h, THE RADIO).
 static void reap(media_t *m) {
 #ifdef MEDIA_BOARD
     task_end(m);                        // idle: it waits on its notification and holds nothing
-#endif
-#if MOY_MEDIA_MIX
-    moy_aud_bg(NULL);
-    moy_aud_lock();
-    s_m = NULL;
-    moy_aud_unlock();
-#else
-    s_m = NULL;
-#endif
-#ifdef MEDIA_BOARD
     vSemaphoreDelete(m->mtx);
+#elif !defined(__EMSCRIPTEN__)
+    pthread_mutex_destroy(&m->mtx);
 #endif
     uint32_t share = m->share, pid = m->pid;
     s_end.runs++;
@@ -2243,7 +2347,7 @@ static int close_gated(void) {
     if (!m->stop) {
         moy_media_stop();
     }
-    if (!m->idle) {
+    if (!m->idle || !unlink_run(m)) {
         return -MOY_MEDIA_EAGAIN;
     }
     reap(m);
@@ -2257,15 +2361,31 @@ int moy_media_close(void) {
     return rc;
 }
 
-// The lease's row dropped from outside (moy_lease_drop): the run stops, and
-// ends now or at the frame's job once the task has let go.
+// The lease's row dropped from outside (moy_lease_drop, which holds the lease
+// table's lock throughout): the run stops, and the frame's job ends it once
+// its task lets go. The life gate is not taken here: the job takes it before
+// the lease table's lock, so taking them the other way round could deadlock;
+// the lease table's lock alone keeps the run linked (unlink_run).
 void moy_media_lease_end(uint32_t owner) {
-    LIFE_LOCK();
+    moy_lease_lock();
     media_t *m = s_m;
-    if (m != NULL && m->pid == owner) {
-        close_gated();
+    if (m != NULL && m->pid == owner && !m->stop) {
+        moy_media_stop();
     }
-    LIFE_UNLOCK();
+    moy_lease_unlock();
+}
+
+// Whether the list is over: the task caught up with the last command and
+// found ENDED, FAILED or nothing to play; its state and error into *st, *err.
+static bool over(media_t *m, int *st, int *err) {
+    LOCK(m);
+    *st = m->state;
+    *err = m->err;
+    bool o = m->gen == m->seen
+             && (*st == MOY_MEDIA_ENDED || *st == MOY_MEDIA_FAILED
+                 || (*st == MOY_MEDIA_IDLE && m->cur < 0));
+    UNLOCK(m);
+    return o;
 }
 
 // The run's end, the frame's job's (under the life gate): a stop the task has
@@ -2275,14 +2395,8 @@ void moy_media_lease_end(uint32_t owner) {
 // output pulling). True when it ended and gave everything back.
 static bool end_check(media_t *m) {
     if (!m->stop) {
-        LOCK(m);
-        int st = m->state;
-        int over = m->gen == m->seen
-                   && (st == MOY_MEDIA_ENDED || st == MOY_MEDIA_FAILED
-                       || (st == MOY_MEDIA_IDLE && m->cur < 0));
-        int err = m->err;
-        UNLOCK(m);
-        if (!over) {
+        int st, err;
+        if (!over(m, &st, &err)) {
             m->ending = 0;
             return false;
         }
@@ -2298,14 +2412,25 @@ static bool end_check(media_t *m) {
         if (!drained) {
             return false;
         }
-        moy_media_stop();
+        // Judged again with a client's command shut out (unlink_run's lock):
+        // one made since moved it on.
+        moy_lease_lock();
+        bool still = over(m, &st, &err);
+        if (still) {
+            moy_media_stop();
+        }
+        moy_lease_unlock();
+        if (!still) {
+            m->ending = 0;
+            return false;
+        }
     }
 #ifndef MEDIA_BOARD
     if (!m->idle) {
         moy_media_run();
     }
 #endif
-    if (!m->idle) {
+    if (!m->idle || !unlink_run(m)) {
         return false;
     }
     reap(m);

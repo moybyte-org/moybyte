@@ -26,7 +26,8 @@ _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 
-PART = native_build.Part("media", ("moy_media.h", "moy_media.c", "moy_mp3.c", "minimp3.h"),
+PART = native_build.Part("media", ("moy_media.h", "moy_media.c", "moy_mp3.c", "minimp3.h",
+                                   "moy_media_dev.c"),
                          (_MEDIA, _NET, _PLAY, _KERNEL, _STORE, _INPUT))
 
 IDLE, OPENING, PLAYING, ENDED, FAILED = range(5)
@@ -85,6 +86,8 @@ _SIGS = (
     ("moy_media_feed_size", [_U32, _U32], _I),
     ("moy_media_feed_icy", [_U32, _U32, ctypes.c_char_p], _I),
     ("moy_media_status", [ctypes.POINTER(_St)], _I),
+    ("moy_media_stamp", [], ctypes.c_int32),
+    ("moy_media_tell", [_U32], _I),
     ("moy_media_text", [_I, ctypes.c_char_p, _SZ], _I),
     ("moy_media_entry", [_I, ctypes.c_char_p, _SZ, ctypes.c_char_p, _SZ], _I),
     ("moy_media_run", [], _I),
@@ -235,15 +238,12 @@ def status():
 
 
 def stamp():
-    st = status()
-    if st is None:
-        return None
-    s = dict(zip(FIELDS, st))
-    h = s["state"] * 2 + (1 if s["paused"] else 0)
-    for v in (s["entry"], s["volume"], s["err"], s["text_gen"],
-              s["at_ms"] // 1000, s["len_ms"] // 1000):
-        h = (h * 31 + v) & 0xffffffff
-    return h & 0x3fffffff
+    h = _lib().moy_media_stamp()
+    return None if h < 0 else h
+
+
+def tell(was):
+    return bool(_lib().moy_media_tell(was))
 
 
 def text(which):

@@ -139,10 +139,11 @@ whose driver has a C face safe on any task are the kernel's handle table's
 (`native/moy_kernel/moy_dev.h`: every lease, `gpio<n>`, `pins`, `uart<n>`,
 `spi<n>`, `i2c`, `pwm<n>` and `adc<n>`, over ESP-IDF's drivers in
 `native/moy_kernel/moy_devbus.h`, and the device APIs `lora`, `mic`, `midi`,
-`http`, `usb` and `ble`, over their drivers' verbs in
+`http`, `usb`, `ble` and `media`, over their drivers' verbs in
 `native/moy_net/moy_lora_dev.c`, `native/moy_audio/moy_mic_dev.c`,
 `native/moy_input/moy_midi_dev.c`, `native/moy_net/moy_fetch_dev.c`,
-`native/p4/moy_usb/moy_usb_dev.c` and `native/moy_input/moy_gatt_dev.c`, an
+`native/p4/moy_usb/moy_usb_dev.c`, `native/moy_input/moy_gatt_dev.c` and
+`native/moy_media/moy_media_dev.c`, an
 `http` handle holding the radio's book
 under its process's pid), served on the calling
 program's own task under its grant's device permissions, so they answer with
@@ -219,8 +220,9 @@ face's verbs and its events as records, a `usb` handle the USB host's
 devices, their reports and serial lines, as records, a `midi` handle one
 port's messages, a `camera` handle its latest frame, a `media`
 handle the media service's stream (§3, §4), playing a file only from its
-cart's folder and the one its `files` permission names: any other is DENIED,
-there or not (`runtime/system/dev_handles.py`).
+cart's folder and the one its `files:<folder>` permission names: any other is
+DENIED, there or not (`native/moy_media/moy_media_dev.c`; the cart's folder
+is its run grant's, `moy_app_grant_folder`).
 
 - **`http`** (`native/moy_net/moy_fetch.h`): a GET a worker task serves
   through the kernel's client (`moy_ota.h`'s worker slot, which the VM's
@@ -467,10 +469,16 @@ Python runs while a file plays. The shell's `media play SRC` names a file
 by the session's folder: the C shell makes it the store's path
 (`moy_sh_resolve`) before it crosses the door, a URL crossing as it is. The
 host has no task; the same job runs one
-pass of its loop. The job and a teardown (close, the lease's end) take turns
+pass of its loop. The job and a teardown (close) take turns
 at the service's life gate, so a teardown from any task
-frees nothing the job is reading, and the job, finding no service, is dropped
-by the loop on its own task. Decode cost is the stream's (internet radio is 44.1 kHz
+frees nothing the job is reading; the lease's end only stops the run, which
+the job then ends; and the job, finding no service, is dropped
+by the loop on its own task. A compiled program's `media` handle
+(`moy_media_dev.c`) opens, plays, probes and commands on the program's own
+task, the VM up or stopped, under the lease table's lock, which the open
+and the run's end take too: no run is freed under its command, and none its
+command moved on is ended. The console's frame finds a run a handle started
+(`dev_media.frame`, one read) and follows it as it follows its own. Decode cost is the stream's (internet radio is 44.1 kHz
 stereo), not the output's. On the T-Deck that cost reaches a heavy cart on
 core 1 through the cache and the memory bus the cores share, and the decode
 itself is the cost: its state in internal SRAM bought back a fifth of it for
@@ -509,7 +517,9 @@ send commands -- play a list, go, pause, skip, seek, volume, stop -- and read
 the state. A `play` replaces what plays whoever played it, and names its
 client (`moy_media_take`: its pid, its name and its label for what it plays);
 a `play` that takes over a list another process's play started, still
-playing, posts a notification, so the person learns why the music changed.
+playing, posts a notification as the system (`moy_media_tell`, through the
+kernel's notification queue, `moy_notes_system`), so the person learns why
+the music changed.
 The other commands act on what plays from any client. A client's media keys
 and its own commands are the same commands: no client holds the stream
 against another, because the stream is the person's, and the person is the
@@ -623,8 +633,9 @@ Leases (Python gets them as `machine` objects, §1:
 subset every tier may hold), and on the compiled tiers leases and the
 `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices, the
 `pins` and the radio link's ports (`net`) by handle (`native/moy_kernel/moy_dev.h`
-for the leases, `pins`, `lora`, `mic`, `midi`, `http`, `usb` and `ble`, `runtime/system/dev_handles.py` for the
-other devices and `net`;
+for the leases, `pins`, `lora`, `mic`, `midi`, `http`, `usb`, `ble` and `media`,
+on the program's own task, the VM up or stopped; `runtime/system/dev_handles.py`
+for `camera` and `net`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
 ```

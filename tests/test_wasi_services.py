@@ -563,13 +563,13 @@ def test_a_wasi_service_plays_a_file_by_a_media_handle_until_it_ends(svc, perms)
     if perms:
         assert got == ["media_open 1 errno 0", "media_probe 2:Tone errno 0",
                        "media_play 1 errno 0", "media_mine 1 errno 0",
-                       "media_src same errno 0"], got
+                       "media_src same errno 0", "media_volume 40 errno 0"], got
         run = N.pid()
         assert run not in (0, pid) and dev_media.now()["client"] == pid
     else:
         assert got == ["media_open -1 errno 2", "media_probe -1: errno 44",
                        "media_play -1 errno 44", "media_mine -1 errno 44",
-                       "media_src other errno 44"], got
+                       "media_src other errno 44", "media_volume -1 errno 44"], got
     assert s.stop(pid)
     if perms:
         assert N.pid() == run, "the service's end leaves the stream playing"
@@ -584,6 +584,61 @@ def test_a_wasi_service_plays_a_file_by_a_media_handle_until_it_ends(svc, perms)
             break
         N.pump()
     assert N.pid() == 0
+
+
+def _shell_stops_media():
+    from runtime import dev_media
+    from runtime import moy_media as N
+    was = L.current()
+    L.current(1)
+    try:
+        dev_media.stop()
+    finally:
+        L.current(was)
+    for _ in range(50):
+        if not N.pid():
+            break
+        N.pump()
+    assert N.pid() == 0
+
+
+def test_a_wasi_service_plays_media_and_sets_its_volume_through_a_vm_stop(svc):
+    """The media handle is the kernel's (native/moy_media/moy_media_dev.c),
+    served on the service's own task: with the VM stopped (the kernel's
+    leases' VM end), a service plays a file of its own folder and sets the
+    stream's volume, and no Python handle is made. The console's frame then
+    finds the run it started and follows it (dev_media.frame)."""
+    from runtime import audio_binding, dev_handles, dev_media
+    from runtime import moy_lease as K
+    from runtime import moy_media as N
+    if audio_binding.get() is None or not dev_media.present():
+        pytest.skip("no media service on this host")
+    ws, s, cart, peer = svc
+    tone = os.path.join(cart["path"], "tone_1k.mp3")
+    shutil.copy(os.path.join(ROOT, "tests", "fixtures", "media", "tone_1k.mp3"), tone)
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, ("media",)), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.hears(pid, "wake"))
+    K.vm_stop()
+    assert moy_evq.send(peer, "wasi.svc", "wake",
+                        json.dumps(["media", tone], separators=(",", ":")))[0] == 1
+    t0 = time.monotonic()
+    while not any(t.startswith("media_volume ") for t in _texts(since, pid)):
+        assert time.monotonic() - t0 < 5, _texts(since, pid)
+        time.sleep(0.01)                     # no scheduler poll: the VM is down
+    got = [t for t in _texts(since, pid) if t.startswith("media_")]
+    assert got == ["media_open 1 errno 0", "media_probe 2:Tone errno 0",
+                   "media_play 1 errno 0", "media_mine 1 errno 0",
+                   "media_src same errno 0", "media_volume 40 errno 0"], got
+    run = N.pid()
+    assert run not in (0, pid) and N.status()[N.FIELDS.index("volume")] == 40
+    assert pid not in dev_handles.HANDLES
+    dev_media.frame()                        # the console's next frame
+    assert dev_media.running() == run and dev_media.now()["client"] == pid
+    assert s.stop(pid)
+    assert N.pid() == run, "the service's end leaves the stream playing"
+    _shell_stops_media()
 
 
 def test_a_wasi_service_s_status_item_hears_its_panel_until_it_ends(svc):

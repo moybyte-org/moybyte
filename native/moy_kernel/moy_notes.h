@@ -12,7 +12,9 @@
 // names one notification whoever posted it. It is DENIED unless the
 // poster's event queue was opened MOY_EVQ_NOTIFY (its `notifications`
 // permission), STALE with no queue. MOY_NOTES_WAITING wait at most: past
-// that the oldest goes, as the console's list lets its oldest go.
+// that the oldest goes, as the console's list lets its oldest go. The system
+// posts too (moy_notes_system: the media service's takeover notice), as the
+// shell, under no queue.
 //
 // BADGES. award(id) and progress(id, value) are messages to the
 // achievements process ("award" [id], "progress" [id, value]), COALESCED
@@ -46,6 +48,7 @@
 #define MOY_NOTES_ID 32u            // a badge's id, its NUL apart
 #define MOY_NOTES_EVERY_MS 250u     // a badge's sends, one in this at most
 #define MOY_NOTES_TO "moybyte.achievements"
+#define MOY_NOTES_SYSTEM 1u         // the system's posts' pid, the shell's
 
 typedef struct {
     uint32_t id;
@@ -61,6 +64,8 @@ uint32_t moy_notes_id(void);
 // (DENIED, STALE). A newline in either text reads as a space.
 int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char *body,
                        size_t bn);
+// The system's notification queued, as the shell: its id, or -MOY_EVQ_FULL.
+int32_t moy_notes_system(const char *summary, size_t sn, const char *body, size_t bn);
 // How many wait, and the oldest taken into `out`: whether there was one.
 uint32_t moy_notes_waiting(void);
 bool moy_notes_take(moy_notes_note_t *out);

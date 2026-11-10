@@ -32,6 +32,7 @@
 #ifndef MOY_APP_H
 #define MOY_APP_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -72,6 +73,7 @@ enum {
 #define MOY_APP_DOC_MAX 255u    // a picture's kind's and name's bytes
 #define MOY_APP_ARTWORK_NS "paint"  // the namespace Paint's open picture is kept in
 #define MOY_APP_ROOT_MAX 191u   // the carts folder's path, in bytes
+#define MOY_APP_FOLDER_MAX 255u // a run's cart folder's path, in bytes
 
 enum { MOY_GRANT_SHIPPED = 0, MOY_GRANT_RUN = 1 };
 enum { MOY_DAMAGE_ALL = 1u, MOY_DAMAGE_AGAIN = 2u };
@@ -100,6 +102,7 @@ typedef struct {
     char ns[MOY_APP_ID_MAX + 1];
     moy_app_surface_t surf;     // written by the shell, zero until then
     uint32_t devs;              // the device permissions it holds (moy_dev.h's MOY_DEV_P_*)
+    char folder[MOY_APP_FOLDER_MAX + 1];    // its cart's folder, absolute, "" none
 } moy_grant_t;
 
 // A console's own state over `prefs` (NULL: prefs answer ABSENT), or NULL.
@@ -496,6 +499,20 @@ int32_t moy_app_role_here(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8
 // under. A grant is made holding none. OK, STALE.
 int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask);
 uint32_t moy_app_dev_bit(const char *perm, size_t n);
+// Grant `h`'s cart folder (n bytes, an absolute path): where its device
+// handles reach the cart's own files (the media handle's, moy_dev.h). A grant
+// is made holding none. OK, STALE, BAD for a path that is not absolute, holds
+// a NUL or is over MOY_APP_FOLDER_MAX bytes.
+int moy_app_grant_folder(moy_appabi_t *a, uint32_t h, const char *path, size_t n);
+// The carts folder moy_app_store_bind bound, "" for none.
+const char *moy_app_root(const moy_appabi_t *a);
+// Where process `pid`'s device handles reach files, from the run grant it
+// owns in any state: the grant's cart folder, the state's carts root and the
+// grant's files kind (-1 none; moy_app_kind_name names it), each string
+// NUL-ended into its buffer ("" for none, or for one that does not fit).
+// False where no state holds a run grant `pid` owns.
+bool moy_app_dev_places(uint32_t pid, char *folder, size_t fcap, char *root, size_t rcap,
+                        int *kind);
 typedef int32_t (*moy_app_door_fn)(uint32_t g, uint32_t row, const uint8_t *arg,
                                    size_t n, uint8_t *ans, size_t cap);
 // The door the shell rows cross: one a process, NULL for none.

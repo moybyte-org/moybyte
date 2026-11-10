@@ -141,6 +141,35 @@
 //            pid (u16) and the name, REPORT's the HID report, DATA's the
 //            bytes the device sent. The open reads as an ATTACH for each
 //            device already plugged in
+//   media    a client of the media service's one stream, the system's
+//            (native/moy_media/moy_media.h, served by moy_media_dev.c; its
+//            permission `media` or `media:url`): write: play the source the
+//            bytes name (UTF-8) in place of what plays, whoever played it --
+//            a file or an .m3u/.pls playlist under `media`, an http(s):// URL
+//            under `media:url` and `http` (the run holds the radio's book,
+//            tag "media", while a URL of its list may play) -- DENIED for a
+//            file outside its cart's folder and the folder its
+//            `files:<folder>` permission names (a relative one is its cart
+//            folder's; a ".." is folded first), there or not, and for a
+//            playlist naming one, ABSENT for a file not there (nothing
+//            started), BAD for https where nothing verifies it (moy_media_tls),
+//            FULL where THE SHARES' MEDIA row is; a play that takes over
+//            another process's list tells the person (moy_media_tell). set
+//            volume=0..100 pause=1|0 seek=<seconds> skip=next|prev stop=1,
+//            applied in that order (every word checked first; ABSENT with no
+//            stream but for a stop, which then does nothing, for a seek a
+//            stream or an unknown length cannot take and a skip past the
+//            list's end; DENIED without `media`); get state (0 idle, 1
+//            opening, 2 playing, 3 ended, 4 failed), paused, entry, entries,
+//            rate, channels, kbps, volume, err, at and len (seconds heard and
+//            long, a file's), stamp (moves when what these show does), mine
+//            (1 where this process's write set what plays), tls; read: the
+//            now-playing text, four lines -- title, artist, station, src --
+//            whole (FULL where it does not fit), 0 bytes with no stream;
+//            xfer: a file's probe, its path in, its length in seconds (u32)
+//            then its title and artist on two lines out, DENIED where it may
+//            not play the file, ABSENT where it reads none. Its close and its
+//            process's end leave the stream playing
 // A device a handle holds stays through the VM's end (moy_lease.h's THE
 // VM'S END, moy_dev_holds) and goes with its process.
 //

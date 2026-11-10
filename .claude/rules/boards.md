@@ -205,8 +205,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 - **A process's devices are the kernel's handle table**
   (`native/moy_kernel/moy_dev.h`), answered on the calling program's own task:
   leases, pins (gpio, pins, uart, spi, i2c, pwm, adc), lora, mic, midi, http,
-  usb and ble are C (`moy_dev.c`, `moy_dev_kinds.c`); camera, media and net
-  are Python (`runtime/system/dev_handles.py`).
+  usb, ble and media are C (`moy_dev.c`, `moy_dev_kinds.c`, media's
+  `native/moy_media/moy_media_dev.c`); camera and net are Python
+  (`runtime/system/dev_handles.py`).
 - **The frame never waits on the radio (2026-11-06)**: on a P4 every
   `esp_wifi_*` call is a round trip to the C6, and a blocking scan, a join's
   poll or a link wait held the whole desk for seconds. The console asks and

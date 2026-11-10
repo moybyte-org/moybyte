@@ -215,6 +215,7 @@ _SIGS = (
     ("moy_app_wallpaper_save_copy", [_P, _U32, _PCHAR, _SIZE], c.c_int),
     ("moy_app_grant_get", [_P, _U32, c.POINTER(c.c_void_p)], c.c_int),
     ("moy_app_grant_devs", [_P, _U32, _U32], c.c_int),
+    ("moy_app_grant_folder", [_P, _U32, _PCHAR, _SIZE], c.c_int),
     ("moy_app_dev_bit", [_PCHAR, _SIZE], _U32),
     ("moy_app_count", [_P, c.c_int], _U32),
     ("moy_app_row_name", [c.c_int], _PCHAR),
@@ -452,13 +453,16 @@ def binding(sanitize=False):
         def end(self, h):
             return lib.moy_app_end(self._p, h) == OK
 
-        def grant_devs(self, h, perms):
+        def grant_devs(self, h, perms, folder=None):
             mask = 0
             for p in perms:
                 if isinstance(p, str):
                     b = _str(p)
                     mask |= lib.moy_app_dev_bit(b, len(b))
             _check(lib.moy_app_grant_devs(self._p, int(h) & 0xFFFFFFFF, mask))
+            if folder is not None:
+                fb = _str(folder)
+                _check(lib.moy_app_grant_folder(self._p, int(h) & 0xFFFFFFFF, fb, len(fb)))
 
         def grant_id(self, h):
             row = c.c_void_p()

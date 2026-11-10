@@ -123,3 +123,19 @@ def check(rc):
     if rc < 0:
         raise error(-rc)
     return rc
+
+
+def folder(cart):
+    """`cart`'s folder as the C reads a path: absolute, the VM's working
+    folder's where the cart's is relative; None for none. A run grant holds
+    it (moy_app_grant_folder) as where its device handles reach the cart's
+    own files."""
+    path = cart.get("path") if cart else None
+    if not path:
+        return None
+    path = str(path)
+    if path[:1] != "/":
+        import os
+        here = os.getcwd()
+        path = (here if here.endswith("/") else here + "/") + path
+    return path

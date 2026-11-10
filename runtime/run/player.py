@@ -70,6 +70,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import os_log as _os_log
 try:
+    import devices as _devices
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import devices as _devices
+try:
     import moybyte as _moybyte
     import scheduler as _scheduler
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -1726,7 +1730,8 @@ class Player(PlayerDiag):
         g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True, owner=self.pid or 0)
         devs = getattr(app, "grant_devs", None)
         if devs is not None and self.granted:
-            devs(g, tuple(self.granted))        # its device handles' (moy_dev.h)
+            # its device handles' (moy_dev.h), and the folder they read its files in
+            devs(g, tuple(self.granted), _devices.folder(cart))
         app.stop_hold(app.run(g, roles))
 
     def _bind_play(self, run):

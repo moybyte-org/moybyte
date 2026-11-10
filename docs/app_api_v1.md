@@ -938,8 +938,9 @@ the source its bytes name in place of what plays, whoever played it (a file
 or a playlist under `media`, an `http://` or `https://` URL under
 `media:url` and `http`), and the person is told when it takes over another
 app's list. A file plays only from the cart's
-own folder and the folder its `files` permission names (owner,
-2026-11-09): any other, or a playlist naming one, is DENIED whether it is
+own folder and the folder its `files:<folder>` permission names (owner,
+2026-11-09), a relative path being the cart folder's: any other, or a
+playlist naming one, is DENIED whether it is
 there or not, so a refusal tells nothing of what a folder holds, and
 `dev_xfer`'s probe refuses the same files. `dev_set` controls it
 (`"volume=60"`, `"pause=1"`, `"pause=0"`, `"seek=30"`, `"skip=next"`,

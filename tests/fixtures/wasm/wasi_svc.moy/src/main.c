@@ -49,7 +49,7 @@
 // "clipped" on the clipboard and reads it back; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
-// reads back, and leaves it playing; a "wake" carrying
+// reads back, sets its volume to 40 and prints it, and leaves it playing; a "wake" carrying
 // ["net"] opens port 7 of the radio link by handle and says "svc" on it, and
 // from then on each tick reads the port's records and prints each (the
 // sender's last byte, the port and the bytes); a "bye" ends it, a "quit" returns
@@ -371,6 +371,11 @@ int main(void) {
                    n > src && strncmp((const char *)r + src, path, strlen(path)) == 0 ? "same"
                                                                                        : "other",
                    n < 0 ? errno : 0);
+            n = (int)moy_dev_set(h, "volume=40");
+            if (n == 0) {
+                n = (int)moy_dev_get(h, "volume");
+            }
+            printf("media_volume %d errno %d\n", n, n < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0
                    && strcmp(m.b + sizeof m.ev, "[\"kernel\"]") == 0) {

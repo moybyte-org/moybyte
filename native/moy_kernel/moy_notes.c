@@ -78,15 +78,8 @@ static void put_text(char *dst, size_t cap, const char *src, size_t n) {
     dst[n] = 0;
 }
 
-int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char *body,
-                       size_t bn) {
-    if (!moy_evq_has(pid)) {
-        return -MOY_EVQ_STALE;
-    }
-    if (!(moy_evq_flags(pid) & MOY_EVQ_NOTIFY)) {
-        return -MOY_EVQ_DENIED;
-    }
-    const char *app = moy_evq_app(pid);
+static int32_t queue(uint32_t pid, const char *app, const char *summary, size_t sn,
+                     const char *body, size_t bn) {
     moy_notes_note_t n;
     n.pid = pid;
     snprintf(n.app, sizeof n.app, "%s", app != NULL ? app : "");
@@ -105,6 +98,21 @@ int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char 
     MOY_SYNC_UNLOCK(&s_lock);
     moy_evq_want(MOY_EVQ_WANT_POLL);
     return (int32_t)n.id;
+}
+
+int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char *body,
+                       size_t bn) {
+    if (!moy_evq_has(pid)) {
+        return -MOY_EVQ_STALE;
+    }
+    if (!(moy_evq_flags(pid) & MOY_EVQ_NOTIFY)) {
+        return -MOY_EVQ_DENIED;
+    }
+    return queue(pid, moy_evq_app(pid), summary, sn, body, bn);
+}
+
+int32_t moy_notes_system(const char *summary, size_t sn, const char *body, size_t bn) {
+    return queue(MOY_NOTES_SYSTEM, NULL, summary, sn, body, bn);
 }
 
 uint32_t moy_notes_waiting(void) {

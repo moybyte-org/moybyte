@@ -1,7 +1,8 @@
 """Leases and device APIs by handle (docs/os_2026-11/hardware.md section 4):
 what the `moybyte.dev_*` rows answer a compiled program, here called as its
 process would be served -- the leases (gpio<n>, pins, uart<n>, spi<n>, i2c,
-pwm<n>, adc<n>) and the lora and mic APIs by the kernel's handle table
+pwm<n>, adc<n>) and the device APIs (lora, mic, midi, http, usb, ble,
+media) by the kernel's handle table
 (native/moy_kernel/moy_dev.h) over its buses' host twin
 (runtime/host/bus_sim.py's far end) and the drivers' C, every other device
 API by runtime/system/dev_handles.py -- over the host's stand-ins
@@ -973,17 +974,28 @@ def test_a_camera_handle_reads_whole_frames_and_its_end_lets_it_go():
 TONE = ROOT / "tests" / "fixtures" / "media" / "tone_1k.mp3"
 
 
+MEDIA, MEDIA_URL = 1 << 8, 1 << 9      # moy_dev.h's MOY_DEV_P_MEDIA, MOY_DEV_P_MEDIA_URL
+
+
 @pytest.fixture
 def media():
     from runtime import audio_binding, dev_media
+    from runtime import moy_app
     from runtime import moy_media
     if audio_binding.get() is None or not dev_media.present():
         pytest.skip("no media service on this host")
     devices.grants = devices.console = None
-    yield dev_media
-    for pid in list(H.HANDLES):
-        moybyte.end(pid)
-    devices.grants = None
+    app = moy_app.App(None)
+
+    def grant(pid, perms, folder, kind=None, root=None):
+        """Process `pid`'s run grant, as the scheduler makes a compiled
+        process's: its device permissions, its cart's folder and its files
+        kind, under the carts folder `root` the state is bound to."""
+        if root is not None:
+            app.store_bind(str(root), True, True, None)
+        g = app.grant("t.%d" % pid, (), kind=kind, run=True, owner=pid)
+        app.grant_devs(g, perms, str(folder))
+    yield grant
     _shell_stops(dev_media)
     assert moy_media.pid() == 0
 
@@ -997,70 +1009,106 @@ def _shell_stops(dev_media):
         dev_media.stop()
     finally:
         L.current(was)
+    _pumped(lambda: not moy_media.pid())
+
+
+def _pumped(cond):
+    """The service's frame job run until cond() holds (the console's frame)."""
+    from runtime import moy_media
     for _ in range(50):
-        if not moy_media.pid():
-            break
+        if cond():
+            return True
         moy_media.pump()
+    return cond()
+
+
+def _ktext(pid, h):
+    got = _kread(pid, h, 512)
+    return got.decode().split("\n") if isinstance(got, bytes) else got
 
 
 def test_a_media_handle_plays_a_file_and_reads_what_plays(media):
+    """The kernel's media handle (native/moy_media/moy_media_dev.c): a client
+    of the service's one stream, on the caller's task."""
     from runtime import moy_media
-    pid = L.spawn("t.music")
-    h = _open(pid, "media")
-    assert _get(pid, h, "state") == 0 and _get(pid, h, "mine") == 0
-    assert _as(pid, lambda: H.read(pid, h, 64)) == b""                 # no stream
-    assert _as(pid, lambda: H.set(pid, h, "pause=1")) == H.ABSENT
-    assert _as(pid, lambda: H.set(pid, h, "stop=1")) == 0
-    probe = _as(pid, lambda: H.xfer(pid, h, str(TONE).encode(), 64))
-    assert probe == struct.pack("<I", 2) + b"Tone\n"
-    assert _as(pid, lambda: H.xfer(pid, h, str(TONE).encode(), 6)) == H.FULL
-    assert _as(pid, lambda: H.xfer(pid, h, b"/no/such.mp3", 64)) == H.ABSENT
-    assert _as(pid, lambda: H.write(pid, h, b"/no/such.mp3")) == H.ABSENT
-    assert moy_media.pid() == 0
-    assert _as(pid, lambda: H.write(pid, h, str(TONE).encode())) == len(str(TONE))
-    assert moy_media.pid() not in (0, pid) and _get(pid, h, "mine") == 1
-    assert _get(pid, h, "state") in (1, 2) and _get(pid, h, "entries") == 1
-    assert _as(pid, lambda: H.set(pid, h, "volume=40 pause=1")) == 0
-    assert _get(pid, h, "paused") == 1 and _get(pid, h, "volume") <= 40
-    assert _as(pid, lambda: H.set(pid, h, "pause=0")) == 0 and _get(pid, h, "paused") == 0
-    assert _as(pid, lambda: H.set(pid, h, "skip=next")) == H.ABSENT    # the list's end
-    text = _as(pid, lambda: H.read(pid, h, 512)).decode().split("\n")
+    from runtime.notifications import NOTES
+    pid, other = L.spawn("t.music"), L.spawn("t.other")
+    media(pid, ("media",), TONE.parent)
+    media(other, ("media",), TONE.parent)
+    h = _kopen(pid, "media", "", MEDIA)
+    assert h > 0 and _kget(pid, h, "state") == 0 and _kget(pid, h, "mine") == 0
+    assert _kread(pid, h, 64) == b""                                   # no stream
+    assert _kset(pid, h, "pause=1") == H.ABSENT
+    assert _kset(pid, h, "stop=1") == 0
+    assert _kxfer(pid, h, str(TONE).encode(), 64) == struct.pack("<I", 2) + b"Tone\n"
+    assert _kxfer(pid, h, b"tone_1k.mp3", 64)[:4] == struct.pack("<I", 2)  # its cart's
+    assert _kxfer(pid, h, str(TONE).encode(), 6) == H.FULL
+    nope = str(TONE.parent / "nope.mp3").encode()
+    assert _kxfer(pid, h, nope, 64) == H.ABSENT
+    assert _kwrite(pid, h, nope) == H.ABSENT and moy_media.pid() == 0   # nothing started
+    assert _kwrite(pid, h, str(TONE).encode()) == len(str(TONE))
+    assert moy_media.pid() not in (0, pid) and _kget(pid, h, "mine") == 1
+    assert _pumped(lambda: _kget(pid, h, "state") in (1, 2))           # the console's frame
+    assert _kget(pid, h, "entries") == 1
+    text = _ktext(pid, h)
     assert len(text) == 5 and text[3] == str(TONE)
-    assert _as(pid, lambda: H.read(pid, h, 4)) == H.FULL
-    for bad in ("volume=101", "pause=2", "skip=up", "stop=0", "warp=1"):
-        assert _as(pid, lambda: H.set(pid, h, bad)) == H.BAD, bad
-    other = L.spawn("t.other")
-    o = _open(other, "media")
-    assert _get(other, o, "mine") == 0
-    assert _as(other, lambda: H.set(other, o, "pause=1")) == 0         # a client acts on it
-    assert _get(pid, h, "paused") == 1
-    assert _as(other, lambda: H.write(other, o, str(TONE).encode())) > 0   # the last command wins
-    assert _get(other, o, "mine") == 1 and _get(pid, h, "mine") == 0
-    assert _open(pid, "media") == H.BUSY                               # one handle a process
+    assert _kset(pid, h, "volume=40 pause=1") == 0
+    assert _kget(pid, h, "paused") == 1 and _kget(pid, h, "volume") == 40
+    assert _kset(pid, h, "pause=0") == 0 and _kget(pid, h, "paused") == 0
+    assert _kset(pid, h, "skip=next") == H.ABSENT                      # the list's end
+    assert _kread(pid, h, 4) == H.FULL
+    for bad in ("volume=101", "pause=2", "skip=up", "stop=0", "warp=1", "volume"):
+        assert _kset(pid, h, bad) == H.BAD, bad
+    assert _kget(pid, h, "warp") == H.BAD and _kopen(other, "media", "x=1", MEDIA) == H.BAD
+    o = _kopen(other, "media", "", MEDIA)
+    assert _kget(other, o, "mine") == 0
+    assert _kset(other, o, "pause=1") == 0                             # a client acts on it
+    assert _kget(pid, h, "paused") == 1
+    seen = len(NOTES.list)
+    assert _kwrite(other, o, b"tone_1k.mp3") > 0                       # the last command wins
+    assert _kget(other, o, "mine") == 1 and _kget(pid, h, "mine") == 0
+    NOTES.drain()
+    assert [(n.summary, n.body) for n in NOTES.list[:len(NOTES.list) - seen]] == [
+        ("t.other took over the music", "tone_1k.mp3 now plays in place of what t.music played.")]
+    assert _kopen(pid, "media", "", MEDIA) == H.BUSY                   # one handle a process
     run = moy_media.pid()
-    assert _as(pid, lambda: H.close(pid, h)) == 0                      # its close leaves it playing
-    assert moy_media.pid() == run
-    assert _as(other, lambda: H.set(other, o, "stop=1")) == 0
-    assert moy_media.pid() == 0
+    assert _kclose(pid, h) == 0 and moy_media.pid() == run            # its close leaves it
+    assert _kset(other, o, "stop=1") == 0
+    assert _pumped(lambda: not moy_media.pid())
 
 
-def test_a_media_handle_needs_either_permission_and_its_end_leaves_the_stream(media,
-                                                                              monkeypatch):
+def test_a_media_handle_plays_only_its_folders_under_either_permission(media, tmp_path):
+    """A file outside the cart's folder and its files folder is DENIED, there
+    or not, a ".." folded first and a playlist naming one refused before it
+    plays; a file is `media`'s, a URL `media:url`'s and `http`'s; the
+    handle's end leaves the stream playing."""
+    from runtime import dev_media
     from runtime import moy_media
+    cart = tmp_path / "t.moy"
+    cart.mkdir()
+    (cart / "tone_1k.mp3").write_bytes(TONE.read_bytes())
+    (cart / "out.m3u").write_text(str(TONE) + "\n")
+    (cart / "in.m3u").write_text("tone_1k.mp3\n")
     a, b = L.spawn("t.a"), L.spawn("t.b")
-    devices.grants = lambda p: {a: {"media"}, b: {"media:url"}}.get(p, set())
-    monkeypatch.setattr(devices, "cart_of",       # the tone is in a's own folder
-                        lambda p: {"path": str(TONE.parent)} if p in (a, b) else None)
-    assert _open(L.spawn("t.none"), "media") == H.DENIED
-    hb = _open(b, "media")
-    assert _as(b, lambda: H.write(b, hb, str(TONE).encode())) == H.DENIED      # a file is media's
-    assert _as(b, lambda: H.write(b, hb, b"http://127.0.0.1:1/x")) == H.DENIED  # and http's
-    ha = _open(a, "media")
-    assert _as(a, lambda: H.write(a, ha, str(TONE).encode())) > 0
+    media(a, ("media",), cart)
+    media(b, ("media:url",), cart)
+    assert _kopen(L.spawn("t.none"), "media", "", 0) == H.DENIED
+    hb = _kopen(b, "media", "", MEDIA_URL)
+    assert _kwrite(b, hb, str(cart / "tone_1k.mp3").encode()) == H.DENIED   # a file is media's
+    assert _kwrite(b, hb, b"http://127.0.0.1:1/x") == H.DENIED             # and http's
+    ha = _kopen(a, "media", "", MEDIA)
+    for out in (str(TONE), str(cart / ".." / ".." / "x.mp3"), str(cart) + "/../t.moy.mp3",
+                "../tone_1k.mp3", str(tmp_path / "nope.mp3")):
+        assert _kwrite(a, ha, out.encode()) == H.DENIED, out
+        assert _kxfer(a, ha, out.encode(), 64) == H.DENIED, out
+    assert moy_media.pid() == 0
+    assert _kwrite(a, ha, b"out.m3u") == H.DENIED                     # its list names one
+    assert _pumped(lambda: not moy_media.pid())
+    assert _kwrite(a, ha, b"./sub/../in.m3u") > 0
     run = moy_media.pid()
-    assert run and media.now()["client"] == a
-    moybyte.end(a)
-    assert a not in H.HANDLES and moy_media.pid() == run       # the system's: it plays on
+    assert run and _kget(a, ha, "entries") == 1 and dev_media.now()["client"] == a
+    _end(a)
+    assert moy_media.pid() == run                              # the system's: it plays on
 
 
 # -- the pins ----------------------------------------------------------------------------
@@ -1101,13 +1149,15 @@ def test_a_pins_handle_needs_the_permission_and_pins_and_keeps_nothing_refused()
     assert _kopen(pid, "pins") == H.ABSENT
 
 
-def test_a_media_handle_plays_only_from_its_own_folders(media, tmp_path, monkeypatch):
+def test_a_media_handle_plays_only_from_its_own_folders(media, tmp_path):
     """A gated process plays a file only from its cart's folder and the
-    folder its `files` permission names: anything else is DENIED, there
+    folder its `files` permission names (the files root beside the carts
+    folder its grant's state is bound to): anything else is DENIED, there
     or not (so a refusal tells it nothing of what is there), a probe as
     much as a play, and a playlist in its folder naming a file outside it
-    as much as the file. A URL is unchanged."""
+    as much as the file."""
     import shutil
+    from runtime import moy_media
     store = tmp_path / "store"
     carts = store / "carts"
     own = carts / "local.player.moy"
@@ -1121,27 +1171,21 @@ def test_a_media_handle_plays_only_from_its_own_folders(media, tmp_path, monkeyp
     shutil.copy(TONE, docs / "secret.mp3")
     (own / "list.m3u").write_text(str(docs / "secret.mp3") + "\n")
     pid = L.spawn("t.player")
-    cart = {"path": str(own), "id": "local.player"}
-    monkeypatch.setattr(devices, "grants",
-                        lambda p: ("media", "files:music") if p == pid else None)
-    monkeypatch.setattr(devices, "cart_of", lambda p: cart if p == pid else None)
-    monkeypatch.setattr(devices, "console", type("C", (), {"carts_root": str(carts)})())
-    h = _open(pid, "media")
+    try:
+        media(pid, ("media", "files:music"), own, kind="music", root=carts)
+    except ImportError as e:              # no user-files layer on this host
+        pytest.skip(str(e))
+    h = _kopen(pid, "media", "", MEDIA)
     for path in (docs / "secret.mp3", docs / "missing.mp3", TONE,
                  own / ".." / ".." / "files" / "Documents" / "secret.mp3"):
-        assert _as(pid, lambda: H.write(pid, h, str(path).encode())) == H.DENIED, path
-        assert _as(pid, lambda: H.xfer(pid, h, str(path).encode(), 64)) == H.DENIED, path
-    assert _as(pid, lambda: H.write(pid, h, str(own / "list.m3u").encode())) == H.DENIED
-    from runtime import moy_media
-    for _ in range(4):
-        moy_media.pump()
-    assert not moy_media.pid()                                  # the refused list left nothing
-    assert _as(pid, lambda: H.write(pid, h, str(own / "missing.mp3").encode())) == H.ABSENT
-    assert _as(pid, lambda: H.xfer(pid, h, str(music / "song.mp3").encode(), 64)) \
-        == struct.pack("<I", 2) + b"Tone\n"
+        assert _kwrite(pid, h, str(path).encode()) == H.DENIED, path
+        assert _kxfer(pid, h, str(path).encode(), 64) == H.DENIED, path
+    assert _kwrite(pid, h, str(own / "list.m3u").encode()) == H.DENIED
+    assert _pumped(lambda: not moy_media.pid())                 # the refused list left nothing
+    assert _kwrite(pid, h, str(own / "missing.mp3").encode()) == H.ABSENT
+    assert _kxfer(pid, h, str(music / "song.mp3").encode(), 64) == struct.pack("<I", 2) + b"Tone\n"
     src = str(own / "tone.mp3")
-    assert _as(pid, lambda: H.write(pid, h, src.encode())) == len(src)
-    assert _get(pid, h, "mine") == 1
+    assert _kwrite(pid, h, src.encode()) == len(src) and _kget(pid, h, "mine") == 1
     src = str(music / "song.mp3")
-    assert _as(pid, lambda: H.write(pid, h, src.encode())) == len(src)
-    assert _as(pid, lambda: H.close(pid, h)) == 0
+    assert _kwrite(pid, h, src.encode()) == len(src)
+    assert _kclose(pid, h) == 0

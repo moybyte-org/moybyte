@@ -9,7 +9,8 @@
 MOY_MEDIA_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD_C += $(MOY_MEDIA_DIR)/modmoy_media.c
-SRC_USERMOD_LIB_C += $(MOY_MEDIA_DIR)/moy_media.c $(MOY_MEDIA_DIR)/moy_mp3.c
+SRC_USERMOD_LIB_C += $(MOY_MEDIA_DIR)/moy_media.c $(MOY_MEDIA_DIR)/moy_mp3.c \
+    $(MOY_MEDIA_DIR)/moy_media_dev.c
 
 CFLAGS_USERMOD += -I$(MOY_MEDIA_DIR) -I$(MOY_MEDIA_DIR)/../moy_audio -I$(MOY_MEDIA_DIR)/../moy_play \
     -I$(MOY_MEDIA_DIR)/../moy_store -I$(MOY_MEDIA_DIR)/../moy_kernel \

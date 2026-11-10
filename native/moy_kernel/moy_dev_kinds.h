@@ -1,7 +1,7 @@
 // The handle table's parts (moy_dev.h has the contract): moy_dev.c keeps the
 // rows, the leases and the buses; moy_dev_kinds.c names the device APIs and
 // hands each call to its driver module's verbs (moy_lora_dev.c, moy_mic_dev.c,
-// ...), which keep their handles' state by the row's slot. Every call runs
+// moy_media_dev.c, ...), which keep their handles' state by the row's slot. Every call runs
 // under the lease table's lock, which moy_dev.c holds for the whole call.
 
 #ifndef MOY_DEV_KINDS_H
@@ -79,6 +79,7 @@ extern const moy_dev_ops_t moy_dev_midi;
 extern const moy_dev_ops_t moy_dev_http;
 extern const moy_dev_ops_t moy_dev_usb;
 extern const moy_dev_ops_t moy_dev_ble;
+extern const moy_dev_ops_t moy_dev_media;
 
 // moy_dev.c's half: the device API `name` names, its kind (> 0) or 0.
 int moy_dev_kind(const char *name, size_t n);

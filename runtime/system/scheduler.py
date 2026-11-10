@@ -1791,7 +1791,12 @@ def compiled_run(ws, p, cart):
     p.ctx = factory(app_id, roles, app_id, run=True, kind=kind, owner=p.pid)
     devs = getattr(app, "grant_devs", None)
     if devs is not None and p.granted:
-        devs(p.ctx.grant, tuple(p.granted))     # its device handles' (moy_dev.h)
+        try:
+            import devices
+        except ImportError:  # host: the runtime package
+            from runtime import devices
+        # its device handles' (moy_dev.h), and the folder they read its files in
+        devs(p.ctx.grant, tuple(p.granted), devices.folder(cart))
     return app.run(p.ctx.grant, roles)
 
 

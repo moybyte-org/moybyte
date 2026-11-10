@@ -60,8 +60,12 @@ THE CLIENTS. Every process the permissions let in is a client, and the last
 command wins: a play() replaces what plays whoever played it (the service
 names its new client, `moy_media_take`), and the other commands act on what
 plays from any client. A play() that takes over a list another process's
-play() started, still playing, posts a notification saying so, so the
-person learns why their music changed. The shell (pid 1) is a client too.
+play() started, still playing, posts a notification saying so
+(`moy_media_tell`), so the person learns why their music changed. The shell
+(pid 1) is a client too. A compiled program is a client by its `media`
+handle, served in C on its own task (native/moy_kernel/moy_dev.h's media
+row), the VM up or stopped; the console's frame finds a run one started
+(`frame`) and follows it as it follows its own.
 
 THE RADIO. While a URL of the list may play, the run holds the radio's
 "media" tag under its own pid (`Workstation.wifi_hold`); its end lets it go
@@ -413,6 +417,16 @@ def attach():
     return pid
 
 
+def frame():
+    """At the console's frame start: a run the face does not follow yet --
+    one a compiled program's media handle started on its own task
+    (native/moy_media/moy_media_dev.c) -- followed and told (`attach`), and
+    one that ended let go. One read while nothing changed."""
+    if _N is not None and _N.pid() != _s["pid"]:
+        if _live():
+            _tell()
+
+
 def running():
     """The run's pid while one plays, else 0."""
     return _live()
@@ -513,18 +527,16 @@ def _who(p):
     return name or ("pid %d" % p)
 
 
-def _took(was, p, label):
-    """Process `p`'s play() replaced what process `was` played: the person
-    is told, as the system."""
-    if not was or was == p:
-        return
-    name = (label or "").split("\t")[-1] or _N.text(_N.T_SRC).rsplit("/", 1)[-1]
-    try:
-        from notifications import NOTES
-    except ImportError:  # host: the runtime package
-        from runtime.notifications import NOTES
-    NOTES.post(_D.SHELL, "%s took over the music" % _who(p),
-               "%s now plays in place of what %s played." % (name, _who(was)))
+def _took(was):
+    """take() answered `was`, whose list another client's play() replaced:
+    the person is told, as the system (moy_media_tell's notification, its
+    text the C's for every client), the console's list taking it now."""
+    if was and _N.tell(was):
+        try:
+            from notifications import NOTES
+        except ImportError:  # host: the runtime package
+            from runtime.notifications import NOTES
+        NOTES.drain()
 
 
 def play(src, allow=None, label=None):
@@ -559,7 +571,7 @@ def play(src, allow=None, label=None):
         _hold()
     if _STEP:
         _N.run()
-    _took(was, p, label)
+    _took(was)
     _watch()
     if new:
         _tell()

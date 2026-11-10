@@ -10,19 +10,18 @@
 #   words                    a cfg string of `key=value` words as a dict
 #   _Handle                  the base every handle's verbs default from
 #   _Camera                  camera: a picture per read
-#   _media_roots             the folders a process's media handle plays from
-#   _Media                   media: the media service's stream by handle
 #   _Net                     net: the radio link's messages on a port
 """Leases and device APIs by handle: what a compiled program (a wasm app, a
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
 `moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
 pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora,
-mic, midi, http, usb and ble on the calling program's own task (native/moy_kernel/moy_dev.h,
-which says what they answer); the other device APIs are served here, by the door's Python half as the calling
-process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
+mic, midi, http, usb, ble and media on the calling program's own task
+(native/moy_kernel/moy_dev.h, which says what they answer); the other device
+APIs are served here, by the door's Python half as the calling process
+(runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
-  open(name, cfg) -> h      a device API ("camera", "media", "net"),
+  open(name, cfg) -> h      a device API ("camera", "net"),
                             configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
@@ -38,30 +37,6 @@ answers:
   camera    read: the latest frame, w * h RGB565 pixels big-endian (the
             glass's byte order), whole (FULL where `into` cannot hold it),
             0 bytes before the first; get w, h
-  media     a client of the media service's one stream, the system's
-            (docs/os_2026-11/hardware.md section 3): write: play the source
-            the bytes name (UTF-8): a file, an .m3u or .pls playlist
-            (`media`) or an http(s):// URL (`media:url` and `http`), in
-            place of what plays, whoever played it, DENIED
-            for a file outside its cart's folder and the folder its
-            `files` permission names (or a playlist naming one), there or
-            not, ABSENT for a file not there, BAD for https where nothing
-            verifies it, FULL where THE SHARES' MEDIA row is;
-            set volume=0..100, pause=1|0, seek=<seconds>, skip=next|prev,
-            stop=1, applied in that order (ABSENT with no stream, a seek a
-            stream or an unknown length cannot take, a skip past the list's
-            end); get state (0 idle,
-            1 opening, 2 playing, 3 ended, 4 failed), paused, entry,
-            entries, rate, channels, kbps, volume, err, at and len (seconds
-            heard and long, a file's), stamp (moves when what these show
-            does), mine (1 where this process's write set what plays), tls (1
-            where an https URL plays); read: the now-playing text, four
-            UTF-8 lines -- title, artist, station, src -- whole (FULL where
-            it does not fit), 0 bytes with no stream; xfer: a file's probe,
-            its path in, its length in seconds (u32) then its title and
-            artist on two lines out, DENIED where it may not play the file,
-            ABSENT where it reads none. Its close and its process's end
-            leave the stream playing
   net       the console-to-console radio link (docs/netplay_v1.md, Ports),
             one port a handle: cfg port=1..65535 (required; port 0 is the
             game's net.send and on_net) and from=any|match (any by
@@ -80,9 +55,9 @@ answers:
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
-name needs (a device's own, `media` or `media:url` for media), BUSY where
-another process holds the device (a Python program's object, or another
-compiled program's handle; a process opens every device API but net once), BAD for a name, a
+name needs (a device's own, `multiplayer` for net), BUSY where another
+process holds the device (a Python program's object, or another compiled
+program's handle; a process opens camera once), BAD for a name, a
 key or a value this console does not take, ABSENT for a handle not open, a
 device this console lacks and a radio verb that needs a connection or a
 join, FULL where `into` cannot hold one record or a table has no room, IO
@@ -107,10 +82,8 @@ STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = -1, -2, -3, -4, -7, -8, -6, 
 EPERM, ENOENT, EIO, EBADF, ENOMEM, EACCES, EBUSY, ENODEV, EINVAL, ENOSPC = (
     1, 2, 5, 9, 12, 13, 16, 19, 22, 28)
 ENOTCONN = 107              # the radios' drivers' (moy_gatt.h, moy_lora.h)
-EPROTONOSUPPORT = 93        # the media service's https where nothing verifies
 _CODE = {EPERM: DENIED, EACCES: DENIED, EBUSY: BUSY, EINVAL: BAD, ENODEV: ABSENT,
-         ENOENT: ABSENT, EBADF: ABSENT, ENOMEM: NOMEM, ENOSPC: FULL, ENOTCONN: ABSENT,
-         EPROTONOSUPPORT: BAD}
+         ENOENT: ABSENT, EBADF: ABSENT, ENOMEM: NOMEM, ENOSPC: FULL, ENOTCONN: ABSENT}
 
 HANDLES = {}                # pid -> {h: its handle}
 _NEXT = [1]
@@ -160,10 +133,6 @@ def _int(v, lo, hi, what):
     if not isinstance(v, int) or not lo <= v <= hi:
         raise OSError(EINVAL, "%s=%r" % (what, v))
     return v
-
-
-def _u32(x):
-    return (x & 0xFFFFFFFF).to_bytes(4, "little")
 
 
 def _only(cfg, keys):
@@ -218,152 +187,6 @@ class _Camera(_Handle):
 
     def close(self, pid):
         self.f.sweep(pid)
-
-
-_MEDIA_STATES = ("idle", "opening", "playing", "ended", "failed")
-_MEDIA_NOW = ("paused", "entry", "entries", "rate", "channels", "kbps", "volume", "err", "at",
-              "len")
-
-
-def _text(data):
-    return bytes(data).decode("utf-8")
-
-
-def _norm(path):
-    """`path` with its "." and ".." folded, or None where a ".." climbs past
-    its root."""
-    out = []
-    for part in path.replace("\\", "/").split("/"):
-        if part in ("", "."):
-            continue
-        if part == "..":
-            if not out:
-                return None
-            out.pop()
-        else:
-            out.append(part)
-    return "/" + "/".join(out)
-
-
-def _media_roots(pid):
-    """The folders process `pid`'s media handle plays files from, as the
-    media service's paths (`dev_media.where`): its cart's own folder and the
-    one its `files` permission names, the folder the files role makes its
-    grant for (`moy_app.policy`, by FILE_KIND_DIRS under the store's files
-    root). None where the process is not gated (a bare host, the shell)."""
-    try:
-        import devices
-        import moy_app
-        from moy_store_base import FILE_KIND_DIRS, files_root
-    except ImportError:  # host: the runtime package
-        from runtime import devices, moy_app
-        from runtime.moy_store_base import FILE_KIND_DIRS, files_root
-    have = devices.grants(pid) if devices.grants is not None else None
-    if have is None:
-        return None
-    where = _face("media").where
-    roots = []
-    cart = devices.cart_of(pid) if devices.cart_of is not None else None
-    if cart and cart.get("path"):
-        roots.append(_norm(where(cart["path"])))
-    kind = moy_app.policy(tuple(have))[1]
-    root = getattr(devices.console, "carts_root", None)
-    if kind is not None and root:
-        roots.append(_norm(where(files_root(root) + "/" + FILE_KIND_DIRS[kind])))
-    return [r for r in roots if r is not None]
-
-
-def _within(roots, path):
-    p = _norm(path)
-    return p is not None and any(p.startswith(r.rstrip("/") + "/") for r in roots)
-
-
-class _Media(_Handle):
-    def __init__(self, cfg):
-        _only(cfg, ())
-        self.f = _face("media")
-
-    def _allow(self):
-        """The test a file the calling process names must pass: inside its
-        folders (`_media_roots`), else None where it is not gated."""
-        try:
-            import devices
-        except ImportError:  # host: the runtime package
-            from runtime import devices
-        roots = _media_roots(devices.pid())
-        return None if roots is None else (lambda path: _within(roots, path))
-
-    def write(self, data):
-        self.f.play(_text(data), self._allow())
-        return len(data)
-
-    def _none(self):
-        raise OSError(ENOENT, "no stream there")
-
-    def set(self, cfg):
-        _only(cfg, ("volume", "pause", "seek", "skip", "stop"))
-        f = self.f
-        if "stop" in cfg:
-            _int(cfg["stop"], 1, 1, "stop")
-        if "skip" in cfg and cfg["skip"] not in ("next", "prev"):
-            raise OSError(EINVAL, "skip=%r" % (cfg["skip"],))
-        if f.now() is None and any(k != "stop" for k in cfg):
-            self._none()
-        if "volume" in cfg:
-            f.volume(_int(cfg["volume"], 0, 100, "volume"))
-        if "pause" in cfg:
-            if _int(cfg["pause"], 0, 1, "pause"):
-                f.pause()
-            else:
-                f.resume()
-        if "seek" in cfg and not f.seek(_int(cfg["seek"], 0, 0x7FFFFFFF, "seek")):
-            self._none()
-        if "skip" in cfg and not (f.next() if cfg["skip"] == "next" else f.prev()):
-            self._none()
-        if "stop" in cfg:
-            f.stop()
-        return 0
-
-    def get(self, what):
-        f = self.f
-        if what == "tls":
-            return int(f.tls())
-        if what == "stamp":
-            return f.stamp() or 0
-        n = f.now()
-        if what == "state":
-            return 0 if n is None else _MEDIA_STATES.index(n["state"])
-        if what == "mine":
-            try:
-                import devices
-            except ImportError:  # host: the runtime package
-                from runtime import devices
-            return int(n is not None and n["client"] == devices.pid())
-        if what in _MEDIA_NOW:
-            return 0 if n is None else int(n[what])
-        raise OSError(EINVAL, "no %s" % what)
-
-    def read(self, cap):
-        n = self.f.now()
-        if n is None:
-            return b""
-        out = "".join((n[k] or "") + "\n" for k in ("title", "artist", "station", "src"))
-        out = out.encode("utf-8")
-        return FULL if len(out) > cap else out
-
-    def xfer(self, data, cap):
-        path = _text(data)
-        allow = self._allow()
-        if allow is not None and not allow(self.f.where(path)):
-            raise OSError(EPERM, "not one of its folders")
-        got = self.f.probe(path)
-        if got is None:
-            self._none()
-        out = _u32(got[0]) + ((got[1] or "") + "\n" + (got[2] or "")).encode("utf-8")
-        return FULL if len(out) > cap else out
-
-    def close(self, pid):
-        """The handle's end: the stream is the service's and plays on."""
 
 
 NET_HEAD = 10               # a net record's head: the sender (6 bytes), port, n (u16)
@@ -459,11 +282,11 @@ class _Net(_Handle):
         self._let_go(_link()[0], pid)
 
 
-_DEVICES = {"camera": _Camera, "media": _Media, "net": _Net}
+_DEVICES = {"camera": _Camera, "net": _Net}
 # A device with one holder: a process opens it once.
-_ONE = ("camera", "media")
+_ONE = ("camera",)
 # The permissions a device needs, one of them, where they are not its name.
-_PERMS = {"media": ("media", "media:url"), "net": ("multiplayer",)}
+_PERMS = {"net": ("multiplayer",)}
 
 
 def _need(pid, name):

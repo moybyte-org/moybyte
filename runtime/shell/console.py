@@ -255,6 +255,9 @@ try:
     from notifications import NOTES as _NOTES
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.notifications import NOTES as _NOTES
+# The media service's face once the console has booted its services: each
+# frame starts with its check for a run a compiled program's handle started.
+_MEDIA = [None]
 try:
     from procs import Procs, Run
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -3404,7 +3407,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         SSH server where a password is set (ssh_service.boot), the
         crontab's lines (cron.boot), and Music's card in the bar for every run
         of the media service, the one a VM stop left playing first
-        (dev_media.listen, music_app.follow)."""
+        (dev_media.listen, music_app.follow), and every frame after for one a
+        compiled program's handle starts (dev_media.frame)."""
         try:
             _scheduler.boot(self)
         except Exception as exc:  # noqa: BLE001 -- a service never stops the desk
@@ -3415,6 +3419,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if media is not None:
             media.listen(self._music_follows)
             media.attach()
+            _MEDIA[0] = media
 
     def _music_follows(self):
         """A run of the media service found, whoever played it: Music's card
@@ -3441,6 +3446,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.boot_services()
         sched = _scheduler.SCHED
         _NOTES.drain()                # what compiled programs posted on their own tasks
+        media = _MEDIA[0]
+        if media is not None:
+            media.frame()             # a stream a compiled program's handle started
         if sched.mail_owed():
             sched.mail()              # messages the input sent: served before the draw
         if self._press_owed:

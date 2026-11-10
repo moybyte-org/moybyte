@@ -191,7 +191,7 @@ What holds less than a reader would assume. Each is how the code stands.
 - **A path's existence leaks inside a program's folders.** A compiled
   program's media handle plays only files under its own cart folder and the
   folder its `files` permission names, and anything else is DENIED whether
-  it exists or not (`runtime/system/dev_handles.py`, `_media_roots`); inside
+  it exists or not (`native/moy_media/moy_media_dev.c`); inside
   those folders ABSENT still tells a missing file from a present one.
 
 - **"Run its own machine code" on a P4 covers a wasm cart's unsigned AOT

@@ -374,6 +374,7 @@ int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
     row->kind = (int8_t)kind;
     row->owner = owner;
     row->devs = 0u;
+    row->folder[0] = '\0';
     memcpy(row->ns, ns, ns_n);
     row->ns[ns_n] = '\0';
     row->ns_len = (uint8_t)ns_n;
@@ -2209,6 +2210,52 @@ int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask) {
     }
     g->devs = mask;
     return MOY_APP_OK;
+}
+
+int moy_app_grant_folder(moy_appabi_t *a, uint32_t h, const char *path, size_t n) {
+    moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return MOY_APP_STALE;
+    }
+    if (n > MOY_APP_FOLDER_MAX || (n > 0u && (path[0] != '/' || memchr(path, 0, n) != NULL))) {
+        return MOY_APP_BAD;
+    }
+    memcpy(g->folder, path, n);
+    g->folder[n] = '\0';
+    return MOY_APP_OK;
+}
+
+const char *moy_app_root(const moy_appabi_t *a) {
+    return a->root;
+}
+
+static void put_str(char *out, size_t cap, const char *s) {
+    size_t n = strlen(s);
+    if (cap == 0u) {
+        return;
+    }
+    if (n >= cap) {
+        n = 0;                              // one that does not fit is none
+    }
+    memcpy(out, s, n);
+    out[n] = '\0';
+}
+
+bool moy_app_dev_places(uint32_t pid, char *folder, size_t fcap, char *root, size_t rcap,
+                        int *kind) {
+    for (moy_appabi_t *a = s_states; pid != 0u && a != NULL; a = a->next) {
+        for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
+            uint32_t at = moy_htab_at(a->grants, s);
+            const moy_grant_t *g = at != 0u ? grant_row(a, at) : NULL;
+            if (g != NULL && g->cls == MOY_GRANT_RUN && g->owner == pid) {
+                put_str(folder, fcap, g->folder);
+                put_str(root, rcap, a->root);
+                *kind = g->kind;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 uint32_t moy_app_dev_bit(const char *perm, size_t n) {

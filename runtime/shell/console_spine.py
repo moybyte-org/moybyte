@@ -503,7 +503,8 @@ class SpineVerbs:
         compiled program's http handles from its first to its last, held in
         the kernel, native/moy_net/moy_fetch_dev.c), "media"
         (the media service's run, under the run's pid, while a URL of its
-        list may play, dev_media.py), "native"
+        list may play, dev_media.py or a compiled program's media handle,
+        native/moy_media/moy_media_dev.c), "native"
         (a native process from its first socket to its end, elf_run.py),
         "net" (its radio link's ports, from the first open to the last
         close, dev_handles.py); its

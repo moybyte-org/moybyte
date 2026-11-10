@@ -291,12 +291,13 @@ static mp_obj_t app_grant_id(mp_obj_t self, mp_obj_t h) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(app_grant_id_obj, app_grant_id);
 
-// grant_devs(h, perms): grant `h` holds the device permissions among `perms`
-// (an iterable of names), what a compiled program's device handles answer
-// under (moy_app_grant_devs).
-static mp_obj_t app_grant_devs(mp_obj_t self, mp_obj_t h, mp_obj_t perms) {
+// grant_devs(h, perms, folder=None): grant `h` holds the device permissions
+// among `perms` (an iterable of names), what a compiled program's device
+// handles answer under (moy_app_grant_devs), and the cart folder they reach
+// its own files in (moy_app_grant_folder, an absolute path).
+static mp_obj_t app_grant_devs(size_t n_args, const mp_obj_t *args) {
     uint32_t mask = 0;
-    mp_obj_t it = mp_getiter(perms, NULL), x;
+    mp_obj_t it = mp_getiter(args[2], NULL), x;
     while ((x = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
         if (mp_obj_is_str(x)) {
             size_t n;
@@ -304,10 +305,17 @@ static mp_obj_t app_grant_devs(mp_obj_t self, mp_obj_t h, mp_obj_t perms) {
             mask |= moy_app_dev_bit(p, n);
         }
     }
-    check(moy_app_grant_devs(app_of(self), grant_arg(h), mask));
+    moy_appabi_t *a = app_of(args[0]);
+    uint32_t h = grant_arg(args[1]);
+    check(moy_app_grant_devs(a, h, mask));
+    if (n_args > 3 && args[3] != mp_const_none) {
+        size_t n;
+        const char *p = mp_obj_str_get_data(args[3], &n);
+        check(moy_app_grant_folder(a, h, p, n));
+    }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(app_grant_devs_obj, app_grant_devs);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_grant_devs_obj, 3, 4, app_grant_devs);
 
 static mp_obj_t app_count(mp_obj_t self) {
     return MP_OBJ_NEW_SMALL_INT(moy_app_grants(app_of(self)));

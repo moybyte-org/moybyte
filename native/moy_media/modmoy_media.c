@@ -7,6 +7,7 @@
 //   present() share() open(rate) close() pid()
 //   last() -> (runs, pid, client, state, err)
 //   take(client, who, label) -> the client taken over from, 0 none
+//   tell(was) -> bool  stamp() -> int | None
 //   play(src, held) -> entries  page(on)  seek(ms)
 //   clear() add(src, title) playlist(text, base)
 //   go(i) stop() pause(on) volume(v)
@@ -217,25 +218,18 @@ static mp_obj_t media_status(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_status_obj, media_status);
 
-// One small int over what a player shows -- the state, pause, entry,
-// volume, error, the texts' generation and the place and length in whole
-// seconds -- that moves when any of them does: a poll that finds it still
-// allocates nothing. None with no service.
+// moy_media_stamp: None with no service.
 static mp_obj_t media_stamp(void) {
-    moy_media_status_t s;
-    if (!moy_media_status(&s)) {
-        return mp_const_none;
-    }
-    uint32_t h = (uint32_t)s.state * 2u + (s.paused ? 1u : 0u);
-    h = h * 31u + (uint32_t)s.entry;
-    h = h * 31u + (uint32_t)s.volume;
-    h = h * 31u + (uint32_t)s.err;
-    h = h * 31u + s.text_gen;
-    h = h * 31u + s.at_ms / 1000u;
-    h = h * 31u + s.len_ms / 1000u;
-    return MP_OBJ_NEW_SMALL_INT(h & 0x3fffffffu);
+    int32_t h = moy_media_stamp();
+    return h < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(h);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(media_stamp_obj, media_stamp);
+
+// moy_media_tell: whether a notification went out.
+static mp_obj_t media_tell(mp_obj_t was) {
+    return mp_obj_new_bool(moy_media_tell(u32(was)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(media_tell_obj, media_tell);
 
 // A media key's consumer usage going down, answered: whether it acted (the
 // frame's job answers the keyboard's own).
@@ -317,6 +311,7 @@ static const mp_rom_map_elem_t media_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_feed_icy), MP_ROM_PTR(&media_feed_icy_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&media_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_stamp), MP_ROM_PTR(&media_stamp_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tell), MP_ROM_PTR(&media_tell_obj) },
     { MP_ROM_QSTR(MP_QSTR_key), MP_ROM_PTR(&media_key_obj) },
     { MP_ROM_QSTR(MP_QSTR_text), MP_ROM_PTR(&media_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_entry), MP_ROM_PTR(&media_entry_obj) },
