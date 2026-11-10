@@ -255,6 +255,32 @@ def test_a_pwm_and_an_adc_handle():
     assert _kopen(pid, "adc23") == H.BUSY and _kopen(pid, "adc21", "atten=3") == H.BAD
 
 
+def test_a_pwm_handle_takes_its_channel_and_timer_from_the_ledc_book():
+    """The kernel's LEDC book (native/moy_kernel/moy_ledc.h): a handle's
+    channel from the top, held by its process; a second at the same frequency
+    shares the first's timer, one at another takes its own; a machine.PWM
+    channel (the VM's) beside them is never taken; a close gives both back."""
+    from runtime.host import ledc_book as B
+    book = B.lib()
+    book.moy_ledc_reset()
+    vm = book.moy_ledc_chan_take(B.VM, False)
+    assert vm == 0
+    pid = L.spawn("t.pwm")
+    p = _kopen(pid, "pwm22", "freq=1000")
+    q = _kopen(pid, "pwm20", "freq=1000")
+    assert p > 0 and q > 0
+    assert B.holders() == [B.VM, 0, 0, 0, 0, 0, pid, pid]
+    t = book.moy_ledc_chan_timer(7)
+    assert book.moy_ledc_chan_timer(6) == t and B.cfg(t)[0] == 1000
+    assert book.moy_ledc_timer_users(t, -1) == 2
+    assert _kset(pid, q, "freq=50") == 0 and bus_sim.pwm(20)[0] == 50
+    u = book.moy_ledc_chan_timer(6)
+    assert u != t and B.cfg(u)[0] == 50 and B.cfg(t)[0] == 1000
+    assert _kclose(pid, q) == 0 and _kclose(pid, p) == 0
+    assert B.holders() == [B.VM] + [0] * 7
+    assert book.moy_ledc_timer_state(t) == B.FREE == book.moy_ledc_timer_state(u)
+    book.moy_ledc_reset()
+
 def test_a_name_or_cfg_the_console_does_not_take_is_bad():
     pid = L.spawn("t.bad")
     assert _kopen(pid, "uart9") == H.BAD and _kopen(pid, "spi1") == H.BAD

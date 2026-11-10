@@ -22,6 +22,7 @@ SRC_USERMOD_LIB_C += $(MOY_KERNEL_DIR)/moy_loop.c $(MOY_KERNEL_DIR)/moy_idle.c \
     $(MOY_KERNEL_DIR)/moy_perf.c $(MOY_KERNEL_DIR)/moy_devch.c $(MOY_KERNEL_DIR)/moy_log.c \
     $(MOY_KERNEL_DIR)/moy_loop_host.c $(MOY_KERNEL_DIR)/moy_loop_board.c \
     $(MOY_KERNEL_DIR)/moy_lease.c $(MOY_KERNEL_DIR)/moy_dev.c $(MOY_KERNEL_DIR)/moy_devbus.c \
+    $(MOY_KERNEL_DIR)/moy_ledc.c \
     $(MOY_KERNEL_DIR)/moy_lock.c $(MOY_KERNEL_DIR)/moy_proc.c \
     $(MOY_KERNEL_DIR)/moy_evq.c $(MOY_KERNEL_DIR)/moy_super.c $(MOY_KERNEL_DIR)/moy_vmq.c \
     $(MOY_KERNEL_DIR)/moy_screen_slot.c

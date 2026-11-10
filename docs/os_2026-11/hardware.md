@@ -118,7 +118,13 @@ process takes one with `moybyte.lease(name, **cfg)` (`runtime/system/leases.py`)
 lease on every call; `"pwm<n>"` and `"adc<n>"` a `machine.PWM` and a
 `machine.ADC` on a pin, and `"i2c"` a `machine.SoftI2C` on two pins of the
 gpio row (CPU-clocked, so it holds pins and no unit; a hardware I²C unit
-would be a class of the table like UART's), each needing `lease:gpio`. A
+would be a class of the table like UART's), each needing `lease:gpio`.
+An LEDC channel and timer, whoever drives them (`machine.PWM`, a compiled
+program's `pwm<n>` handle, a panel's backlight), come from the kernel's LEDC
+book (`native/moy_kernel/moy_ledc.h`; `machine.PWM` asks it through
+`tools/patch_pwm_ledc_book.py`): a channel is one holder's, PWMs at one
+frequency share a timer whoever holds them, and the VM's end gives
+`machine.PWM`'s back. A
 leased Pin's `irq` opens its edges (`moy_edge.h`) as a ring source read by a
 wake of the process alone (`moy_input_reader_only`).
 `moybyte.pins()` lists each offered row and who holds it, and the `pins`

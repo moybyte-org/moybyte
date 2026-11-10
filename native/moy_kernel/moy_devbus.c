@@ -6,6 +6,7 @@
 
 #include "moy_dev.h"
 #include "moy_lease.h"
+#include "moy_ledc.h"
 
 // A board is known by the header it has (moy_lease.c does the same).
 #if defined(__has_include)
@@ -22,6 +23,7 @@
 #include "driver/spi_master.h"
 #include "driver/uart.h"
 #include "esp_adc/adc_oneshot.h"
+#include "esp_clk_tree.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 
@@ -32,11 +34,16 @@
 #endif
 #define I2C_WAIT pdMS_TO_TICKS(50)      // machine.I2C's own timeout
 
-// The light's pair is LEDC_TIMER_3 / LEDC_CHANNEL_7 (moy_light_ledc.h).
-static const ledc_channel_t PWM_CHAN[MOY_DEVBUS_PWM_SLOTS] = { LEDC_CHANNEL_6, LEDC_CHANNEL_5 };
-static const ledc_timer_t PWM_TIMER[MOY_DEVBUS_PWM_SLOTS] = { LEDC_TIMER_2, LEDC_TIMER_1 };
-#define PWM_MAX_BITS 14u                // the S3's widest LEDC timer
-#define PWM_SRC_HZ 80000000u
+// A timer's clock and duty bits are machine.PWM's choice for the frequency
+// (ports/esp32/machine_pwm.c's set_freq), so a timer either configured
+// carries a channel of the other at that frequency as it is.
+#if SOC_LEDC_SUPPORT_APB_CLOCK
+#define PWM_CLK LEDC_USE_APB_CLK
+#elif SOC_LEDC_SUPPORT_PLL_DIV_CLOCK
+#define PWM_CLK LEDC_USE_PLL_DIV_CLK
+#else
+#define PWM_CLK LEDC_USE_XTAL_CLK
+#endif
 
 static uint32_t s_txbuf[MOY_DEVBUS_UARTS];
 
@@ -293,37 +300,90 @@ int32_t moy_devbus_i2c_write_read(uint8_t addr, const uint8_t *data, size_t n, u
 
 typedef struct {
     int pin;                    // -1: free
+    int8_t ch;                  // its LEDC channel, from the book
+    bool on;                    // the channel configured
     uint8_t bits;
+    uint32_t holder;
 } pwm_t;
 
-static pwm_t s_pwm[MOY_DEVBUS_PWM_SLOTS] = { { -1, 0 }, { -1, 0 } };
+static pwm_t s_pwm[MOY_DEVBUS_PWM_SLOTS] = { { -1, -1, false, 0, 0 }, { -1, -1, false, 0, 0 } };
 
 static uint32_t pwm_hw(uint32_t duty, uint8_t bits) {
     return (uint32_t)(((uint64_t)duty << bits) >> 16);
 }
 
-static int32_t pwm_timer(int slot, uint32_t freq) {
-    uint32_t bits = 0;
-    while (bits < PWM_MAX_BITS && ((uint64_t)freq << (bits + 1u)) <= PWM_SRC_HZ) {
-        bits++;
+// A SETTING timer configured for `freq` as machine.PWM would, and READY.
+static int32_t pwm_config(int t, uint32_t freq, uint8_t *bits) {
+    uint32_t src = 0;
+    if (esp_clk_tree_src_get_freq_hz((soc_module_clk_t)PWM_CLK,
+                                     ESP_CLK_TREE_SRC_FREQ_PRECISION_APPROX, &src) != ESP_OK
+        || freq == 0u || freq > src / 2u) {
+        return MOY_DEV_EBAD;
     }
-    for (; bits >= 1u; bits--) {
-        ledc_timer_config_t t = {
-            .speed_mode = LEDC_LOW_SPEED_MODE,
-            .duty_resolution = (ledc_timer_bit_t)bits,
-            .timer_num = PWM_TIMER[slot],
-            .freq_hz = freq,
-            .clk_cfg = LEDC_AUTO_CLK,
-        };
-        if (ledc_timer_config(&t) == ESP_OK) {
-            s_pwm[slot].bits = (uint8_t)bits;
-            return 0;
-        }
+    uint32_t r = ledc_find_suitable_duty_resolution(src, freq);
+    if (r > 16u) {
+        r = 16u;
     }
-    return MOY_DEV_EBAD;
+    if (r >= SOC_LEDC_TIMER_BIT_WIDTH) {
+        r--;
+    }
+    if (r < 1u) {
+        return MOY_DEV_EBAD;
+    }
+    ledc_timer_config_t c = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = (ledc_timer_bit_t)r,
+        .timer_num = (ledc_timer_t)t,
+        .freq_hz = freq,
+        .clk_cfg = PWM_CLK,
+    };
+    int32_t rc = esp_rc(ledc_timer_config(&c));
+    if (rc == 0) {
+        ledc_timer_rst(LEDC_LOW_SPEED_MODE, (ledc_timer_t)t);
+        moy_ledc_timer_set(t, freq, (uint8_t)r, (int32_t)PWM_CLK);
+        *bits = (uint8_t)r;
+    }
+    return rc;
 }
 
-int32_t moy_devbus_pwm_open(int pin, uint32_t freq, uint32_t duty) {
+// Channel `ch` onto a timer at `freq`: one there already, shared; its own,
+// retuned where it rides it alone; else a free one, configured.
+static int32_t pwm_timer(int ch, uint32_t freq, uint8_t *bits) {
+    for (int t = 0; t < MOY_LEDC_TIMERS; t++) {
+        if (moy_ledc_timer_join(ch, t, freq) && moy_ledc_timer_cfg(t, NULL, bits, NULL)) {
+            return t;
+        }
+    }
+    int t = moy_ledc_chan_timer(ch);
+    if (t < 0 || !moy_ledc_timer_retune(t, ch)) {
+        for (t = 0; t < MOY_LEDC_TIMERS && !moy_ledc_timer_join(ch, t, MOY_LEDC_FRESH); t++) {
+        }
+        if (t == MOY_LEDC_TIMERS) {
+            return MOY_DEV_EFULL;
+        }
+    }
+    int32_t rc = pwm_config(t, freq, bits);
+    return rc != 0 ? rc : t;
+}
+
+// The channel's output stopped and its book entry dropped; a timer it was
+// the last channel of, deconfigured.
+static void pwm_release(pwm_t *p) {
+    if (p->on) {
+        ledc_stop(LEDC_LOW_SPEED_MODE, (ledc_channel_t)p->ch, 0);
+    }
+    int t = moy_ledc_chan_drop(p->ch, p->holder);
+    if (t >= 0) {
+        ledc_timer_pause(LEDC_LOW_SPEED_MODE, (ledc_timer_t)t);
+        ledc_timer_config_t c = { .speed_mode = LEDC_LOW_SPEED_MODE,
+                                  .timer_num = (ledc_timer_t)t, .deconfigure = true };
+        ledc_timer_config(&c);
+        moy_ledc_timer_closed(t);
+    }
+    *p = (pwm_t){ -1, -1, false, 0, 0 };
+}
+
+int32_t moy_devbus_pwm_open(uint32_t holder, int pin, uint32_t freq, uint32_t duty) {
     int slot = 0;
     while (slot < (int)MOY_DEVBUS_PWM_SLOTS && s_pwm[slot].pin >= 0) {
         slot++;
@@ -331,52 +391,62 @@ int32_t moy_devbus_pwm_open(int pin, uint32_t freq, uint32_t duty) {
     if (slot == (int)MOY_DEVBUS_PWM_SLOTS) {
         return MOY_DEV_EFULL;
     }
-    int32_t rc = pwm_timer(slot, freq);
+    pwm_t *p = &s_pwm[slot];
+    int ch = moy_ledc_chan_take(holder, true);
+    if (ch < 0) {
+        return MOY_DEV_EFULL;
+    }
+    *p = (pwm_t){ pin, (int8_t)ch, false, 0, holder };
+    int32_t t = pwm_timer(ch, freq, &p->bits);
+    int32_t rc = t < 0 ? t : 0;
+    if (rc == 0) {
+        ledc_channel_config_t c = {
+            .gpio_num = pin,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .channel = (ledc_channel_t)ch,
+            .intr_type = LEDC_INTR_DISABLE,
+            .timer_sel = (ledc_timer_t)t,
+            .duty = pwm_hw(duty, p->bits),
+            .hpoint = 0,
+        };
+        rc = esp_rc(ledc_channel_config(&c));
+        p->on = rc == 0;
+    }
     if (rc != 0) {
+        pwm_release(p);
         return rc;
     }
-    ledc_channel_config_t c = {
-        .gpio_num = pin,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = PWM_CHAN[slot],
-        .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = PWM_TIMER[slot],
-        .duty = pwm_hw(duty, s_pwm[slot].bits),
-        .hpoint = 0,
-    };
-    rc = esp_rc(ledc_channel_config(&c));
-    if (rc != 0) {
-        ledc_timer_config_t t = { .speed_mode = LEDC_LOW_SPEED_MODE,
-                                  .timer_num = PWM_TIMER[slot], .deconfigure = true };
-        ledc_timer_pause(LEDC_LOW_SPEED_MODE, PWM_TIMER[slot]);
-        ledc_timer_config(&t);
-        return rc;
-    }
-    s_pwm[slot].pin = pin;
     return slot;
 }
 
 int32_t moy_devbus_pwm_set(int slot, uint32_t freq, uint32_t duty) {
+    if (slot < 0 || slot >= (int)MOY_DEVBUS_PWM_SLOTS || s_pwm[slot].pin < 0) {
+        return MOY_DEV_EABSENT;
+    }
+    pwm_t *p = &s_pwm[slot];
     if (freq != 0u) {
-        int32_t rc = pwm_timer(slot, freq);
-        if (rc != 0) {
-            return rc;
+        int was = moy_ledc_chan_timer(p->ch);
+        int32_t t = pwm_timer(p->ch, freq, &p->bits);
+        if (t < 0) {
+            return t;
+        }
+        if (t != was) {
+            int32_t rc = esp_rc(ledc_bind_channel_timer(LEDC_LOW_SPEED_MODE,
+                                                        (ledc_channel_t)p->ch, (ledc_timer_t)t));
+            if (rc != 0) {
+                return rc;
+            }
         }
     }
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, PWM_CHAN[slot], pwm_hw(duty, s_pwm[slot].bits));
-    return esp_rc(ledc_update_duty(LEDC_LOW_SPEED_MODE, PWM_CHAN[slot]));
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)p->ch, pwm_hw(duty, p->bits));
+    return esp_rc(ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)p->ch));
 }
 
 void moy_devbus_pwm_close(int slot) {
     if (slot < 0 || slot >= (int)MOY_DEVBUS_PWM_SLOTS || s_pwm[slot].pin < 0) {
         return;
     }
-    ledc_stop(LEDC_LOW_SPEED_MODE, PWM_CHAN[slot], 0);
-    ledc_timer_pause(LEDC_LOW_SPEED_MODE, PWM_TIMER[slot]);
-    ledc_timer_config_t t = { .speed_mode = LEDC_LOW_SPEED_MODE, .timer_num = PWM_TIMER[slot],
-                              .deconfigure = true };
-    ledc_timer_config(&t);
-    s_pwm[slot].pin = -1;
+    pwm_release(&s_pwm[slot]);
 }
 
 // -- adc -----------------------------------------------------------------------------
@@ -521,14 +591,15 @@ typedef struct {
 
 typedef struct {
     int pin;                    // -1: free
-    uint32_t freq, duty;
+    int ch;                     // its LEDC channel, from the book
+    uint32_t freq, duty, holder;
 } sim_pwm_t;
 
 static sim_uart_t s_uart[MOY_DEVBUS_UARTS];
 static sim_spi_t s_spi[MOY_DEVBUS_SPIS];
 static sim_i2c_t s_i2c_dev[SIM_I2C_DEVS];
 static bool s_i2c;
-static sim_pwm_t s_pwm[MOY_DEVBUS_PWM_SLOTS] = { { -1, 0, 0 }, { -1, 0, 0 } };
+static sim_pwm_t s_pwm[MOY_DEVBUS_PWM_SLOTS] = { { -1, -1, 0, 0, 0 }, { -1, -1, 0, 0, 0 } };
 static uint16_t s_adc[MOY_LEASE_PIN_MAX];
 static uint8_t s_adc_on[MOY_LEASE_PIN_MAX];
 
@@ -701,10 +772,46 @@ int32_t moy_devbus_i2c_write_read(uint8_t addr, const uint8_t *data, size_t n, u
     return r < 0 ? r : moy_devbus_i2c_read(addr, out, cap);
 }
 
-int32_t moy_devbus_pwm_open(int pin, uint32_t freq, uint32_t duty) {
+// The board's book walk (a timer at the frequency, shared; its own retuned;
+// a free one), with no hardware: what a timer was set to is the book's.
+static int sim_pwm_timer(int ch, uint32_t freq) {
+    for (int t = 0; t < MOY_LEDC_TIMERS; t++) {
+        if (moy_ledc_timer_join(ch, t, freq)) {
+            return t;
+        }
+    }
+    int t = moy_ledc_chan_timer(ch);
+    if (t < 0 || !moy_ledc_timer_retune(t, ch)) {
+        for (t = 0; t < MOY_LEDC_TIMERS && !moy_ledc_timer_join(ch, t, MOY_LEDC_FRESH); t++) {
+        }
+        if (t == MOY_LEDC_TIMERS) {
+            return -1;
+        }
+    }
+    moy_ledc_timer_set(t, freq, 13u, 0);
+    return t;
+}
+
+static void sim_pwm_release(sim_pwm_t *p) {
+    int t = moy_ledc_chan_drop(p->ch, p->holder);
+    if (t >= 0) {
+        moy_ledc_timer_closed(t);
+    }
+    *p = (sim_pwm_t){ -1, -1, 0, 0, 0 };
+}
+
+int32_t moy_devbus_pwm_open(uint32_t holder, int pin, uint32_t freq, uint32_t duty) {
     for (int slot = 0; slot < (int)MOY_DEVBUS_PWM_SLOTS; slot++) {
         if (s_pwm[slot].pin < 0) {
-            s_pwm[slot] = (sim_pwm_t){ pin, freq, duty };
+            int ch = moy_ledc_chan_take(holder, true);
+            if (ch < 0) {
+                return MOY_DEV_EFULL;
+            }
+            s_pwm[slot] = (sim_pwm_t){ pin, ch, freq, duty, holder };
+            if (sim_pwm_timer(ch, freq) < 0) {
+                sim_pwm_release(&s_pwm[slot]);
+                return MOY_DEV_EFULL;
+            }
             periph(pin, true);
             return slot;
         }
@@ -713,7 +820,13 @@ int32_t moy_devbus_pwm_open(int pin, uint32_t freq, uint32_t duty) {
 }
 
 int32_t moy_devbus_pwm_set(int slot, uint32_t freq, uint32_t duty) {
+    if (slot < 0 || slot >= (int)MOY_DEVBUS_PWM_SLOTS || s_pwm[slot].pin < 0) {
+        return MOY_DEV_EABSENT;
+    }
     if (freq != 0u) {
+        if (sim_pwm_timer(s_pwm[slot].ch, freq) < 0) {
+            return MOY_DEV_EFULL;
+        }
         s_pwm[slot].freq = freq;
     }
     s_pwm[slot].duty = duty;
@@ -721,8 +834,8 @@ int32_t moy_devbus_pwm_set(int slot, uint32_t freq, uint32_t duty) {
 }
 
 void moy_devbus_pwm_close(int slot) {
-    if (slot >= 0 && slot < (int)MOY_DEVBUS_PWM_SLOTS) {
-        s_pwm[slot].pin = -1;
+    if (slot >= 0 && slot < (int)MOY_DEVBUS_PWM_SLOTS && s_pwm[slot].pin >= 0) {
+        sim_pwm_release(&s_pwm[slot]);
     }
 }
 

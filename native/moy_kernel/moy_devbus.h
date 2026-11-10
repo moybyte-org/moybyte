@@ -11,9 +11,10 @@
 // BUSY, and a close ends only what its open began.
 //   - The I2C unit is MOY_DEVBUS_I2C_PORT, never the kernel's bus
 //     (MOY_BUS_I2C_PORT, the input task's on every board): one holder at a time.
-//   - The LEDC channels and timers are MOY_DEVBUS_PWM_SLOTS pairs below the
-//     light's (moy_light_ledc.h) and above where MicroPython's machine.PWM
-//     starts its own (from 0 up, in a book of its own).
+//   - A PWM's LEDC channel and timer are the LEDC book's (moy_ledc.h), which
+//     machine.PWM and the backlight take theirs from too: a channel from the
+//     top, held by the opening process, on a timer shared with any channel at
+//     the same frequency, configured as machine.PWM would configure it.
 //
 // ON THE HOST, a twin whose far end a test moves (moy_devbus_sim_*, no-ops on
 // a board): a UART's peer feeds its RX, reads what it wrote and joins TX to
@@ -84,9 +85,10 @@ int32_t moy_devbus_i2c_read(uint8_t addr, uint8_t *out, size_t n);
 int32_t moy_devbus_i2c_write_read(uint8_t addr, const uint8_t *data, size_t n, uint8_t *out,
                                   size_t cap);
 
-// A PWM on `pin` at `freq` Hz and `duty` (0..65535): its slot (>= 0), FULL
-// where every slot drives one. Set: the slot's duty, and its freq (0 keeps it).
-int32_t moy_devbus_pwm_open(int pin, uint32_t freq, uint32_t duty);
+// A PWM on `pin` at `freq` Hz and `duty` (0..65535), held by process
+// `holder`: its slot (>= 0), FULL where every slot drives one or the book has
+// no channel or timer for it. Set: the slot's duty, and its freq (0 keeps it).
+int32_t moy_devbus_pwm_open(uint32_t holder, int pin, uint32_t freq, uint32_t duty);
 int32_t moy_devbus_pwm_set(int slot, uint32_t freq, uint32_t duty);
 void moy_devbus_pwm_close(int slot);
 

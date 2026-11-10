@@ -69,6 +69,11 @@ moybyte_patch_native_code_free
 # whole boot (tools/patch_usj_rx_init.py).
 moybyte_patch_usj_rx_init
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # 2e) REPR_C -- FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT (the Waveshare's
 #     build.sh carries the measured argument): every board that can hold a
 #     link runs REPR_C. With it, the map-lookup cache index re-aimed for

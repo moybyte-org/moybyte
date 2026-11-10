@@ -88,6 +88,11 @@ moybyte_patch_native_code_free
 # whole boot (tools/patch_usj_rx_init.py).
 moybyte_patch_usj_rx_init
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # 2c) PSRAM temperature retune (#169) -- REQUIRED by the 120MHz MSPI profile in
 #     sdkconfig.board (adopted 2026-08-19).
 moybyte_patch_psram_retune

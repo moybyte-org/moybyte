@@ -415,6 +415,17 @@ moybyte_patch_usj_rx_init() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_usj_rx_init.py" "${MPY_DIR}" || exit 1
 }
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book
+# (native/moy_kernel/moy_ledc.h), which a compiled program's PWM handles and a
+# panel's backlight take theirs from too, so none drives another's, and
+# channels at one frequency share a timer whoever holds them.
+# tools/patch_pwm_ledc_book.py is the patch; all-or-nothing, idempotent. Every
+# board that links moy_kernel takes it: the book is the kernel's.
+moybyte_patch_pwm_ledc_book() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_pwm_ledc_book.py" "${MPY_DIR}" || exit 1
+}
+
 # The mDNS responder's four function-static scratch buffers (about 1.8 KB of
 # internal .bss in every image that links espressif/mdns) become one PSRAM
 # block mdns_init allocates and mdns_free frees, so a console whose responder

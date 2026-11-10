@@ -127,6 +127,11 @@ moybyte_patch_thread_state_tls
 #     the wake.
 moybyte_patch_stdin_ring
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # DECLINED moybyte_patch_usj_rx_init -- the USB-Serial/JTAG console's start.
 # This board's console is the CH343's UART, whose ISR is installed with the
 # port and takes every byte as it arrives.

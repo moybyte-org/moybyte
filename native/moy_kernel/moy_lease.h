@@ -45,7 +45,8 @@
 // are dev_handles.py's), so its holder's half of it lives in the VM's heap.
 // The kernel's VM down (a soft reset and a stop alike, moy_kernel.c) drops
 // them all (moy_lease_vm_stop), each as its owner's sweep would, so the
-// next VM finds the drivers closed and free. What is not the VM's stays:
+// next VM finds the drivers closed and free; machine.PWM's LEDC channels go
+// from the LEDC book with them (moy_ledc.h). What is not the VM's stays:
 // the radio's rows (THE RADIO) and a C service's pins (the webhost's).
 //
 // THE RADIO. The WiFi station is off unless something holds it (the

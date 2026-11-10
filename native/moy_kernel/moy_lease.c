@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "moy_htab.h"
+#include "moy_ledc.h"
 
 // A board is known by the header it has (moy_input.h says why); a board that
 // stages no moy_input (the Zero) leases pins with no edges.
@@ -904,6 +905,7 @@ uint32_t moy_lease_sweep(uint32_t owner) {
 uint32_t moy_lease_vm_stop(void) {
     lock();
     uint32_t r = vm_stop_u();
+    moy_ledc_vm_drop();
     unlock();
     return r;
 }

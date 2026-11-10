@@ -5,9 +5,11 @@
 //
 // A level is moy_light.h's (0 off, 255 full). The
 // channel is configured on the first call, which also takes the pin from
-// whatever plain-GPIO parking the module's init gave it. Timer 3 and channel 7
-// are the last of each, the ones machine.PWM's first-free allocation reaches
-// last.
+// whatever plain-GPIO parking the module's init gave it, and reserves its
+// pair in the LEDC book first (native/moy_kernel/moy_ledc.h: the timer SOLO),
+// so machine.PWM and a compiled program's PWM handles never take either.
+// Timer 3 and channel 7 are the last of each, the far end from machine.PWM's
+// first-free allocation.
 
 #ifndef MOY_LIGHT_LEDC_H
 #define MOY_LIGHT_LEDC_H
@@ -16,6 +18,7 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "moy_ledc.h"
 #include "moy_light.h"
 
 #define MOY_LIGHT_LEDC_TIMER LEDC_TIMER_3
@@ -49,7 +52,9 @@ static inline void moy_light_ledc_set(int gpio, bool active_low, int level) {
             .hpoint = 0,
             .flags.output_invert = active_low ? 1 : 0,
         };
-        if (ledc_timer_config(&t) == ESP_OK && ledc_channel_config(&c) == ESP_OK) {
+        if (moy_ledc_reserve(MOY_LIGHT_LEDC_CHAN, MOY_LIGHT_LEDC_TIMER, MOY_LEDC_LIGHT,
+                             MOY_LIGHT_LEDC_HZ, MOY_LIGHT_LEDC_BITS, (int32_t)LEDC_AUTO_CLK)
+            && ledc_timer_config(&t) == ESP_OK && ledc_channel_config(&c) == ESP_OK) {
             state = 1;
             return;
         }

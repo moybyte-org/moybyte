@@ -741,7 +741,7 @@ static int32_t pin_bus_open(dev_row_t *d, uint32_t perms, int pin, const char *c
         return rc;
     }
     if (d->kind == K_PWM) {
-        rc = moy_devbus_pwm_open(pin, d->freq, d->duty);
+        rc = moy_devbus_pwm_open(d->pid, pin, d->freq, d->duty);
         d->slot = (int8_t)rc;
     } else {
         rc = moy_devbus_adc_open(pin);

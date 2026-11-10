@@ -43,7 +43,8 @@
 //            `cap` (a register read); BAD before an addr, ABSENT where no
 //            device answers, IO where the bus times out
 //   pwm<n>   pin n of the gpio row driven by an LEDC channel (`lease:gpio`;
-//            MOY_DEVBUS_PWM_SLOTS at a time, FULL past them): cfg freq
+//            MOY_DEVBUS_PWM_SLOTS at a time, FULL past them or where the
+//            LEDC book, moy_ledc.h, has no channel or timer left): cfg freq
 //            (5000) duty (0..65535, 32768); set the same; get freq, duty
 //   adc<n>   pin n of the gpio row read by its ADC channel (`lease:gpio`; BAD
 //            for a pin with none, BUSY for a unit MicroPython's machine.ADC

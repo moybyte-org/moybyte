@@ -72,6 +72,12 @@ moybyte_patch_slice_store
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
+
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # DECLINED moybyte_patch_thread_state_tls -- the VM's thread state as a
 # `__thread` variable. Measured on the P4s (RISC-V), where the TLS slot's
 # lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
