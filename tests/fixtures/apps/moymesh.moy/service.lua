@@ -11,6 +11,8 @@
 -- nothing: a Meshtastic CLIENT_MUTE that hears the channel and talks on it.
 -- A Lua service runs on a task of its own, so it keeps listening through a
 -- game that stops the VM.
+-- The app's id and its regions are mesh.lua's, which runs ahead of this
+-- script here as it does ahead of main.lua in the window.
 --
 -- THE PROTOCOL, from the Meshtastic firmware (src/mesh/RadioInterface.*,
 -- Channels.cpp, CryptoEngine.cpp) and its protobufs (mesh.proto,
@@ -43,7 +45,6 @@
 -- 0x7fffffff is negative here, packs and prints as the same 32 bits, and
 -- compares unsigned through math.ult.
 
-ME = "moymesh"
 BROADCAST = 0xFFFFFFFF
 TEXT = 1                                -- portnums.proto: TEXT_MESSAGE_APP
 KEEP = 30                               -- messages the log keeps
@@ -59,37 +60,8 @@ HEADER = 16
 -- The well-known key one-byte PSKs index (Channels.h, defaultpsk).
 DEFAULT_KEY = "\xd4\xf1\xbb\x3a\x20\x29\x07\x59\xf0\xbc\xff\xab\xcf\x4e\x69\x01"
 
--- Meshtastic's regions an SX1262 reaches (RadioInterface.cpp, RDEF): the
--- band's start and end (Hz) and its power limit (dBm). The radio's own
--- ceiling is 22 dBm.
-REGIONS = {
-    EU_868 = { 869400000, 869650000, 27 },
-    EU_433 = { 433000000, 434000000, 10 },
-    US = { 902000000, 928000000, 30 },
-    ANZ = { 915000000, 928000000, 30 },
-    ANZ_433 = { 433050000, 434790000, 14 },
-    CN = { 470000000, 510000000, 19 },
-    JP = { 920500000, 923500000, 13 },
-    RU = { 868700000, 869200000, 20 },
-    KR = { 920000000, 923000000, 23 },
-    TW = { 920000000, 925000000, 27 },
-    IN = { 865000000, 867000000, 30 },
-    NZ_865 = { 864000000, 868000000, 36 },
-    TH = { 920000000, 925000000, 27 },
-    UA_433 = { 433000000, 434700000, 10 },
-    UA_868 = { 868000000, 868600000, 14 },
-    MY_433 = { 433000000, 435000000, 20 },
-    MY_919 = { 919000000, 924000000, 27 },
-    SG_923 = { 917000000, 925000000, 20 },
-    PH_433 = { 433000000, 434700000, 10 },
-    PH_868 = { 868000000, 869400000, 14 },
-    PH_915 = { 915000000, 918000000, 24 },
-    KZ_433 = { 433075000, 434775000, 10 },
-    KZ_863 = { 863000000, 868000000, 30 },
-    NP_865 = { 865000000, 868000000, 30 },
-    BR_902 = { 902000000, 907500000, 30 },
-}
-REGION = "EU_868"
+-- The radio's own power ceiling (dBm); a region's own limit is its band's
+-- third field (BANDS, mesh.lua).
 POWER_MAX = 22
 
 local pack, unpack, byte, char, fmt = string.pack, string.unpack, string.byte, string.char,
@@ -113,13 +85,13 @@ end
 -- The centre (Hz) of the slot `name` hashes to in `region`.
 function frequency(region, name, bw)
     name, bw = name or PRESET, bw or BW
-    local r = REGIONS[region]
+    local r = BANDS[region]
     local slots = (r[2] - r[1]) // bw
     return r[1] + bw // 2 + umod(djb2(name), slots) * bw
 end
 
 function power(region)
-    return math.min(REGIONS[region][3], POWER_MAX)
+    return math.min(BANDS[region][3], POWER_MAX)
 end
 
 -- A channel's AES key from its PSK: a one-byte PSK indexes the well-known
@@ -379,7 +351,7 @@ end
 
 local function region()
     local r = prefs.get("region")
-    return REGIONS[r] and r or REGION
+    return BANDS[r] and r or REGION
 end
 
 local function tune()

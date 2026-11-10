@@ -7,11 +7,6 @@
 -- whatever room `_layout` was given, and a window too narrow for a row's
 -- signal readout lists the text alone.
 
-ME = "moymesh"
-REGIONS = {"EU_868", "EU_433", "US", "ANZ", "ANZ_433", "CN", "JP", "RU", "KR", "TW",
-           "IN", "NZ_865", "TH", "UA_433", "UA_868", "MY_433", "MY_919", "SG_923",
-           "PH_433", "PH_868", "PH_915", "KZ_433", "KZ_863", "NP_865", "BR_902"}
-
 rows = {}
 cur = 1
 text = ""

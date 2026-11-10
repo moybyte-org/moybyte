@@ -60,13 +60,15 @@ end
 
 
 class _Codec:
-    """service.lua's functions on a Lua state of their own."""
+    """service.lua's functions on a Lua state of their own, after mesh.lua
+    as the service runs them."""
 
     def __init__(self):
         from runtime import lua_binding
         self.run = lua_binding.HostLuaRun(bytearray(64 * 64 * 2), 64, 64)
-        with open(os.path.join(CART, "service.lua")) as f:
-            self.run.exec(f.read(), "service.lua")
+        for name in ("mesh.lua", "service.lua"):
+            with open(os.path.join(CART, name)) as f:
+                self.run.exec(f.read(), name)
         self.run.exec(GLUE)
 
     def __call__(self, expr):

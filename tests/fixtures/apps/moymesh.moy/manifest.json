@@ -5,6 +5,10 @@
   "id": "moymesh",
   "runtime": "lua",
   "main": "main.lua",
+  "sources": [
+    "mesh.lua",
+    "main.lua"
+  ],
   "description": "Text messages on the LoRa radio, on the default LongFast channel. Works with Meshtastic.",
   "moybyte": {
     "type": "app",
