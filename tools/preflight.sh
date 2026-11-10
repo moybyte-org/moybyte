@@ -170,7 +170,7 @@ web_touched() {
     case "${f}" in
       firmware/web_runner/*|runtime/*|device/*|system_carts/*|native/*|ports/jet/*) return 0 ;;
       tests/test_web_*|tests/web_e2e.py|tests/cart_store_fixtures.py) return 0 ;;
-      tests/fixtures/*|tests/test_moy_tty.py|tests/tier_frame.py) return 0 ;;
+      tests/fixtures/*|tests/test_moy_tty.py|tests/tier_frame.py|tests/crypto_vectors.py) return 0 ;;
       tools/jet_cart.py|tools/zopfli_gz.py|tools/wasm_cart.py) return 0 ;;
       tools/p8_import.py|tools/p8_lua_port.py|tools/p8_writer.py) return 0 ;;
       .github/workflows/web-e2e.yml) return 0 ;;
@@ -269,7 +269,7 @@ step "desktop MicroPython with the native usermods" "${IN[@]}" make unix-micropy
 step "docs agree with the tree"                     "${PY}" tools/check_docs.py
 # CI's cached step: the toolchain the showcase cart's goldens build with,
 # fetched by its pinned sha256 when absent (a no-op when it is here).
-step "wasi-sdk for the compiled showcase cart"      "${PY}" tools/jet_cart.py --toolchain
+step "wasi-sdk for the compiled showcase cart and the WASI commands" "${PY}" tools/jet_cart.py --toolchain
 # CI's cached step too: the pinned wamrc the AOT checks compile with, fetched
 # and hash-checked when absent.
 step "the pinned wamrc for the AOT checks"          "${PY}" tools/wasm_module.py compilers
