@@ -50,6 +50,7 @@ target_sources(usermod_moy_kernel INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_super.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_vmq.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_screen_slot.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_status.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_evq.c
 )
 

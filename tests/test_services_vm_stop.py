@@ -448,9 +448,12 @@ def test_a_wasi_service_listens_and_its_alarm_rings_through_a_vm_stop(
         tmp_path, wasi_built, fresh, monkeypatch):
     """`on` and `at` are the kernel's on the program's own task
     (native/os_calls.json, how "here"): with the VM down, a WASI service
-    listens on a name and hears it, and an alarm it sets then rings, the
-    screen's wake reaching the console's first frame back. Without `alarms`
-    its alarm is refused (DENIED, its errno EACCES)."""
+    listens on a name and hears it, puts a status item in the bar and sets its
+    state (native/moy_kernel/moy_status.h), and an alarm it sets then rings,
+    the screen's wake reaching the console's first frame back, whose bar
+    shows the item; the service's end sweeps it. Without `alarms` its alarm
+    is refused (DENIED, its errno EACCES)."""
+    from runtime.status_items import ITEMS, PAUSED
     ws = _two_ws(tmp_path, [(wasi_built, "wasi_svc.moy",
                              {"permissions": ["alarms"], "receives": ["wake", "ring"]})])
     s = fresh
@@ -468,6 +471,9 @@ def test_a_wasi_service_listens_and_its_alarm_rings_through_a_vm_stop(
         assert time.monotonic() - t0 < 5, _texts(since, pid)
         _during(10)
     assert "on.ring 0 errno 0" in _texts(since, pid)
+    assert any(t.startswith("status.kernel ") and t.endswith(" 0 errno 0")
+               for t in _texts(since, pid)), _texts(since, pid)
+    assert moy_evq.status_get(1) is not None or moy_evq.status_get(2) is not None
     assert moy_evq.send(peer, "wasi.svc", "ring", "[]")[0] == 1
     t0 = time.monotonic()
     while not any(t.startswith("moybyte.at from system") for t in _texts(since, pid)):
@@ -478,7 +484,9 @@ def test_a_wasi_service_listens_and_its_alarm_rings_through_a_vm_stop(
     s2, _started = _back(ws, rec, door, monkeypatch)
     s2.tick()
     assert woke == [pid], "the alarm's screen wake reaches the console's next frame"
+    assert [(it.pid, it.icon, it.state) for it in ITEMS.shown] == [(pid, "pulse", PAUSED)]
     assert s2.stop(pid) and s2.procs[pid].code == 0
+    assert ITEMS.count() == 0, "its end sweeps its item"
     moy_evq.close(peer)
 
 

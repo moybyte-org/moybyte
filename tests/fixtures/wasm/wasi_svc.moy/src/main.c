@@ -22,8 +22,9 @@
 // handle it never had, each answer printed with its errno, and keeps the
 // item until the service ends, a press in its panel heard as the system's
 // message "moybyte.status" [item, id, value]; a "wake" carrying ["kernel"]
-// listens on "ring" (each one heard printing "rung") and sets an alarm a
-// second off, heard as "moybyte.at"; a "wake" carrying ["timers"] asks for
+// listens on "ring" (each one heard printing "rung"), sets an alarm a
+// second off, heard as "moybyte.at", and puts a status item in the bar in
+// its paused state, kept until the service ends; a "wake" carrying ["timers"] asks for
 // minute-long timers until the console answers FULL, printing how many it
 // got and that answer's errno, then cancels all but the first, which it keeps
 // until the service ends; a "wake" carrying ["front"] listens
@@ -377,6 +378,9 @@ int main(void) {
             printf("on.ring %d errno %d\n", r, r < 0 ? errno : 0);
             r = (int)moy_at((int32_t)time(NULL) + 1);
             printf("at.kernel %d errno %d\n", r > 0, r < 0 ? errno : 0);
+            int h = (int)moy_status_show("pulse", MOY_STATUS_ON, 0);
+            r = h > 0 ? (int)moy_status_state(h, MOY_STATUS_PAUSED) : h;
+            printf("status.kernel %d %d errno %d\n", h, r, r < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "ring") == 0) {
             printf("rung\n");

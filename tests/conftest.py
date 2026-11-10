@@ -371,6 +371,7 @@ def _processes_reset():
         N.NOTES.reset()
     SI = sys.modules.get("runtime.status_items")
     if SI is not None:
+        SI.ITEMS.sync()
         for it in SI.ITEMS.slots:
             if it.pid:
                 SI.ITEMS._free(it)

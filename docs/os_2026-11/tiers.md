@@ -128,8 +128,10 @@ costs are #227's.
   (with LoRaWAN), `mic`, `ble`, `usb`, `midi` and `camera` devices, the
   media service and the `pins` permission's pins, `hardware.md` §1, §3 and
   §4), and the status item `moy_status_show` to `moy_status_remove` (a
-  panel the shell draws, a press heard as the system's message
-  `moybyte.status`, `docs/app_api_v1.md` §10). Each is
+  slot of the kernel's table, `native/moy_kernel/moy_status.h`, written on
+  the program's own task but for its panel, which the shell draws; a press
+  heard as the system's message `moybyte.status`, `docs/app_api_v1.md`
+  §10). Each is
   its role table row run through the ROLE door for the process's app run: a
   grant the shell makes for the command, owned by its pid, over the roles
   its granted permissions name (`native/moy_elf/README.md`). The nav row and
@@ -301,7 +303,8 @@ generated from the source; the wakes `every`, `after`, `at` and `cancel`;
 and item rows, `service_stop`, `service_running` and `share`, each its role table row for
 the grant the program's start made, run as a C program's is: hopped to the
 VM's task, or, for a row `how` "here" (the files, prefs and clipboard-write
-rows, the device handles, the wakes, `service_stop`, `service_running`), run on the program's own task,
+rows, the device handles, the wakes, `service_stop`, `service_running`,
+the status item's but its panel), run on the program's own task,
 hopped only where the kernel's half answers NEEDS_VM (`moy_wasi.c`'s THE APP ROWS); and an app's `moybyte.app`, its
 roles' rows. Those are rows of
 the one source (§1): each import is `<role>_<verb>` at the WAMR signature its

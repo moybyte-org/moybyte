@@ -18,6 +18,14 @@ int moy_evq_send(uint32_t from, const char *app, const char *name, const char *a
 int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len) __attribute__((weak));
 int moy_evq_listen(uint32_t pid, const char *name, bool on) __attribute__((weak));
 int moy_evq_at(uint32_t pid, int64_t t, uint32_t *id) __attribute__((weak));
+
+// The bar's status items (native/moy_kernel/moy_status.h; its codes are this
+// layer's, FULL, BAD and ABSENT): weak, for a build of the layer alone, where
+// a status row answers STALE.
+int moy_status_add(uint32_t pid, const char *icon, size_t n, int32_t order, bool compiled)
+    __attribute__((weak));
+int moy_status_show(uint32_t pid, int h, int state) __attribute__((weak));
+int moy_status_remove(uint32_t pid, int h) __attribute__((weak));
 void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
 
 // A compiled program's device handles (native/moy_kernel/moy_dev.h): weak,
@@ -1767,6 +1775,8 @@ static int no_args(int row) {
         case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL:
         case MOY_ROW_MOYBYTE_SEND: case MOY_ROW_MOYBYTE_LOG:
         case MOY_ROW_MOYBYTE_ON: case MOY_ROW_MOYBYTE_AT:
+        case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
+        case MOY_ROW_MOYBYTE_STATUS_REMOVE:
         case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
         case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
         case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
@@ -1907,6 +1917,47 @@ static int32_t at_row(moy_appabi_t *a, uint32_t h, args_t *f) {
     int rc = moy_evq_at(pid, t, &id);
     return rc == 0 ? (int32_t)id : rc == EVQ_DENIED ? -MOY_APP_DENIED
            : rc == EVQ_FULL ? -MOY_APP_FULL : -MOY_APP_STALE;
+}
+
+// A compiled process's status item (moybyte.status_show, status_state,
+// status_remove): a slot of the kernel's table (moy_status.h) as the
+// process the grant names, on its own task, which the console reads to
+// draw. A show answers the item's handle (FULL where the bar holds
+// MOY_STATUS_CAP, BAD for an empty or long icon or a state out of range),
+// a state 0, a remove 0, each ABSENT for a handle that is no compiled item
+// of the process's. Its panel is described through the VM (status_panel).
+static int32_t status_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
+    size_t in = 0;
+    const uint8_t *icon = NULL;
+    int32_t item = 0;
+    if (row == MOY_ROW_MOYBYTE_STATUS_SHOW) {
+        icon = arg_field(f, &in);
+    } else {
+        item = arg_int(f);
+    }
+    int32_t state = row != MOY_ROW_MOYBYTE_STATUS_REMOVE ? arg_int(f) : 0;
+    int32_t order = row == MOY_ROW_MOYBYTE_STATUS_SHOW ? arg_int(f) : 0;
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, row);
+    if (pid == 0u || moy_status_add == NULL) {
+        return -MOY_APP_STALE;
+    }
+    if (row == MOY_ROW_MOYBYTE_STATUS_REMOVE) {
+        return moy_status_remove(pid, item);
+    }
+    if (row == MOY_ROW_MOYBYTE_STATUS_STATE) {
+        return moy_status_show(pid, item, state);
+    }
+    if (state < 0 || state > 2) {
+        return -MOY_APP_BAD;
+    }
+    int got = moy_status_add(pid, (const char *)icon, in, order, true);
+    if (got > 0) {
+        moy_status_show(pid, got, state);
+    }
+    return got;
 }
 
 static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
@@ -2325,6 +2376,9 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return on_row(a, g, f);
         case MOY_ROW_MOYBYTE_AT:
             return at_row(a, g, f);
+        case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
+        case MOY_ROW_MOYBYTE_STATUS_REMOVE:
+            return status_row(a, g, row, f);
         case MOY_ROW_MOYBYTE_RANDOM: {
             int32_t want = arg_int(f);
             if (f->bad || f->at != f->n) {

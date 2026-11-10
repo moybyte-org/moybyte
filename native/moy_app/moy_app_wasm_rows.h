@@ -365,12 +365,12 @@ static int32_t w_moybyte_status_show(void *e, const uint8_t *icon, uint32_t icon
                                      int32_t order) {
     uint8_t q_state[4], q_order[4];
     span_t f[3] = { { icon, icon_n }, NUM(q_state, state), NUM(q_order, order) };
-    return run(e, HOP, MOY_T_MOYBYTE_STATUS_SHOW, f, 3, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_STATUS_SHOW, f, 3, NULL, 0);
 }
 static int32_t w_moybyte_status_state(void *e, int32_t item, int32_t state) {
     uint8_t q_item[4], q_state[4];
     span_t f[2] = { NUM(q_item, item), NUM(q_state, state) };
-    return run(e, HOP, MOY_T_MOYBYTE_STATUS_STATE, f, 2, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_STATUS_STATE, f, 2, NULL, 0);
 }
 static int32_t w_moybyte_status_panel(void *e, int32_t item, const uint8_t *rows,
                                       uint32_t rows_n) {
@@ -381,7 +381,7 @@ static int32_t w_moybyte_status_panel(void *e, int32_t item, const uint8_t *rows
 static int32_t w_moybyte_status_remove(void *e, int32_t item) {
     uint8_t q_item[4];
     span_t f[1] = { NUM(q_item, item) };
-    return run(e, HOP, MOY_T_MOYBYTE_STATUS_REMOVE, f, 1, NULL, 0);
+    return run(e, HERE, MOY_T_MOYBYTE_STATUS_REMOVE, f, 1, NULL, 0);
 }
 
 // The natives, in their import names' order, and the table row each serves.

@@ -366,7 +366,7 @@ int32_t moy_os_moy_status_show(const char *icon, int32_t state, int32_t order) {
         { NULL, 0u, state, MOY_OS_ARG_INT },
         { NULL, 0u, order, MOY_OS_ARG_INT },
     };
-    return moy_os_call(196u, MOY_OS_HOP, a, 3, NULL, 0u);   // moybyte.status_show
+    return moy_os_call(196u, MOY_OS_HERE, a, 3, NULL, 0u);   // moybyte.status_show
 }
 
 int32_t moy_os_moy_status_state(int32_t item, int32_t state) {
@@ -374,7 +374,7 @@ int32_t moy_os_moy_status_state(int32_t item, int32_t state) {
         { NULL, 0u, item, MOY_OS_ARG_INT },
         { NULL, 0u, state, MOY_OS_ARG_INT },
     };
-    return moy_os_call(197u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.status_state
+    return moy_os_call(197u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.status_state
 }
 
 int32_t moy_os_moy_status_panel(int32_t item, const char *rows) {
@@ -389,7 +389,7 @@ int32_t moy_os_moy_status_remove(int32_t item) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, item, MOY_OS_ARG_INT },
     };
-    return moy_os_call(199u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.status_remove
+    return moy_os_call(199u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.status_remove
 }
 
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.

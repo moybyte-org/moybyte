@@ -56,7 +56,8 @@ enum {
     MOY_ROW_MOYBYTE_DEV_OPEN, MOY_ROW_MOYBYTE_DEV_CLOSE, MOY_ROW_MOYBYTE_DEV_READ,
     MOY_ROW_MOYBYTE_DEV_WRITE, MOY_ROW_MOYBYTE_DEV_XFER, MOY_ROW_MOYBYTE_DEV_SET,
     MOY_ROW_MOYBYTE_DEV_GET, MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
-    MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_N,
+    MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_MOYBYTE_STATUS_SHOW, MOY_ROW_MOYBYTE_STATUS_STATE,
+    MOY_ROW_MOYBYTE_STATUS_REMOVE, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
     "damage.all", "damage.again", "surface.canvas", "surface.size", "surface.font_scale", \
@@ -84,7 +85,8 @@ enum {
     "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519", "moybyte.dev_open", \
     "moybyte.dev_close", "moybyte.dev_read", "moybyte.dev_write", "moybyte.dev_xfer", \
     "moybyte.dev_set", "moybyte.dev_get", "moybyte.ed25519_public", "moybyte.ed25519_sign", \
-    "moybyte.ed25519_verify", \
+    "moybyte.ed25519_verify", "moybyte.status_show", "moybyte.status_state", \
+    "moybyte.status_remove", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -342,10 +344,10 @@ enum {
     { "moybyte.ed25519_public", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_PUBLIC }, \
     { "moybyte.ed25519_sign", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_SIGN }, \
     { "moybyte.ed25519_verify", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_ED25519_VERIFY }, \
-    { "moybyte.status_show", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.status_state", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.status_show", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_STATUS_SHOW }, \
+    { "moybyte.status_state", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_STATUS_STATE }, \
     { "moybyte.status_panel", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.status_remove", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.status_remove", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_STATUS_REMOVE }, \
 }
 
 // The permission each role is granted by: a role absent here is never

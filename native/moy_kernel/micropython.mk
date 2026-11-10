@@ -9,7 +9,8 @@
 # moy_devbus.c), the writer lock moy_app's
 # seqlock takes (moy_lock.c), the process table
 # (moy_proc.c), the service model's queues and supervisor (the module
-# `moy_evq`), a process's screen slot (moy_screen_slot.c), and the
+# `moy_evq`), a process's screen slot (moy_screen_slot.c), the bar's
+# status items (moy_status.c), and the
 # VM-side stages a staged console's frames run through (moy_loop_board.c). The entry,
 # the crash record, the floor and the bus are the esp32 port's
 # (micropython.cmake).
@@ -26,5 +27,5 @@ SRC_USERMOD_LIB_C += $(MOY_KERNEL_DIR)/moy_loop.c $(MOY_KERNEL_DIR)/moy_idle.c \
     $(MOY_KERNEL_DIR)/moy_devbus.c $(MOY_KERNEL_DIR)/moy_ledc.c \
     $(MOY_KERNEL_DIR)/moy_lock.c $(MOY_KERNEL_DIR)/moy_proc.c \
     $(MOY_KERNEL_DIR)/moy_evq.c $(MOY_KERNEL_DIR)/moy_super.c $(MOY_KERNEL_DIR)/moy_vmq.c \
-    $(MOY_KERNEL_DIR)/moy_screen_slot.c
+    $(MOY_KERNEL_DIR)/moy_screen_slot.c $(MOY_KERNEL_DIR)/moy_status.c
 CFLAGS_USERMOD += -I$(MOY_KERNEL_DIR)

@@ -28,6 +28,8 @@
 //   timer(pid, ms, every=0) -> (rc, id)   a timer of its queue (TIMERS)
 //   alarm(pid, ms) -> (rc, id), woke() -> pid or 0      ALARMS
 //   termed() -> pid or 0               THE STOPS ASKED
+//   status_add, status_show, status_remove, status_sweep, status_gen,
+//   status_get, status_reset           the status items (moy_status.h)
 //   timer_cancel(pid, id) -> bool, timers(pid) -> n
 //   timers_run() -> ms to the next      the due ones posted
 //   want(bits), wanted(mask) -> bits    THE VM'S WAKE: bits wanted, and those
@@ -44,6 +46,7 @@
 
 #include "moy_evq.h"
 #include "moy_screen_slot.h"
+#include "moy_status.h"
 #include "moy_super.h"
 #include "moy_vmq.h"
 
@@ -288,6 +291,61 @@ static mp_obj_t ev_woke(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_woke_obj, ev_woke);
 
+// The status items (moy_status.h): status_add(pid, icon, order, compiled)
+// -> handle or a code negated; status_show(pid, h, state),
+// status_remove(pid, h) -> 0 or a code negated (pid 0: any process's);
+// status_sweep(pid) -> n; status_gen(); status_get(h) -> (pid, icon, state,
+// order, age, shown, compiled), None for a free slot; status_reset().
+static mp_obj_t ev_status_add(size_t n_args, const mp_obj_t *a) {
+    size_t n;
+    const char *icon = mp_obj_str_get_data(a[1], &n);
+    return MP_OBJ_NEW_SMALL_INT(moy_status_add(mp_obj_get_int(a[0]), icon, n,
+                                               mp_obj_get_int(a[2]), mp_obj_is_true(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_status_add_obj, 4, 4, ev_status_add);
+
+static mp_obj_t ev_status_show(mp_obj_t pid, mp_obj_t h, mp_obj_t state) {
+    return MP_OBJ_NEW_SMALL_INT(moy_status_show(mp_obj_get_int(pid), mp_obj_get_int(h),
+                                                mp_obj_get_int(state)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ev_status_show_obj, ev_status_show);
+
+static mp_obj_t ev_status_remove(mp_obj_t pid, mp_obj_t h) {
+    return MP_OBJ_NEW_SMALL_INT(moy_status_remove(mp_obj_get_int(pid), mp_obj_get_int(h)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ev_status_remove_obj, ev_status_remove);
+
+static mp_obj_t ev_status_sweep(mp_obj_t pid) {
+    return MP_OBJ_NEW_SMALL_INT(moy_status_sweep(mp_obj_get_int(pid)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_status_sweep_obj, ev_status_sweep);
+
+static mp_obj_t ev_status_gen(void) {
+    return mp_obj_new_int_from_uint(moy_status_gen());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_status_gen_obj, ev_status_gen);
+
+static mp_obj_t ev_status_get(mp_obj_t h) {
+    moy_status_item_t it;
+    if (!moy_status_get(mp_obj_get_int(h), &it) || it.pid == 0u) {
+        return mp_const_none;
+    }
+    mp_obj_t t[7] = {
+        mp_obj_new_int_from_uint(it.pid), mp_obj_new_str(it.icon, strlen(it.icon)),
+        MP_OBJ_NEW_SMALL_INT(it.state), mp_obj_new_int(it.order),
+        mp_obj_new_int_from_uint(it.age), mp_obj_new_bool(it.shown),
+        mp_obj_new_bool(it.compiled),
+    };
+    return mp_obj_new_tuple(7, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_status_get_obj, ev_status_get);
+
+static mp_obj_t ev_status_reset(void) {
+    moy_status_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_status_reset_obj, ev_status_reset);
+
 static mp_obj_t ev_termed(void) {
     return mp_obj_new_int_from_uint(moy_evq_termed());
 }
@@ -389,6 +447,13 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&ev_alarm_obj) },
     { MP_ROM_QSTR(MP_QSTR_woke), MP_ROM_PTR(&ev_woke_obj) },
     { MP_ROM_QSTR(MP_QSTR_termed), MP_ROM_PTR(&ev_termed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status_add), MP_ROM_PTR(&ev_status_add_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status_show), MP_ROM_PTR(&ev_status_show_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status_remove), MP_ROM_PTR(&ev_status_remove_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status_sweep), MP_ROM_PTR(&ev_status_sweep_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status_gen), MP_ROM_PTR(&ev_status_gen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status_get), MP_ROM_PTR(&ev_status_get_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status_reset), MP_ROM_PTR(&ev_status_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_timers), MP_ROM_PTR(&ev_timers_obj) },
     { MP_ROM_QSTR(MP_QSTR_timers_run), MP_ROM_PTR(&ev_timers_run_obj) },
     { MP_ROM_QSTR(MP_QSTR_TIMER_ID), MP_ROM_INT(MOY_EVQ_TIMER_ID) },

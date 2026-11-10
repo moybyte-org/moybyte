@@ -299,7 +299,10 @@ renders the owner chose from):
    state and an optional panel of rows it describes -- text, buttons, a
    toggle, a slider (`moybyte.status_show` to `status_remove`,
    `docs/app_api_v1.md` §10) -- which the shell draws in the same menu
-   and card (`status_items.Panel`); a press reaches the program as the
+   and card (`status_items.Panel`); the items themselves, a Python
+   program's too, are the kernel's table (`native/moy_kernel/
+   moy_status.h`), which a compiled program writes on its own task, VM or
+   no VM, and the bar reads; a press reaches the program as the
    message `moybyte.status`, and it never draws into the bar. Icon alone,
    text rows or a full panel are one mechanism: an item with no panel (or
    a Python item with no section) has no menu, and a tap on it opens its

@@ -20,7 +20,8 @@ _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
 PART = native_build.Part("evq", ("moy_sync.h", "moy_evq.h", "moy_evq.c", "moy_super.h",
                                  "moy_super.c", "moy_vmq.h", "moy_vmq.c", "moy_screen_slot.h",
-                                 "moy_screen_slot.c"), (_KERNEL,))
+                                 "moy_screen_slot.c", "moy_status.h", "moy_status.c"),
+                         (_KERNEL,))
 
 OK, STALE, FULL, NOMEM, DENIED, DEAF, EMPTY, RANGE = range(8)
 FINE, WARNED, STRUCK, SUSPENDED = range(4)
@@ -90,6 +91,13 @@ _SIGS = (
     ("moy_evq_alarm", [_U32, _U32, ctypes.POINTER(_U32)], _I),
     ("moy_evq_woke", [], _U32),
     ("moy_evq_termed", [], _U32),
+    ("moy_status_add", [_U32, _P, _SZ, ctypes.c_int32, _B], _I),
+    ("moy_status_show", [_U32, _I, _I], _I),
+    ("moy_status_remove", [_U32, _I], _I),
+    ("moy_status_sweep", [_U32], _U32),
+    ("moy_status_gen", [], _U32),
+    ("moy_status_get", [_I, ctypes.c_void_p], _B),
+    ("moy_status_reset", [], None),
     ("moy_evq_clock", [ctypes.c_int64], None),
     ("moy_evq_timers", [_U32], _U32),
     ("moy_evq_timers_run", [], _U32),
@@ -289,6 +297,44 @@ def woke():
 
 def termed():
     return _lib().moy_evq_termed()
+
+
+class _Status(ctypes.Structure):
+    _fields_ = [("pid", _U32), ("icon", ctypes.c_char * 25), ("order", ctypes.c_int32),
+                ("age", _U32), ("state", ctypes.c_uint8), ("shown", ctypes.c_bool),
+                ("compiled", ctypes.c_bool)]
+
+
+def status_add(pid, icon, order, compiled):
+    b = _b(icon)
+    return _lib().moy_status_add(int(pid), b, len(b), int(order), bool(compiled))
+
+
+def status_show(pid, h, state):
+    return _lib().moy_status_show(int(pid), int(h), int(state))
+
+
+def status_remove(pid, h):
+    return _lib().moy_status_remove(int(pid), int(h))
+
+
+def status_sweep(pid):
+    return _lib().moy_status_sweep(int(pid))
+
+
+def status_gen():
+    return _lib().moy_status_gen()
+
+
+def status_get(h):
+    it = _Status()
+    if not _lib().moy_status_get(int(h), ctypes.byref(it)) or not it.pid:
+        return None
+    return (it.pid, it.icon.decode(), it.state, it.order, it.age, it.shown, it.compiled)
+
+
+def status_reset():
+    _lib().moy_status_reset()
 
 
 def timer_cancel(pid, tid):

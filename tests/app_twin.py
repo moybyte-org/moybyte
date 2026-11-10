@@ -65,7 +65,10 @@ _ROWS = ("damage.all", "damage.again",
          "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519",
          "moybyte.dev_open", "moybyte.dev_close", "moybyte.dev_read", "moybyte.dev_write",
          "moybyte.dev_xfer", "moybyte.dev_set", "moybyte.dev_get",
-         "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify")
+         "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify",
+         # the bar's status items (native/moy_kernel/moy_status.h), counted
+         # by nothing here
+         "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",

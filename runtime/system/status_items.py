@@ -31,17 +31,24 @@ join the status cluster, and their sections are cards in the control center
 under their app's name. Both run the section AS ITS PROCESS (`Items.draw`), so
 what its buttons do is the app's, under the app's grants.
 
-Every item is a preallocated record (CAP of them): showing, a state change
-and a draw allocate nothing, and the bar reads `shown` and `gen`, two
-attributes. The process's end sweeps its items (`moybyte.ENDS`).
+THE TABLE is the kernel's (native/moy_kernel/moy_status.h, through the
+module `moy_evq`): each slot's process, icon, state, order and whether it
+shows, written from any task -- a compiled program's status rows run on its
+own task, VM or no VM (native/moy_app/moy_app.c, how "here") -- and this
+face's own writes go through it too. Every item is a preallocated record
+(CAP of them) mirroring its slot, read again whenever the table's
+generation moved (`sync`, which `shown`, `gen` and `layout_gen` run): a
+draw and a quiet frame allocate nothing. The sections stay here, a Python
+program's its own and a compiled program's its Panel. The process's end
+sweeps its items (`moybyte.ENDS`).
 
 An item with no section has no menu: its tap opens its app (on the desk
 the cell's tap, on a handheld its card's one Open row).
 
 A COMPILED program (a wasm app, a WASI program, an ELF module) never runs
 Python in the shell, so its item's section is the shell's: a `Panel` of
-the rows the program describes (`moybyte.status_panel`, served by
-`runtime/shell/shell_servers.py`'s ConsoleCalls), drawn with the same
+the rows the program describes (`moybyte.status_panel`, the one status row
+the VM serves: runtime/shell/shell_servers.py's ConsoleCalls), drawn with the same
 verbs. Its handle is the slot's number from 1. A description is lines of
 text, one row each, at most ROWS_MAX:
 
@@ -66,6 +73,10 @@ except ImportError:  # pragma: no cover - an image without the kernel
     except ImportError:
         _L = None
 try:
+    import moy_evq as _E
+except ImportError:  # host: the runtime package
+    from runtime import moy_evq as _E
+try:
     import ui as _ui
     import ui_draw as _ui_draw
 except ImportError:  # host: the runtime package
@@ -75,9 +86,9 @@ except ImportError:  # host: the runtime package
     except ImportError:  # pragma: no cover - a headless image: nothing draws
         _ui = _ui_draw = None
 
-ON, PAUSED, ERROR = 0, 1, 2
+ON, PAUSED, ERROR = 0, 1, 2      # moy_status.h's MOY_STATUS_*
 STATES = (ON, PAUSED, ERROR)
-CAP = 4
+CAP = 4                         # MOY_STATUS_CAP
 SHELL = 1
 
 STATUS = "moybyte.status"       # the message a panel's press posts its process
@@ -87,7 +98,7 @@ _NUMS = (0, 0, 1, 3)            # the numbers that end a kind's line
 ROWS_MAX = 8
 ID_MAX = 16
 LABEL_MAX = 40
-ICON_MAX = 24
+ICON_MAX = 24                   # MOY_STATUS_ICON
 
 
 class Item:
@@ -108,13 +119,8 @@ class Item:
     def show(self, state=ON):
         if self.pid == 0:
             return
-        state = state if state in STATES else ON
-        if self.visible and self.state == state:
-            return
-        moved = not self.visible
-        self.visible = True
-        self.state = state
-        self._owner._moved(moved)
+        _E.status_show(0, self.k + 1, state if state in STATES else ON)
+        self._owner.sync()
 
     def changed(self):
         if self.pid:
@@ -249,43 +255,97 @@ class Panel:
 
 
 class Items:
-    """The bar's status items: CAP records, the ones shown in order."""
+    """The bar's status items: CAP records over the kernel's slots, the ones
+    shown in order."""
 
     def __init__(self):
         self.slots = [Item(self, k) for k in range(CAP)]
         self.panels = [Panel(self, k) for k in range(CAP)]
         self._open = [{"id": "status%d.open" % k} for k in range(CAP)]
+        self._section = [None] * CAP    # a Python item's section, by slot
         self.opening = None         # the item whose Open row was pressed
         # fn(pid, name, args) the moybyte module sets: a message posted to a
         # process from the system (moybyte.WAKES.post)
         self.post = None
-        self.shown = []             # the visible items, by order then age
-        self.gen = 0                # moves with anything an item shows
-        self.layout_gen = 0         # ...and with how many are shown
-        self._age = 0
+        self._shown = []            # the visible items, by order then age
+        self._gen = 0               # moves with anything an item shows
+        self._layout_gen = 0        # ...and with how many are shown
+        self._seen = -1             # the table's generation last read
         # fn(item) the console sets: an item's menu closes with it
         self.closed = None
         # fn(pid) -> the process's title, the console's
         self.title_of = None
 
-    def add(self, pid, icon, section, order=0):
+    @property
+    def shown(self):
+        self.sync()
+        return self._shown
+
+    @property
+    def gen(self):
+        self.sync()
+        return self._gen
+
+    @property
+    def layout_gen(self):
+        self.sync()
+        return self._layout_gen
+
+    def sync(self):
+        """Each record read again from the kernel's slot where the table
+        moved: an item freed there (its process's remove or end, from any
+        task) closes its menu, one added there (a compiled program's) takes
+        its slot's Panel."""
+        g = _E.status_gen()
+        if g == self._seen:
+            return
+        self._seen = g
+        moved = count = False
         for it in self.slots:
-            if it.pid == 0:
-                self._age += 1
-                it.pid = pid
-                it.icon = icon
-                it.section = section
-                it.order = order
-                it.age = self._age
-                it.state = ON
+            rec = _E.status_get(it.k + 1)
+            if it.pid and (rec is None or rec[4] != it.age):
+                cb = self.closed
+                if cb is not None:
+                    cb(it)
+                count = count or it.visible
+                moved = True
+                it.pid = 0
+                it.icon = None
+                it.section = None
                 it.visible = False
+            if rec is None:
+                continue
+            pid, icon, state, order, age, shown, compiled = rec
+            if it.pid == 0:
+                it.pid, it.icon, it.order, it.age = pid, icon, order, age
+                if compiled:
+                    sec = self.panels[it.k]
+                    sec.set(())
+                else:
+                    sec = self._section[it.k]
+                it.section = sec
                 t = self.title_of
                 it.app = (t(pid) if t is not None else "") or ""
-                return it
-        return None
+                it.state, it.visible = ON, False
+                moved = True
+            if it.state != state or it.visible != shown:
+                count = count or it.visible != shown
+                it.state, it.visible = state, shown
+                moved = True
+        if moved:
+            self._moved(count)
+
+    def add(self, pid, icon, section, order=0):
+        h = _E.status_add(pid, icon or "", order, False)
+        if h <= 0:
+            return None
+        self._section[h - 1] = section
+        self.sync()
+        self._section[h - 1] = None
+        return self.slots[h - 1]
 
     def _order(self):
-        out = self.shown
+        out = self._shown
         del out[:]
         for it in self.slots:
             if it.pid and it.visible:
@@ -295,27 +355,19 @@ class Items:
                 out.insert(j, it)
 
     def _moved(self, count):
-        self.gen = (self.gen + 1) & 0x3fffffff
+        self._gen = (self._gen + 1) & 0x3fffffff
         if count:
             self._order()
-            self.layout_gen = (self.layout_gen + 1) & 0x3fffffff
+            self._layout_gen = (self._layout_gen + 1) & 0x3fffffff
 
     def _free(self, it):
-        was = it.visible
-        cb = self.closed
-        if cb is not None:
-            cb(it)
-        it.pid = 0
-        it.icon = None
-        it.section = None
-        it.visible = False
-        self._moved(was)
+        _E.status_remove(0, it.k + 1)
+        self.sync()
 
     def sweep(self, pid):
         """Process `pid` ended: its items leave the bar."""
-        for it in self.slots:
-            if it.pid and it.pid == pid:
-                self._free(it)
+        _E.status_sweep(pid)
+        self.sync()
 
     def count(self):
         return len(self.shown)
@@ -363,27 +415,28 @@ class Items:
         finally:
             _L.current(was)
 
-    # -- a compiled program's items (ConsoleCalls' status rows) --------------
+    # -- a compiled program's items (moy_app.c's status rows) ----------------
 
     def of(self, pid, h):
         """Process `pid`'s compiled item of handle `h`, or None."""
         if type(h) is not int or not 1 <= h <= CAP:
             return None
+        self.sync()
         it = self.slots[h - 1]
         if it.pid != pid or it.section is not self.panels[h - 1]:
             return None
         return it
 
     def show_compiled(self, pid, icon, state, order):
-        """A compiled program's item shown in `state`, no panel yet: its
-        handle, 0 where the bar holds CAP already."""
-        for it in self.slots:
-            if it.pid == 0:
-                p = self.panels[it.k]
-                p.set(())
-                self.add(pid, icon, p, order).show(state)
-                return it.k + 1
-        return 0
+        """A compiled program's item shown in `state`, no panel yet, as its
+        status_show row makes one: its handle, 0 where the bar holds CAP
+        already."""
+        h = _E.status_add(pid, icon, order, True)
+        if h <= 0:
+            return 0
+        _E.status_show(pid, h, state)
+        self.sync()
+        return h
 
 
 ITEMS = Items()
