@@ -270,7 +270,7 @@ def test_the_service_keeps_another_node_s_text_with_its_signal(mesh):
     assert lora_sim.air(p, 869525000, 11, rssi=-112, snr=-34, bw=250000, sync=0x2B)
     N.step(0)
     _frames(drv)
-    assert win.rows() == ["!a1b2c3d4: hello T-Deck  -112 dBm -8.5 dB"]
+    assert win.rows() == ["!a1b2c3d4 -112 dBm -8.5 dB: hello T-Deck"]
     log = pl.ns["prefs"].get("log")
     assert log == [{"from": "!a1b2c3d4", "text": "hello T-Deck", "rssi": -112, "snr": -8.5}]
     # a repeat (a relay's copy), another channel and its own echo are dropped
@@ -293,7 +293,7 @@ def test_a_new_region_retunes_the_radio(mesh):
     assert lora_sim.air(_node_packet(b"us", 1234, 2), 906875000, 11)
     N.step(0)
     _frames(drv)
-    assert win.row(1).startswith("!000004d2: us")
+    assert win.row(1).startswith("!000004d2 ") and win.row(1).endswith(": us")
     assert win.get("region") == 3, "the window's region is the one prefs name"
 
 
@@ -382,9 +382,8 @@ def test_on_the_desk_mesh_is_a_window_laid_out_for_its_room(tmp_path):
             [w, h, ws.look.effective_font_scale()]
         pl.ns["prefs"].set("log", [{"from": "!5e6f7a8b", "text": "hi", "rssi": -98, "snr": 6.5}])
         win.run("_layout(200, %d, 1)" % h)
-        assert win.rows() == ["!5e6f7a8b: hi"], "a narrow window drops the readout"
-        win.run("_layout(%d, %d, 1)" % (w, h))
-        assert win.rows() == ["!5e6f7a8b: hi  -98 dBm 6.5 dB"]
+        # the readout leads the text: a row the room cuts short loses its text
+        assert win.rows() == ["!5e6f7a8b -98 dBm 6.5 dB: hi"]
     finally:
         S.SCHED.reset()         # opening Mesh started its service on the one scheduler
         while N.owner():

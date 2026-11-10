@@ -4,8 +4,9 @@
 -- and keeps running when the window closes. The region picks the frequency
 -- and must match the law where the console is: EU_868 until another is
 -- chosen. The window is responsive: the ui verbs lay the page out in
--- whatever room `_layout` was given, and a window too narrow for a row's
--- signal readout lists the text alone.
+-- whatever room `_layout` was given. A heard row names its sender and signal
+-- before its text, so a row too long for the room loses the end of the
+-- text, never the readout.
 
 rows = {}
 cur = 1
@@ -19,23 +20,18 @@ function _layout(w, h, fs)
   _reload()
 end
 
--- The ui verbs draw a Lua app's text at one size whatever `fs` is, so the
--- readout fits by width alone: the 320 the handheld gives it.
-function signal_fits()
-  return room_w >= 320
-end
-
 function _reload()
   local log = prefs.get("log") or {}
   rows = {}
   for i = #log, 1, -1 do
     local m = log[i]
     local heard = m.from ~= nil and m.from ~= ""
-    local line = (heard and m.from or "me") .. ": " .. (m.text or "")
-    if m.failed then
-      line = line .. " (not sent)"
-    elseif heard and signal_fits() then
-      line = line .. string.format("  %d dBm %.1f dB", m.rssi or 0, m.snr or 0)
+    local line
+    if heard then
+      line = string.format("%s %d dBm %.1f dB: %s", m.from, m.rssi or 0, m.snr or 0,
+                           m.text or "")
+    else
+      line = "me: " .. (m.text or "") .. (m.failed and " (not sent)" or "")
     end
     rows[#rows + 1] = line
   end
