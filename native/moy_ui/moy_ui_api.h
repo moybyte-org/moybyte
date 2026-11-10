@@ -445,12 +445,20 @@ typedef struct {
     uint8_t pop_back;               // the host's back took the popover: gone next frame
     uint8_t tip_shown;              // ui.end drew a tooltip this frame
     uint8_t pop_mid;                // it opened with nothing to hang from: centred
+    uint8_t pop_placed;             // it hangs from ui.at's rect
     uint32_t pop_id;                // the popover drawn this frame (0: none)
     // Its body's cut while its rows lay out (content coordinates, 0: not
     // cut): the deepest row middle at or above it, and whether it already
     // falls well inside a row (a cut body peeks a row under its fade).
     int16_t pop_cut, pop_peek;
     uint8_t pop_inside;
+    // A popover's button row (its ui.buttons side by side, right-aligned
+    // inside the card's padding): open while the buttons follow one
+    // another, the row's top (content coordinates), the next button's x
+    // from the row's left, and the row's width as this frame and the last
+    // drew it, which places this frame's.
+    uint8_t brow;
+    int16_t brow_y, brow_x, brow_w, brow_was;
     // ui.grid's: open (2: placed by ui.at), its columns, the card next, the
     // first column's left edge and the columns' pitch, the pictures' size,
     // the top of the card row being laid out (content coordinates; a placed

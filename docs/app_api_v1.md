@@ -400,6 +400,21 @@ for i, m in ipairs(log) do
 end
 ```
 
+**Details hang from what they detail.** `ui.at` the rect `ui.bubble`
+answered, then `ui.popover(id, w)` with the room's width less the gutters
+spans the chat; its buttons form one row at the card's foot, the primary
+last:
+
+```lua
+local x, y, w, h = ui.bubble(m.text, "out", {tone = "failed", anchor = true})
+ui.at(x, y, w, h)
+details = ui.popover("details", pw - 16)   -- back or a press outside: false
+ui.info("Status", "Not sent")
+if ui.button("Delete", "danger") then delete(m) end
+if ui.button("Send again", "primary") then resend(m) end
+ui.popover()
+```
+
 **Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
 "Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
 `cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,

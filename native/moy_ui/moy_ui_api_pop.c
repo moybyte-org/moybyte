@@ -40,6 +40,13 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
                 c->owe = 1;
             }
             c->pop_cut = 0;
+            int bw = c->brow_w;
+            if (bw != c->brow_was) {
+                c->brow_was = (int16_t)bw;
+                c->owe = 1;             // its button row laid out for other widths
+            }
+            c->brow = 0;
+            c->brow_x = c->brow_w = 0;
         }
         return 0;
     }
@@ -55,9 +62,11 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         c->pop_at = c->at;
         c->has_at = 0;
         c->pop_mid = 0;
+        c->pop_placed = 1;
     } else if (c->pop_prev.w == 0) {
         c->pop_at = c->focus_box;
         c->pop_mid = c->focus_box.w == 0;   // nothing to hang from: centred
+        c->pop_placed = 0;
     }
     moy_ui_box_t a = c->pop_at;
     int fs = c->fs, rh = mua_row_h(c);
@@ -69,11 +78,15 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     }
     int pad = moy_ui_modal_band(fs, c->cls);
     moy_ui_box_t sf = c->surface;
+    // a card hung from ui.at's rect may span the surface but for the
+    // page's gutters (8 px at the scale, 12 on the desk); any other keeps
+    // the modal band each side
     if (w <= 0) {
         w = a.w;
     }
-    if (w > sf.w - 2 * pad) {
-        w = sf.w - 2 * pad;
+    int edge = c->pop_placed ? (c->cls ? 12 : 8) * fs : pad;
+    if (w > sf.w - 2 * edge) {
+        w = sf.w - 2 * edge;
     }
     if (w < 2 * pad + rh) {
         w = 2 * pad + rh;

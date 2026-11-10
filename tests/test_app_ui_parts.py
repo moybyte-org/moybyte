@@ -12,6 +12,9 @@ names the page each app draws:
      lines, wearing the anchor ring; pmem 1 the CUT bit the last answered.
   3  the signal glyph in a details card: an info row's before its value
      (`o.signal`), and a link's.
+  4  ui.popover hung from a failed bubble at the room's width (wider than
+     the modal band leaves), its two buttons one right-aligned row inside
+     the card, the primary focused.
 """
 
 import os
@@ -29,7 +32,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2, 3)
+PAGES = (1, 2, 3, 4)
 CONSOLES = ("tdeck", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 

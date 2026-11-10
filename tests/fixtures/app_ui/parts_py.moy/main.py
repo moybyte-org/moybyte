@@ -10,7 +10,7 @@ def _layout(w, h, fs):
 
 def _draw():
     page = pmem(0)
-    ui.page("Parts")
+    px, py, pw, ph = ui.page("Parts")
     if page == 1:
         ui.empty("bubble", "No messages yet", ["Say hello to the mesh", "Messages show here"])
         ui.button("Write one", "primary")
@@ -29,3 +29,14 @@ def _draw():
         ui.info("SNR", "2.0 dB")
         ui.group()
         ui.link("Base Camp", "-96 dBm", {"signal": 4})
+    elif page == 4:
+        x, y, w, h, st = ui.bubble("Wait for me at the gate", "out",
+                                   {"tone": "failed", "status": "Not sent", "anchor": True})
+        ui.at(x, y, w, h)
+        ui.popover("details", pw - 16)
+        ui.info("Channel", "LongFast")
+        ui.info("Status", "Not sent")
+        ui.button("Delete", "danger")
+        ui.button("Send again", "primary")
+        ui.popover()
+        ui.focus("Send again")

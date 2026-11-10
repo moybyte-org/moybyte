@@ -1544,6 +1544,7 @@ static void peek_note(moy_ui_ctx_t *c, int t, int h) {
 // The next call's box: ui.at's, or the next row of the page. *stacked says
 // which (a row clips to the page); a row a popover's cut may peek is `row`.
 moy_ui_box_t mua_place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
+    c->brow = 0;                        // a popover's button row ends at any other row
     c->row_slot = c->icon_slot;
     c->row_glyph = c->icon_glyph;
     c->icon_slot = c->icon_glyph = -1;
@@ -2881,7 +2882,35 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     const char *kn = moy_ui_button_kinds[kind][0];
     int kid = moy_ui_button_kind(kn, strlen(kn));
     int stacked;
-    moy_ui_box_t b = mua_place(c, mua_row_h(c), &stacked);
+    moy_ui_box_t b;
+    if (!c->has_at && c->n_nest > 0 && c->nest[c->n_nest - 1].kind == 3) {
+        // in a popover's body the buttons that follow one another are one
+        // row, right-aligned inside the card's padding as a dialog's, a
+        // focus ring's reach and 4 pixels between them, laid out by the
+        // row's width the last frame drew
+        int fs = c->fs, reach = moy_ui_mark_reach(MOY_UI_ITEM_CELL) * fs;
+        int gap = (reach / fs + 4 > 8 ? reach / fs + 4 : 8) * fs;
+        int bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
+        int bw = moy_ui_role_w(s, MOY_UI_FONT_UI, label) + 2 * bpad;
+        bw = bw > minw ? bw : minw;
+        if (!c->brow) {
+            b = mua_place(c, mua_row_h(c) + reach, &stacked);
+            c->brow = 1;
+            c->brow_y = (int16_t)(b.y - c->page.y + c->scroll + reach);
+            c->brow_x = 0;
+        }
+        int lp = mua_kmetric(c->cls ? MOY_UI_K_GROUP : MOY_UI_K_ROW,
+                             c->cls ? MOY_UI_M_GROUP_PAD : MOY_UI_M_ROW_PAD) * fs;
+        int right = c->page.x + c->page.w - lp;
+        b = (moy_ui_box_t){(int16_t)(right - c->brow_was + c->brow_x),
+                           (int16_t)(c->page.y + c->brow_y - c->scroll), (int16_t)bw,
+                           (int16_t)mua_row_h(c)};
+        c->brow_x = (int16_t)(c->brow_x + bw + gap);
+        c->brow_w = (int16_t)(c->brow_x - gap);
+        stacked = 1;
+    } else {
+        b = mua_place(c, mua_row_h(c), &stacked);
+    }
     int disabled = o->disabled == 1;
     int st = disabled ? 0 : mua_stop(c, mua_id_of(c, o, label), b, 0, mua_name_of(o, label));
     if (st < 0) {

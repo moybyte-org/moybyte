@@ -57,7 +57,8 @@ EXPORT(_update) void _update(float dt) {
 
 EXPORT(_draw) void _draw(void) {
     int32_t page = pmem(0, 0, 0);
-    ui_page(S("Parts"), NULL, 0, NULL, 0);
+    int32_t room[4] = {0, 0, 0, 0};
+    ui_page(S("Parts"), NULL, 0, room, sizeof(room));
     if (page == 1) {
         ui_empty(S("bubble"), S("No messages yet"), S("Say hello to the mesh\0Messages show here"));
         ui_button(S("Write one"), 1, NULL, 0);
@@ -81,5 +82,18 @@ EXPORT(_draw) void _draw(void) {
         ui_info(S("SNR"), S("2.0 dB"), NULL, 0);
         ui_group("", 0, NULL, 0);
         ui_link(S("Base Camp"), S("-96 dBm"), over_signal(4), over_n);
+    } else if (page == 4) {
+        int32_t v[5];
+        int32_t failed[6] = {1, -1, 1, 75, 4, 1};
+        ui_bubble(S("Wait for me at the gate"), S(""), S("Not sent"), (const char *)failed,
+                  sizeof(failed), NULL, 0, v, sizeof(v));
+        ui_at(v[0], v[1], v[2], v[3]);
+        ui_popover(S("details"), room[2] - 16, NULL, 0);
+        ui_info(S("Channel"), S("LongFast"), NULL, 0);
+        ui_info(S("Status"), S("Not sent"), NULL, 0);
+        ui_button(S("Delete"), 3, NULL, 0);
+        ui_button(S("Send again"), 1, NULL, 0);
+        ui_popover("", 0, 0, NULL, 0);
+        ui_focus(S("Send again"), NULL, 0);
     }
 }
