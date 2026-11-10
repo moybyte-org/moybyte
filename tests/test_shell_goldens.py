@@ -1056,16 +1056,26 @@ def _notes_vault(ws, enter):
 
 # Mesh's node, pinned: its service draws one at random where prefs hold none.
 MESH_NODE = "!0a1b2c3d"
+# What it heard and sent, oldest first as its service keeps them: the window
+# lists them newest first.
+MESH_LOG = [
+    {"from": "!5e6f7a8b", "text": "Anyone on the hill tonight?", "rssi": -98, "snr": 6.5},
+    {"text": "On my way up"},
+    {"text": "Bring the blue tent", "failed": True},
+    {"from": "!5e6f7a8b", "text": "See you at the top", "rssi": -104, "snr": 2.0},
+]
 
 
 def _mesh_radio(ws, enter):
-    """Mesh on the stand-in radio (it requires `lora`), its node pinned."""
+    """Mesh on the stand-in radio (it requires `lora`), its node and its
+    messages pinned."""
     def run():
         from runtime.host import lora_sim
         lora_sim.install()
         enter()
         ns = ws.run.player.ns
         ns["prefs"].set("node", MESH_NODE)
+        ns["prefs"].set("log", MESH_LOG)
         ns["_reload"]()
     return run
 

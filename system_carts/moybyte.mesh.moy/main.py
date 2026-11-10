@@ -43,7 +43,7 @@ def send(words):
 
 def _layout(w, h, fs):
     # The page reflows in content_rect() every frame: on the desk its surface
-    # is the window's whole.
+    # is the window's whole, on a handheld the glass below the bar.
     pass
 
 
@@ -55,6 +55,7 @@ def _init():
 
 def _draw():
     global cur, text, region
+    ui.at(*content_rect())
     ui.page("")             # the app bar and the window name it
     ui.hints(("confirm", "Send"))
     text, enter = ui.field("Message", text, 200)

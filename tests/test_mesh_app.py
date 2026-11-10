@@ -283,3 +283,33 @@ def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
         assert "Mesh" in titles(c for _k, _l, c in desk._icon_catalog())
     finally:
         lora_sim.remove()
+
+
+def test_on_the_handheld_the_window_opens_on_the_field_below_the_bar(tmp_path):
+    from runtime import host_app
+    from runtime import ui
+    page, seen = ui.page, []
+    lora_sim.install()
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(320, 240))
+    try:
+        assert select_on_home(ws, "Mesh") is not None
+        ws.open()
+        ns = ws.run.player.ns
+        assert ns["ui"] is ui
+
+        def spy(*a):
+            seen.append((page(*a), ns["content_rect"]()))
+            return seen[-1][0]
+        ui.page = spy
+        drv = make_drv(ws)
+        for _ in range(3):
+            ws.mark_dirty()
+            drv.frame(1 / 30)
+        got, room = seen[-1]
+        assert room[1] > 0 and got == room          # the page lies below the bar
+        assert ui.focus() == "Message"
+    finally:
+        ui.page = page
+        while N.owner():
+            moybyte.end(N.owner())
+        lora_sim.remove()
