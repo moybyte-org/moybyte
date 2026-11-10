@@ -251,6 +251,7 @@ def test_a_wasi_service_notifies_under_its_permission_and_writes_the_log(svc, pe
     # ABSENT, read as WASI's NOENT (44), as an ELF module reads ENOENT
     assert _polled(s, lambda: "service_running -1 errno 44" in _texts(since, pid))
     texts = _texts(since, pid)
+    notifications.NOTES.drain()         # the console's next frame takes it into the list
     mine = [n for n in notifications.NOTES.list if n.pid == pid]
     if perms:
         assert [(n.summary, n.body) for n in mine] == [("Service Wasi", '["hi"]')]

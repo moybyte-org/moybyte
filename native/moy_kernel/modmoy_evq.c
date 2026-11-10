@@ -3,8 +3,9 @@
 // calls into the VM (moy_vmq.h) -- as the module `moy_evq`, the same names
 // runtime/host/moy_evq.py gives CPython.
 //
-//   open(pid, app, receives="", vm=False, alarms=False)   a process's queue
-//                      (receives: one name a line; alarms: MOY_EVQ_ALARMS)
+//   open(pid, app, receives="", vm=False, alarms=False, notify=False)
+//                      a process's queue (receives: one name a line;
+//                      alarms: MOY_EVQ_ALARMS, notify: MOY_EVQ_NOTIFY)
 //   close(pid), has(pid), app(pid)
 //   listen(pid, name, on)                    OK, STALE or FULL
 //   hears(pid, name)                         whether its queue listens on it
@@ -30,6 +31,8 @@
 //   termed() -> pid or 0               THE STOPS ASKED
 //   status_add, status_show, status_remove, status_sweep, status_gen,
 //   status_get, status_reset           the status items (moy_status.h)
+//   notes_id, notes_waiting, notes_take, notes_goal, notes_award,
+//   notes_progress, notes_run, notes_end, notes_reset   the notes (moy_notes.h)
 //   timer_cancel(pid, id) -> bool, timers(pid) -> n
 //   timers_run() -> ms to the next      the due ones posted
 //   want(bits), wanted(mask) -> bits    THE VM'S WAKE: bits wanted, and those
@@ -46,6 +49,7 @@
 
 #include "moy_evq.h"
 #include "moy_screen_slot.h"
+#include "moy_notes.h"
 #include "moy_status.h"
 #include "moy_super.h"
 #include "moy_vmq.h"
@@ -56,11 +60,13 @@ static mp_obj_t ev_open(size_t n, const mp_obj_t *a) {
     const char *recv = n > 2 && a[2] != mp_const_none ? mp_obj_str_get_str(a[2]) : NULL;
     bool vm = n > 3 && mp_obj_is_true(a[3]);
     bool alarms = n > 4 && mp_obj_is_true(a[4]);
+    bool notify = n > 5 && mp_obj_is_true(a[5]);
     int rc = moy_evq_open(mp_obj_get_int(a[0]), mp_obj_str_get_str(a[1]), recv,
-                          (vm ? MOY_EVQ_VM : 0u) | (alarms ? MOY_EVQ_ALARMS : 0u));
+                          (vm ? MOY_EVQ_VM : 0u) | (alarms ? MOY_EVQ_ALARMS : 0u)
+                          | (notify ? MOY_EVQ_NOTIFY : 0u));
     return MP_OBJ_NEW_SMALL_INT(rc);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_open_obj, 2, 5, ev_open);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_open_obj, 2, 6, ev_open);
 
 static mp_obj_t ev_close(mp_obj_t pid) {
     return MP_OBJ_NEW_SMALL_INT(moy_evq_close(mp_obj_get_int(pid)));
@@ -321,7 +327,7 @@ static mp_obj_t ev_status_sweep(mp_obj_t pid) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ev_status_sweep_obj, ev_status_sweep);
 
 static mp_obj_t ev_status_gen(void) {
-    return mp_obj_new_int_from_uint(moy_status_gen());
+    return MP_OBJ_NEW_SMALL_INT(moy_status_gen() & 0x3FFFFFFFu);    // compared, never counted
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_status_gen_obj, ev_status_gen);
 
@@ -345,6 +351,73 @@ static mp_obj_t ev_status_reset(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ev_status_reset_obj, ev_status_reset);
+
+// The notes (moy_notes.h): notes_id(); notes_waiting(); notes_take() ->
+// (id, pid, app, summary, body) or None; notes_goal(pid, id, goal);
+// notes_award(pid, id); notes_progress(pid, id, value); notes_run();
+// notes_end(pid); notes_reset().
+static mp_obj_t ev_notes_id(void) {
+    return mp_obj_new_int_from_uint(moy_notes_id());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_notes_id_obj, ev_notes_id);
+
+static mp_obj_t ev_notes_waiting(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_notes_waiting());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_notes_waiting_obj, ev_notes_waiting);
+
+static mp_obj_t ev_notes_take(void) {
+    moy_notes_note_t n;
+    if (!moy_notes_take(&n)) {
+        return mp_const_none;
+    }
+    mp_obj_t t[5] = {
+        mp_obj_new_int_from_uint(n.id), mp_obj_new_int_from_uint(n.pid),
+        mp_obj_new_str(n.app, strlen(n.app)), mp_obj_new_str(n.summary, strlen(n.summary)),
+        mp_obj_new_str(n.body, strlen(n.body)),
+    };
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_notes_take_obj, ev_notes_take);
+
+static mp_obj_t ev_notes_goal(mp_obj_t pid, mp_obj_t id, mp_obj_t goal) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(id, &n);
+    return MP_OBJ_NEW_SMALL_INT(moy_notes_goal(mp_obj_get_int(pid), s, n, mp_obj_get_int(goal)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ev_notes_goal_obj, ev_notes_goal);
+
+static mp_obj_t ev_notes_award(mp_obj_t pid, mp_obj_t id) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(id, &n);
+    return mp_obj_new_int(moy_notes_award(mp_obj_get_int(pid), s, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ev_notes_award_obj, ev_notes_award);
+
+static mp_obj_t ev_notes_progress(mp_obj_t pid, mp_obj_t id, mp_obj_t v) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(id, &n);
+    return mp_obj_new_int(moy_notes_progress(mp_obj_get_int(pid), s, n, mp_obj_get_int(v)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ev_notes_progress_obj, ev_notes_progress);
+
+static mp_obj_t ev_notes_run(void) {
+    uint32_t ms = moy_notes_run();
+    return MP_OBJ_NEW_SMALL_INT(ms > 0x3FFFFFFFu ? 0x3FFFFFFF : (mp_int_t)ms);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_notes_run_obj, ev_notes_run);
+
+static mp_obj_t ev_notes_end(mp_obj_t pid) {
+    moy_notes_end(mp_obj_get_int(pid));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ev_notes_end_obj, ev_notes_end);
+
+static mp_obj_t ev_notes_reset(void) {
+    moy_notes_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ev_notes_reset_obj, ev_notes_reset);
 
 static mp_obj_t ev_termed(void) {
     return mp_obj_new_int_from_uint(moy_evq_termed());
@@ -447,6 +520,15 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&ev_alarm_obj) },
     { MP_ROM_QSTR(MP_QSTR_woke), MP_ROM_PTR(&ev_woke_obj) },
     { MP_ROM_QSTR(MP_QSTR_termed), MP_ROM_PTR(&ev_termed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_id), MP_ROM_PTR(&ev_notes_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_waiting), MP_ROM_PTR(&ev_notes_waiting_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_take), MP_ROM_PTR(&ev_notes_take_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_goal), MP_ROM_PTR(&ev_notes_goal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_award), MP_ROM_PTR(&ev_notes_award_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_progress), MP_ROM_PTR(&ev_notes_progress_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_run), MP_ROM_PTR(&ev_notes_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_end), MP_ROM_PTR(&ev_notes_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_notes_reset), MP_ROM_PTR(&ev_notes_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_status_add), MP_ROM_PTR(&ev_status_add_obj) },
     { MP_ROM_QSTR(MP_QSTR_status_show), MP_ROM_PTR(&ev_status_show_obj) },
     { MP_ROM_QSTR(MP_QSTR_status_remove), MP_ROM_PTR(&ev_status_remove_obj) },

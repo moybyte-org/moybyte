@@ -207,8 +207,8 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
 - **The VM's queue** (`native/moy_kernel/moy_vmq.h`): the one way a process
   on its own task enters the console. A HOP runs C on the VM's task while
   the poster waits (a role row of its app's run); a CALL is a console call
-  by name (`moybyte.notify`, `open_with`, `share`, `send`, a function the
-  console handed a system process), answered in Python as the calling
+  by name (a Lua program's `moybyte.notify`, `open_with`, `share`, a
+  function the console handed a system process), answered in Python as the calling
   process at the scheduler's poll, the poster woken by the answer.
 - **The VM's wake** (`moy_evq.h`, THE VM'S WAKE): the VM's task blocks on
   no queue, and on a board nothing polls the services while they sleep. A
@@ -761,9 +761,8 @@ collide.
 The motivating case: a background mesh app wakes on `moybyte.on("lora", fn)`
 while a game plays, and posts.
 
-As built (`runtime/system/notifications.py`, the service `NOTES`), phase 1
-serves Python processes; Lua and wasm get the verb with their process tables
-(phase 5). `moybyte.notify` answers the notification's id, or None where the
+As built (`runtime/system/notifications.py`, the service `NOTES`, every
+tier's), `moybyte.notify` answers the notification's id, or None where the
 process does not hold the permission: `moybyte` is one module every process
 shares, so the permission's row names no Python names (§2) and the grant is
 read at the post, from the one its run or its service was bound with
@@ -773,6 +772,15 @@ console's icon set ("bubble" where it names none), `actions` the freedesktop
 flat list (key, label, ...; `"default"` the action the notification itself
 stands for), `urgency` 0 to 2, and `replaces_id` one of the same process's
 notifications, updated in place under its id.
+
+A compiled program's post (`moybyte_notify`, `moy_notify`, WASI's
+`moybyte.os.notify`: a summary and a body) is the kernel's
+(`native/moy_kernel/moy_notes.h`): answered on its own task, VM or no VM,
+under the `notifications` its event queue was opened with
+(`MOY_EVQ_NOTIFY`, from the grant at its open), DENIED without it, and
+queued for the console, whose next frame takes it into the list and puts
+the banner up (`NOTES.drain`). Every notification's id, the console's own
+posts' too, comes from that queue's one counter.
 
 - **The banner** is the unlock banner's card (`moy_ui_unlock`): the posting
   app's title over the summary, on the icon's tile, at the top centre, under
@@ -840,15 +848,18 @@ start runs it again.
   console's next frame, before it draws (`Scheduler.mail`), so the banner
   an unlock raises shows in the frame of the input that earned it, or by a
   tick that runs first.
-- **The game's own process coalesces** (Steam's SetStat and StoreStats):
-  `moybyte.award` and `moybyte.progress` are the one Python layer every
-  tier's call reaches (a Lua or compiled tier's console call runs them as
-  its process), which sends an `award` once a process, a badge's newest
-  `progress` value once `ACH_EVERY_MS` (250 ms) at most and at once at the
-  goal its manifest declares, what waits by a wake of the shell's, and all
-  of it at the process's end (`runtime/system/moybyte.py`, COALESCING). A
-  game may call either every frame; a raw `send` of the two names is
-  bounded by §1's BACKPRESSURE alone.
+- **The kernel coalesces** (Steam's SetStat and StoreStats): `award` and
+  `progress` are the kernel's queue on every tier (`native/moy_kernel/
+  moy_notes.h`, BADGES; a compiled program's rows run on its own task, a
+  Python or Lua program's through `moybyte.award` and `progress`), which
+  sends an `award` once a process, a badge's newest `progress` value once
+  `MOY_NOTES_EVERY_MS` (250 ms) at most and at once at the goal its manifest
+  declares (handed to the queue at the process's open), what waits in its
+  own turn (the kernel's frame's job, the host's scheduler's tick), and all
+  of it at the process's end. A send nobody took (the achievements process
+  is the VM's, so through a VM stop) waits and goes again in its turn. A
+  value is a whole count. A game may call either every frame; a raw `send`
+  of the two names is bounded by §1's BACKPRESSURE alone.
 - **The sender is the OS's stamp.** The process asks the console for the
   sender's declaration (`game(app)`, handed at its start with `clock_day()`
   and `row_stamp()` by `Workstation.service_env`; for `"system"` the

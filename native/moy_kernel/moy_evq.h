@@ -124,6 +124,7 @@ enum {
 
 #define MOY_EVQ_VM 0x01u            // the VM's task serves it (a Python process)
 #define MOY_EVQ_ALARMS 0x02u        // its process holds `alarms` (moy_evq_at)
+#define MOY_EVQ_NOTIFY 0x04u        // ...`notifications` (moy_notes.h)
 
 #define MOY_EVQ_FD 31               // the event descriptor
 #define MOY_EVQ_VERSION 1           // the record's layout
@@ -138,6 +139,8 @@ int moy_evq_open(uint32_t pid, const char *app, const char *receives, uint32_t f
 int moy_evq_close(uint32_t pid);
 // Whether `pid` has a queue.
 bool moy_evq_has(uint32_t pid);
+// The flags `pid`'s queue was opened with, 0 for none.
+uint32_t moy_evq_flags(uint32_t pid);
 // The app id `pid`'s queue was opened with, MOY_EVQ_SYSTEM for pid 0 and 1,
 // NULL for none.
 const char *moy_evq_app(uint32_t pid);

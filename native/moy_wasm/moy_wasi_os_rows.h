@@ -183,8 +183,8 @@ static int32_t w_os_clipboard_seq(wasm_exec_env_t e) {
 
 static int32_t w_os_notify(wasm_exec_env_t e, const char *summary, uint32_t summary_n,
                            const char *body, uint32_t body_n) {
-    const os_arg_t a[2] = { OS_S(summary, summary_n), OS_O(body, body_n) };
-    return os_call(e, "moybyte.notify", a, 2);
+    const os_arg_t a[2] = { OS_O(summary, summary_n), OS_O(body, body_n) };
+    return os_role(e, MOY_T_MOYBYTE_NOTIFY, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_open_with(wasm_exec_env_t e, const char *item, uint32_t item_n,
@@ -200,13 +200,13 @@ static int32_t w_os_share(wasm_exec_env_t e, const uint8_t *data, uint32_t data_
 }
 
 static int32_t w_os_award(wasm_exec_env_t e, const char *id, uint32_t id_n) {
-    const os_arg_t a[1] = { OS_S(id, id_n) };
-    return os_call(e, "moybyte.award", a, 1);
+    const os_arg_t a[1] = { OS_O(id, id_n) };
+    return os_role(e, MOY_T_MOYBYTE_AWARD, OS_HERE, a, 1, NULL, 0);
 }
 
 static int32_t w_os_progress(wasm_exec_env_t e, const char *id, uint32_t id_n, int32_t value) {
-    const os_arg_t a[2] = { OS_S(id, id_n), OS_I(value) };
-    return os_call(e, "moybyte.progress", a, 2);
+    const os_arg_t a[2] = { OS_O(id, id_n), OS_I(value) };
+    return os_role(e, MOY_T_MOYBYTE_PROGRESS, OS_HERE, a, 2, NULL, 0);
 }
 
 static int32_t w_os_every(wasm_exec_env_t e, int32_t ms) {

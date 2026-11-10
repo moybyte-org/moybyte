@@ -53,9 +53,13 @@ one, `time.ticks_us()`.
                      COALESCED: the newest value of each badge, sent once
                      an ACH_EVERY_MS at most, at once where it reaches the
                      badge's goal, and at the process's end; nothing for an
-                     unchanged value or a found badge. Either may be called
-                     every frame, allocating nothing; each answers what its
-                     badge's last send answered (1 for a found badge)
+                     unchanged value or a found badge. A value is a whole
+                     count: a fraction counts down to the whole below it.
+                     Either may be called every frame; each answers what
+                     its badge's last send answered (1 for a found badge).
+                     The queue is the kernel's (native/moy_kernel/
+                     moy_notes.h), every tier's: a send nobody took (the
+                     achievements process not there) goes again in its turn
   service_start()    start this app's own service (its manifest's
                      `"entries": {"service": file}`, docs/app_api_v1.md
                      section 7), from any process of the app: its pid where
@@ -317,8 +321,6 @@ class Wakes:
         self.radio_keep = False     # something beside a wake wants the router
         self.opener = None          # fn(pid): process pid's event queue opened
                                     # (the scheduler's: its app and `receives`)
-        self.goal = None            # fn(pid, badge id) -> its goal in the
-                                    # manifest of the app pid runs, or None
         self.service = None         # fn(pid, verb) -> service_<verb>'s answer
                                     # (the scheduler's `own`)
         self._rbuf = None
@@ -860,131 +862,30 @@ def service_running():
 
 
 ACHIEVEMENTS = "moybyte.achievements"
-ACH_EVERY_MS = 250          # a badge's sends, one in this at most
-
-# The COALESCING of award and progress (the module's head): pid -> {badge
-# id: [found, what waits to go (a value, _AWARD, or _NOTHING), the value
-# last sent, its send's ms (None: never), what that send answered, the
-# badge's goal (None: not known)]}.
-_ACH = {}
-_B_FOUND, _B_WANT, _B_SENT, _B_AT, _B_ANS, _B_GOAL = range(6)
-_NOTHING = object()
-_AWARD = object()
-_ACH_WAKE = [0]             # the shell's wake that sends what waits, 0: none
-
-
-def _badge(pid, ach_id):
-    got = _ACH.get(pid)
-    if got is None:
-        got = _ACH[pid] = {}
-    b = got.get(ach_id)
-    if b is None:
-        goal = WAKES.goal(pid, ach_id) if WAKES.goal is not None else None
-        b = got[ach_id] = [False, _NOTHING, _NOTHING, None, 0, goal]
-    return b
-
-
-def _ach_send(pid, ach_id, b, now):
-    """What waits of badge `b` sent now as process `pid`: send's answer.
-    A FULL answer leaves it waiting for the shell's wake."""
-    v = b[_B_WANT]
-    if v is _AWARD:
-        took = WAKES.send(pid, ACHIEVEMENTS, "award", (ach_id,))
-    else:
-        took = WAKES.send(pid, ACHIEVEMENTS, "progress", (ach_id, v))
-    b[_B_AT] = now
-    b[_B_ANS] = took
-    if took == FULL:
-        _ach_later()
-        return took
-    b[_B_WANT] = _NOTHING
-    if v is _AWARD:
-        b[_B_FOUND] = took > 0
-        return took
-    b[_B_SENT] = v
-    goal = b[_B_GOAL]
-    if took > 0 and goal is not None and type(v) is int and v >= goal:
-        b[_B_FOUND] = True
-    return took
-
-
-def _ach_later():
-    """The shell's wake that sends what waits, made where there is none."""
-    w = WAKES.by_id.get(_ACH_WAKE[0])
-    if w is not None and w[_FN] is _ach_due:
-        return
-    was = _pid()
-    if _L is not None:
-        _L.current(SHELL)
-    try:
-        _ACH_WAKE[0] = WAKES.after(ACH_EVERY_MS, _ach_due)
-    finally:
-        if _L is not None:
-            _L.current(was)
-
+ACH_EVERY_MS = 250          # a badge's sends, one in this at most (MOY_NOTES_EVERY_MS)
 
 def award(ach_id):
     pid = _pid()
-    b = _badge(pid, ach_id)
-    if b[_B_FOUND]:
-        return 1
-    b[_B_WANT] = _AWARD
-    now = _ticks_ms()
-    if b[_B_AT] is None or b[_B_ANS] > 0 or _ticks_diff(now, b[_B_AT]) >= ACH_EVERY_MS:
-        return _ach_send(pid, ach_id, b, now)
-    _ach_later()                        # refused a moment ago: tried again in its turn
-    return b[_B_ANS]
+    WAKES.queue(pid)                # its goals handed to the queue at its open
+    took = _E.notes_award(pid, ach_id)
+    if took > 0:
+        WAKES.queued = 1            # the achievements process is the VM's
+    return took
 
 
 def progress(ach_id, value):
     pid = _pid()
-    b = _badge(pid, ach_id)
-    if b[_B_FOUND] or b[_B_WANT] is _AWARD:
-        return 1 if b[_B_FOUND] else b[_B_ANS]
-    if b[_B_WANT] is _NOTHING and value == b[_B_SENT]:
-        return b[_B_ANS]
-    b[_B_WANT] = value
-    now = _ticks_ms()
-    goal = b[_B_GOAL]
-    if b[_B_AT] is None or _ticks_diff(now, b[_B_AT]) >= ACH_EVERY_MS or (
-            goal is not None and type(value) is int and value >= goal):
-        return _ach_send(pid, ach_id, b, now)
-    _ach_later()
-    return b[_B_ANS]
-
-
-def _ach_flush(pid, due):
-    """Process `pid`'s badges' waiting sends made, where `due` those whose
-    ACH_EVERY_MS has passed alone: whether any still waits."""
-    got = _ACH.get(pid)
-    left = False
-    if got is None:
-        return left
-    now = _ticks_ms()
-    for ach_id, b in got.items():
-        if b[_B_WANT] is _NOTHING:
-            continue
-        if due and _ticks_diff(now, b[_B_AT]) < ACH_EVERY_MS \
-                or _ach_send(pid, ach_id, b, now) == FULL:
-            left = True
-    return left
-
-
-def _ach_due():
-    """The shell's wake: what waits whose turn came sent, and the wake made
-    again while any still waits."""
-    _ACH_WAKE[0] = 0
-    left = False
-    for pid in list(_ACH):
-        left = _ach_flush(pid, True) or left
-    if left:
-        _ach_later()
+    WAKES.queue(pid)
+    if type(value) is not int:
+        value = int(value // 1)     # a whole count: a fraction counts down
+    took = _E.notes_progress(pid, ach_id, value)
+    if took > 0:
+        WAKES.queued = 1
+    return took
 
 
 def _ach_end(pid):
-    if pid in _ACH:
-        _ach_flush(pid, False)
-        del _ACH[pid]
+    _E.notes_end(pid)
 
 
 ENDS.append(_ach_end)

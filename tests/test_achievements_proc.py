@@ -235,31 +235,32 @@ def test_the_page_lists_by_game_and_keeps_a_deleted_games_badges(ws):
 
 
 
-def test_a_game_calling_progress_every_frame_sends_a_few_and_unlocks_at_its_goal(
-        ws, monkeypatch):
-    """moybyte's COALESCING (Steam's SetStat/StoreStats): a game's award and
-    progress every frame make a few sends -- an award once, a progress
-    value once an ACH_EVERY_MS at most and at once where it reaches the
-    goal its manifest declares, the newest value sent by the shell's wake
-    when the game stops calling, and at its end -- and the badge unlocks."""
-    now = [1000]
-    clock = lambda: now[0]                      # noqa: E731
-    monkeypatch.setattr(moybyte, "_ticks_ms", clock)
-    monkeypatch.setattr(S, "_ticks_ms", clock)
-    sends = []
-    real = moybyte.WAKES.send
-
-    def send(frm, app, name, args):
-        sends.append((name,) + tuple(args))
-        return real(frm, app, name, args)
-    monkeypatch.setattr(moybyte.WAKES, "send", send)
+def test_a_game_calling_progress_every_frame_sends_a_few_and_unlocks_at_its_goal(ws):
+    """The COALESCING (Steam's SetStat/StoreStats), the kernel's queue's
+    (native/moy_kernel/moy_notes.h): a game's award and progress every frame
+    make a few sends -- an award once, a progress value once an
+    ACH_EVERY_MS at most and at once where it reaches the goal its manifest
+    declares (handed to the queue at its open), the newest value sent by the
+    queue's own turn when the game stops calling, and at its end -- and the
+    badge unlocks. A fraction counts down to the whole below it."""
     cart = next(c for c in ws.carts.all if c.get("id") == GAME)
     pid = L.spawn("t.game")
-    moy_evq.open(pid, GAME, "", True)
     S.SCHED.procs[pid] = S.Proc(pid, S.APP, "t.game", cart)
+    S.SCHED._open(pid, True)
+    spy = L.spawn("t.spy")              # a second process of the achievements app
+    moy_evq.open(spy, A.PROC, "award\nprogress", False)
+    moy_evq.listen(spy, "award", True)
+    moy_evq.listen(spy, "progress", True)
+
+    def sends():
+        out = []
+        m = moy_evq.take(spy)
+        while m is not None:
+            out.append((m[2],) + tuple(json.loads(m[3])))
+            m = moy_evq.take(spy)
+        return out
 
     def frame(fn):
-        now[0] += 16
         was = L.current()
         L.current(pid)
         try:
@@ -267,40 +268,73 @@ def test_a_game_calling_progress_every_frame_sends_a_few_and_unlocks_at_its_goal
         finally:
             L.current(was)
     try:
-        for f in range(100):                    # 1.6 s at 60 fps, a level each 20 frames
-            frame(lambda: moybyte.progress("high_tide", f // 20))
+        got = []
+        for f in range(40):                     # 0.8 s, a level each 10 frames
+            frame(lambda: moybyte.progress("high_tide", f // 10 + 0.5))
             frame(lambda: moybyte.award("first_clear"))
             S.SCHED.tick(0)
+            got += sends()
+            time.sleep(0.02)
+        assert got.count(("award", "first_clear")) == 1
+        tide = [v for name, _id, *v in got if name == "progress"]
+        assert tide[0] == [0] and 2 <= len(tide) <= 5, got
+        assert tide == sorted(tide) and all(v[0] in (0, 1, 2, 3) for v in tide), got
         settle_badges(ws)
-        assert sends.count(("award", "first_clear")) == 1
-        tide = [v for name, _id, *v in sends if name == "progress"]
-        assert tide == [[0], [1], [2], [3], [4]], sends
-        assert not ws.ach.has(GAME, "high_tide")
+        assert ws.ach.has(GAME, "first_clear") and not ws.ach.has(GAME, "high_tide")
         frame(lambda: moybyte.progress("high_tide", 5))    # the goal: sent at once
+        assert sends() == [("progress", "high_tide", 5)]
         settle_badges(ws)
-        assert tide + [[5]] == [v for name, _id, *v in sends if name == "progress"]
         assert ws.ach.has(GAME, "high_tide")
-        del sends[:]
-        for f in range(60):
+        for _ in range(60):
             frame(lambda: moybyte.progress("high_tide", 9))
             frame(lambda: moybyte.award("first_clear"))
-        assert sends == []                      # found: nothing more
+        assert sends() == []                    # found: nothing more
         frame(lambda: moybyte.progress("pop_star", 1))      # no goal: the interval alone
         frame(lambda: moybyte.progress("pop_star", 2))
         frame(lambda: moybyte.progress("pop_star", 3))
-        assert sends == [("progress", "pop_star", 1)]
-        now[0] += moybyte.ACH_EVERY_MS
-        for _ in range(4):                      # the shell's wake: the newest value
-            S.SCHED.tick(0)
-        assert sends[-1] == ("progress", "pop_star", 3) and len(sends) == 2
+        assert sends() == [("progress", "pop_star", 1)]
+        time.sleep((moybyte.ACH_EVERY_MS + 30) / 1000)
+        S.SCHED.tick(0)                         # its turn: the newest value
+        assert sends() == [("progress", "pop_star", 3)]
         frame(lambda: moybyte.progress("pop_star", 4))
         moybyte.WAKES.end(pid)                  # its end sends what waits
-        assert sends[-1] == ("progress", "pop_star", 4) and len(sends) == 3
-        assert pid not in moybyte._ACH
+        assert sends() == [("progress", "pop_star", 4)]
     finally:
         S.SCHED.procs.pop(pid, None)
         moybyte.WAKES.end(pid)
-        moybyte.WAKES.cancel(moybyte._ACH_WAKE[0])     # its wake, on this test's clock
+        moy_evq.close(spy)
+
+
+def test_an_award_nobody_takes_waits_for_the_achievements_process():
+    """A compiled program's award through a VM stop, when no process of the
+    achievements app listens (its process is the VM's): the send nobody
+    took answers 0 and waits in the kernel's queue, which sends it again in
+    its turn once a listener is there; the program's end forgets the rest."""
+    pid, ach = L.spawn("t.game"), L.spawn("t.ach")
+    try:
+        moy_evq.open(pid, "t.game", "", False)
+        assert moy_evq.notes_award(pid, "first_clear") == 0
+        assert moy_evq.notes_progress(pid, "high_tide", 2) == 0
+        moy_evq.open(ach, A.PROC, "award\nprogress", False)
+        moy_evq.listen(ach, "award", True)
+        moy_evq.listen(ach, "progress", True)
+        assert moy_evq.notes_run() > 0                  # not its turn yet
+        assert moy_evq.take(ach) is None
+        time.sleep((moybyte.ACH_EVERY_MS + 30) / 1000)
+        assert moy_evq.notes_run() == 0x3FFFFFFF        # nothing waits after it
+        got = []
+        m = moy_evq.take(ach)
+        while m is not None:
+            got.append((m[2], json.loads(m[3])))
+            m = moy_evq.take(ach)
+        assert sorted(got) == [("award", ["first_clear"]), ("progress", ["high_tide", 2])]
+        assert moy_evq.notes_award(pid, "first_clear") == 1     # found: nothing sent
+        assert moy_evq.take(ach) is None
+        moy_evq.notes_end(pid)
+    finally:
+        moy_evq.notes_end(pid)
+        moy_evq.close(pid)
+        moy_evq.close(ach)
 
 
 def test_an_award_the_process_is_full_for_goes_at_the_shells_wake(ws):

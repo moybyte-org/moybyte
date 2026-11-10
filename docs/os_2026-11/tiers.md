@@ -314,13 +314,15 @@ from it (`native/moy_app/moy_app_wasm_rows.h`,
 door and hopping to the VM's task, or, for a read of what the look and the
 clipboard write, reading in place under the seqlock, or, for a row over the
 kernel's own locked state, running in place on the app's own task, as its
-row's `how` says. The console calls are imported too (`moybyte_notify`,
-`open_with`, `share`, `pick`, `award`, `progress`), each the
-`moybyte` module's verb run as the app's process through the door
-(`runtime/shell/shell_servers.py`, ConsoleCalls), under the permission it
-names there; `send`, `on`, `log` and the wakes `every`, `after`, `at` and `cancel` are
-the kernel's, C rows run on the app's own task as its process (`how`
-"here", `native/moy_app/moy_app.c`), so they need no VM, and so are the
+row's `how` says. The console calls are imported too (`open_with`,
+`share`, `pick`), each the `moybyte` module's verb run as the app's
+process through the door (`runtime/shell/shell_servers.py`, ConsoleCalls),
+under the permission it names there; `send`, `on`, `log`, the wakes
+`every`, `after`, `at` and `cancel`, and `moybyte_notify`, `award` and
+`progress` (the kernel's queue in front of the console's list and the
+achievements process, `native/moy_kernel/moy_notes.h`) are the kernel's,
+C rows run on the app's own task as its process (`how` "here",
+`native/moy_app/moy_app.c`), so they need no VM, and so are the
 store's `files` and `prefs` rows and the clipboard's write, under the
 store's lock, the settings lock and the kernel's writer lock
 (`native/moy_app/README.md`). **A compiled app

@@ -852,8 +852,8 @@ static int32_t w_os_ui_font_pull(wasm_exec_env_t e, int32_t gen, int32_t font, v
                ? (int32_t)moy_ui_theme_font((uint32_t)gen, (uint32_t)font, buf, cap) : 0;
 }
 
-// THE CONSOLE CALLS (moy_wasi_os_rows.h's bodies: notify, award, progress,
-// at, every, after, cancel): each the console's verb of the
+// THE CONSOLE CALLS (moy_wasi_os_rows.h's bodies: open_with, pick,
+// service_start): each the console's verb of the
 // row's name run as the run's process, its arguments a JSON array posted on
 // the VM's queue (moy_vmq.h) as a native service's are, and answered at the
 // console's next serve of it: a service's at the scheduler's poll, a

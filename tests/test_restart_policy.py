@@ -40,7 +40,6 @@ def sched(monkeypatch):
     _clear(wakes)
     wakes.ended = S.SCHED._ended
     wakes.opener = S.SCHED._open
-    wakes.goal = S.SCHED._goal
 
 
 CRASHER = '''

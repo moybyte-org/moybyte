@@ -27,6 +27,7 @@ import pytest
 
 from runtime import moy_evq, moy_loop, moybyte, moycore, native_build, os_log, scheduler as S
 from runtime import moy_log as L
+from runtime.notifications import NOTES
 from test_scheduler import _clear
 from ws_helpers import build_ws
 
@@ -171,8 +172,8 @@ def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
         _during(10, _lua_step)
         got = moy_evq.take(peer)
     assert got[2] == "counted" and json.loads(got[3])[0] >= 2
-    # Its alarm, the kernel's, rings during the stop; its notify waits for
-    # the VM.
+    # Its alarm, the kernel's, rings during the stop; its notify, a Lua
+    # program's console call, waits for the VM.
     t0 = time.monotonic()
     while "rang" not in _texts(since, pid):
         assert time.monotonic() - t0 < 3, "its alarm rings during the stop"
@@ -319,13 +320,15 @@ def _compiled_ws(tmp_path, built, name):
     return build_workstation(str(carts))
 
 
-def _through_a_stop(ws, s, monkeypatch, cid, tier, noted, rearm, ticks):
+def _through_a_stop(ws, s, monkeypatch, cid, tier, noted, rearm, ticks, listed):
     """A compiled service started, a VM stop and back: it keeps its pid, a
     ping from a process on its own task is answered during the stop, a timer
     it sets again from its own timer's message (`rearm`, the message that
     starts it) keeps going off meanwhile (`ticks(texts, got)` counts them),
-    and its notify, which needs the console, is answered once the VM is
-    back."""
+    and its notify is answered on its own task too (the kernel's queue,
+    native/moy_kernel/moy_notes.h), its notification taken into the list
+    by the console's first frame back where it holds `notifications`
+    (`listed`)."""
     since = L.next()
     cart = _shelf(ws, cid)
     pid = S.start_cart(ws, cart, s)
@@ -359,13 +362,18 @@ def _through_a_stop(ws, s, monkeypatch, cid, tier, noted, rearm, ticks):
         assert time.monotonic() - t0 < 5, "its timer, set again from its tick, runs on"
         _during(10)
     assert moy_evq.send(peer, cid, "note", '["x"]')[0] == 1
-    _during(150)
+    t0 = time.monotonic()
+    while not heard():
+        assert time.monotonic() - t0 < 5, "its notify is answered on its own task"
+        _during(10)
     assert rt.figures(pid) is not None, "it runs on"
-    assert not heard(), "its notify waits for the VM"
+    assert not [n for n in NOTES.list if n.pid == pid], "the console takes it at its frame"
     s2, started = _back(ws, rec, door, monkeypatch)
     q = s2.procs[pid]
     assert started[0] == pid and q.rt is rt and q.state == S.BACKGROUND
-    assert _polled(s2, heard)
+    NOTES.drain()
+    assert [n.pid for n in NOTES.list if n.pid == pid] == ([pid] if listed else []), \
+        "...and lists it under its permission"
     assert s2.stop(pid) and q.state == S.EXITED and q.code == 0, "|".join(_texts(since, pid))
     moy_evq.close(peer)
     return _texts(since, pid)
@@ -377,7 +385,7 @@ def test_an_elf_service_runs_on_through_a_vm_stop(tmp_path, elf_built, fresh, mo
         pytest.skip("no ELF tier on this host")
     texts = _through_a_stop(ws, fresh, monkeypatch, "elf.svc", "elf",
                             lambda texts, got: "noted" in got, ("rearm", "[]"),
-                            lambda texts, got: got.count("timed"))
+                            lambda texts, got: got.count("timed"), True)
     assert "taken back elf.svc" in texts and "ping 3" in texts, "|".join(texts)
 
 
@@ -386,12 +394,12 @@ def test_a_wasi_service_runs_on_through_a_vm_stop(tmp_path, wasi_built, fresh, m
     if "wasm" not in ws.runtimes:
         pytest.skip("no wasm tier on this host")
     texts = _through_a_stop(ws, fresh, monkeypatch, "wasi.svc", "wasm",
-                            lambda texts, got: any(t.startswith("service_running ")
-                                                   for t in texts),
+                            lambda texts, got: "noted" in texts,
                             ("wake", '["rearm"]'),
-                            lambda texts, got: texts.count("rearmed"))
+                            lambda texts, got: texts.count("rearmed"), False)
     note = next(i for i, t in enumerate(texts) if t.startswith("note "))
-    assert texts.index("taken back wasi.svc") < note, "its notify was answered after the stop"
+    assert note < texts.index("taken back wasi.svc"), "its notify was answered during the stop"
+    assert texts[note].startswith("note -1 "), "...DENIED: it holds no `notifications`"
     assert "stopped after 1 pings, ticking" in texts
 
 

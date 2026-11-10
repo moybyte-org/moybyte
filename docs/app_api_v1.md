@@ -681,13 +681,17 @@ moybyte.award("first_clear")          # found
 moybyte.progress("high_tide", level)  # the goal's current value: found once it reaches 5
 ```
 
-`progress` reports the game's own count, which the console stores as told
-(the last value, not the best); a best or a total is the game's to keep, in
-`pmem`. Both may be called freely, every frame or on every kill: the game's
-own process coalesces them (`runtime/system/moybyte.py`, COALESCING) and
-allocates nothing doing so. An `award` of a badge it found already sends
+`progress` reports the game's own count, a whole number, which the console
+stores as told (the last value, not the best); a fraction counts down to the
+whole below it (`2.9` is `2`), as the compiled tiers' `int32` value cannot
+carry one. A best or a total is the game's to keep, in `pmem`. Both may be
+called freely, every frame or on every kill: the kernel coalesces them per
+process and badge, every tier's alike (`native/moy_kernel/moy_notes.h`,
+BADGES), so a compiled game's answer on its own task with no VM; a send the
+achievements process is not there to take (through a VM stop) waits and
+goes in its turn. An `award` of a badge it found already sends
 nothing; `progress` keeps each badge's newest value and sends it once a
-quarter second (`ACH_EVERY_MS`) at most, at once when it reaches the goal the
+quarter second (`MOY_NOTES_EVERY_MS`) at most, at once when it reaches the goal the
 manifest declares, and at the game's end; an unchanged value sends nothing.
 Each answers what its badge's last send answered. Each is a message to the achievements process
 (`moybyte.send("moybyte.achievements", "award", id)`), which takes those two

@@ -49,7 +49,7 @@ It is the Lua face of the one service model
 (`docs/os_2026-11/processes.md` §1): its messages are its process's event
 queue (`native/moy_kernel/moy_evq.h`), its task blocks in that queue's wait,
 its rungs are the one supervisor's (`moy_super.h`), and its console calls
-(`moybyte.notify`, `send`, the functions the console hands it) go through
+(`moybyte.notify`, `award`, `progress`, the functions the console hands it) go through
 the VM's queue (`moy_vmq.h`) for the VM's task to answer; their JSON is the
 prefs names' (`native/moy_app/moy_app_lua.h`). Its state opens its app's role
 names over the run its start was handed (`moy_app_lua_open_hop`), a row the

@@ -65,7 +65,6 @@ def sched():
     s.reset()
     moybyte.WAKES.ended = S.SCHED._ended
     moybyte.WAKES.opener = S.SCHED._open
-    moybyte.WAKES.goal = S.SCHED._goal
 
 
 def _as(pid, fn):

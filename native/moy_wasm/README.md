@@ -104,10 +104,11 @@ product), with the owner's later calls dated where they land.
   permissions, its variables; and `moybyte.os`, the calls a WASI program
   shares with an ELF module: the service model's (`moy_send`, `moy_on`),
   beside its event descriptor (`moy_wasi.h`, THE EVENT DESCRIPTOR), the OS
-  log (`moy_log`), and the console calls `moy_notify`, `moy_award`,
-  `moy_progress`, `moy_open_with`, `moy_pick` and the app's own service's
-  start (`moy_service_start`), posted on the VM's queue as a native service's are
-  (`moy_wasi.c`, THE CONSOLE CALLS), and the wakes (`moy_every`,
+  log (`moy_log`), and the console calls `moy_open_with`, `moy_pick` and
+  the app's own service's start (`moy_service_start`), posted on the VM's
+  queue as a native service's are (`moy_wasi.c`, THE CONSOLE CALLS), and
+  the notifications and badges (`moy_notify`, `moy_award`, `moy_progress`,
+  the kernel's queue, `native/moy_kernel/moy_notes.h`), the wakes (`moy_every`,
   `moy_after`, `moy_at`, `moy_cancel`, each heard as the system's message
   carrying its id), the files, nav, prefs, clipboard, device and item rows,
   `moy_service_stop`, `moy_service_running` and `share`, run for the grant the

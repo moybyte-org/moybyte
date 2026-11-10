@@ -120,6 +120,7 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
         "files.rename kept", "files.new_name note_2", "files.new_name.untitled doc_1", "notify 1",
         "nav.open_app -1 EACCES", "award 1", "progress 1", "after 1", "every 1", "cancel 1",
         "cancel.again 0", "cancel.every 1", "at -1 EACCES", "status 0"]
+    NOTES.drain()                       # the console's next frame takes it into the list
     assert [(n.app, n.summary, n.body) for n in NOTES.list if n.summary == "Hello"] == [
         ("App Calls", "Hello", "from C")]
     ws = _ws

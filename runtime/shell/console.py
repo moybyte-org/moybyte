@@ -3440,6 +3440,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._services_due = False
             self.boot_services()
         sched = _scheduler.SCHED
+        _NOTES.drain()                # what compiled programs posted on their own tasks
         if sched.mail_owed():
             sched.mail()              # messages the input sent: served before the draw
         if self._press_owed:

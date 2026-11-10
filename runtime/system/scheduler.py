@@ -293,6 +293,7 @@ BACKGROUND = "background"       # a service, running
 SUSPENDED = "suspended"
 STOPPING = "stopping"
 EXITED = "exited"
+NOTIFY = "notifications"        # the permission a notification needs
 
 SHELL = 1
 SERVICE, APP, COMMAND = "service", "app", "command"
@@ -435,7 +436,6 @@ class Scheduler:
         self.asked = {}             # service id -> [its wake, "start" or "stop", its app cart]
         self.wakes.ended = self._ended
         self.wakes.opener = self._open
-        self.wakes.goal = self._goal
         self.wakes.service = self.own
 
     # -- the tick ---------------------------------------------------------
@@ -445,6 +445,9 @@ class Scheduler:
         f = self.frame + 1
         self.frame = f = 0 if f >= MOY_BG_SLICE_EVERY else f
         _E.timers_run()                 # the kernel's frame runs them too (moy_evq.h, TIMERS)
+        _E.notes_run()                  # ...and the badges' sends that wait (moy_notes.h)
+        if not self.kernel_wake and not self.wakes.queued and _E.wants() & _E.WANT_MAIL:
+            self.wakes.queued = 1       # one of them reached a VM process
         woke = _E.woke()
         while woke:                     # a kernel alarm went off: the screen's wake
             if self.wakes.woke is not None:
@@ -543,10 +546,10 @@ class Scheduler:
 
     def _open(self, pid, vm=True):
         """Process `pid`'s event queue opened: its app id (`app_of`, else
-        its cart's), its manifest's `receives` and whether it holds
-        `alarms` (moy_evq.h's MOY_EVQ_ALARMS: the kernel's alarms, a
-        compiled program's and a Lua service's); `vm` where the VM's task
-        serves it (a Python process)."""
+        its cart's), its manifest's `receives`, whether it holds `alarms`
+        and `notifications` (moy_evq.h's MOY_EVQ_ALARMS and MOY_EVQ_NOTIFY:
+        what the kernel's alarms and notifications check) and its badges'
+        goals; `vm` where the VM's task serves it (a Python process)."""
         p = self.procs.get(pid)
         cart = p.cart if p is not None else None
         if cart is None and self.cart_of is not None:
@@ -562,20 +565,19 @@ class Scheduler:
             app = (_L.name(pid) if _L is not None else "") or "pid%d" % pid
         recv = cart.get("receives") if cart is not None else None
         recv = "\n".join(r for r in recv if isinstance(r, str)) if isinstance(recv, list) else ""
-        _E.open(pid, app, recv, vm, _devices().may(pid, _moybyte.ALARMS))
+        dev = _devices()
+        _E.open(pid, app, recv, vm, dev.may(pid, _moybyte.ALARMS), dev.may(pid, NOTIFY))
+        self._goals(pid, cart)
 
-    def _goal(self, pid, ach_id):
-        """The goal of badge `ach_id` in the manifest of the cart process
-        `pid` runs, None where it declares none (moybyte's COALESCING)."""
-        p = self.procs.get(pid)
-        cart = p.cart if p is not None else None
-        if cart is None and self.cart_of is not None:
-            cart = self.cart_of(pid)
+    def _goals(self, pid, cart):
+        """The goals of the badges cart `cart` declares, handed to the
+        kernel's queue for process `pid` (native/moy_kernel/moy_notes.h:
+        a progress that reaches its goal is sent at once)."""
         for a in (cart.get("achievements") if cart is not None else None) or ():
-            if isinstance(a, dict) and a.get("id") == ach_id:
+            if isinstance(a, dict) and isinstance(a.get("id"), str):
                 goal = a.get("goal")
-                return goal if type(goal) is int and goal >= 1 else None
-        return None
+                if type(goal) is int and goal >= 1:
+                    _E.notes_goal(pid, a["id"], goal)
 
     def wakes_of(self, pid):
         """How many wakes process `pid` holds: its timers, readers and

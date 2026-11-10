@@ -62,11 +62,6 @@ try:
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
-try:
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
-
 _SHELL = 1
 
 _COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
@@ -665,16 +660,16 @@ class ConsoleCalls:
     the kernel's and Python's rows a compiled app imports): the console
     calls a program makes on any tier, each the `moybyte` module's function
     run as the process whose grant `g` is (`Procs.pid_of`), so the
-    permission each names (`notifications`, `alarms`, the front's gate) is
-    that process's. Every grant holds the role; a grant no process claims
+    permission each names (the front's gate) is that process's. Every grant holds the role; a grant no process claims
     is answered STALE.
 
     A compiled app's messages are its process's own event queue
     (native/moy_kernel/moy_evq.h), opened for it at its launch
     (moybyte._compiled_events) as a native service's is (no Python wake
-    serves it). Its `send`, `recv`, `on`, `log`, timers and alarms are no
-    console call: native/moy_app's C rows serve them on the caller's own
-    task (moy_app.c, send_row, at_row)."""
+    serves it). Its `send`, `recv`, `on`, `log`, timers, alarms,
+    notifications and badges are no console call: native/moy_app's C rows
+    serve them on the caller's own task (moy_app.c, send_row, at_row,
+    note_row)."""
 
     def __init__(self, ws):
         self.__ws = ws
@@ -690,23 +685,6 @@ class ConsoleCalls:
             if _L is not None:
                 _L.current(was)
 
-    def _own(self, g):
-        """The process of grant `g` with its event queue open, or None."""
-        pid = self.__ws.procs.pid_of(g)
-        if pid is None or pid <= _SHELL:
-            return None
-        if not _E.has(pid):
-            opener = _moybyte.WAKES.opener
-            if opener is not None:
-                opener(pid, False)
-            else:
-                _E.open(pid, "pid%d" % pid, "", False)
-        return pid
-
-    def notify(self, g, summary, body=None):
-        n = self._as(g, _moybyte.notify, summary, body or "")
-        return _DOOR_DENIED if n is None else n
-
     def open_with(self, g, item, choose):
         return self._as(g, _moybyte.open_with, item, bool(choose))
 
@@ -715,16 +693,6 @@ class ConsoleCalls:
 
     def pick(self, g, mime, mode=None):
         return self._as(g, _moybyte.pick, mime, mode or "r")
-
-    def award(self, g, ach_id):
-        if self._own(g) is None:
-            return _DOOR_STALE
-        return self._as(g, _moybyte.award, ach_id)
-
-    def progress(self, g, ach_id, value):
-        if self._own(g) is None:
-            return _DOOR_STALE
-        return self._as(g, _moybyte.progress, ach_id, value)
 
     def service_start(self, g):
         return self._service(g, _moybyte.service_start)
@@ -836,7 +804,7 @@ def _dev_handles():
 # -- the ROLE door ----------------------------------------------------------------
 
 # moy_app.h's codes the door answers with, negated.
-_DOOR_STALE, _DOOR_FULL, _DOOR_DENIED, _DOOR_BAD, _DOOR_ABSENT = -1, -2, -4, -7, -8
+_DOOR_STALE, _DOOR_FULL, _DOOR_BAD, _DOOR_ABSENT = -1, -2, -7, -8
 # The row the C shell's crossings take (native/moy_sh/moy_sh_board.h's
 # MOY_SH_DOOR, runtime/shell/sh_door.py).
 SH_DOOR = 0x7368
@@ -866,11 +834,8 @@ DOOR_ARGS = {
     "wallpaper.id_for": "c",
     "wallpaper.title": "s",
     "wallpaper.select": "o",
-    "moybyte.notify": "so",
     "moybyte.open_with": "si",
     "moybyte.share": "bs",
-    "moybyte.award": "s",
-    "moybyte.progress": "si",
     "moybyte.pick": "so",
     "moybyte.item_read": "ii",
     "moybyte.item_write": "ib",

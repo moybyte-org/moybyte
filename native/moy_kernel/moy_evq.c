@@ -342,6 +342,14 @@ bool moy_evq_has(uint32_t pid) {
     return got;
 }
 
+uint32_t moy_evq_flags(uint32_t pid) {
+    MOY_SYNC_LOCK(&s_lock);
+    int i = slot_of(pid);
+    uint32_t f = i >= 0 ? s_q[i]->flags : 0u;
+    MOY_SYNC_UNLOCK(&s_lock);
+    return f;
+}
+
 const char *moy_evq_app(uint32_t pid) {
     if (system_pid(pid)) {
         return MOY_EVQ_SYSTEM;

@@ -111,7 +111,7 @@ int32_t moy_os_moy_notify(const char *summary, const char *body) {
         { summary, 0u, 0, MOY_OS_ARG_STR },
         { body, 0u, 0, MOY_OS_ARG_OPT },
     };
-    return moy_os_call(161u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.notify
+    return moy_os_call(161u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.notify
 }
 
 int32_t moy_os_moy_open_with(const char *item, int32_t choose) {
@@ -134,7 +134,7 @@ int32_t moy_os_moy_award(const char *id) {
     const moy_os_arg_t a[1] = {
         { id, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(165u, MOY_OS_HOP, a, 1, NULL, 0u);   // moybyte.award
+    return moy_os_call(165u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.award
 }
 
 int32_t moy_os_moy_progress(const char *id, int32_t value) {
@@ -142,7 +142,7 @@ int32_t moy_os_moy_progress(const char *id, int32_t value) {
         { id, 0u, 0, MOY_OS_ARG_STR },
         { NULL, 0u, value, MOY_OS_ARG_INT },
     };
-    return moy_os_call(166u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.progress
+    return moy_os_call(166u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.progress
 }
 
 int32_t moy_os_moy_every(int32_t ms) {

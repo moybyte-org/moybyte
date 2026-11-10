@@ -20,7 +20,8 @@ _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
 PART = native_build.Part("evq", ("moy_sync.h", "moy_evq.h", "moy_evq.c", "moy_super.h",
                                  "moy_super.c", "moy_vmq.h", "moy_vmq.c", "moy_screen_slot.h",
-                                 "moy_screen_slot.c", "moy_status.h", "moy_status.c"),
+                                 "moy_screen_slot.c", "moy_status.h", "moy_status.c",
+                                 "moy_notes.h", "moy_notes.c"),
                          (_KERNEL,))
 
 OK, STALE, FULL, NOMEM, DENIED, DEAF, EMPTY, RANGE = range(8)
@@ -35,6 +36,7 @@ WANT_MAIL, WANT_POLL = 0x01, 0x02
 SYSTEM = "system"
 _VM = 0x01
 _ALARMS = 0x02
+_NOTIFY = 0x04
 _APP = 48
 _NAME = 24
 
@@ -98,6 +100,15 @@ _SIGS = (
     ("moy_status_gen", [], _U32),
     ("moy_status_get", [_I, ctypes.c_void_p], _B),
     ("moy_status_reset", [], None),
+    ("moy_notes_id", [], _U32),
+    ("moy_notes_waiting", [], _U32),
+    ("moy_notes_take", [ctypes.c_void_p], _B),
+    ("moy_notes_goal", [_U32, _P, _SZ, ctypes.c_int32], _I),
+    ("moy_notes_award", [_U32, _P, _SZ], ctypes.c_int32),
+    ("moy_notes_progress", [_U32, _P, _SZ, ctypes.c_int32], ctypes.c_int32),
+    ("moy_notes_run", [], _U32),
+    ("moy_notes_end", [_U32], None),
+    ("moy_notes_reset", [], None),
     ("moy_evq_clock", [ctypes.c_int64], None),
     ("moy_evq_timers", [_U32], _U32),
     ("moy_evq_timers_run", [], _U32),
@@ -121,9 +132,11 @@ def _b(s):
     return s.encode() if isinstance(s, str) else s
 
 
-def open(pid, app, receives="", vm=False, alarms=False):  # noqa: A001 -- the module's name
+def open(pid, app, receives="", vm=False, alarms=False,  # noqa: A001 -- the module's name
+         notify=False):
     return _lib().moy_evq_open(pid, _b(app), _b(receives) if receives else None,
-                               (_VM if vm else 0) | (_ALARMS if alarms else 0))
+                               (_VM if vm else 0) | (_ALARMS if alarms else 0)
+                               | (_NOTIFY if notify else 0))
 
 
 def close(pid):
@@ -323,7 +336,7 @@ def status_sweep(pid):
 
 
 def status_gen():
-    return _lib().moy_status_gen()
+    return _lib().moy_status_gen() & 0x3FFFFFFF
 
 
 def status_get(h):
@@ -335,6 +348,54 @@ def status_get(h):
 
 def status_reset():
     _lib().moy_status_reset()
+
+
+class _Note(ctypes.Structure):
+    _fields_ = [("id", _U32), ("pid", _U32), ("app", ctypes.c_char * 48),
+                ("summary", ctypes.c_char * 48), ("body", ctypes.c_char * 201)]
+
+
+def notes_id():
+    return _lib().moy_notes_id()
+
+
+def notes_waiting():
+    return _lib().moy_notes_waiting()
+
+
+def notes_take():
+    n = _Note()
+    if not _lib().moy_notes_take(ctypes.byref(n)):
+        return None
+    return (n.id, n.pid, n.app.decode("utf-8", "replace"),
+            n.summary.decode("utf-8", "replace"), n.body.decode("utf-8", "replace"))
+
+
+def notes_goal(pid, ach_id, goal):
+    b = _b(ach_id)
+    return _lib().moy_notes_goal(int(pid), b, len(b), int(goal))
+
+
+def notes_award(pid, ach_id):
+    b = _b(ach_id)
+    return _lib().moy_notes_award(int(pid), b, len(b))
+
+
+def notes_progress(pid, ach_id, value):
+    b = _b(ach_id)
+    return _lib().moy_notes_progress(int(pid), b, len(b), int(value))
+
+
+def notes_run():
+    return min(_lib().moy_notes_run(), 0x3FFFFFFF)
+
+
+def notes_end(pid):
+    _lib().moy_notes_end(int(pid))
+
+
+def notes_reset():
+    _lib().moy_notes_reset()
 
 
 def timer_cancel(pid, tid):

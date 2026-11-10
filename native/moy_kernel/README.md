@@ -19,7 +19,9 @@ the one supervisor of background callbacks; `moy_vmq.h`, the one queue of
 calls into the VM's task; the module `moy_evq`, `modmoy_evq.c`), a compiled
 app's or game's screen handed to the console (`moy_screen_slot.h`), the
 bar's status items, which a compiled program writes on its own task and the
-console reads to draw (`moy_status.h`), and the
+console reads to draw (`moy_status.h`), the queue in front of the
+console's notifications and the achievements process, which a program's
+`notify`, `award` and `progress` reach on its own task (`moy_notes.h`), and the
 kernel's I2C bus (`moy_bus.h`). Each header states how
 its piece works; `moy_kernel.h` holds the rules every kernel module keeps
 (handles, PSRAM, stopping the VM), and `native/moy_play/moy_play.h` the

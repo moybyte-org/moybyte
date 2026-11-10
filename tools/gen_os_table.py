@@ -225,12 +225,14 @@ def cap_packed(r):
 
 
 def py_twin(r):
-    """Whether a C row has the moybyte module's verb as its Python half: a
-    kernel answer first, on a compiled program's own task, and the console
-    call where the kernel has none (the door's). A Lua program, whose calls
-    are the VM's already, holds the console call itself."""
-    return (r.get("server") == "c" and bool(r.get("door")) and bool(r.get("py"))
-            and role_of(r) == "moybyte")
+    """Whether a C row run where it is called has the moybyte module's verb
+    as its Python half: the kernel's answer on a compiled program's own
+    task, and, for a door row, the console call where the kernel has none
+    (the door's). A Lua program, whose calls are the VM's already, holds the
+    console call itself. A Lua tier's own form of the row (lua_own) is no
+    twin."""
+    return (r.get("server") == "c" and r.get("how") == "here" and not r.get("lua_own")
+            and bool(r.get("py")) and role_of(r) == "moybyte")
 
 
 def wasi_rows(src):

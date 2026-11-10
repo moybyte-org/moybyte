@@ -369,6 +369,9 @@ def _processes_reset():
     N = sys.modules.get("runtime.notifications")
     if N is not None and (N.NOTES.list or N.NOTES.banner is not None):
         N.NOTES.reset()
+    E = sys.modules.get("runtime.moy_evq")
+    if E is not None and E._LIB[0] is not None:
+        E.notes_reset()             # the kernel's notifications and badges (moy_notes.h)
     SI = sys.modules.get("runtime.status_items")
     if SI is not None:
         SI.ITEMS.sync()
@@ -388,7 +391,7 @@ def _processes_reset():
     if S is not None:
         sched = S.SCHED
         w = sched.wakes
-        w.ended, w.opener, w.goal = sched._ended, sched._open, sched._goal
+        w.ended, w.opener = sched._ended, sched._open
         w.service = sched.own
         for pid in [p.pid for p in sched.procs.values() if p.state == S.EXITED]:
             del sched.procs[pid]

@@ -32,7 +32,6 @@ def sched():
     _clear(wakes)
     wakes.ended = S.SCHED._ended
     wakes.opener = S.SCHED._open
-    wakes.goal = S.SCHED._goal
 
 
 def _cart(src, cid="t.aio"):

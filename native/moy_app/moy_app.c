@@ -26,6 +26,16 @@ int moy_status_add(uint32_t pid, const char *icon, size_t n, int32_t order, bool
     __attribute__((weak));
 int moy_status_show(uint32_t pid, int h, int state) __attribute__((weak));
 int moy_status_remove(uint32_t pid, int h) __attribute__((weak));
+
+// The queue in front of the notifications and the achievements process
+// (native/moy_kernel/moy_notes.h; its codes are moy_evq's, this layer's
+// STALE, FULL and DENIED): weak, for a build of the layer alone, where a
+// notify, award or progress row answers STALE.
+int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char *body,
+                       size_t bn) __attribute__((weak));
+int32_t moy_notes_award(uint32_t pid, const char *id, size_t n) __attribute__((weak));
+int32_t moy_notes_progress(uint32_t pid, const char *id, size_t n, int32_t value)
+    __attribute__((weak));
 void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
 
 // A compiled program's device handles (native/moy_kernel/moy_dev.h): weak,
@@ -1629,8 +1639,9 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g) {
 // The role table, row for row: each row's "role.verb", its role and its C row
 // (MOY_APP_SHELL for a row the Python console serves), generated from
 // native/os_calls.json.
-static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABLE_N] =
+static const struct { const char *name; int8_t role; int16_t c_row; } TABLE[MOY_APP_TABLE_N] =
     MOY_APP_TABLE_ROWS;
+_Static_assert(MOY_ROW_N <= INT16_MAX, "a C row's index is a TABLE entry's int16_t");
 
 int moy_app_table_role(uint32_t row) {
     return row < MOY_APP_TABLE_N ? TABLE[row].role : -1;
@@ -1777,6 +1788,7 @@ static int no_args(int row) {
         case MOY_ROW_MOYBYTE_ON: case MOY_ROW_MOYBYTE_AT:
         case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
         case MOY_ROW_MOYBYTE_STATUS_REMOVE:
+        case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
         case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
         case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
         case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
@@ -1958,6 +1970,37 @@ static int32_t status_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
         moy_status_show(pid, got, state);
     }
     return got;
+}
+
+// A compiled process's notification and badges (moybyte.notify, award,
+// progress): the kernel's queue in front of the console's list and the
+// achievements process (moy_notes.h), as the process the grant names, on its
+// own task. A notify answers its id (DENIED without `notifications`), an
+// award or a progress what its badge's last send answered.
+static int32_t note_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
+    size_t n0, n1 = 0;
+    const uint8_t *p0 = arg_field(f, &n0);
+    const uint8_t *p1 = NULL;
+    int32_t v = 0;
+    if (row == MOY_ROW_MOYBYTE_NOTIFY) {
+        p1 = arg_field(f, &n1);
+    } else if (row == MOY_ROW_MOYBYTE_PROGRESS) {
+        v = arg_int(f);
+    }
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, row);
+    if (pid == 0u || moy_notes_post == NULL) {
+        return -MOY_APP_STALE;
+    }
+    if (row == MOY_ROW_MOYBYTE_NOTIFY) {
+        return moy_notes_post(pid, (const char *)p0, n0, (const char *)p1, n1);
+    }
+    if (row == MOY_ROW_MOYBYTE_AWARD) {
+        return moy_notes_award(pid, (const char *)p0, n0);
+    }
+    return moy_notes_progress(pid, (const char *)p0, n0, v);
 }
 
 static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
@@ -2379,6 +2422,8 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
         case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
         case MOY_ROW_MOYBYTE_STATUS_REMOVE:
             return status_row(a, g, row, f);
+        case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
+            return note_row(a, g, row, f);
         case MOY_ROW_MOYBYTE_RANDOM: {
             int32_t want = arg_int(f);
             if (f->bad || f->at != f->n) {

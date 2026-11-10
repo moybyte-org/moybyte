@@ -36,6 +36,13 @@ service was bound with; the shell itself (pid 1) always may. Without it the
 post answers None and nothing shows. A request is the shell's to post and
 needs no permission.
 
+A compiled program's notification is the kernel's queue's
+(native/moy_kernel/moy_notes.h): posted on the program's own task, VM or no
+VM, under the `notifications` its event queue was opened with, and taken
+into the list here at the console's next frame (`drain`). Every id, the
+console's own posts' too, is that queue's (`moy_notes_id`), so an id names
+one notification whoever posted it.
+
 `gen` moves with every change, the task manager's cue to read the list again.
 """
 
@@ -43,6 +50,10 @@ try:
     from ticks import _ticks_ms, _ticks_diff, _ticks_add
 except ImportError:  # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_add
+try:
+    import moy_evq as _E
+except ImportError:  # host: the runtime package
+    from runtime import moy_evq as _E
 
 LOW, NORMAL, CRITICAL = 0, 1, 2
 BANNER_MS = 5000                # a NORMAL banner's time up
@@ -106,8 +117,8 @@ class Notifications:
         self.banner = None          # the Note up, or None
         self.until = 0              # ticks_ms the banner goes at
         self.gen = 0
-        self.next_id = 1
         self.who = None             # fn(pid) -> (title, cart, may_post), the shell's
+        self.titled = None          # fn(app id) -> its cart or None, the shell's
         self.shown = None           # fn(note|None, until) the banner went up or down
         self.acted = None           # fn(note, key) a notification was acted on
 
@@ -147,11 +158,27 @@ class Notifications:
         n.then = then
         return n.id
 
-    def _put(self, n, pid, title, cart, summary, body, icon, acts, urgency):
-        """Notification `n` (None: a new one) as posted, the banner up for it."""
+    def drain(self):
+        """The notifications compiled programs posted on their own tasks
+        (moy_notes.h), each taken into the list under its id, its banner up,
+        as the console's frame starts. Allocates nothing while none waits."""
+        if not _E.notes_waiting():
+            return
+        got = _E.notes_take()
+        while got is not None:
+            nid, pid, app, summary, body = got
+            title, cart, _may = self._who(pid)
+            if title is None:           # its process ended since: its app's cart
+                cart = self.titled(app) if self.titled is not None else None
+                title = (cart.get("title") if cart is not None else None) or app or "App"
+            self._put(None, pid, title, cart, summary, body, None, (), NORMAL, nid)
+            got = _E.notes_take()
+
+    def _put(self, n, pid, title, cart, summary, body, icon, acts, urgency, nid=0):
+        """Notification `n` (None: a new one, `nid` its id or 0 for the
+        queue's next) as posted, the banner up for it."""
         if n is None:
-            n = Note(self.next_id, pid, title, cart)
-            self.next_id += 1
+            n = Note(nid or _E.notes_id(), pid, title, cart)
             self.list.insert(0, n)
             if len(self.list) > KEEP:
                 old = self.list.pop()

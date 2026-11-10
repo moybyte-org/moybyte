@@ -284,8 +284,10 @@ class Notices:
 
     def _init_notes(self):
         """The notification service's hooks are this console's: who a pid
-        is, the banner's kernel copy, and acting on one."""
+        is, which cart an app id names, the banner's kernel copy, and acting
+        on one."""
         _NOTES.who = self._note_who
+        _NOTES.titled = self._note_titled
         _NOTES.shown = self._note_shown
         _NOTES.acted = self._note_acted
         self._note_rect = None          # the banner's card where it last drew
@@ -554,6 +556,13 @@ class Notices:
 
     def _note_who(self, pid):
         return self.procs.who(pid)
+
+    def _note_titled(self, app):
+        """The cart app id `app` names, None where none on the shelf does."""
+        for c in self.carts.all:
+            if _perms.app_id(c) == app:
+                return c
+        return None
 
     def _note_shown(self, n, until):
         """The banner went up (`n`) or down: the kernel's copy, which a run

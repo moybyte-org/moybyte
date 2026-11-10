@@ -99,8 +99,8 @@ The role table is data, and every verb has one of four servers:
   the row as a shell row; the link sends the process its events as messages and
   reads its answers off its functions.
 - **`call`**: a console call (the `moybyte` role, which every grant holds):
-  the `moybyte` module's function (`notify`, `open_with`, `share`,
-  `award`, `progress`, `pick`) run as the process whose grant it is
+  the `moybyte` module's function (`open_with`, `share`, `pick`) run as
+  the process whose grant it is
   (`runtime/shell/shell_servers.py`'s `ConsoleCalls`), so the permission it
   names is that process's. A native command reaches them through the door; a
   Lua service and a WASI program through the VM's queue; a compiled app
