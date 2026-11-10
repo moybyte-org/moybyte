@@ -132,7 +132,8 @@ _LIB = [None]
 # This module's share of the host's one library (runtime/host/host_native.py).
 PART = native_build.Part("loop", ("moy_loop.h", "moy_idle.h", "moy_idle.c", "moy_perf.h",
                                   "moy_perf.c", "moy_devch.h", "moy_devch.c", "moy_log.h", "moy_log.c", "moy_proc_exit.h",
-                                  "moy_loop_host.h", "moy_loop_host.c"), _KERNEL, shim=_SHIM)
+                                  "moy_sync.h", "moy_loop_host.h", "moy_loop_host.c"), _KERNEL,
+                         shim=_SHIM)
 
 
 def build(verbose=False):

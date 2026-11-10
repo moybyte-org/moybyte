@@ -1,5 +1,9 @@
 // moy_loop: the console's frame. moy_loop.h has the contract and the order.
 
+#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
+#endif
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +13,7 @@
 #include "moy_loop.h"
 #include "moy_log.h"
 #include "moy_perf.h"
+#include "moy_sync.h"
 
 // The stage budgets in per-mille of the pacing slot; -1 is no deadline (the
 // tail: a browser pulling the console bundle owns the frame it lands in, the
@@ -100,6 +105,7 @@ static struct {
     struct {
         moy_loop_job_fn fn;
         void *arg;
+        bool again;             // asked for while it ran: a false answer keeps it
     } jobs[MOY_LOOP_JOBS];
     int njobs;
 } L = {.vm = true, .frame_ms = 16, .slot = 16, .light_top = MOY_IDLE_LIGHT_FULL};
@@ -136,51 +142,87 @@ void moy_loop_say_line(const char *line) {
 
 // -- the jobs ----------------------------------------------------------------------
 
-bool moy_loop_job(moy_loop_job_fn fn, void *arg) {
+// The table is any task's to add to (a program's own task arms the kernel's
+// timers and notifications, moy_evq.c and moy_notes.c), so it is held under
+// its own lock, never across a job's run. A job asked for again while it
+// runs is kept by its false answer: the ask made after the job looked and
+// before it went is not lost.
+static MOY_SYNC_LOCK_T s_jobs_lock = MOY_SYNC_LOCK_INIT;
+
+static int job_at(moy_loop_job_fn fn, void *arg) {
     for (int i = 0; i < L.njobs; i++) {
         if (L.jobs[i].fn == fn && L.jobs[i].arg == arg) {
-            return true;
+            return i;
         }
     }
-    if (L.njobs == MOY_LOOP_JOBS) {
-        return false;
+    return -1;
+}
+
+static void job_cut(int i) {
+    memmove(&L.jobs[i], &L.jobs[i + 1], (size_t)(L.njobs - i - 1) * sizeof L.jobs[0]);
+    L.njobs--;
+}
+
+bool moy_loop_job(moy_loop_job_fn fn, void *arg) {
+    bool ok = true;
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    int i = job_at(fn, arg);
+    if (i >= 0) {
+        L.jobs[i].again = true;
+    } else if (L.njobs == MOY_LOOP_JOBS) {
+        ok = false;
+    } else {
+        L.jobs[L.njobs].fn = fn;
+        L.jobs[L.njobs].arg = arg;
+        L.jobs[L.njobs].again = false;
+        L.njobs++;
     }
-    L.jobs[L.njobs].fn = fn;
-    L.jobs[L.njobs].arg = arg;
-    L.njobs++;
-    return true;
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
+    return ok;
 }
 
 void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) {
-    for (int i = 0; i < L.njobs; i++) {
-        if (L.jobs[i].fn == fn && L.jobs[i].arg == arg) {
-            memmove(&L.jobs[i], &L.jobs[i + 1], (size_t)(L.njobs - i - 1) * sizeof L.jobs[0]);
-            L.njobs--;
-            return;
-        }
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    int i = job_at(fn, arg);
+    if (i >= 0) {
+        job_cut(i);
     }
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
 }
 
 // A job may drop itself or another, or add one, while they run: each is run
 // at most once a call, by its identity.
 int moy_loop_jobs(void) {
-    int n = L.njobs;
     moy_loop_job_fn fns[MOY_LOOP_JOBS];
     void *args[MOY_LOOP_JOBS];
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    int n = L.njobs;
     for (int i = 0; i < n; i++) {
         fns[i] = L.jobs[i].fn;
         args[i] = L.jobs[i].arg;
     }
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
     for (int i = 0; i < n; i++) {
-        bool still = false;
-        for (int j = 0; j < L.njobs; j++) {
-            still |= L.jobs[j].fn == fns[i] && L.jobs[j].arg == args[i];
+        MOY_SYNC_LOCK(&s_jobs_lock);
+        int at = job_at(fns[i], args[i]);
+        if (at >= 0) {
+            L.jobs[at].again = false;
         }
-        if (still && !fns[i](args[i])) {
-            moy_loop_job_drop(fns[i], args[i]);
+        MOY_SYNC_UNLOCK(&s_jobs_lock);
+        if (at < 0 || fns[i](args[i])) {
+            continue;
         }
+        MOY_SYNC_LOCK(&s_jobs_lock);
+        at = job_at(fns[i], args[i]);
+        if (at >= 0 && !L.jobs[at].again) {
+            job_cut(at);
+        }
+        MOY_SYNC_UNLOCK(&s_jobs_lock);
     }
-    return L.njobs;
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    n = L.njobs;
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
+    return n;
 }
 
 static uint32_t now_ms(void) {
