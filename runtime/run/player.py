@@ -1268,6 +1268,11 @@ class Player(PlayerDiag):
         # an app on the whole surface (a desk's window, or its glass) lays out
         # on the desk's rows there; the fixed raster is the handheld's
         desk = self.run.app_full_canvas and _layout_base.metric_class() == _layout_base.DESK
+        # a responsive app's frame is its surface less the host's bars
+        # (`content_rect()`), so `ui.page` lies below them wherever its
+        # surface is, the handheld's shared raster included; a game's and a
+        # fixed app's is their whole canvas
+        room = ws.app_content_rect() if self._app_layout is not None else None
         ed = self._note() if render and not self._bg_on else None
         if ed is None or (self._over[2] and ed.meets(self._over)):
             host.whole()                # nothing vouches for the page's pixels
@@ -1284,7 +1289,7 @@ class Player(PlayerDiag):
         if own:
             _ui_draw.window_frame(2)
         try:
-            settled = host.run(cv, ws.theme_colors, None, a, desk, ws.windowed_chrome,
+            settled = host.run(cv, ws.theme_colors, room, a, desk, ws.windowed_chrome,
                                fed is not None)
         finally:
             if own:

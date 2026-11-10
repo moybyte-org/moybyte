@@ -202,7 +202,9 @@ app never keeps a scroll offset or a frame path of its own (owner,
 **The bar is the host's.** The console draws the bar (its back chevron,
 your title, the status) over your app and routes its taps; your app draws
 none. Lay out inside `content_rect()` (`x, y, w, h`), wherever the bar sits;
-`ui.page` already does. `bar_h()` is that rect's `y`.
+in a responsive app (`_layout`, below) `ui.page` already does, its frame
+being that rect, while a fixed canvas's page is its whole raster. `bar_h()`
+is that rect's `y`.
 
 **Drawn on change.** An app paints a frame only when something changed: its
 input, a message, a timer. One that moves on its own says

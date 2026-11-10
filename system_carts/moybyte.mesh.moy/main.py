@@ -55,7 +55,6 @@ def _init():
 
 def _draw():
     global cur, text, region
-    ui.at(*content_rect())
     ui.page("")             # the app bar and the window name it
     ui.hints(("confirm", "Send"))
     text, enter = ui.field("Message", text, 200)

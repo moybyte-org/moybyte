@@ -288,7 +288,6 @@ def _hand_keys():
 def _list_page(x, y, w, h):
     global cur
     ui.bar("Notes")
-    ui.at(x, y, w, h)
     ui.page("")
     if names is None:
         _blank(x, y, w, h, "No storage", NO_STORE)
@@ -406,7 +405,6 @@ def _note_page(x, y, w, h):
     elif t == -2:
         _close()
         return
-    ui.at(x, y, w, h)
     ui.page("", _page_o(False))
     foot = 34
     _sheet(x + 6, y + 3, w - 12, h - foot - 5, 8 * FS)
@@ -501,7 +499,6 @@ def _desk(x, y, w, h):
     over it, a foot under both: its rule, the note's state, the clipboard's
     keys."""
     ui.bar(_title(ed.name()) if ed is not None else "")
-    ui.at(x, y, w, h)
     ui.page("", _page_o(True) if ed is not None and names is not None else None)
     if names is None:
         _blank(x, y, w, h, "No storage", NO_STORE)
