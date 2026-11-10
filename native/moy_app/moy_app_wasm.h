@@ -88,7 +88,8 @@ uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *na
 
 // The hops made, the microseconds they took end to end, and the rows' own
 // share of those on the VM's task: the hop's price per call is the difference
-// over the count (the suites read it).
-void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us);
+// over the count (the suites read it). And the rows of how "here" answered on
+// the caller's own task, with no hop.
+void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us, uint32_t *here);
 
 #endif // MOY_APP_WASM_H

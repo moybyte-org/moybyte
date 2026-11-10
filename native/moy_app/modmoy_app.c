@@ -29,7 +29,8 @@
 //                        and every other run grant (the stopped VM's)
 //   wasm_rows()          the import adapter's natives: (name, type, table row)
 //   wasm_hops()          (hops made, their microseconds end to end, the rows'
-//                        own microseconds on the VM's task)
+//                        own microseconds on the VM's task, rows answered
+//                        here on the caller's task with no hop)
 //   table()              the role table's rows, "role.verb", in its order
 //   door_bind(on)        the shell rows' door: the kernel's ROLE upcall
 //                        (moy_loop_role), or none
@@ -2059,11 +2060,11 @@ static mp_obj_t mod_wasm_rows(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_rows_obj, mod_wasm_rows);
 
 static mp_obj_t mod_wasm_hops(void) {
-    uint32_t n, us, work;
-    moy_app_wasm_hops(&n, &us, &work);
-    mp_obj_t r[3] = { mp_obj_new_int_from_uint(n), mp_obj_new_int_from_uint(us),
-                      mp_obj_new_int_from_uint(work) };
-    return mp_obj_new_tuple(3, r);
+    uint32_t n, us, work, here;
+    moy_app_wasm_hops(&n, &us, &work, &here);
+    mp_obj_t r[4] = { mp_obj_new_int_from_uint(n), mp_obj_new_int_from_uint(us),
+                      mp_obj_new_int_from_uint(work), mp_obj_new_int_from_uint(here) };
+    return mp_obj_new_tuple(4, r);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_hops_obj, mod_wasm_hops);
 

@@ -48,7 +48,7 @@ int moy_wasm_on_vm(void (*fn)(void *arg), void *arg) __attribute__((weak));
 enum { HOP = 0, SEQ = 1, HERE = 2 };
 
 static moy_appabi_t *volatile s_live;   // the console's state: what the theme reads
-static uint32_t s_hops, s_hop_us, s_hop_work_us;
+static uint32_t s_hops, s_hop_us, s_hop_work_us, s_here;
 
 void moy_app_wasm_live(moy_appabi_t *a) {
     if (a != NULL) {
@@ -94,10 +94,11 @@ uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *na
     }
 }
 
-void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us) {
+void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us, uint32_t *here) {
     *count = s_hops;
     *us = s_hop_us;
     *work_us = s_hop_work_us;
+    *here = s_here;
 }
 
 // -- running a row -----------------------------------------------------------------
@@ -167,7 +168,7 @@ static int32_t run(void *e, int how, int row, const span_t *f, int nf, uint8_t *
         r = moy_app_role_here(a, g, (uint32_t)row, buf, n, ans, cap);
     }
     if (how == HERE && r != -MOY_APP_NEEDS_VM) {
-        // answered on the caller's task
+        s_here++;
     } else if (how == SEQ) {
         for (unsigned spins = 0;; spins++) {
             uint32_t q = moy_app_seq_begin(a);

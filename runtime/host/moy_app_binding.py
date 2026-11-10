@@ -172,7 +172,7 @@ _SIGS = (
     ("moy_app_stop_end", [_P, _P, ctypes.c_size_t], None),
     ("moy_app_wasm_natives", [_PU32], _P),
     ("moy_app_wasm_row", [_U32], c.c_int),
-    ("moy_app_wasm_hops", [_PU32, _PU32, _PU32], None),
+    ("moy_app_wasm_hops", [_PU32, _PU32, _PU32, _PU32], None),
     ("moy_app_store_bind", [_P, _P, _PCHAR, _SIZE, c.c_int, c.c_int], c.c_int),
     ("moy_app_why", [_P], c.c_int),
     ("moy_app_buf_free", [_P, c.POINTER(_Buf)], None),
@@ -1118,9 +1118,9 @@ def binding(sanitize=False):
                       lib.moy_app_wasm_row(i)) for i in range(n.value))
 
     def wasm_hops():
-        n, us, work = c.c_uint32(), c.c_uint32(), c.c_uint32()
-        lib.moy_app_wasm_hops(c.byref(n), c.byref(us), c.byref(work))
-        return n.value, us.value, work.value
+        n, us, work, here = c.c_uint32(), c.c_uint32(), c.c_uint32(), c.c_uint32()
+        lib.moy_app_wasm_hops(c.byref(n), c.byref(us), c.byref(work), c.byref(here))
+        return n.value, us.value, work.value, here.value
 
     def door_bind(on):
         """The shell rows' door: the kernel's ROLE upcall, the loop's own

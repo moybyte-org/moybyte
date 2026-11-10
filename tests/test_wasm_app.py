@@ -83,9 +83,13 @@ def test_a_compiled_app_reaches_prefs_and_theme_with_no_upcall(tmp_path):
     _binding_or_skip()
     ws = host_app.build_workstation(_store(tmp_path))
     t0 = moy_loop.upcalls()[1]
+    h0 = moy_app.wasm_hops()
     open_cart(ws, "App Roles Wasm")
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     _frames(ws, 10)
+    hops, _us, _work, here = (b - a for a, b in zip(h0, moy_app.wasm_hops()))
+    assert here >= 2 and hops == 0, "prefs rows not answered here: %r" % (
+        (h0, moy_app.wasm_hops()),)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     from runtime import moy_play
     books = moy_play.info()[5]

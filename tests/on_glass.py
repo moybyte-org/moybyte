@@ -4137,8 +4137,9 @@ WASM_APPS = (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1])
 
 def wasm_app_reaches_its_roles(board, root):
     """App Roles Wasm runs with its prefs and theme imports and no crossing of
-    any class but the console's frame, each prefs row hopped to the VM's task (moy_app.wasm_hops: the
-    hop's price per call, printed); the module one permission short is refused
+    any class but the console's frame, each prefs row answered in C on the
+    run's own task, none hopped to the VM's (moy_app.wasm_hops: rows of how
+    "here" and hops, counted); the module one permission short is refused
     at load naming prefs_get; App Shell Wasm's verdict keeps the VM, naming its
     shell-served import. Leaves the desk as it found it."""
     hops0 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
@@ -4161,10 +4162,11 @@ def wasm_app_reaches_its_roles(board, root):
                           "if c['title'] == %r)))" % APP_ROLES[1], strict=True)
     assert strikes == 0, "the run's end left %r strikes" % strikes
     hops1 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
-    n, us, work = [b - a for a, b in zip(hops0, hops1)]
-    assert n >= 2, "prefs.get and prefs.set did not hop: %r -> %r" % (hops0, hops1)
-    print("\nWASM APP: %d hops, %d us end to end, %d us the rows' own: %.1f us "
-          "per hop" % (n, us, work, (us - work) / n))
+    n, _us, _work, here = [b - a for a, b in zip(hops0, hops1)]
+    assert here >= 2, "prefs.get and prefs.set were not answered here: %r -> %r" % (
+        hops0, hops1)
+    assert n == 0, "the run hopped to the VM: %r -> %r" % (hops0, hops1)
+    print("\nWASM APP: %d rows answered here, %d hops" % (here, n))
     line = board.cmd("run %s" % APP_SHORT[1].lower(), wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     try:
@@ -4180,7 +4182,6 @@ def wasm_app_reaches_its_roles(board, root):
     census = board.pyval("__import__('moy_play').census(%r)"
                          % (root + "/wasm_app_roles.moy"), strict=True)
     assert list(census) == ["wasm", True, "free"], census
-    return (us - work) / n
 
 
 # App UI Wasm's pmem slots (tests/fixtures/wasm/app_ui.moy/src/main.wat).
