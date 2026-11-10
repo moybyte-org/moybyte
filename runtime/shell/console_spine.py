@@ -486,9 +486,13 @@ class SpineVerbs:
 
     def wifi_hold(self, tag, pid=None):
         """Take the radio for `tag`: the WiFi is OFF unless
-        something holds it, and this is the only way to turn it on. Powers the
-        interface up at once -- every holder scans or connects next, and the
-        ESP-NOW link must find the service owning the interface it activates.
+        something holds it. The hold is a row of the lease table's radio book,
+        and on a board the kernel's WiFi driver powers the station from that
+        book (native/moy_net/moy_net.h's THE BOOK), as it does for a hold a
+        compiled program or a C service takes; `radio_on` then makes the
+        service's view of the interface at once -- every holder scans or
+        connects next, and the ESP-NOW link must find the service owning the
+        interface it activates.
         Idempotent per tag and holder. The console's own holders: "web" (wasm
         mode, released when its socket actually closes), "update" (the online
         update screen), "settings" (the WIFI panel), "link" (a match), "carts"
@@ -528,17 +532,18 @@ class SpineVerbs:
     def wifi_release(self, tag, pid=None):
         """Let the radio go for `tag` (a process's tag: process `pid`'s hold,
         or with pid 0 every process's, for a run that ended in the kernel);
-        the last holder out powers it down. Releasing a tag never held is fine
-        (every exit path releases without asking), and an empty set powers
-        down even so: "off in general" is the rule, and whatever a serial `py`
-        brought up without a lease goes with the next exit."""
+        the last holder out powers it down (the book's, on a board). Releasing
+        a tag never held is fine (every exit path releases without asking),
+        and an empty set lets the service's view go even so (`radio_off`,
+        which on the host and a port's network.WLAN powers down too)."""
         if self.leases.release(tag, self._wifi_owner(tag, pid, True)):
             return
         self._radio_off()
 
     def wifi_settle(self):
-        """The radio powered down when nothing holds it: what a process's
-        end runs after the lease table let its holds go."""
+        """The service's view let go when nothing holds the radio: what a
+        process's end runs after the lease table let its holds go (the
+        book powered the station down with them, on a board)."""
         if not self.leases.mask():
             self._radio_off()
 

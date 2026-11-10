@@ -3,8 +3,12 @@
 DeviceWifi is the injected `wifi` backend the shared Workstation exposes to a cart
 whose manifest opts into the "network" permission (host == device: it mirrors the
 host make_wifi). It is a SYSTEM service, and THE RADIO IS A LEASE (2026-09-07):
-off unless something holds it. `Workstation.wifi_hold(tag)` powers it up and
-the last `wifi_release(tag)` powers it down (radio_off), so a console on a shelf
+off unless something holds it. The holds are the kernel's lease table's radio
+rows, and the kernel's WiFi driver powers the station from them
+(native/moy_net/moy_net.h's THE BOOK): `Workstation.wifi_hold(tag)` takes a
+row, whose first holder powers the station up, and the last
+`wifi_release(tag)` lets it go, which powers it down; radio_on and radio_off
+here keep this service's view of the station in step. A console on a shelf
 spends nothing on WiFi. The holders are the web console, the online update
 screen, the Settings WIFI panel, a cart with the "network" permission for the
 length of its run, the ESP-NOW link for a match, and the Get Carts app while it
@@ -64,6 +68,12 @@ def _rest_after_vm_start():
         web = getattr(moy_net, "web_state", None)
         if web is not None and (web()[0] or web()[1]):
             return
+        try:
+            import moy_lease
+            if moy_lease.Wifi().mask():
+                return                  # the book holds it (a return start keeps the rows)
+        except (ImportError, AttributeError):
+            pass
         moy_net.wifi_off()
     except Exception as exc:  # noqa: BLE001 -- the console boots regardless
         _diag_note("wifi", "rest after start failed: %s" % (exc,))
@@ -327,21 +337,25 @@ class DeviceWifi:
                 pass
 
     def radio_on(self):
-        """The lease's power-up half: the STA interface up, idempotently.
-        Eager on purpose -- every holder scans or connects right after, and the
-        ESP-NOW link must find THIS service owning the interface it activates,
-        because radio_off() below only ever touches a handle this service
-        holds: an interface's first start is what initialises the driver."""
+        """The view's half of a hold: the STA interface this service reads,
+        made at once (the kernel's book has powered the station; its start
+        again is a no-op). Eager on purpose -- every holder scans or connects
+        right after, and the ESP-NOW link must find THIS service owning the
+        interface it activates: an interface's first start is what
+        initialises the driver."""
         return self._ensure_wlan() is not None
 
     def radio_off(self):
-        """The power-down half: disconnect, then `active(False)` -- which is
-        esp_wifi_stop: the radio and its task go idle, and the driver's static
-        allocation stays. Never constructs an interface (see radio_on)."""
+        """The view's half of the last release: forgotten. The kernel's book
+        powered the station down as its last row went; the port's
+        network.WLAN, which has no book, is disconnected and stopped here
+        (`active(False)`, esp_wifi_stop: the radio and its task go idle, and
+        the driver's static allocation stays). Never constructs an interface
+        (see radio_on)."""
         w = self.wlan
         self.wlan = None
         self._ssid = None
-        if w is None:
+        if w is None or isinstance(w, KernelWlan):
             return
         try:
             w.disconnect()

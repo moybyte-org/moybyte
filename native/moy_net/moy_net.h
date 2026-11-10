@@ -530,10 +530,26 @@ typedef struct {
 
 #define MOY_WIFI_SCAN_MAX 24
 
-// Up and down are the lease's halves: the radio's lease calls them, and
-// nothing else starts or stops the radio. A connect is asked once and kept
-// (the driver re-associates on a loss) until a disconnect or the radio goes
+// THE BOOK. The station's power follows the lease table's radio rows
+// (moy_lease.h's THE RADIO), the one record of who holds it: the table calls
+// moy_wifi_book with its mask after every change, under its lock, from
+// whichever task made it (the VM's Workstation.wifi_hold, a compiled
+// program's http handle, the media service). The mask's first holder powers
+// the station on (moy_wifi_on); the last out powers it off, where the book
+// powered it on -- a station already up when the first holder came (a
+// board's own setup, the ESP-NOW link riding it) stays up. A holder of the
+// tags a C worker waits on the link for ("http", "media") also asks for the
+// kept network (moy_wifi_connect_kept) when nothing is asked yet; the
+// console's tags dial from Python's store (device_wifi.autoconnect_wifi),
+// and "link" never dials (a network would move ESP-NOW's channel). The
+// kernel's own "dev" hold (its kstop mark, moy_kernel.c) is a record that
+// powers nothing.
+// moy_wifi_on and moy_wifi_off are otherwise called only where nothing
+// holds the book: a VM's start resting a station nobody holds, and the
+// Zero, whose station is its own. A connect is asked once and kept (the
+// driver re-associates on a loss) until a disconnect or the radio goes
 // down; its result is the state, polled.
+void moy_wifi_book(uint32_t mask);
 int moy_wifi_on(void);
 void moy_wifi_off(void);
 int moy_wifi_connect(const char *ssid, const char *password);

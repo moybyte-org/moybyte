@@ -55,15 +55,18 @@
 // whose rows are its holders, each row's `tags` a mask of the closed table
 // moy_lease_wifi_tag names ("web", "update", "settings", "cart", "link",
 // "carts", "dev", "http", "media", "ssh", "native", "net"). The console's own
-// holds are one row owned by the shell (pid 1, which powers the station up and
-// down); a process's (a run's "cart", a request's "http", a stream's "media",
-// a native process's "native", a radio link's port's "net") are one row it owns, so its end
+// holds are one row owned by the shell (pid 1); a process's (a run's "cart",
+// a request's "http", a stream's "media", a native process's "native", a
+// radio link's port's "net") are one row it owns, so its end
 // (moy_lease_sweep) lets exactly its holds go and the listing names who
 // holds the radio. A hold is idempotent per tag and owner; a row goes with
-// its last tag; the station is held while any row is. The rows survive a VM
-// stop with the table; a VM's fresh start (not a return start) lets them go
-// with moy_lease_wifi_reset. Dropped any other way, the holds are forgotten
-// and the station is powered down at the next release.
+// its last tag; the station is held while any row is. The rows are the
+// station's one book: after every change (a hold, a release, a drop, a
+// sweep, a reset) the table hands its mask to the WiFi driver
+// (moy_wifi_book, weak), which powers the station on at the first holder and
+// off after the last (native/moy_net/moy_net.h's THE BOOK). The rows survive
+// a VM stop with the table; a VM's fresh start (not a return start) lets
+// them go with moy_lease_wifi_reset.
 //
 // EDGES. moy_lease_edge opens a held pin's edges as a ring source of the
 // kernel's input table: on a board moy_edge.h's ISR source (BAD on one that

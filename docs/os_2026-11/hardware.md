@@ -198,8 +198,11 @@ THE RADIO), each a mask of tags (`web`, `update`, `cart`, `media`, ...): the
 console's own in one row the shell owns, and a process's (`cart`, `http`,
 `media`, `native`) in one row the process owns, so its end lets exactly its
 holds go and `state`'s `wifi_held` names it (`http:12`). The station is held
-while any row is; `Workstation.wifi_hold` and `wifi_release` take and let go,
-and a VM stop keeps the rows; the station's address coming and going is a NET record on the
+while any row is, and the rows are its one book: the kernel's WiFi driver
+powers the station on at the first row and off after the last
+(`native/moy_net/moy_net.h`'s THE BOOK), whoever takes them --
+`Workstation.wifi_hold` and `wifi_release`, a compiled program's `http`
+handle, the media service -- and a VM stop keeps the rows; the station's address coming and going is a NET record on the
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
 MIDI records on each driver's ring source, which a face's `on(fn)` or `on_done` wakes its process

@@ -597,6 +597,16 @@ uint32_t moy_lease_wifi_mask(void) {
     return mask;
 }
 
+// The station's power, the WiFi driver's (native/moy_net/moy_net.h's THE
+// BOOK): told the mask after each change. Weak: an image without the driver.
+void moy_wifi_book(uint32_t mask) __attribute__((weak));
+
+static void book_u(void) {
+    if (moy_wifi_book != NULL) {
+        moy_wifi_book(moy_lease_wifi_mask());
+    }
+}
+
 static int wifi_hold_u(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
     uint32_t bit = moy_lease_wifi_bit(tag, n);
     if (bit == 0u || owner == 0u) {
@@ -896,6 +906,7 @@ int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
 int moy_lease_drop(uint32_t h) {
     lock();
     int r = drop_u(h);
+    book_u();
     unlock();
     return r;
 }
@@ -903,6 +914,7 @@ int moy_lease_drop(uint32_t h) {
 uint32_t moy_lease_sweep(uint32_t owner) {
     lock();
     uint32_t r = sweep_u(owner);
+    book_u();
     unlock();
     return r;
 }
@@ -967,6 +979,7 @@ uint32_t moy_lease_holder(uint8_t cls) {
 int moy_lease_wifi_hold(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
     lock();
     int r = wifi_hold_u(owner, tag, n, mask);
+    book_u();
     unlock();
     return r;
 }
@@ -974,6 +987,7 @@ int moy_lease_wifi_hold(uint32_t owner, const char *tag, size_t n, uint32_t *mas
 int moy_lease_wifi_release(uint32_t owner, const char *tag, size_t n, uint32_t *mask) {
     lock();
     int r = wifi_release_u(owner, tag, n, mask);
+    book_u();
     unlock();
     return r;
 }
@@ -981,6 +995,7 @@ int moy_lease_wifi_release(uint32_t owner, const char *tag, size_t n, uint32_t *
 void moy_lease_wifi_reset(void) {
     lock();
     wifi_reset_u();
+    book_u();
     unlock();
 }
 

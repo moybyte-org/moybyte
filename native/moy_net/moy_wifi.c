@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "moy_net.h"
+#include "moy_lease.h"
 
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
 
@@ -502,6 +503,33 @@ int moy_net_link(uint32_t *ip) {
     *ip = s_st.ip;
     portEXIT_CRITICAL(&s_latch);
     return up;
+}
+
+// THE BOOK (moy_net.h): the mask it last followed, and whether its first
+// holder powered the station on.
+static uint32_t s_book;
+static uint8_t s_book_on;
+
+void moy_wifi_book(uint32_t mask) {
+    mask &= ~moy_lease_wifi_bit("dev", 3);     // the kernel's kstop mark powers nothing
+    uint32_t was = s_book;
+    s_book = mask;
+    if (mask != 0u && was == 0u) {
+        uint8_t on = s_st.on;
+        if (moy_wifi_on() == ESP_OK) {
+            s_book_on = !on;
+        }
+    } else if (mask == 0u && was != 0u) {
+        if (s_book_on) {
+            s_book_on = 0;
+            moy_wifi_off();
+        }
+        return;
+    }
+    uint32_t dial = moy_lease_wifi_bit("http", 4) | moy_lease_wifi_bit("media", 5);
+    if ((mask & dial) && !(was & dial) && s_st.on && !s_want && !s_st.connected) {
+        moy_wifi_connect_kept();
+    }
 }
 
 int moy_wifi_connect_kept(void) {

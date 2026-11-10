@@ -83,7 +83,8 @@ def test_only_the_station_fallback_constructs_the_ports_wlan():
 # The kernel's audio (section 5.5): the session table, the mix and the feeder
 # task, and the codec's register sequence.
 AUDIO = (os.path.join(ROOT, "native", "moy_audio", n)
-         for n in ("moy_aud.c", "moy_aud_out.c", "moy_codec_es8311.c", "moy_mic.c"))
+         for n in ("moy_aud.c", "moy_aud_out.c", "moy_codec_es8311.c", "moy_mic.c",
+                   "moy_mic_dev.c"))
 
 
 @pytest.mark.parametrize("path", sorted(AUDIO))
@@ -108,7 +109,7 @@ INPUT_DRIVERS = ("moy_input.c", "moy_input.h", "moy_kbd.c", "moy_touchdev.c", "m
                  "moy_touch.h", "moy_drivers.h", "moy_input_task.c", "moy_hid.c", "moy_hid.h",
                  "moy_ble_task.c", "moy_ble.h", "moy_event.h", "moy_edge.c", "moy_edge.h",
                  "moy_gatt.c", "moy_gatt.h", "moy_gatt_task.c", "moy_scan.c", "moy_scan.h",
-                 "moy_midi.c", "moy_midi.h")
+                 "moy_midi.c", "moy_midi.h", "moy_midi_dev.c")
 
 
 def test_every_input_source_but_the_binding_is_checked():
