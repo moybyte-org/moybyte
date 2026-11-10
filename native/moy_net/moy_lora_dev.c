@@ -18,7 +18,7 @@ typedef struct {
     uint8_t rx_port;
 } lora_t;
 
-static lora_t s_lora[MOY_DEV_HANDLES];
+static lora_t *s_lora;                  // MOY_DEV_ROWS, made at the first open
 
 // What a cfg names, every word checked before any is applied.
 typedef struct {
@@ -133,6 +133,9 @@ static int32_t lora_apply(uint32_t pid, lora_t *l, const words_out_t *o) {
 static int32_t lora_open(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg,
                          size_t cn) {
     (void)perms;
+    if (MOY_DEV_ROWS(s_lora) == NULL) {
+        return MOY_DEV_ENOMEM;
+    }
     lora_t *l = &s_lora[slot];
     *l = (lora_t){ .cfg = { .freq = 868100000u, .bw = 125000u, .sf = 9, .cr = 5, .power = 14,
                             .sync = 0x12, .preamble = 8 }, .dr = 5 };

@@ -1,5 +1,6 @@
 // moy_sync: the lock and the one wait the kernel's queues share (moy_evq.h,
-// moy_vmq.h). Internal to native/moy_kernel.
+// moy_vmq.h), and the tables they keep (THE TABLE). Internal to
+// native/moy_kernel and the device drivers' handle tables.
 //
 // THE LOCK is a critical section on a board and a spinlock elsewhere: held
 // around a few loads and stores, never around an allocation or a wait.
@@ -14,10 +15,13 @@
 #define MOY_SYNC_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #if defined(__has_include) && __has_include("esp_heap_caps.h")
 #define MOY_SYNC_RTOS 1
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #elif !defined(__EMSCRIPTEN__) && defined(__has_include) && __has_include(<pthread.h>)
@@ -99,5 +103,41 @@ static inline void moy_sync_wake(volatile uint32_t *word, moy_sync_who_t who) {
     (void)who;
     #endif
 }
+
+// THE TABLE. Kernel data is PSRAM (moy_kernel.h), so a table a task fills is
+// one block made at its first use, never .bss the idle desk pays for: *t made
+// now if it is not yet, zeroed, PSRAM first (calloc where there is none), and
+// never freed, so its rows' generations outlive their ends. Tasks may race to
+// make it; the first to publish wins and the others give theirs back. NULL
+// when there is no memory. Never under THE LOCK: it allocates.
+static inline void *moy_sync_table(void **t, size_t n) {
+    void *p = __atomic_load_n(t, __ATOMIC_ACQUIRE);
+    if (p != NULL) {
+        return p;
+    }
+    #if defined(MOY_SYNC_RTOS)
+    p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
+    #endif
+    if (p == NULL && (p = calloc(1, n)) == NULL) {
+        return NULL;
+    }
+    void *none = NULL;
+    if (!__atomic_compare_exchange_n(t, &none, p, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        free(p);
+        return none;
+    }
+    return p;
+}
+
+// *t as it stands: NULL until moy_sync_table made it, which a reader takes
+// as a table with no rows.
+static inline void *moy_sync_table_at(void *const *t) {
+    return __atomic_load_n(t, __ATOMIC_ACQUIRE);
+}
+
+// The two for a typed pointer `t`: MOY_SYNC_TABLE(t) makes *t's one row
+// block; MOY_SYNC_AT(t) reads it.
+#define MOY_SYNC_TABLE(t) ((__typeof__(t))moy_sync_table((void **)&(t), sizeof *(t)))
+#define MOY_SYNC_AT(t) ((__typeof__(t))moy_sync_table_at((void *const *)&(t)))
 
 #endif // MOY_SYNC_H

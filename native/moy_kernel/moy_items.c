@@ -20,7 +20,7 @@ typedef struct {
 } slot_t;
 
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
-static slot_t s_item[MOY_ITEMS];
+static slot_t (*s_item)[MOY_ITEMS];     // made at the first hand (moy_sync.h's THE TABLE)
 
 static bool fits(const char *s, size_t n, size_t cap) {
     return s != NULL && n != 0u && n <= cap && memchr(s, 0, n) == NULL;
@@ -32,10 +32,13 @@ bool moy_items_hand(uint32_t pid, int32_t h, const char *kind, size_t kn, const 
         || !fits(name, nn, MOY_ITEMS_NAME)) {
         return false;
     }
+    if (MOY_SYNC_TABLE(s_item) == NULL) {
+        return false;
+    }
     bool took = false;
     MOY_SYNC_LOCK(&s_lock);
     for (uint32_t i = 0; i < MOY_ITEMS && !took; i++) {
-        slot_t *s = &s_item[i];
+        slot_t *s = &(*s_item)[i];
         if (s->pid == 0u || (s->pid == pid && s->h == h)) {
             s->pid = pid;
             s->h = h;
@@ -55,8 +58,8 @@ bool moy_items_get(uint32_t pid, int32_t h, char *kind, size_t kcap, char *name,
                    bool *rw) {
     bool got = false;
     MOY_SYNC_LOCK(&s_lock);
-    for (uint32_t i = 0; pid != 0u && i < MOY_ITEMS; i++) {
-        const slot_t *s = &s_item[i];
+    for (uint32_t i = 0; s_item != NULL && pid != 0u && i < MOY_ITEMS; i++) {
+        const slot_t *s = &(*s_item)[i];
         if (s->pid == pid && s->h == h) {
             size_t kn = strlen(s->kind), nn = strlen(s->name);
             if (kn < kcap && nn < ncap) {
@@ -74,9 +77,9 @@ bool moy_items_get(uint32_t pid, int32_t h, char *kind, size_t kcap, char *name,
 
 void moy_items_end(uint32_t pid, int32_t h) {
     MOY_SYNC_LOCK(&s_lock);
-    for (uint32_t i = 0; pid != 0u && i < MOY_ITEMS; i++) {
-        if (s_item[i].pid == pid && (h == 0 || s_item[i].h == h)) {
-            s_item[i].pid = 0u;
+    for (uint32_t i = 0; s_item != NULL && pid != 0u && i < MOY_ITEMS; i++) {
+        if ((*s_item)[i].pid == pid && (h == 0 || (*s_item)[i].h == h)) {
+            (*s_item)[i].pid = 0u;
         }
     }
     MOY_SYNC_UNLOCK(&s_lock);
@@ -84,6 +87,8 @@ void moy_items_end(uint32_t pid, int32_t h) {
 
 void moy_items_reset(void) {
     MOY_SYNC_LOCK(&s_lock);
-    memset(s_item, 0, sizeof s_item);
+    if (s_item != NULL) {
+        memset(s_item, 0, sizeof *s_item);
+    }
     MOY_SYNC_UNLOCK(&s_lock);
 }

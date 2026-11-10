@@ -21,11 +21,11 @@ typedef struct {
     uint8_t stream;
 } http_t;
 
-static http_t s_http[MOY_DEV_HANDLES];
+static http_t *s_http;                  // MOY_DEV_ROWS, made at the first open
 
 // The process's "http" hold let go with its last handle.
 static void settle(uint32_t pid) {
-    for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
+    for (uint32_t i = 0; s_http != NULL && i < MOY_DEV_HANDLES; i++) {
         if (s_http[i].pid == pid) {
             return;
         }
@@ -37,6 +37,9 @@ static void settle(uint32_t pid) {
 static int32_t http_open(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg,
                          size_t cn) {
     (void)perms;
+    if (MOY_DEV_ROWS(s_http) == NULL) {
+        return MOY_DEV_ENOMEM;
+    }
     char url[MOY_FETCH_URL_MAX];
     bool has_url = false, has_cap = false, has_window = false;
     int64_t cap = CAP_DEFAULT, window = 0;

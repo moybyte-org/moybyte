@@ -5,12 +5,17 @@
 // the lease table's lock (moy_dev.c), which each driver's verbs that take or
 // let a lease take first too, so the lease lock is always the outer one.
 
+#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
+#endif
+
 #include "moy_dev.h"
 
 #include <string.h>
 
 #include "moy_dev_kinds.h"
 #include "moy_lease.h"
+#include "moy_sync.h"
 
 extern const moy_dev_ops_t moy_dev_lora __attribute__((weak));
 extern const moy_dev_ops_t moy_dev_mic __attribute__((weak));
@@ -41,7 +46,11 @@ typedef struct {
     uint8_t kind;
 } kind_t;
 
-static kind_t s_kind[MOY_DEV_HANDLES];
+static kind_t *s_kind;                  // MOY_DEV_HANDLES rows, made at the first open
+
+void *moy_dev_rows(void **t, size_t row) {
+    return moy_sync_table(t, MOY_DEV_HANDLES * row);
+}
 
 int32_t moy_dev_errno(int rc) {
     if (rc >= 0) {
@@ -97,6 +106,9 @@ int32_t moy_dev_kind_open(uint32_t slot, int kind, uint32_t pid, uint32_t perms,
     if (!(perms & KINDS[kind].perm)) {
         return MOY_DEV_EDENIED;
     }
+    if (MOY_DEV_ROWS(s_kind) == NULL) {
+        return MOY_DEV_ENOMEM;
+    }
     for (uint32_t i = 0; KINDS[kind].one && i < MOY_DEV_HANDLES; i++) {
         if (s_kind[i].pid == pid && s_kind[i].kind == kind) {
             return MOY_DEV_EBUSY;               // one handle a process on the one device
@@ -115,6 +127,9 @@ int32_t moy_dev_kind_open(uint32_t slot, int kind, uint32_t pid, uint32_t perms,
 }
 
 void moy_dev_kind_close(uint32_t slot) {
+    if (s_kind == NULL) {
+        return;
+    }
     kind_t *k = &s_kind[slot];
     if (k->kind != 0) {
         ops_of(slot)->close(slot, k->pid);
@@ -151,7 +166,7 @@ int32_t moy_dev_kind_get(uint32_t slot, const char *what, size_t n) {
 bool moy_dev_holds(uint32_t pid, uint8_t cls) {
     bool r = false;
     moy_lease_lock();
-    for (uint32_t i = 0; i < MOY_DEV_HANDLES && !r; i++) {
+    for (uint32_t i = 0; s_kind != NULL && i < MOY_DEV_HANDLES && !r; i++) {
         const kind_t *k = &s_kind[i];
         const moy_dev_ops_t *o = KINDS[k->kind].ops;
         r = pid != 0 && cls != 0 && k->pid == pid && k->kind != 0

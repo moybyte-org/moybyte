@@ -42,7 +42,7 @@ typedef struct {
     uint32_t lease;             // a UART's
 } midi_t;
 
-static midi_t s_midi[MOY_DEV_HANDLES];
+static midi_t *s_midi;                  // MOY_DEV_ROWS, made at the first open
 
 // "aa:bb:cc:dd:ee:ff" as the BLE driver holds an address (little-endian).
 static bool ble_addr(const char *v, size_t n, uint8_t out[6]) {
@@ -169,6 +169,9 @@ static uint8_t ble_type(const uint8_t mac[6]) {
 
 static int32_t midi_open(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg,
                          size_t cn) {
+    if (MOY_DEV_ROWS(s_midi) == NULL) {
+        return MOY_DEV_ENOMEM;
+    }
     midi_t *m = &s_midi[slot];
     *m = (midi_t){ .port = -1, .reader = -1 };
     int way = 0;

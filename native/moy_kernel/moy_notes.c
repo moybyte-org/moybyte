@@ -36,10 +36,14 @@ typedef struct {
 } badge_t;
 
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
-static moy_notes_note_t s_wait[MOY_NOTES_WAITING];
+// The waiting notifications and the badges: one block made at the first
+// post, award, progress or goal (moy_sync.h's THE TABLE), none before.
+static struct {
+    moy_notes_note_t wait[MOY_NOTES_WAITING];
+    badge_t b[MOY_NOTES_BADGES];
+} *s_t;
 static uint32_t s_wait_n;
 static uint32_t s_next_id = 1;
-static badge_t s_b[MOY_NOTES_BADGES];
 static uint32_t s_serial;
 static bool s_job;
 
@@ -88,13 +92,16 @@ int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char 
     snprintf(n.app, sizeof n.app, "%s", app != NULL ? app : "");
     put_text(n.summary, sizeof n.summary, summary, sn);
     put_text(n.body, sizeof n.body, body, bn);
+    if (MOY_SYNC_TABLE(s_t) == NULL) {
+        return -MOY_EVQ_FULL;
+    }
     n.id = moy_notes_id();
     MOY_SYNC_LOCK(&s_lock);
     if (s_wait_n == MOY_NOTES_WAITING) {
-        memmove(s_wait, s_wait + 1, (MOY_NOTES_WAITING - 1u) * sizeof s_wait[0]);
+        memmove(s_t->wait, s_t->wait + 1, (MOY_NOTES_WAITING - 1u) * sizeof s_t->wait[0]);
         s_wait_n--;
     }
-    s_wait[s_wait_n++] = n;
+    s_t->wait[s_wait_n++] = n;
     MOY_SYNC_UNLOCK(&s_lock);
     moy_evq_want(MOY_EVQ_WANT_POLL);
     return (int32_t)n.id;
@@ -108,8 +115,8 @@ bool moy_notes_take(moy_notes_note_t *out) {
     bool got = false;
     MOY_SYNC_LOCK(&s_lock);
     if (s_wait_n != 0u) {
-        *out = s_wait[0];
-        memmove(s_wait, s_wait + 1, (size_t)(--s_wait_n) * sizeof s_wait[0]);
+        *out = s_t->wait[0];
+        memmove(s_t->wait, s_t->wait + 1, (size_t)(--s_wait_n) * sizeof s_t->wait[0]);
         got = true;
     }
     MOY_SYNC_UNLOCK(&s_lock);
@@ -119,11 +126,14 @@ bool moy_notes_take(moy_notes_note_t *out) {
 // -- badges -----------------------------------------------------------------------
 
 // Process `pid`'s row of badge `id`, made where `make` (NULL: none, or no
-// row left). Under the lock.
+// row left, or no table). Under the lock.
 static badge_t *row(uint32_t pid, const char *id, size_t n, bool make) {
     badge_t *free_row = NULL;
+    if (s_t == NULL) {
+        return NULL;
+    }
     for (uint32_t i = 0; i < MOY_NOTES_BADGES; i++) {
-        badge_t *b = &s_b[i];
+        badge_t *b = &s_t->b[i];
         if (b->pid == 0u) {
             free_row = free_row != NULL ? free_row : b;
         } else if (b->pid == pid && strncmp(b->id, id, n) == 0 && b->id[n] == 0) {
@@ -225,6 +235,7 @@ int moy_notes_goal(uint32_t pid, const char *id, size_t n, int32_t goal) {
     if (bad_id(id, n) || goal < 1) {
         return -MOY_EVQ_DENIED;
     }
+    (void)MOY_SYNC_TABLE(s_t);         // without it, row() answers NULL
     MOY_SYNC_LOCK(&s_lock);
     badge_t *b = row(pid, id, n, true);
     if (b != NULL) {
@@ -240,6 +251,7 @@ int32_t moy_notes_award(uint32_t pid, const char *id, size_t n) {
         return 0;
     }
     uint64_t now = now_ms();
+    (void)MOY_SYNC_TABLE(s_t);         // without it, row() answers NULL
     MOY_SYNC_LOCK(&s_lock);
     badge_t *b = row(pid, id, n, true);
     int32_t r;
@@ -267,6 +279,7 @@ int32_t moy_notes_progress(uint32_t pid, const char *id, size_t n, int32_t value
         return 0;
     }
     uint64_t now = now_ms();
+    (void)MOY_SYNC_TABLE(s_t);         // without it, row() answers NULL
     MOY_SYNC_LOCK(&s_lock);
     badge_t *b = row(pid, id, n, true);
     int32_t r;
@@ -299,8 +312,8 @@ static uint32_t flush(uint32_t pid) {
     uint64_t now = now_ms();
     uint32_t next = UINT32_MAX;
     MOY_SYNC_LOCK(&s_lock);
-    for (uint32_t i = 0; i < MOY_NOTES_BADGES; i++) {
-        badge_t *b = &s_b[i];
+    for (uint32_t i = 0; s_t != NULL && i < MOY_NOTES_BADGES; i++) {
+        badge_t *b = &s_t->b[i];
         if (b->pid == 0u || b->want == WANT_NONE || (pid != 0u && b->pid != pid)) {
             continue;
         }
@@ -331,9 +344,9 @@ void moy_notes_end(uint32_t pid) {
     }
     flush(pid);
     MOY_SYNC_LOCK(&s_lock);
-    for (uint32_t i = 0; i < MOY_NOTES_BADGES; i++) {
-        if (s_b[i].pid == pid) {
-            s_b[i].pid = 0u;
+    for (uint32_t i = 0; s_t != NULL && i < MOY_NOTES_BADGES; i++) {
+        if (s_t->b[i].pid == pid) {
+            s_t->b[i].pid = 0u;
         }
     }
     MOY_SYNC_UNLOCK(&s_lock);
@@ -341,7 +354,9 @@ void moy_notes_end(uint32_t pid) {
 
 void moy_notes_reset(void) {
     MOY_SYNC_LOCK(&s_lock);
-    memset(s_b, 0, sizeof s_b);
+    if (s_t != NULL) {
+        memset(s_t->b, 0, sizeof s_t->b);
+    }
     s_wait_n = 0;
     MOY_SYNC_UNLOCK(&s_lock);
 }

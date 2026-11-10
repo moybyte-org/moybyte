@@ -25,7 +25,7 @@ typedef struct {
     uint8_t *pend;              // REC_MAX bytes while the handle is open
 } usb_t;
 
-static usb_t s_usb[MOY_DEV_HANDLES];
+static usb_t *s_usb;                    // MOY_DEV_ROWS, made at the first open
 
 static void put16(uint8_t *q, uint32_t v) {
     q[0] = (uint8_t)v;
@@ -134,6 +134,9 @@ static void usb_close(uint32_t slot, uint32_t pid) {
 static int32_t usb_open(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg,
                         size_t cn) {
     (void)perms;
+    if (MOY_DEV_ROWS(s_usb) == NULL) {
+        return MOY_DEV_ENOMEM;
+    }
     usb_t *u = &s_usb[slot];
     *u = (usb_t){ .reader = -1, .target = -1 };
     moy_input_t *t = moy_input_kernel();

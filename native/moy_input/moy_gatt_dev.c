@@ -23,7 +23,7 @@ typedef struct {
     uint8_t pend[REC_MAX];
 } ble_t;
 
-static ble_t s_ble[MOY_DEV_HANDLES];
+static ble_t *s_ble;                    // MOY_DEV_ROWS, made at the first open
 
 static void put16(uint8_t *q, uint32_t v) {
     q[0] = (uint8_t)v;
@@ -198,6 +198,9 @@ static void ble_close(uint32_t slot, uint32_t pid) {
 static int32_t ble_open(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg,
                         size_t cn) {
     (void)perms;
+    if (MOY_DEV_ROWS(s_ble) == NULL) {
+        return MOY_DEV_ENOMEM;
+    }
     ble_t *b = &s_ble[slot];
     b->reader = -1;
     b->target = -1;

@@ -35,6 +35,14 @@ int32_t moy_dev_errno(int rc);
 // anything else.
 bool moy_dev_hex(const char *v, size_t n, uint8_t *out, size_t len);
 
+// A device API's per-handle table, *t: MOY_DEV_HANDLES rows of `row` bytes,
+// zeroed, made at its first open and kept, from PSRAM where there is any
+// (moy_sync.h's THE TABLE), so the idle desk pays no internal RAM for a kind
+// no program opened. NULL where there is no memory (the open answers
+// ENOMEM); a reader of every row takes a NULL table as one with none.
+void *moy_dev_rows(void **t, size_t row);
+#define MOY_DEV_ROWS(t) ((__typeof__(t))moy_dev_rows((void **)&(t), sizeof *(t)))
+
 // A UART row (`lease:<row>`, `row` n chars) for a device API's port: leased
 // to `pid` under `perms` and its driver up at `baud`, 8N1, with a 512-byte
 // transmit buffer (a write of up to that is taken whole): 0 with its lease
