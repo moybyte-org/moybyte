@@ -501,7 +501,8 @@ def _media_net(ws, mode, carts_root):
         from moy_store_base import files_root
     except ImportError:
         return None
-    return media_link.WebMediaNet(link, files_root(carts_root) + "/" + media_link.MUSIC)
+    import moy_sync
+    return media_link.WebMediaNet(link, files_root(carts_root) + "/" + moy_sync.MUSIC)
 
 
 def _cart_landed(folder):
@@ -592,6 +593,62 @@ def _watchers():
     import moy_sync
     ws = _S.get("watchers") or {}
     return [ws[r.id] for r in moy_sync.SYNC_ROOTS if r.id in ws]
+
+
+def page_boot(carts_root, query_json, coarse=False, scheme=""):
+    """`boot` the console a page's address asks for (`query_json`: its query
+    string's pairs), on the page's `(pointer: coarse)` and its colour scheme
+    ("dark" or "light"; anything else is the default). Call `page_start`
+    after anything else that needs the live console (`update_enable`).
+
+    TIER SELECT (#73/#175). The DESKTOP desk is the default everywhere (owner
+    call 2026-08-14) -- on moybyte.com and on a board serving its own console
+    alike. It was the handheld 320x240 tier, which made the full-size product
+    the thing you had to know a url parameter to see.
+      ?handheld=1  the 320x240 console (the phone-shaped one)
+      ?size=WxH    override the desk's panel size (1024x600)
+      ?cart=NAME   that cart; a bundle of one cart names it without asking
+      ?desktop=1   the desk even with a cart named
+    A single ?cart=<name> still implies handheld: that url is the one-cart
+    player (moy export / the gallery), where a desk around one game is chrome
+    nobody asked for. The served carts are the bundle's
+    (`moy_sync.served_carts`), else the shelf's."""
+    import moy_sync
+    q = json.loads(query_json)
+    names = moy_sync.served_carts()
+    if names is None:
+        names = json.loads(moy_sync.folders_json(carts_root))
+    cart = q.get("cart") or (names[0] if len(names) == 1 else None)
+    desktop = not q.get("handheld") and bool(q.get("desktop") or not cart)
+    scheme = scheme if scheme in ("dark", "light") else None
+    if desktop:
+        w, h = 1024, 600
+        size = q.get("size") or ""
+        wh = size.split("x")
+        if len(wh) == 2 and wh[0].isdigit() and wh[1].isdigit():
+            w, h = int(wh[0]), int(wh[1])
+        boot(carts_root, None, w, h, True, coarse=coarse, scheme=scheme)
+    else:
+        boot(carts_root, cart=cart, coarse=coarse, scheme=scheme)
+    _S["page_start"] = (q.get("edit"), q.get("tab"), desktop, cart, len(names))
+    return ""
+
+
+def page_start():
+    """What a page's address starts the console on (after `page_boot`):
+    ?edit=<cart>[&tab=code|paint|map|...] opens that cart in the Editor
+    (`start_edit`), where a plain visit lands on the home; a desk with a cart
+    named opens it; and the one-cart player of a bundle of one cart is a
+    kiosk -- the exit gesture restarts the game instead of dropping into the
+    shell, because the game IS the page."""
+    edit, tab, desktop, cart, served = _S.pop("page_start")
+    if edit:
+        start_edit(edit, tab or None)
+    if desktop and cart:
+        open_cart(cart)
+    if not desktop and served == 1 and cart:
+        kiosk(cart)
+    return ""
 
 
 def kiosk(name):
@@ -746,6 +803,25 @@ def start_edit(name, tab=None):
         return edit_cart(name, tab)
     finally:
         ws.ach.mute = was
+
+
+def drop_kind(name, head_json):
+    """What a file dropped on the page is, from its name and its first bytes
+    (`head_json`, a JSON list of them): "song" for one Music keeps
+    (moy_sync.local_song), "p8" for a PICO-8 cart, else "archive" (a `.moy`
+    export, a zip). A text cart is known by its name, a `.p8.png` by its
+    bytes too: a BBS cart saved by a person is named anything, and the only
+    other thing the page imports is a zip, so a PNG is a cart attempt and
+    `png_problem` says so kindly when it is a holiday photo."""
+    import moy_sync
+    base = name.rsplit("/", 1)[-1]
+    if moy_sync.local_song(moy_sync.MUSIC + "/" + base):
+        return "song"
+    low = base.lower()
+    if low.endswith(".p8") or low.endswith(".p8.png"):
+        return "p8"
+    import p8_writer
+    return "p8" if p8_writer.looks_like_png(bytes(json.loads(head_json))) else "archive"
 
 
 def import_p8_json(path, name, root):
@@ -1015,6 +1091,26 @@ def store_mode(mode=None, seeded=None):
     return ""
 
 
+def site_sources(carts_root, doc_json):
+    """The shelves whoever serves a site-mode page chose (its indexes.json:
+    {"indexes": [url, ...]}) as the console's `system/sources`
+    (cart_index.save_sources), a board's twin. A page a board serves browses
+    the board's own, and a page with none the console's default shelves.
+    Called after `store_mode` and before `boot`."""
+    if _S.get("store_mode") == "board":
+        return ""
+    try:
+        doc = json.loads(doc_json)
+    except ValueError:
+        return ""
+    urls = doc.get("indexes") if isinstance(doc, dict) else None
+    if not isinstance(urls, list):
+        return ""
+    import cart_index
+    cart_index.save_sources(carts_root, [u for u in urls if isinstance(u, str)])
+    return ""
+
+
 def sync_poll_json():
     """One sweep + the next wire batch as JSON, or "" (nothing changed, or a
     batch is already awaiting its answer). The worker calls this about once a
@@ -1038,6 +1134,13 @@ def sync_poll_json():
             _S["sync_took"] = w.root_id
             return body
     return ""
+
+
+def sync_root():
+    """The root id of the batch `sync_poll_json` last handed out: the store a
+    site-mode page applies it into."""
+    import moy_sync
+    return _S.get("sync_took") or moy_sync.CARTS_ROOT_ID
 
 
 def sync_ack(ok):

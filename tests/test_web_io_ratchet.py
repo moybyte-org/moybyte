@@ -17,8 +17,10 @@ holds it there:
   * no regular expression but the channel's word: a channel is a page's
     (site/build.py), and no console has one.
 
-And worker.js may call only exported names on the store, and no rule that
-moved into the VM comes back under its old name.
+And worker.js may call only exported names on the store, names no file kind
+by its suffix (what a dropped file is, is web_boot.drop_kind's call) and no
+store's endpoint (the registry's), and no rule that moved into the VM comes
+back under its old name.
 """
 
 import re
@@ -76,7 +78,7 @@ MOVED = (
     "skipIn", "BINARY_FILES", "BINARY_SUFFIXES", "isBinary", "ROOTS", "isEmpty",
     "safeSegments", "localParts", "plainName", "writtenName", "isSong",
     "MUSIC_DIR", "RECORD_NAME", "STAGE_DIR", "WRITTEN_ROOT", "RECORD_VFS",
-    "WRITTEN_VFS", "openWritten", "setSkip", "setRoots",
+    "WRITTEN_VFS", "openWritten", "setSkip", "setRoots", "isP8Drop",
 )
 
 _TOP = re.compile(r"^(export\s+)?(?:(?:async\s+)?function\*?|const|let|var)\s+"
@@ -134,3 +136,12 @@ def test_the_worker_calls_only_exported_store_names():
     worker = (WEB / "worker.js").read_text(encoding="utf-8")
     used = set(re.findall(r"\bstore\.([A-Za-z_$][\w$]*)", worker))
     assert used - {"mjs"} <= set(EXPORTS), used - set(EXPORTS)
+
+
+def test_the_worker_names_no_file_kind_and_no_endpoint():
+    from runtime import moy_sync
+    code = _code((WEB / "worker.js").read_text(encoding="utf-8"))
+    assert not re.search(r'endsWith\(\s*"\.', code), "a suffix test is the VM's"
+    assert not re.search(r"/\\\.\w+\$/", code), "a suffix pattern is the VM's"
+    for root in moy_sync.SYNC_ROOTS:
+        assert '"%s"' % root.endpoint not in code, root.endpoint

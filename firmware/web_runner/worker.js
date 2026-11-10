@@ -79,7 +79,7 @@ import * as store from "./moy_store.mjs";
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 // The drop's and the export's Python entry points (#194), bound at boot like
 // the rest.
-let importP8Json = null, importArchiveJson = null, exportCart = null;
+let importP8Json = null, importArchiveJson = null, exportCart = null, dropKind = null;
 let editCart = null, openCart = null, stateJson = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
@@ -96,7 +96,7 @@ let fbAddr = null, fbLen = null;
 // for is inside the body, chosen by web_boot, and the disable-on-404 above is
 // about the ENDPOINT, not about either store. Whether the files half runs at
 // all is settled once at boot by the files.json fetch (see writeFiles).
-let syncPoll = null, syncAck = null, syncOff = null, rescan = null;
+let syncPoll = null, syncAck = null, syncOff = null, syncRoot = null, rescan = null;
 let syncBusy = false, lastSyncAt = 0;
 const SYNC_MS = 1000;
 // How long the board may stay silent before this page admits it is gone. A
@@ -807,18 +807,12 @@ async function initStore(fetched) {
     if (keep && keep.state !== "granted") self.postMessage({ t: "keep" });
     let anySite = false, anyNone = false, loaded = false;
     seededRoots = [];
+    const sync = mp.pyimport("moy_sync");
     for (const root of store.roots()) {
         const data = fetched[root.id];
-        // A sibling root the host does not serve (files.json or console.json
-        // 404 -> null): in BOARD mode skip it (no watcher, no empty dir: the
-        // capability rule, which for the console's own documents is what keeps
-        // a board flashed before their root from being sent a batch it
-        // refuses); in SITE mode still give it an empty OPFS store, so a
-        // drawing the kid makes locally has somewhere to persist.
-        if (!site && data == null && root.id !== "carts") continue;
-        // A root another keeper writes in site mode (the apps' folders:
-        // seedWritten, commitWritten) is that keeper's alone there.
-        if (site && root.site === false) continue;
+        // Which roots a page seeds is the VM's (moy_sync.seeds); a root it
+        // skips gets no watcher and no empty directory.
+        if (!sync.seeds(root.id, site, data != null)) continue;
         seededRoots.push(root.id);
         const w = await seedRoot(root, data, site);
         if (w === "seed" || w === "load") anySite = true;
@@ -889,14 +883,10 @@ function vfsExists(p) {
     try { mp.FS.stat(p); return true; } catch (e) { return false; }
 }
 
+// The shelf's cart folders (moy_sync.folders_json), from the moment the
+// store's rules are bound.
 function cartNames() {
-    const out = [];
-    if (!mp) return out;
-    for (const name of mp.FS.readdir(CARTS_ROOT)) {
-        if (name === "." || name === ".." || store.skipName(name)) continue;
-        try { if (vfsIsDir(CARTS_ROOT + "/" + name)) out.push(name); } catch (e) { }
-    }
-    return out.sort();
+    return mp ? JSON.parse(mp.pyimport("moy_sync").folders_json(CARTS_ROOT)) : [];
 }
 
 // A dropped `.moy` zip onto the shelf, unpacked, named and adopted by the
@@ -947,13 +937,6 @@ function exportZip(cart) {
 // converter reads them there, in Python, exactly as it does on a desktop.
 const P8_TMP = "/moy/tmp";
 
-// Which importer a dropped file goes to. The NAME decides for a text `.p8`,
-// but the BYTES have to decide for the PNG form: a BBS cart is downloaded as
-// `foo.p8.png` and saved by a human as anything at all, and the file that
-// arrives is a cart either way. There is no ambiguity to resolve -- the only
-// other thing this page imports is a `.moy` export, which is a zip and starts
-// "PK" -- so a dropped PNG is a PICO-8 cart attempt, and `png_problem` is what
-// says so kindly when it turns out to be a holiday photo.
 // A dropped song into this browser's music folder, where Music finds it; a
 // board-served page's songs are the board's own.
 async function importSong(name, buf) {
@@ -966,12 +949,12 @@ async function importSong(name, buf) {
     return "added " + kept + " to your music";
 }
 
-function isP8Drop(name, buf) {
-    const n = String(name || "").toLowerCase();
-    if (n.endsWith(".p8") || n.endsWith(".p8.png")) return true;
-    if (!buf || buf.byteLength < 8) return false;
-    const b = new Uint8Array(buf, 0, 8);
-    return b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
+// Which importer a dropped file goes to: the VM's call, from its name and
+// its first bytes (web_boot.drop_kind).
+function dropped(name, buf) {
+    if (!dropKind) throw new Error("this console cannot import yet");
+    const head = buf ? new Uint8Array(buf, 0, Math.min(8, buf.byteLength)) : [];
+    return dropKind(String(name || ""), JSON.stringify(Array.from(head)));
 }
 
 async function importP8(name, buf) {
@@ -1315,16 +1298,24 @@ async function init(search, coarse, channel, scheme, signin) {
         .then((r) => ({ status: r.status, wait: r.wait,
                         json: r.status >= 200 && r.status < 300 ? sealedJson(r) : null }));
     const none = () => ({ status: 0, wait: -1, json: null });
-    const [mods, cartsRes, filesRes, shelves, systemRes, appsRes] = await Promise.all([
+    const [mods, shelves] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        gated("/carts.json"),
-        gated("/files.json").catch(none),
-        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        // The console's own documents, where the serving board keeps them
-        // (its portable Settings and its badges); firmware before them 404s.
-        gated("/console.json").catch(none),
-        // The apps' private folders, every file bytes; firmware before them 404s.
-        gated("/apps.json").catch(none)]);
+        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
+    if (mods) {
+        mkdirs("/modules");
+        for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
+        // Before the store's rules and the seed, which are the VM's too.
+        mp.runPython("import sys\nsys.path.insert(0, '/modules')\n");
+    }
+    bindStore();
+    // Every root's pull, at the endpoint the VM's registry names: the carts,
+    // and the roots firmware before them 404s (the files layer, the console's
+    // own documents, the apps' private folders).
+    const pulled = await Promise.all(store.roots().map((r) => r.id === "carts"
+        ? gated("/" + r.endpoint) : gated("/" + r.endpoint).catch(none)));
+    const fetched = {};
+    store.roots().forEach((r, i) => { fetched[r.id] = pulled[i].json; });
+    const cartsRes = pulled[store.roots().indexOf(store.rootById("carts"))];
     if (!signedIn && !authOpen && !(authNeed && authNeed.gone)) {
         // A BOARD THAT HAS NOT PAIRED THIS BROWSER: stop the boot here --
         // there is nothing to boot, and seeding the VFS from a refusal would
@@ -1343,51 +1334,11 @@ async function init(search, coarse, channel, scheme, signin) {
         console.log("[moy] sign-in: the console does not answer");
         return;
     }
-    const files = filesRes.json, system = systemRes.json;
-    const carts = cartsRes.json;
-    if (mods) {
-        mkdirs("/modules");
-        for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
-        // Before the seed, which is the VM's too.
-        mp.runPython("import sys\nsys.path.insert(0, '/modules')\n");
-    }
-    bindStore();
-    await initStore({ carts: carts, files: files, system: system, apps: appsRes.json });
+    await initStore(fetched);
     // Music's songs: the serving board's music folder, or this browser's.
     await mediaList(mode === "board" ? () => gated("/media").then((r) => r.json) : siteSongs);
-    if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
-        const sys = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/system";
-        mkdirs(sys);
-        mp.FS.writeFile(sys + "/sources",
-                        shelves.indexes.filter((u) => typeof u === "string")
-                            .map((u) => u + "\n").join(""));
-    }
     say("booting console...");
 
-    let cart = qs.get("cart");
-    const names = [...new Set(Object.keys(carts).map((k) => k.split("/")[0]))];
-    if (!cart && names.length === 1) cart = names[0];
-    // TIER SELECT (#73/#175). The DESKTOP desk is the default everywhere (owner
-    // call 2026-08-14) -- on moybyte.com and on a board serving its own console
-    // alike. It was the handheld 320x240 tier, which made the full-size product
-    // the thing you had to know a url parameter to see.
-    //   ?handheld=1  the 320x240 console (the phone-shaped one)
-    //   ?size=WxH    override the desk's panel size
-    // A single ?cart=<name> still implies handheld: that url is the one-cart
-    // player (moy export / the gallery), where a desk around one game is chrome
-    // nobody asked for.
-    const desktop = qs.get("handheld") ? null : (qs.get("desktop") || !cart);
-    let dw = 1024, dh = 600;
-    const szm = /^(\d+)x(\d+)$/.exec(qs.get("size") || "");
-    if (szm) { dw = +szm[1]; dh = +szm[2]; }
-    const bootArgs = (desktop
-        ? ", None, " + dw + ", " + dh + ", True"
-        : (cart ? ", cart=" + JSON.stringify(cart) : ""))
-        + (coarse ? ", coarse=True" : "")
-        // The page's colour scheme (page_tail.js: ?scheme= or prefers-color-scheme):
-        // the theme variant of a first run. Anything else leaves the default.
-        + (scheme === "dark" || scheme === "light"
-            ? ", scheme=" + JSON.stringify(scheme) : "");
     // #9: does whoever served this page have PINS? ONE probe, here, before the
     // console exists -- so `pin_write`/`pin_read` are decided once and a cart
     // either has the names or has never heard of them. An empty batch is the
@@ -1402,30 +1353,30 @@ async function init(search, coarse, channel, scheme, signin) {
         // which is a NameError in the Python this string becomes.
         + "web_boot.store_mode(" + JSON.stringify(mode || "") + ", "
         + JSON.stringify(seededRoots || []) + ")\n"
+        // indexes.json: the shelves Get Carts lists, chosen by whoever SERVES
+        // this page (a site-mode page's system/sources).
+        + (shelves ? "web_boot.site_sources(" + JSON.stringify(CARTS_ROOT) + ", "
+            + JSON.stringify(JSON.stringify(shelves)) + ")\n" : "")
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
-        + "web_boot.boot(" + JSON.stringify(CARTS_ROOT) + bootArgs + ")\n"
+        // The console this page's address asks for: its tier, size and cart
+        // (web_boot.page_boot), on the page's pointer and colour scheme
+        // (page_tail.js: ?scheme= or prefers-color-scheme).
+        + "web_boot.page_boot(" + JSON.stringify(CARTS_ROOT) + ", "
+        + JSON.stringify(JSON.stringify(Object.fromEntries(qs))) + ", "
+        + (coarse ? "True" : "False") + ", " + JSON.stringify(scheme || "") + ")\n"
         // AFTER boot(), unlike gpio_enable: this one hangs the updater on the
         // live Workstation, which boot() is what creates.
         + (updateDoc ? "web_boot.update_enable("
             + JSON.stringify(JSON.stringify(updateDoc)) + ")\n" : "")
-        // START OPTION: ?edit=<cart>[&tab=code|paint|map|...] opens that cart in
-        // the Editor (the p8 drop's edit_cart: ws.open_in_editor and a tab, with
-        // no badge), where a plain visit lands on the home. The cart is whatever the
-        // store holds, edited or seeded; an unknown name leaves the home.
-        + (qs.get("edit") ? "web_boot.start_edit(" + JSON.stringify(qs.get("edit"))
-            + (qs.get("tab") ? ", " + JSON.stringify(qs.get("tab")) : "") + ")\n" : "")
-        + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
-        // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
-        // instead of dropping into the shell (the game IS the page).
-        + (!desktop && names.length === 1 && cart
-            ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
+        // What the address starts it on (web_boot.page_start).
+        + "web_boot.page_start()\n"
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
         + "reload_cart, idle_collect, fb_addr, fb_len, "
-        + "sync_poll_json, sync_ack, sync_off, store_mode, "
+        + "sync_poll_json, sync_ack, sync_off, sync_root, store_mode, "
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "services_json, carts_poll_json, carts_event_json, "
-        + "import_p8_json, import_archive_json, export_cart, "
+        + "import_p8_json, import_archive_json, export_cart, drop_kind, "
         + "edit_cart, open_cart, state_json, "
         + "term_enable, term_poll_json, term_feed, term_state");
     step = mp.globals.get("step_frame_json");
@@ -1438,6 +1389,7 @@ async function init(search, coarse, channel, scheme, signin) {
     syncPoll = mp.globals.get("sync_poll_json");
     syncAck = mp.globals.get("sync_ack");
     syncOff = mp.globals.get("sync_off");
+    syncRoot = mp.globals.get("sync_root");
     rescan = mp.globals.get("rescan_store");
     cartsPoll = mp.globals.get("carts_poll_json");
     cartsEvent = mp.globals.get("carts_event_json");
@@ -1445,6 +1397,7 @@ async function init(search, coarse, channel, scheme, signin) {
     importP8Json = mp.globals.get("import_p8_json");
     importArchiveJson = mp.globals.get("import_archive_json");
     exportCart = mp.globals.get("export_cart");
+    dropKind = mp.globals.get("drop_kind");
     editCart = mp.globals.get("edit_cart");
     openCart = mp.globals.get("open_cart");
     stateJson = mp.globals.get("state_json");
@@ -1774,12 +1727,11 @@ function termPump() {
 async function pumpLocal(body) {
     const t0 = performance.now();
     try {
-        const doc = JSON.parse(body);
-        const ops = doc.ops || [];
-        // The batch names its root (v2 -> doc.root; a v1 batch is carts). Apply
-        // it into THAT root's OPFS store -- so a files batch persists drawings
-        // and a carts batch persists carts, from the one pump.
-        const rootId = (doc.v === 2 && doc.root) ? doc.root : "carts";
+        const ops = JSON.parse(body).ops || [];
+        // Into the OPFS store of the root the VM took the batch from -- so a
+        // files batch persists drawings and a carts batch persists carts,
+        // from the one pump.
+        const rootId = syncRoot();
         const s = opfsStores[rootId];
         if (!s) {                            // no store for this root: nothing to
             try { syncAck(1); } catch (e) { }  // keep; ack so it does not requeue
@@ -2403,10 +2355,10 @@ self.onmessage = async (ev) => {
             // hold megabytes hostage.
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
-            const [cr, fr, ar] = await Promise.all([
-                sealed("GET", "/carts.json"),
-                sealed("GET", "/files.json").catch(() => ({ status: 0 })),
-                sealed("GET", "/apps.json").catch(() => ({ status: 0 }))]);
+            const at = (id) => sealed("GET", "/" + store.rootById(id).endpoint);
+            const [cr, fr, ar] = await Promise.all([at("carts"),
+                at("files").catch(() => ({ status: 0 })),
+                at("apps").catch(() => ({ status: 0 }))]);
             if (cr.wait >= 0) { say(signInWaitSays(cr.wait)); return; }
             const carts = cr.status === 200 ? sealedJson(cr) : null;
             const files = fr.status === 200 ? sealedJson(fr) : null;
@@ -2436,10 +2388,11 @@ self.onmessage = async (ev) => {
             }
         } else if (m.t === "import") {
             try {
-                if (/\.mp3$/i.test(m.name)) {
+                const kind = dropped(m.name, m.buf);
+                if (kind === "song") {
                     const s = await importSong(m.name, m.buf);
                     self.postMessage({ t: "imported", ok: true, s: s });
-                } else if (isP8Drop(m.name, m.buf)) {
+                } else if (kind === "p8") {
                     const r = await importP8(m.name, m.buf);
                     if (!r.ok) {
                         self.postMessage({ t: "imported", ok: false,

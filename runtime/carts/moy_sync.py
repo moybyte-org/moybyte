@@ -579,6 +579,20 @@ def roots_json(carts_root):
     return _json.dumps(out)
 
 
+def seeds(root_id, site, served):
+    """Whether a page seeds `root_id` before its console boots: a page a
+    board serves the roots its board served (`served`; the carts always),
+    which is what keeps a board flashed before a root from being sent a batch
+    it refuses; a site-mode page every root it keeps itself (`Root.site`),
+    served or not, so a drawing made there has somewhere to persist."""
+    root = root_by_id(root_id)
+    if root is None:
+        return False
+    if site:
+        return root.site
+    return served or root_id == CARTS_ROOT_ID
+
+
 def local_segs(root_id, rel, dc=False):
     """How many segments `rel` has as a path the browser's store of record
     for `root_id` keeps (moy_store.mjs), 0 when it keeps none there: the
@@ -607,6 +621,12 @@ def local_song(rel):
     the browser's store keeps out of the VFS (`MUSIC`, moy_sync_song)."""
     folder, _, name = rel.partition("/")
     return folder == MUSIC and sync_path(rel, 1) == 2 and sync_song(name)
+
+
+def folders_json(path):
+    """The folders of `path` the wire carries, sorted, as JSON: the browser's
+    export picker lists a shelf's carts by it."""
+    return _json.dumps(sorted(n for n, d in _entries(path) if d and not _skip(n)))
 
 
 # The cart folders the served bundle held when the carts root was seeded

@@ -55,11 +55,6 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-try:
-    from moy_sync import MUSIC         # the files root's folder of songs
-except ImportError:  # host / CPython: the runtime package
-    from runtime.moy_sync import MUSIC
-
 SPOOL = "/moy/net"
 LISTING = SPOOL + "/media.json"
 EIO = 5

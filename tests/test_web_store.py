@@ -54,7 +54,7 @@ def test_the_browser_store_takes_its_rules_from_the_vm():
                  "ci.RECORD_NAME", "ci.STAGE_DIR", "store.bind("):
         assert rule in bind, rule
     init = worker[worker.index("async function init("):]
-    assert init.index("bindStore()") < init.index("initStore({")
+    assert init.index("bindStore()") < init.index("initStore(fetched)")
 
 
 def test_the_root_registry_the_browser_reads_is_the_receivers():
@@ -203,7 +203,7 @@ def test_the_mode_reaches_web_boot_before_the_watcher_is_built():
     nothing, reading as a decision that had been made."""
     worker = _read("firmware", "web_runner", "worker.js")
     body = worker[worker.index("async function init("):]
-    assert body.index("web_boot.store_mode(") < body.index("web_boot.boot(")
+    assert body.index("web_boot.store_mode(") < body.index("web_boot.page_boot(")
     # A name the boot script imports but web_boot does not export is a
     # NameError at boot, in a worker, on somebody else's machine.
     assert "store_mode" in worker[worker.index("from web_boot import"):
@@ -239,7 +239,7 @@ def test_the_mode_is_decided_before_anything_is_written():
     # The console boots AFTER the store is seeded: web_boot rebases each watcher
     # on whatever it finds, so a late seed would ship the whole store as changes.
     body = worker[worker.index("async function init("):]
-    assert body.index("initStore({") < body.index("import web_boot")
+    assert body.index("initStore(fetched)") < body.index("import web_boot")
 
 
 def test_get_carts_layout_agrees_across_languages():
@@ -272,3 +272,78 @@ def test_get_carts_layout_agrees_across_languages():
         sys.path.remove(_RUNNER)
     assert const(worker, "NET_DIR") == carts_link.SPOOL
 
+
+def _web_boot():
+    """web_boot imported for its verbs only -- no VM, no canvas."""
+    import sys
+    for p in ("firmware/web_runner", "device", "runtime", "tools"):
+        d = os.path.join(_ROOT, p)
+        if d not in sys.path:
+            sys.path.insert(0, d)
+    try:
+        import web_boot
+    except Exception as exc:  # noqa: BLE001 -- a wasm-only dep would skip, not fail
+        pytest.skip("web_boot not importable on the host: %s" % exc)
+    return web_boot
+
+
+def test_which_roots_a_page_seeds_is_the_registrys():
+    """A board-served page seeds the roots its board served and the carts
+    always; a site-mode page every root it keeps itself (the apps' folders
+    are their keeper's there)."""
+    from runtime import moy_sync
+    assert [r.id for r in moy_sync.SYNC_ROOTS
+            if moy_sync.seeds(r.id, False, False)] == ["carts"]
+    assert all(moy_sync.seeds(r.id, False, True) for r in moy_sync.SYNC_ROOTS)
+    for served in (False, True):
+        assert [r.id for r in moy_sync.SYNC_ROOTS if moy_sync.seeds(r.id, True, served)] \
+            == ["carts", "files", "system"]
+
+
+def test_a_dropped_file_is_named_by_the_vm():
+    """What the page does with a dropped file is web_boot.drop_kind's call: a
+    song Music keeps, a PICO-8 cart by its name or a PNG's signature, else a
+    `.moy` archive."""
+    import json
+    wb = _web_boot()
+    png = json.dumps(list(b"\x89PNG\r\n\x1a\n"))
+    zip_ = json.dumps(list(b"PK\x03\x04\x14\x00\x00\x00"))
+    assert wb.drop_kind("Song.MP3", zip_) == "song"
+    assert wb.drop_kind("x/y/tune.mp3", "[]") == "song"
+    assert wb.drop_kind("celeste.p8", "[]") == "p8"
+    assert wb.drop_kind("Celeste.P8.PNG", "[]") == "p8"
+    assert wb.drop_kind("download (3)", png) == "p8"
+    assert wb.drop_kind("hop.moy", zip_) == "archive"
+    assert wb.drop_kind("hop.zip", "[]") == "archive"
+
+
+def test_a_site_pages_shelves_are_its_sources(tmp_path):
+    """indexes.json becomes a site-mode console's system/sources through
+    cart_index's writer; a page a board serves browses the board's own."""
+    import json
+    from runtime import cart_index
+    wb = _web_boot()
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    doc = json.dumps({"indexes": ["https://a.example/index.json", 3,
+                                  "https://b.example/index.json"]})
+    was = wb._S.get("store_mode")
+    try:
+        wb._S["store_mode"] = "board"
+        wb.site_sources(str(carts), doc)
+        assert not (tmp_path / "system" / "sources").exists()
+        wb._S["store_mode"] = "site"
+        wb.site_sources(str(carts), doc)
+        assert cart_index.load_indexes(str(carts)) == [
+            "https://a.example/index.json", "https://b.example/index.json"]
+    finally:
+        wb._S["store_mode"] = was
+
+
+def test_the_export_picker_lists_the_folders_the_wire_carries(tmp_path):
+    import json
+    from runtime import moy_sync
+    for name in ("b.moy", "a.moy", "thumbs", "__pycache__"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "wifi.json").write_text("{}")
+    assert json.loads(moy_sync.folders_json(str(tmp_path))) == ["a.moy", "b.moy"]
