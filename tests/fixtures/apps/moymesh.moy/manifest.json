@@ -1,12 +1,12 @@
 {
   "format": "moy-1",
   "version": 1,
-  "title": "Mesh",
-  "id": "mesh",
+  "title": "Moy Mesh",
+  "id": "moymesh",
   "runtime": "lua",
   "main": "main.lua",
   "canvas": "320x240",
-  "description": "Meshtastic text messages on the LoRa radio, on the default LongFast channel.",
+  "description": "Text messages on the LoRa radio, on the default LongFast channel. Works with Meshtastic.",
   "moybyte": {
     "type": "app",
     "permissions": [

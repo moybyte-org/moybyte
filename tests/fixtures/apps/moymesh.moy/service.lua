@@ -1,4 +1,4 @@
--- Mesh's service: Meshtastic text on the LoRa radio, in the background.
+-- Moy Mesh's service: text messages on the LoRa radio, in the background.
 --
 -- It holds the radio by handle (moybyte.dev_open("lora", ...)) on
 -- Meshtastic's default channel, the LongFast preset in the region the app's
@@ -43,7 +43,7 @@
 -- 0x7fffffff is negative here, packs and prints as the same 32 bits, and
 -- compares unsigned through math.ult.
 
-ME = "mesh"
+ME = "moymesh"
 BROADCAST = 0xFFFFFFFF
 TEXT = 1                                -- portnums.proto: TEXT_MESSAGE_APP
 KEEP = 30                               -- messages the log keeps

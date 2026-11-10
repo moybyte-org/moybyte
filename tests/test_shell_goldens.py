@@ -299,10 +299,10 @@ APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcart
 # surface out of stored content, which is what every other row here does.
 APP_CARTS = (("notes", "Notes"),)
 
-# Mesh, an installable app (moybyte-org/carts' carts/mesh/, its copy the
+# Moy Mesh, an installable app (moybyte-org/carts' carts/moymesh/, its copy the
 # fixture): a Lua window over a Lua service, installed into the store last,
 # so every surface before it draws the seed set alone.
-MESH_APP = str(Path(__file__).resolve().parent / "fixtures" / "apps" / "mesh.moy")
+MESH_APP = str(Path(__file__).resolve().parent / "fixtures" / "apps" / "moymesh.moy")
 
 # The public UI API's fixture page (docs/ui_api_2026-10.md), the Python app's
 # (tests/test_ui_public.py holds the Lua and compiled ones to its pixels): its
@@ -859,7 +859,7 @@ def _surface_plan(ws, cfg):
     plan.append(("open_with", lambda: _open_with(ws, home)))
     plan.append(("pick", lambda: _pick(ws, home)))
     plan.append(("app_files_document", lambda: _files_document(ws)))
-    plan.append(("app_mesh", _mesh_installed(ws, desktop)))
+    plan.append(("app_moymesh", _mesh_installed(ws, desktop)))
     return plan
 
 
@@ -1058,7 +1058,7 @@ def _notes_vault(ws, enter):
     return run
 
 
-# Mesh's node, pinned: its service draws one at random where prefs hold none.
+# Moy Mesh's node, pinned: its service draws one at random where prefs hold none.
 MESH_NODE = "!0a1b2c3d"
 # What it heard and sent, oldest first as its service keeps them: the window
 # lists them newest first.
@@ -1071,17 +1071,17 @@ MESH_LOG = [
 
 
 def _mesh_installed(ws, desktop):
-    """Mesh installed and open on the stand-in radio (it requires `lora`),
+    """Moy Mesh installed and open on the stand-in radio (it requires `lora`),
     its node and its messages pinned: from the home, or alone on the desk."""
     def run():
         from runtime.host import lora_sim
         ws.go_home()                     # the desk's windows close
         if desktop:
             ws.open_desk()
-        shutil.copytree(MESH_APP, os.path.join(str(ws.carts_root), "mesh.moy"))
+        shutil.copytree(MESH_APP, os.path.join(str(ws.carts_root), "moymesh.moy"))
         ws.carts.rescan()
         lora_sim.install()
-        open_cart(ws, "Mesh")
+        open_cart(ws, "Moy Mesh")
         pl = ws.run.player
         assert pl.ns is not None, pl.cart_error
         pl.ns["prefs"].set("node", MESH_NODE)
@@ -1916,7 +1916,7 @@ def surface_names(config_name):
             names.append("app_terminal_touch")
         names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
                   "app_terminal_colours"]
-    names += ["open_with", "pick", "app_files_document", "app_mesh"]
+    names += ["open_with", "pick", "app_files_document", "app_moymesh"]
     return names
 
 
@@ -1949,7 +1949,7 @@ def capture(config_name, carts_dir):
         from runtime import devices
         devices.MIC[0] = 0             # ...and the microphone's holder
         from runtime import moy_lora, moybyte
-        while moy_lora.owner():        # ...and the radio, Mesh's service's
+        while moy_lora.owner():        # ...and the radio, Moy Mesh's service's
             moybyte.end(moy_lora.owner())
         from runtime.host import lora_sim
         lora_sim.remove()

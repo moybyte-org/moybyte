@@ -1,5 +1,6 @@
-"""Mesh (tests/fixtures/apps/mesh.moy, moybyte-org/carts' carts/mesh/):
-Meshtastic text on the LoRa radio, a Lua window over a Lua service.
+"""Moy Mesh (tests/fixtures/apps/moymesh.moy, moybyte-org/carts' carts/moymesh/):
+text messages on the LoRa radio, works with Meshtastic, a Lua window over a
+Lua service.
 
 The codec in its Lua service (service.lua), run on the host's Lua VM with
 the boards' 32-bit integers (LUA_32BITS), against the Meshtastic firmware's
@@ -28,7 +29,8 @@ from runtime.host import lora_sim
 from ws_helpers import build_ws, make_drv, select_on_home
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CART = os.path.join(ROOT, "tests", "fixtures", "apps", "mesh.moy")
+CART = os.path.join(ROOT, "tests", "fixtures", "apps", "moymesh.moy")
+TITLE = "Moy Mesh"
 H = bytes.fromhex
 DEFAULT_KEY = H("d4f1bb3a20290759f0bcffabcf4e6901")
 
@@ -181,8 +183,8 @@ def test_a_text_is_utf8_and_a_node_number_is_unsigned(c):
 
 
 def _install(ws):
-    """Mesh into `ws`'s store, as `pkg install mesh` leaves it."""
-    shutil.copytree(CART, os.path.join(ws.carts_root, "mesh.moy"))
+    """Moy Mesh into `ws`'s store, as `pkg install moymesh` leaves it."""
+    shutil.copytree(CART, os.path.join(ws.carts_root, "moymesh.moy"))
     ws.carts.rescan()
 
 
@@ -214,7 +216,7 @@ def mesh(tmp_path):
     ws = build_ws(tmp_path)
     _install(ws)
     S.attach(ws)
-    assert select_on_home(ws, "Mesh") is not None
+    assert select_on_home(ws, TITLE) is not None
     ws.open()
     pl = ws.run.player
     assert pl.cart_error is None, pl.cart_error
@@ -222,7 +224,7 @@ def mesh(tmp_path):
     for _ in range(6):
         drv.frame(1 / 30)
         S.SCHED.poll()
-    svc = S.SCHED.find("mesh")
+    svc = S.SCHED.find("moymesh")
     assert svc is not None and svc.state != S.EXITED
     yield ws, pl, drv, svc
     S.SCHED.stop(svc.pid)
@@ -283,7 +285,7 @@ def test_a_new_region_retunes_the_radio(mesh):
     ws, pl, drv, svc = mesh
     win = _Window(pl)
     pl.ns["prefs"].set("region", "US")
-    moybyte.send("mesh", "retune")
+    moybyte.send("moymesh", "retune")
     _frames(drv)
     assert not lora_sim.air(_node_packet(b"eu", 1234, 1), 869525000, 11)
     assert lora_sim.air(_node_packet(b"us", 1234, 2), 906875000, 11)
@@ -296,7 +298,9 @@ def test_a_new_region_retunes_the_radio(mesh):
 def test_the_manifest_asks_for_the_radio_and_names_its_service():
     with open(os.path.join(CART, "manifest.json")) as f:
         man = json.load(f)
-    assert man["id"] == "mesh" and man["moybyte"]["type"] == "app"
+    assert (man["id"], man["title"]) == ("moymesh", TITLE)
+    assert man["moybyte"]["type"] == "app"
+    assert "Meshtastic" in man["description"]
     assert (man["runtime"], man["main"]) == ("lua", "main.lua")
     assert man["moybyte"]["entries"] == {"service": "service.lua"}
     assert set(man["moybyte"]["required"]) == {"lora", "prefs"}
@@ -311,13 +315,13 @@ def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
     def titles(rows):
         return [c.get("title") for c in rows if c]
     desk = ws.wm._backdrop_layer
-    assert "Mesh" not in titles(ws._runnable_items())
-    assert "Mesh" not in titles(c for _k, _l, c in desk._icon_catalog())
-    assert "Mesh" in titles(ws._launcher_items(ws.carts.all, "make"))
+    assert TITLE not in titles(ws._runnable_items())
+    assert TITLE not in titles(c for _k, _l, c in desk._icon_catalog())
+    assert TITLE in titles(ws._launcher_items(ws.carts.all, "make"))
     lora_sim.install()
     try:
-        assert "Mesh" in titles(ws._launcher_items(ws.carts.all, "apps"))
-        assert ("mesh", "Mesh") in [(k, lb) for k, lb, _c in desk._icon_catalog()], \
+        assert TITLE in titles(ws._launcher_items(ws.carts.all, "apps"))
+        assert ("moymesh", TITLE) in [(k, lb) for k, lb, _c in desk._icon_catalog()], \
             "its tile is the mesh icon slot"
     finally:
         lora_sim.remove()
@@ -329,7 +333,7 @@ def test_on_the_handheld_the_window_opens_on_the_field_below_the_bar(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(320, 240))
     try:
         _install(ws)
-        assert select_on_home(ws, "Mesh") is not None
+        assert select_on_home(ws, TITLE) is not None
         ws.open()
         win = _Window(ws.run.player)
         win.run("local page = ui.page\n"

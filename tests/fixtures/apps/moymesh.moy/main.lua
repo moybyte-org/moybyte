@@ -1,10 +1,11 @@
--- Mesh: Meshtastic text on the LoRa radio. The window lists what the service
--- (service.lua) heard and sent on the default channel, newest first, and sends
--- what is typed; the service holds the radio and keeps running when the window
--- closes. The region picks the frequency and must match the law where the
--- console is: EU_868 until another is chosen.
+-- Moy Mesh: text messages on the LoRa radio; it works with Meshtastic. The
+-- window lists what the service (service.lua) heard and sent on the default
+-- channel, newest first, and sends what is typed; the service holds the radio
+-- and keeps running when the window closes. The region picks the frequency
+-- and must match the law where the console is: EU_868 until another is
+-- chosen.
 
-ME = "mesh"
+ME = "moymesh"
 REGIONS = {"EU_868", "EU_433", "US", "ANZ", "ANZ_433", "CN", "JP", "RU", "KR", "TW",
            "IN", "NZ_865", "TH", "UA_433", "UA_868", "MY_433", "MY_919", "SG_923",
            "PH_433", "PH_868", "PH_915", "KZ_433", "KZ_863", "NP_865", "BR_902"}

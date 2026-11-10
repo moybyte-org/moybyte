@@ -24,11 +24,12 @@ generated or held by code, this guide points at it rather than copying it:
 Two worked examples run in the host suite, `tests/test_app_examples.py`: a
 Python app with a scrolling list and prefs (`tests/fixtures/apps/shopping.moy`)
 and a Lua service answering a message (`tests/fixtures/apps/echo_lua.moy`).
-`system_carts/moybyte.notes.moy` is the full-size app. Mesh, an installable
-app in moybyte-org/carts (`carts/mesh/`, `pkg install mesh`), is the whole
-app in Lua: a window over a service that holds the LoRa radio by handle and
-wakes on it (Meshtastic's default channel); its copy
-`tests/fixtures/apps/mesh.moy` runs in `tests/test_mesh_app.py`.
+`system_carts/moybyte.notes.moy` is the full-size app. Moy Mesh, an
+installable app in moybyte-org/carts (`carts/moymesh/`, `pkg install
+moymesh`), is the whole app in Lua: a window over a service that holds the
+LoRa radio by handle and wakes on it (text on Meshtastic's default channel,
+so it works with Meshtastic); its copy `tests/fixtures/apps/moymesh.moy`
+runs in `tests/test_moymesh_app.py`.
 
 ---
 
