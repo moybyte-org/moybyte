@@ -355,6 +355,7 @@ def test_on_the_handheld_the_window_opens_on_the_field_below_the_bar(tmp_path):
         win.run("FOCUS = ui.focus()")
         assert win.get("FOCUS") == "Message"
     finally:
+        S.SCHED.reset()         # opening Mesh started its service on the one scheduler
         while N.owner():
             moybyte.end(N.owner())
         lora_sim.remove()
@@ -385,6 +386,7 @@ def test_on_the_desk_mesh_is_a_window_laid_out_for_its_room(tmp_path):
         win.run("_layout(%d, %d, 1)" % (w, h))
         assert win.rows() == ["!5e6f7a8b: hi  -98 dBm 6.5 dB"]
     finally:
+        S.SCHED.reset()         # opening Mesh started its service on the one scheduler
         while N.owner():
             moybyte.end(N.owner())
         lora_sim.remove()
