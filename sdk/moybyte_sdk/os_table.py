@@ -78,6 +78,7 @@ WASM_APP = {
     'theme_variant': (),
     'ui_at': (),
     'ui_bar': (),
+    'ui_bubble': (),
     'ui_button': (),
     'ui_card': (),
     'ui_cycle': (),

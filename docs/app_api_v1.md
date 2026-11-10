@@ -381,6 +381,23 @@ if #log == 0 then
 end
 ```
 
+**A chat is bubbles.** `ui.bubble(text, side, o)` is one message, a stop
+that wraps itself: `"in"` at the left with its sender (`o.head`) and the
+signal glyph (`o.signal`, 0 to 4 bars), `"out"` at the right in your
+colour, `o.tone = "failed"` as its tint; `o.status` is the line under it.
+It answers its rect and state; `ui.CUT` is set where the text ran past
+`o.lines` (4), the cue to offer the whole message on a page of its own:
+
+```lua
+for i, m in ipairs(log) do
+  local o = {id = "m" .. i}
+  if m.from then o.head, o.signal = m.name, m.bars end
+  if m.failed then o.tone, o.status = "failed", "Not sent" end
+  local x, y, w, h, st = ui.bubble(m.text, m.from and "in" or "out", o)
+  if st & 2 ~= 0 then open_details(i, st & ui.CUT ~= 0) end
+end
+```
+
 **Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
 "Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
 `cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,

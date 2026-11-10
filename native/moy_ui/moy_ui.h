@@ -985,6 +985,41 @@ int moy_ui_text_block(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, i
 // to a line's pitch under the last, drawn where `draw`.
 int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, moy_ui_span_t title,
                  const uint8_t *lines, size_t n, int fs, int desk, int draw);
+// A chat's bubble (ui.bubble): `text` wrapped in the ui face to `max`
+// hundredths of b.w less its pads, at most `lines` lines (0: no limit) and
+// the last cut with an ellipsis where it runs on. An "in" bubble (side 0)
+// sits at b.x: `surface_alt` (a light look's `surface` with a `border`
+// edge), its `head` over the words in the caption face and `value`, then the
+// signal glyph, `signal` of its four bars lit (-1: no glyph); an "out"
+// bubble (side 1) ends at b's right: `value` under `value_ink`, or where
+// `tone` is MOY_UI_BUBBLE_FAILED, `value` mixed into the ground under
+// `value`'s words. Its tail corner is square (in: bottom left, out: bottom
+// right). `status` is a caption line under it, right-aligned to it, in the
+// dim ink, or failed, the `warn` icon and the danger ink. `flags`'
+// MOY_UI_F_FOCUS rings it in `focus` (2 units, a unit clear) where focus
+// marks show, MOY_UI_BUBBLE_ANCHOR in `ink_dim` (1 unit) while a popover
+// hangs from it. The bubble's box in *out, whether the text was cut in
+// *cut; the block's height (the bubble and its status line), drawn where
+// `draw`.
+enum { MOY_UI_BUBBLE_FAILED = 1 };
+#define MOY_UI_BUBBLE_ANCHOR 0x10000
+typedef struct {
+    moy_ui_span_t text, head, status;
+    int16_t side, signal, tone, max, lines;
+    int32_t flags;
+} moy_ui_bubble_t;
+int moy_ui_bubble(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_bubble_t *bb, int fs,
+                  int desk, int draw, moy_ui_box_t *out, int *cut);
+// The signal glyph (ui.bubble's head, ui.info's `signal`): four bars,
+// bottom-aligned, from x with their feet at `foot`, `n` lit in `ink_dim`,
+// the rest `ink_dim` mixed into `under` (wire order). Its width.
+int moy_ui_signal(const moy_ui_sink_t *s, int x, int foot, int n, uint16_t under, int fs,
+                  int desk);
+// The width and height of the signal glyph at the scale.
+void moy_ui_signal_size(int fs, int desk, int *w, int *h);
+// A focus mark a part drew itself, counted as moy_ui_focus counts one.
+void moy_ui_marks_count(void);
+
 // A toast (ui.toast): a pill in the ink's colour holding icon `slot` (else
 // `glyph`) and `text` in the ground's colour, centred across b with its
 // foot on b's foot; `flat` draws no soft shadow under it (a pill painted

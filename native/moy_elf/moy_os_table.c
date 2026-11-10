@@ -111,7 +111,7 @@ int32_t moy_os_moy_notify(const char *summary, const char *body) {
         { summary, 0u, 0, MOY_OS_ARG_STR },
         { body, 0u, 0, MOY_OS_ARG_OPT },
     };
-    return moy_os_call(162u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.notify
+    return moy_os_call(163u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.notify
 }
 
 int32_t moy_os_moy_open_with(const char *item, int32_t choose) {
@@ -119,7 +119,7 @@ int32_t moy_os_moy_open_with(const char *item, int32_t choose) {
         { item, 0u, 0, MOY_OS_ARG_STR },
         { NULL, 0u, choose, MOY_OS_ARG_INT },
     };
-    return moy_os_call(163u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.open_with
+    return moy_os_call(164u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.open_with
 }
 
 int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime) {
@@ -127,14 +127,14 @@ int32_t moy_os_moy_share(const void *data, size_t data_len, const char *mime) {
         { data, data_len, 0, MOY_OS_ARG_BYTES },
         { mime, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(164u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.share
+    return moy_os_call(165u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.share
 }
 
 int32_t moy_os_moy_award(const char *id) {
     const moy_os_arg_t a[1] = {
         { id, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(166u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.award
+    return moy_os_call(167u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.award
 }
 
 int32_t moy_os_moy_progress(const char *id, int32_t value) {
@@ -142,35 +142,35 @@ int32_t moy_os_moy_progress(const char *id, int32_t value) {
         { id, 0u, 0, MOY_OS_ARG_STR },
         { NULL, 0u, value, MOY_OS_ARG_INT },
     };
-    return moy_os_call(167u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.progress
+    return moy_os_call(168u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.progress
 }
 
 int32_t moy_os_moy_every(int32_t ms) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, ms, MOY_OS_ARG_INT },
     };
-    return moy_os_call(169u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.every
+    return moy_os_call(170u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.every
 }
 
 int32_t moy_os_moy_after(int32_t ms) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, ms, MOY_OS_ARG_INT },
     };
-    return moy_os_call(170u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.after
+    return moy_os_call(171u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.after
 }
 
 int32_t moy_os_moy_cancel(int32_t id) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, id, MOY_OS_ARG_INT },
     };
-    return moy_os_call(171u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.cancel
+    return moy_os_call(172u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.cancel
 }
 
 int32_t moy_os_moy_at(int32_t t) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, t, MOY_OS_ARG_INT },
     };
-    return moy_os_call(177u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.at
+    return moy_os_call(178u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.at
 }
 
 int32_t moy_os_moy_files_duplicate(const char *kind, const char *name, void *copy, size_t copy_cap) {
@@ -202,14 +202,14 @@ int32_t moy_os_moy_random(int32_t n, void *data, size_t data_cap) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, n, MOY_OS_ARG_INT },
     };
-    return moy_os_call(181u, MOY_OS_SEQ, a, 1, data, data_cap);   // moybyte.random
+    return moy_os_call(182u, MOY_OS_SEQ, a, 1, data, data_cap);   // moybyte.random
 }
 
 int32_t moy_os_moy_sha256(const void *data, size_t data_len, void *digest, size_t digest_cap) {
     const moy_os_arg_t a[1] = {
         { data, data_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(182u, MOY_OS_SEQ, a, 1, digest, digest_cap);   // moybyte.sha256
+    return moy_os_call(183u, MOY_OS_SEQ, a, 1, digest, digest_cap);   // moybyte.sha256
 }
 
 int32_t moy_os_moy_hmac_sha256(const void *key, size_t key_len, const void *data, size_t data_len, void *mac, size_t mac_cap) {
@@ -217,7 +217,7 @@ int32_t moy_os_moy_hmac_sha256(const void *key, size_t key_len, const void *data
         { key, key_len, 0, MOY_OS_ARG_BYTES },
         { data, data_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(183u, MOY_OS_SEQ, a, 2, mac, mac_cap);   // moybyte.hmac_sha256
+    return moy_os_call(184u, MOY_OS_SEQ, a, 2, mac, mac_cap);   // moybyte.hmac_sha256
 }
 
 int32_t moy_os_moy_aes_gcm_seal(const void *key, size_t key_len, const void *plain, size_t plain_len, void *sealed, size_t sealed_cap) {
@@ -225,7 +225,7 @@ int32_t moy_os_moy_aes_gcm_seal(const void *key, size_t key_len, const void *pla
         { key, key_len, 0, MOY_OS_ARG_BYTES },
         { plain, plain_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(184u, MOY_OS_SEQ, a, 2, sealed, sealed_cap);   // moybyte.aes_gcm_seal
+    return moy_os_call(185u, MOY_OS_SEQ, a, 2, sealed, sealed_cap);   // moybyte.aes_gcm_seal
 }
 
 int32_t moy_os_moy_aes_gcm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, void *plain, size_t plain_cap) {
@@ -233,7 +233,7 @@ int32_t moy_os_moy_aes_gcm_open(const void *key, size_t key_len, const void *sea
         { key, key_len, 0, MOY_OS_ARG_BYTES },
         { sealed, sealed_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(185u, MOY_OS_SEQ, a, 2, plain, plain_cap);   // moybyte.aes_gcm_open
+    return moy_os_call(186u, MOY_OS_SEQ, a, 2, plain, plain_cap);   // moybyte.aes_gcm_open
 }
 
 int32_t moy_os_moy_x25519(const void *secret, size_t secret_len, const void *peer, size_t peer_len, void *shared, size_t shared_cap) {
@@ -241,19 +241,19 @@ int32_t moy_os_moy_x25519(const void *secret, size_t secret_len, const void *pee
         { secret, secret_len, 0, MOY_OS_ARG_BYTES },
         { peer, peer_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(186u, MOY_OS_SEQ, a, 2, shared, shared_cap);   // moybyte.x25519
+    return moy_os_call(187u, MOY_OS_SEQ, a, 2, shared, shared_cap);   // moybyte.x25519
 }
 
 int32_t moy_os_moy_service_start(void) {
-    return moy_os_call(178u, MOY_OS_HOP, NULL, 0, NULL, 0u);   // moybyte.service_start
+    return moy_os_call(179u, MOY_OS_HOP, NULL, 0, NULL, 0u);   // moybyte.service_start
 }
 
 int32_t moy_os_moy_service_stop(void) {
-    return moy_os_call(179u, MOY_OS_HERE, NULL, 0, NULL, 0u);   // moybyte.service_stop
+    return moy_os_call(180u, MOY_OS_HERE, NULL, 0, NULL, 0u);   // moybyte.service_stop
 }
 
 int32_t moy_os_moy_service_running(void) {
-    return moy_os_call(180u, MOY_OS_HERE, NULL, 0, NULL, 0u);   // moybyte.service_running
+    return moy_os_call(181u, MOY_OS_HERE, NULL, 0, NULL, 0u);   // moybyte.service_running
 }
 
 int32_t moy_os_moy_pick(const char *mime, const char *mode) {
@@ -261,7 +261,7 @@ int32_t moy_os_moy_pick(const char *mime, const char *mode) {
         { mime, 0u, 0, MOY_OS_ARG_STR },
         { mode, 0u, 0, MOY_OS_ARG_OPT },
     };
-    return moy_os_call(172u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.pick
+    return moy_os_call(173u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.pick
 }
 
 int32_t moy_os_moy_item_read(int32_t item, void *data, size_t data_cap) {
@@ -269,7 +269,7 @@ int32_t moy_os_moy_item_read(int32_t item, void *data, size_t data_cap) {
         { NULL, 0u, item, MOY_OS_ARG_INT },
         { NULL, 0u, (int32_t)(data_cap < 0x7fffffffu ? data_cap : 0x7fffffffu), MOY_OS_ARG_INT },
     };
-    return moy_os_call(175u, MOY_OS_HERE, a, 2, data, data_cap);   // moybyte.item_read
+    return moy_os_call(176u, MOY_OS_HERE, a, 2, data, data_cap);   // moybyte.item_read
 }
 
 int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len) {
@@ -277,7 +277,7 @@ int32_t moy_os_moy_item_write(int32_t item, const void *data, size_t data_len) {
         { NULL, 0u, item, MOY_OS_ARG_INT },
         { data, data_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(176u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.item_write
+    return moy_os_call(177u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.item_write
 }
 
 int32_t moy_os_moy_dev_open(const char *name, const char *cfg) {
@@ -285,14 +285,14 @@ int32_t moy_os_moy_dev_open(const char *name, const char *cfg) {
         { name, 0u, 0, MOY_OS_ARG_STR },
         { cfg, 0u, 0, MOY_OS_ARG_OPT },
     };
-    return moy_os_call(187u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_open
+    return moy_os_call(188u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_open
 }
 
 int32_t moy_os_moy_dev_close(int32_t h) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, h, MOY_OS_ARG_INT },
     };
-    return moy_os_call(188u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.dev_close
+    return moy_os_call(189u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.dev_close
 }
 
 int32_t moy_os_moy_dev_read(int32_t h, void *data, size_t data_cap) {
@@ -300,7 +300,7 @@ int32_t moy_os_moy_dev_read(int32_t h, void *data, size_t data_cap) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { NULL, 0u, (int32_t)(data_cap < 0x7fffffffu ? data_cap : 0x7fffffffu), MOY_OS_ARG_INT },
     };
-    return moy_os_call(189u, MOY_OS_HERE, a, 2, data, data_cap);   // moybyte.dev_read
+    return moy_os_call(190u, MOY_OS_HERE, a, 2, data, data_cap);   // moybyte.dev_read
 }
 
 int32_t moy_os_moy_dev_write(int32_t h, const void *data, size_t data_len) {
@@ -308,7 +308,7 @@ int32_t moy_os_moy_dev_write(int32_t h, const void *data, size_t data_len) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { data, data_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(190u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_write
+    return moy_os_call(191u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_write
 }
 
 int32_t moy_os_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *into, size_t into_cap) {
@@ -317,7 +317,7 @@ int32_t moy_os_moy_dev_xfer(int32_t h, const void *data, size_t data_len, void *
         { data, data_len, 0, MOY_OS_ARG_BYTES },
         { NULL, 0u, (int32_t)(into_cap < 0x7fffffffu ? into_cap : 0x7fffffffu), MOY_OS_ARG_INT },
     };
-    return moy_os_call(191u, MOY_OS_HERE, a, 3, into, into_cap);   // moybyte.dev_xfer
+    return moy_os_call(192u, MOY_OS_HERE, a, 3, into, into_cap);   // moybyte.dev_xfer
 }
 
 int32_t moy_os_moy_dev_set(int32_t h, const char *cfg) {
@@ -325,7 +325,7 @@ int32_t moy_os_moy_dev_set(int32_t h, const char *cfg) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { cfg, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(192u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_set
+    return moy_os_call(193u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_set
 }
 
 int32_t moy_os_moy_dev_get(int32_t h, const char *what) {
@@ -333,14 +333,14 @@ int32_t moy_os_moy_dev_get(int32_t h, const char *what) {
         { NULL, 0u, h, MOY_OS_ARG_INT },
         { what, 0u, 0, MOY_OS_ARG_STR },
     };
-    return moy_os_call(193u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_get
+    return moy_os_call(194u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.dev_get
 }
 
 int32_t moy_os_moy_ed25519_public(const void *secret, size_t secret_len, void *pub, size_t pub_cap) {
     const moy_os_arg_t a[1] = {
         { secret, secret_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(194u, MOY_OS_SEQ, a, 1, pub, pub_cap);   // moybyte.ed25519_public
+    return moy_os_call(195u, MOY_OS_SEQ, a, 1, pub, pub_cap);   // moybyte.ed25519_public
 }
 
 int32_t moy_os_moy_ed25519_sign(const void *secret, size_t secret_len, const void *msg, size_t msg_len, void *sig, size_t sig_cap) {
@@ -348,7 +348,7 @@ int32_t moy_os_moy_ed25519_sign(const void *secret, size_t secret_len, const voi
         { secret, secret_len, 0, MOY_OS_ARG_BYTES },
         { msg, msg_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(195u, MOY_OS_SEQ, a, 2, sig, sig_cap);   // moybyte.ed25519_sign
+    return moy_os_call(196u, MOY_OS_SEQ, a, 2, sig, sig_cap);   // moybyte.ed25519_sign
 }
 
 int32_t moy_os_moy_ed25519_verify(const void *pub, size_t pub_len, const void *msg, size_t msg_len, const void *sig, size_t sig_len) {
@@ -357,7 +357,7 @@ int32_t moy_os_moy_ed25519_verify(const void *pub, size_t pub_len, const void *m
         { msg, msg_len, 0, MOY_OS_ARG_BYTES },
         { sig, sig_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(196u, MOY_OS_SEQ, a, 3, NULL, 0u);   // moybyte.ed25519_verify
+    return moy_os_call(197u, MOY_OS_SEQ, a, 3, NULL, 0u);   // moybyte.ed25519_verify
 }
 
 int32_t moy_os_moy_status_show(const char *icon, int32_t state, int32_t order) {
@@ -366,7 +366,7 @@ int32_t moy_os_moy_status_show(const char *icon, int32_t state, int32_t order) {
         { NULL, 0u, state, MOY_OS_ARG_INT },
         { NULL, 0u, order, MOY_OS_ARG_INT },
     };
-    return moy_os_call(197u, MOY_OS_HERE, a, 3, NULL, 0u);   // moybyte.status_show
+    return moy_os_call(198u, MOY_OS_HERE, a, 3, NULL, 0u);   // moybyte.status_show
 }
 
 int32_t moy_os_moy_status_state(int32_t item, int32_t state) {
@@ -374,7 +374,7 @@ int32_t moy_os_moy_status_state(int32_t item, int32_t state) {
         { NULL, 0u, item, MOY_OS_ARG_INT },
         { NULL, 0u, state, MOY_OS_ARG_INT },
     };
-    return moy_os_call(198u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.status_state
+    return moy_os_call(199u, MOY_OS_HERE, a, 2, NULL, 0u);   // moybyte.status_state
 }
 
 int32_t moy_os_moy_status_panel(int32_t item, const char *rows) {
@@ -382,14 +382,14 @@ int32_t moy_os_moy_status_panel(int32_t item, const char *rows) {
         { NULL, 0u, item, MOY_OS_ARG_INT },
         { rows, 0u, 0, MOY_OS_ARG_OPT },
     };
-    return moy_os_call(199u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.status_panel
+    return moy_os_call(200u, MOY_OS_HOP, a, 2, NULL, 0u);   // moybyte.status_panel
 }
 
 int32_t moy_os_moy_status_remove(int32_t item) {
     const moy_os_arg_t a[1] = {
         { NULL, 0u, item, MOY_OS_ARG_INT },
     };
-    return moy_os_call(200u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.status_remove
+    return moy_os_call(201u, MOY_OS_HERE, a, 1, NULL, 0u);   // moybyte.status_remove
 }
 
 int32_t moy_os_moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap) {
@@ -397,7 +397,7 @@ int32_t moy_os_moy_aes_ctr(const void *key, size_t key_len, const void *data, si
         { key, key_len, 0, MOY_OS_ARG_BYTES },
         { data, data_len, 0, MOY_OS_ARG_BYTES },
     };
-    return moy_os_call(201u, MOY_OS_SEQ, a, 2, text, text_cap);   // moybyte.aes_ctr
+    return moy_os_call(202u, MOY_OS_SEQ, a, 2, text, text_cap);   // moybyte.aes_ctr
 }
 
 int32_t moy_os_moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap) {
@@ -406,7 +406,7 @@ int32_t moy_os_moy_aes_ccm_seal(const void *key, size_t key_len, const void *dat
         { data, data_len, 0, MOY_OS_ARG_BYTES },
         { NULL, 0u, tag, MOY_OS_ARG_INT },
     };
-    return moy_os_call(202u, MOY_OS_SEQ, a, 3, sealed, sealed_cap);   // moybyte.aes_ccm_seal
+    return moy_os_call(203u, MOY_OS_SEQ, a, 3, sealed, sealed_cap);   // moybyte.aes_ccm_seal
 }
 
 int32_t moy_os_moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap) {
@@ -415,7 +415,7 @@ int32_t moy_os_moy_aes_ccm_open(const void *key, size_t key_len, const void *sea
         { sealed, sealed_len, 0, MOY_OS_ARG_BYTES },
         { NULL, 0u, tag, MOY_OS_ARG_INT },
     };
-    return moy_os_call(203u, MOY_OS_SEQ, a, 3, plain, plain_cap);   // moybyte.aes_ccm_open
+    return moy_os_call(204u, MOY_OS_SEQ, a, 3, plain, plain_cap);   // moybyte.aes_ccm_open
 }
 
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.

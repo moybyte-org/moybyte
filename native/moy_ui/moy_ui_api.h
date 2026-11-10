@@ -878,6 +878,19 @@ void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // Its foot's y, where the page's verbs go.
 int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
                      moy_ui_span_t title, const uint8_t *lines, size_t n);
+// A chat's bubble (ui.bubble, moy_ui.h's moy_ui_bubble) at `at`'s rect's
+// top, across its width, else stacked on the page inside its gutters, a
+// stop: `opt` its options as words in MOY_UI_BBO_* order (`n` of them, the
+// rest their defaults: side 0 "in", signal -1 none, tone 0, max 75
+// hundredths, lines 4, anchor 0). out: the bubble's x, y, w, h and the
+// state bits, MOY_UI_ST_CUT where its text was cut. Stacked bubbles stand
+// 4 pixels apart at the scale, 6 on the desk.
+enum { MOY_UI_BBO_SIDE, MOY_UI_BBO_SIGNAL, MOY_UI_BBO_TONE, MOY_UI_BBO_MAX, MOY_UI_BBO_LINES,
+       MOY_UI_BBO_ANCHOR, MOY_UI_BBO_WORDS };
+#define MOY_UI_ST_CUT 16
+void moy_ui_api_bubble(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
+                       moy_ui_span_t head, moy_ui_span_t status, const int32_t *opt, int n,
+                       const moy_ui_over_t *o, int32_t out[5]);
 // A month (ui.month) at `at`'s rect, else stacked on the page: `title`,
 // the weekdays' initials `days`, `n` days from column `first` (0 Monday),
 // `today` marked (0 none); on the desk and under touch its head carries the

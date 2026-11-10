@@ -1571,6 +1571,205 @@ int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text_, in
     return MOY_UI_OK;
 }
 
+// -- a chat's bubble (ui.bubble) and the signal glyph -------------------------------------
+
+#define BUBBLE_LINES 32
+
+// A rect with corner radius r but the corner `square` (0 TL, 1 TR, 2 BR, 3
+// BL; -1 none), filled in `c` where has_fill, ringed `line` wide in `ring`.
+static void rrect_sq(pd_t *d, int x, int y, int w, int h, int r, int square, int has_fill,
+                     uint16_t c, int line, uint16_t ring) {
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    moy_shape_paint_t p;
+    memset(&p, 0, sizeof(p));
+    p.n = 1;
+    p.c[0] = c;
+    moy_shape_rrect_t sp;
+    memset(&sp, 0, sizeof(sp));
+    for (int k = 0; k < 4; k++) {
+        sp.r[k] = (uint8_t)(r < 0 || k == square ? 0 : r);
+    }
+    sp.stepped = moy_ui_depth()->stepped;
+    sp.line = (uint8_t)line;
+    sp.line_hi = ring;
+    sp.line_lo = -1;
+    sp.fill = has_fill ? &p : NULL;
+    moy_shape_rrect(&d->t, x, y, w, h, &sp);
+    d->row->st[MOY_ST_N_FILL]++;
+}
+
+void moy_ui_signal_size(int fs, int desk, int *w, int *h) {
+    int k = fs < 1 ? 1 : fs;
+    *w = 11 * k;
+    *h = ((desk & MOY_UI_DESK) ? 10 : 9) * k;
+}
+
+static int signal_d(pd_t *d, int x, int foot, int n, uint16_t under) {
+    int sw, sh;
+    moy_ui_signal_size(d->fs, d->desk ? MOY_UI_DESK : 0, &sw, &sh);
+    int bw = (sw - 3 * d->fs) / 4, step = bw + d->fs;
+    int ci = tok(d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
+    uint16_t lit = pal(d, ci), unlit = mix(under, lit, dark(d) ? 100 : 130);
+    for (int k = 0; k < 4; k++) {
+        int bh = sh * (k + 1) / 4;
+        bh = bh < 2 * d->fs ? 2 * d->fs : bh;
+        fill(d, x + k * step, foot - bh, bw, bh, k < n ? lit : unlit);
+    }
+    return sw;
+}
+
+int moy_ui_signal(const moy_ui_sink_t *s, int x, int foot, int n, uint16_t under, int fs,
+                  int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    return signal_d(&d, x, foot, n, under);
+}
+
+int moy_ui_bubble(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_bubble_t *bb, int fs,
+                  int desk, int draw, moy_ui_box_t *out, int *cut) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s), k = d.fs;
+    int pad = (d.desk ? 10 : 6) * k, pady = (d.desk ? 5 : 3) * k, r = (d.desk ? 10 : 7) * k;
+    int notgap = (d.desk ? 2 : 1) * k;
+    pf_t fu = font_of(&d, MOY_UI_FONT_UI), fc = font_of(&d, MOY_UI_FONT_CAPTION);
+    int share = bb->max > 0 && bb->max <= 100 ? bb->max : 75;
+    int room = b.w * share / 100 - 2 * pad;
+    room = room < 8 * k ? 8 * k : room;
+    moy_text_line_t ln[BUBBLE_LINES];
+    int n = bb->text.n > 0 ? moy_text_wrap(fu.id, bb->text.p, bb->text.n, room / sc,
+                                           MOY_WRAP_WORDS_PX, ln, BUBBLE_LINES)
+                           : 0;
+    if (n < 1) {
+        n = 1;
+        ln[0].off = ln[0].len = 0;
+        ln[0].collapse = 0;
+    }
+    int lim = bb->lines > 0 && bb->lines < BUBBLE_LINES ? bb->lines : BUBBLE_LINES;
+    int shown = n < lim ? n : lim, was_cut = n > shown;
+    // each line's span, the last shown the rest of the text where it is cut
+    int wmax = 0;
+    for (int i = 0; i < shown; i++) {
+        int w;
+        if (i == shown - 1 && was_cut) {
+            int ell = 0;
+            size_t kk = moy_text_cut_px(fu.id, bb->text.p + ln[i].off, bb->text.n - ln[i].off,
+                                        room, sc, &ell);
+            w = tw(&fu, bb->text.p + ln[i].off, kk, sc)
+                + (ell ? tw(&fu, s_dots, sizeof(s_dots), sc) : 0);
+        } else {
+            w = tw(&fu, bb->text.p + ln[i].off, ln[i].len, sc);
+        }
+        wmax = w > wmax ? w : wmax;
+    }
+    int in = bb->side == 0, sw = 0, sh = 0, headh = 0, hroom = room;
+    if (in && bb->head.n > 0) {
+        if (bb->signal >= 0) {
+            moy_ui_signal_size(d.fs, d.desk ? MOY_UI_DESK : 0, &sw, &sh);
+            hroom = room - 4 * k - sw;
+        }
+        int ell = 0;
+        size_t kk = moy_text_cut_px(fc.id, bb->head.p, bb->head.n, hroom, sc, &ell);
+        int hw = tw(&fc, bb->head.p, kk, sc) + (ell ? tw(&fc, s_dots, sizeof(s_dots), sc) : 0)
+                 + (sw ? 4 * k + sw : 0);
+        wmax = hw > wmax ? hw : wmax;
+        headh = fc.ascent * sc + 3 * k;
+    }
+    int w = wmax + 2 * pad;
+    int h = 2 * pady + headh + (shown - 1) * fu.line * sc + fu.ascent * sc + 3 * k;
+    moy_ui_box_t box = {(int16_t)(in ? b.x : b.x + b.w - w), b.y, (int16_t)w, (int16_t)h};
+    if (out != NULL) {
+        *out = box;
+    }
+    if (cut != NULL) {
+        *cut = was_cut;
+    }
+    int status_h = bb->status.n > 0 ? notgap + fc.line * sc : 0;
+    if (!draw) {
+        return h + status_h;
+    }
+    int failed = !in && bb->tone == MOY_UI_BUBBLE_FAILED;
+    int square = in ? 3 : 2, light = !dark(&d);
+    uint16_t g = ground(&d), fillc, ink;
+    int vi = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+    if (in) {
+        if (light) {
+            fillc = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+            rrect_sq(&d, box.x, box.y, w, h, r, square, 1, fillc, k,
+                     pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_INK_DIM)));
+        } else {
+            fillc = pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE));
+            rrect_sq(&d, box.x, box.y, w, h, r, square, 1, fillc, 0, 0);
+        }
+        ink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK));
+    } else if (failed) {
+        // your colour as a tint of the ground, its edge a deeper one
+        rrect_sq(&d, box.x, box.y, w, h, r, square, 1, mix(g, pal(&d, vi), light ? 120 : 110), 0,
+                 0);
+        fillc = mix(g, pal(&d, vi), light ? 40 : 46);
+        rrect_sq(&d, box.x + k, box.y + k, w - 2 * k, h - 2 * k, r - k, square, 1, fillc, 0, 0);
+        ink = pal(&d, vi);
+    } else {
+        fillc = pal(&d, vi);
+        rrect_sq(&d, box.x, box.y, w, h, r, square, 1, fillc, 0, 0);
+        ink = pal(&d, tok(&d, MOY_UI_T_VALUE_INK, MOY_UI_T_PANEL));
+    }
+    int ty = box.y + pady;
+    if (headh) {
+        moy_ui_span_t hd = bb->head;
+        text_cut(&d, &fc, hd, box.x + pad, ty - k, fc.line * sc, hroom, pal(&d, vi), sc);
+        if (sw) {
+            int ell = 0;
+            size_t kk = moy_text_cut_px(fc.id, hd.p, hd.n, hroom, sc, &ell);
+            int nx = box.x + pad + tw(&fc, hd.p, kk, sc)
+                     + (ell ? tw(&fc, s_dots, sizeof(s_dots), sc) : 0) + 4 * k;
+            signal_d(&d, nx, ty + fc.ascent * sc - k, bb->signal, fillc);
+        }
+        ty += headh;
+    }
+    uint8_t buf[256];
+    for (int i = 0; i < shown; i++) {
+        moy_ui_span_t part = {bb->text.p + ln[i].off, ln[i].len};
+        if (i == shown - 1 && was_cut) {
+            part.n = (uint16_t)(bb->text.n - ln[i].off);
+            text_cut(&d, &fu, part, box.x + pad, ty - k, fu.line * sc, room, ink, sc);
+        } else {
+            if (ln[i].collapse && ln[i].len <= sizeof(buf)) {
+                part.p = buf;
+                part.n = (uint16_t)moy_text_collapse(bb->text.p, &ln[i], buf);
+            }
+            text(&d, &fu, part.p, part.n, box.x + pad, ty - k, fu.line * sc, ink, sc);
+        }
+        ty += fu.line * sc;
+    }
+    if (status_h) {
+        int sy = box.y + h + notgap, right = box.x + w;
+        int lw = tw(&fc, bb->status.p, bb->status.n, sc);
+        int ci = tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
+        if (failed) {
+            int di = ink_danger(&d);
+            ci = di >= 0 ? di : tok(&d, MOY_UI_T_DANGER, MOY_UI_T_INK);
+            int isz = fc.ascent * sc;
+            moy_ui_box_t ib = {(int16_t)(right - lw - 3 * k - isz), (int16_t)(sy + k), (int16_t)isz,
+                               (int16_t)isz};
+            icon_d(&d, moy_ui_icon_slot((const uint8_t *)"warn", 4), -1, ib, ci);
+        }
+        text(&d, &fc, bb->status.p, bb->status.n, right - lw, sy, fc.line * sc, pal(&d, ci), sc);
+    }
+    int o = 3 * k;
+    if ((bb->flags & MOY_UI_F_FOCUS) && moy_ui_sink_marks(s)) {
+        rrect_sq(&d, box.x - o, box.y - o, w + 2 * o, h + 2 * o, r + o, square, 0, 0, 2 * k,
+                 pal(&d, tok(&d, MOY_UI_T_FOCUS, MOY_UI_T_ACCENT)));
+        moy_ui_marks_count();
+    } else if (bb->flags & MOY_UI_BUBBLE_ANCHOR) {
+        rrect_sq(&d, box.x - o, box.y - o, w + 2 * o, h + 2 * o, r + o, square, 0, 0, k,
+                 pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)));
+    }
+    return h + status_h;
+}
+
 // -- the perf HUD --------------------------------------------------------------------------
 
 // A number of tenths as digits ("33.0" with `point`, else whole), into out;

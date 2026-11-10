@@ -105,6 +105,10 @@ int moy_ui_marks_shown(void) {
 // The focus marks every task's frames drew: a count only, a relaxed add.
 static uint32_t s_marks_drawn;
 
+void moy_ui_marks_count(void) {
+    __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
+}
+
 uint32_t moy_ui_marks_drawn(int reset) {
     return reset ? __atomic_exchange_n(&s_marks_drawn, 0u, __ATOMIC_RELAXED)
                  : __atomic_load_n(&s_marks_drawn, __ATOMIC_RELAXED);

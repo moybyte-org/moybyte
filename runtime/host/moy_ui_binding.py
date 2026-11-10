@@ -421,6 +421,8 @@ _DRAW_SIGS = (
     ("moy_ui_api_grid_spread", [c.c_void_p, _I, _I, _I, _I, _I], None),
     ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_empty", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_char_p, _Z], _I),
+    ("moy_ui_api_bubble", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, _Span, c.c_void_p, _I,
+                           c.c_void_p, c.c_void_p], None),
     ("moy_ui_api_month", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, _I, _I, _I], _I),
     ("moy_ui_api_toast", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_int,
                           c.POINTER(c.c_int32)], None),

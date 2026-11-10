@@ -150,6 +150,9 @@ int moy_ui_run_card(void *target, moy_ui_span_t title, moy_ui_span_t sub, const 
 int moy_ui_run_tool(void *target, moy_ui_span_t icon, moy_ui_span_t label, const moy_ui_over_t *o,
                     int32_t *out);
 int moy_ui_run_rule(void *target);
+// A chat's bubble (moy_ui_api_bubble): out its x, y, w, h and state.
+int moy_ui_run_bubble(void *target, moy_ui_span_t text, moy_ui_span_t head, moy_ui_span_t status,
+                      const int32_t *opt, int n, const moy_ui_over_t *o, int32_t out[5]);
 // An empty page's head (moy_ui_api_empty): *out the y under it.
 int moy_ui_run_empty(void *target, moy_ui_span_t icon, moy_ui_span_t title, const uint8_t *lines,
                      size_t n, int32_t *out);
@@ -265,6 +268,12 @@ int32_t moy_ui_wasm_tool(void *e, const uint8_t *icon, uint32_t in, const uint8_
                          uint32_t n, const uint8_t *o, uint32_t on);
 // ui_rule: a divider (moy_ui_api_rule).
 int32_t moy_ui_wasm_rule(void *e);
+// ui_bubble writes the bubble's x, y, w, h and the state bits at `out`;
+// `opt` its options as little-endian words (MOY_UI_BBO_* order).
+int32_t moy_ui_wasm_bubble(void *e, const uint8_t *text, uint32_t n, const uint8_t *head,
+                           uint32_t hn, const uint8_t *status, uint32_t sn, const uint8_t *opt,
+                           uint32_t optn, const uint8_t *o, uint32_t on, uint8_t *out,
+                           uint32_t cap);
 // ui_empty: the y under the empty page's head; `lines` NUL-separated.
 int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8_t *title,
                           uint32_t n, const uint8_t *lines, uint32_t len);

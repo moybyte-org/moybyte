@@ -66,6 +66,9 @@ OVERS = ({"fill": 0x204060, "ink": 0x123456, "current": True},
          {"wash": False, "lead": True, "hint": "h", "ink": 0xffffff},
          {"ink": 0xff00ff, "fill": None, "bar": True},
          {"gen": 3, "current": False, "border": 0xff00ff, "ink": 0x0000ff})
+BUBBLES = (("in", {"head": "Ana Ridge", "signal": 2, "lines": 1, "id": "b0"}),
+           ("out", {"tone": "failed", "status": "Not sent", "max": 0.5, "anchor": True}),
+           ("out", None))
 SHORT = [False]
 OUT = [0] * 5
 
@@ -89,6 +92,9 @@ def page():
     for i in range(len(OVERS)):
         ui.at(4, 4 + 18 * i, 100, 16)
         ui.label(WORDS[i % 3], OVERS[i])
+    for i in range(len(BUBBLES)):
+        ui.at(4, 40 + 30 * i, 230, 30)
+        ui.bubble("a message long enough to wrap and be cut", BUBBLES[i][0], BUBBLES[i][1])
     ui.end()
     return out
 

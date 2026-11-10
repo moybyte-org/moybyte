@@ -294,6 +294,47 @@ int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon
     return b.y + h;
 }
 
+void moy_ui_api_bubble(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
+                       moy_ui_span_t head, moy_ui_span_t status, const int32_t *opt, int n,
+                       const moy_ui_over_t *o, int32_t out[5]) {
+    o = mua_over(o);
+    mua_grid_end(c, s);
+    int32_t v[MOY_UI_BBO_WORDS] = {0, -1, 0, 75, 4, 0};
+    for (int i = 0; opt != NULL && i < n && i < MOY_UI_BBO_WORDS; i++) {
+        v[i] = opt[i];
+    }
+    moy_ui_bubble_t bb = {text, head, status, (int16_t)(v[MOY_UI_BBO_SIDE] != 0),
+                          (int16_t)(v[MOY_UI_BBO_SIGNAL] < 0 ? -1 : v[MOY_UI_BBO_SIGNAL] > 4
+                                                                       ? 4 : v[MOY_UI_BBO_SIGNAL]),
+                          (int16_t)v[MOY_UI_BBO_TONE], (int16_t)v[MOY_UI_BBO_MAX],
+                          (int16_t)(v[MOY_UI_BBO_LINES] < 0 ? 0 : v[MOY_UI_BBO_LINES]), 0};
+    int placed = c->has_at, g = (c->cls ? 12 : 8) * c->fs;
+    moy_ui_box_t room = placed ? c->at
+                               : (moy_ui_box_t){(int16_t)(c->page.x + g), 0,
+                                                (int16_t)(c->page.w - 2 * g), 0};
+    moy_ui_box_t box;
+    int cut = 0;
+    int h = moy_ui_bubble(s, room, &bb, c->fs, mua_ground_of(c), 0, &box, &cut);
+    int gap = (c->cls ? 6 : 4) * c->fs - mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_STACK_GAP) * c->fs;
+    int stacked;
+    moy_ui_box_t b = mua_place(c, placed ? h : h + (gap > 0 ? gap : 0), &stacked);
+    room.y = box.y = b.y;
+    b.h = (int16_t)h;
+    int st = mua_stop(c, mua_id_of(c, o, text), box, 0, mua_name_of(o, text));
+    st = st < 0 ? 0 : st;
+    bb.flags = mua_mark_flags(st, o) | (v[MOY_UI_BBO_ANCHOR] ? MOY_UI_BUBBLE_ANCHOR : 0);
+    clip_t k;
+    EACH_ROW(c, k, s, b, stacked, c->page) {
+        moy_ui_bubble(s, room, &bb, c->fs, mua_ground_of(c), 1, NULL, NULL);
+        mua_clip_out(&k);
+    }
+    out[0] = box.x;
+    out[1] = box.y;
+    out[2] = box.w;
+    out[3] = box.h;
+    out[4] = st | (cut ? MOY_UI_ST_CUT : 0);
+}
+
 int moy_ui_api_month(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      moy_ui_span_t days, int first, int n, int today) {
     int weeks = (first + n + 6) / 7;

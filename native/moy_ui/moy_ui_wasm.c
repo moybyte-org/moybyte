@@ -512,6 +512,13 @@ int moy_ui_run_rule(void *target) {
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_bubble(void *target, moy_ui_span_t text, moy_ui_span_t head, moy_ui_span_t status,
+                      const int32_t *opt, int n, const moy_ui_over_t *o, int32_t out[5]) {
+    OPEN(target);
+    moy_ui_api_bubble(c, &r.s, text, head, status, opt, n, o, out);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_empty(void *target, moy_ui_span_t icon, moy_ui_span_t title, const uint8_t *lines,
                      size_t n, int32_t *out) {
     OPEN(target);
@@ -975,6 +982,28 @@ int32_t moy_ui_wasm_bar(void *e, const uint8_t *title, uint32_t n, const uint8_t
 int32_t moy_ui_wasm_rule(void *e) {
     (void)e;
     return moy_ui_run_rule(wasm_target());
+}
+
+int32_t moy_ui_wasm_bubble(void *e, const uint8_t *text, uint32_t n, const uint8_t *head,
+                           uint32_t hn, const uint8_t *status, uint32_t sn, const uint8_t *opt,
+                           uint32_t optn, const uint8_t *ob, uint32_t on, uint8_t *out,
+                           uint32_t cap) {
+    (void)e;
+    OVER(ob, on);
+    int32_t words[MOY_UI_BBO_WORDS];
+    int k = 0;
+    for (; k < MOY_UI_BBO_WORDS && 4u * (uint32_t)k + 4u <= optn; k++) {
+        const uint8_t *b = opt + 4 * k;
+        words[k] = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16)
+                             | ((uint32_t)b[3] << 24));
+    }
+    int32_t v[5] = {0, 0, 0, 0, 0};
+    int rc = moy_ui_run_bubble(wasm_target(), span(text, n), span(head, hn), span(status, sn),
+                               words, k, &o, v);
+    if (rc == 0) {
+        put_words(out, cap, v, 5);
+    }
+    return rc;
 }
 
 int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8_t *title,

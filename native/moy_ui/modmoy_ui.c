@@ -3571,6 +3571,27 @@ static mp_obj_t ui_api_group_card(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_group_card_obj, ui_api_group_card);
 
+// api_bubble(ctx, cv, look, text, head, status, opt, o) -> (x, y, w, h, state):
+// `opt` an array of int32 words in MOY_UI_BBO_* order
+static mp_obj_t ui_api_bubble(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t ob;
+    mp_get_buffer_raise(a[6], &ob, MP_BUFFER_READ);
+    moy_ui_over_t o;
+    int32_t v[5];
+    moy_ui_api_bubble(c, &s, span_of(a[3]), span_of(a[4]), span_of(a[5]),
+                      (const int32_t *)ob.buf, (int)(ob.len / 4), over_of(a[7], &o), v);
+    mp_obj_t t[5];
+    for (int i = 0; i < 5; i++) {
+        t[i] = mp_obj_new_int(v[i]);
+    }
+    return ret_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bubble_obj, 8, 8, ui_api_bubble);
+
 // api_empty(ctx, cv, look, icon, title, lines) -> the head's foot y
 static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -4112,6 +4133,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_grid_spread), MP_ROM_PTR(&ui_api_grid_spread_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_group_card), MP_ROM_PTR(&ui_api_group_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_empty), MP_ROM_PTR(&ui_api_empty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_bubble), MP_ROM_PTR(&ui_api_bubble_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_month), MP_ROM_PTR(&ui_api_month_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },

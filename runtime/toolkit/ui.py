@@ -1046,6 +1046,42 @@ def card(title, sub="", o=None):
     return _C.api_card(t[0], t[1], t[2], title, sub, _over(o))
 
 
+_BB = array("i", [0, -1, 0, 75, 4, 0])     # ui.bubble's options (moy_ui_api.h's MOY_UI_BBO_*)
+CUT = 16                                  # ui.bubble's state bit: its text was cut
+
+
+def bubble(text, side="in", o=None):
+    """A chat's bubble, a stop: `text` wrapped to `o.max` (0.75) of the
+    page's width inside its gutters, at most `o.lines` (4; 0 no limit)
+    lines, the last cut with an ellipsis. `side` "in" sits at the left on
+    `surface_alt` with `o.head` (the sender) and `o.signal` (0..4 bars, the
+    signal glyph after the head); "out" ends at the right in `value`, or
+    with `o.tone` "failed" as your colour's tint. `o.status` is a caption
+    line under it ("Sending...", or failed, the warn icon and "Not sent" in
+    the danger ink); `o.anchor` rings it while a popover hangs from it.
+    Stacked, else at `at`'s rect's top across its width: `(x, y, w, h,
+    state)`, the bubble's rect and the state bits, `CUT` where its text was
+    cut."""
+    b = _BB
+    b[0] = 1 if side == "out" else 0
+    head = status = ""
+    if o:
+        sig = o.get("signal")
+        b[1] = -1 if sig is None else int(sig)
+        b[2] = 1 if o.get("tone") == "failed" else 0
+        m = o.get("max")
+        b[3] = 75 if m is None else int(m * 100 + 0.5)
+        n = o.get("lines")
+        b[4] = 4 if n is None else int(n)
+        b[5] = 1 if o.get("anchor") else 0
+        head = o.get("head") or ""
+        status = o.get("status") or ""
+    else:
+        b[1], b[2], b[3], b[4], b[5] = -1, 0, 75, 4, 0
+    t = _T
+    return _C.api_bubble(t[0], t[1], t[2], text, head, status, b, _over(o))
+
+
 def empty(icon, title, lines=()):
     """An empty page's head, centred in `at`'s rect (else the page's next
     row): `icon` on a disc of `value`, `title`, then `lines` in the dim ink,

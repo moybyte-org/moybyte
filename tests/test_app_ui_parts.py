@@ -2,10 +2,14 @@
 (docs/ui_api_2026-10.md section 1, docs/app_api_v1.md section 3), each a
 page of one fixture app per tier -- tests/fixtures/app_ui/parts_py.moy,
 parts_lua.moy and parts_wasm.moy (a compiled app) -- held to the same pixels
-on the T-Deck's 320x240 console and in a window on the P4's desk. pmem 0
+on the T-Deck's 320x240 console (Moy light) and in a window on the P4's
+desk as shipped (Moy dark). pmem 0
 names the page each app draws:
 
   1  ui.empty: an empty page's head and its one verb.
+  2  ui.bubble: an "in" bubble with its head and signal glyph, an "out"
+     one sending, a failed one focused, and one at half the width cut at three
+     lines, wearing the anchor ring; pmem 1 the CUT bit the last answered.
 """
 
 import os
@@ -23,7 +27,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1,)
+PAGES = (1, 2)
 CONSOLES = ("tdeck", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 
@@ -59,8 +63,11 @@ def _open(tier, base, desk):
     host_app.moy_carts.ensure_dirs(root)
     if not _install(tier, root):
         return None
-    ws = build_desktop_ws(base) if desk else host_app.build_workstation(root)
-    ws.look.set_theme("moy", persist=False)
+    # the P4 as shipped (font scale 1 on its 7-inch glass), in the dark
+    # variant; the T-Deck in the light one
+    ws = (build_desktop_ws(base, font_scale=1, panel_diagonal_in=7.0) if desk
+          else host_app.build_workstation(root))
+    ws.look.set_theme("moy", persist=False, variant="dark" if desk else "light")
     ws.pointer.visible = False
     ws.bar_layer._clock_text = lambda: "10:30"
     if desk:
@@ -87,6 +94,19 @@ def _set_page(ws, n):
         run.pmem_load([n] + [0] * 255)
         return
     assert lua.exec("pmem(0, %d)" % n, "parts") is None
+
+
+def _pmem1(ws):
+    p = ws.run.player
+    lua = getattr(p, "_lua", None)
+    if lua is None:
+        return p.ns["pmem"](1)
+    run = getattr(lua, "_run", None)
+    if run is not None and hasattr(run, "pmem"):
+        return run.pmem()[1][1]
+    img = array("i", bytearray(4 * 256))
+    sys.modules[type(lua).__module__]._moycore.pmem_image(img)
+    return img[1]
 
 
 def _frame(drv):
@@ -133,6 +153,8 @@ def pages(tmp_path_factory):
                 out[(console, tier, page)] = _pixels(ws)
                 if SHOTS:
                     _shot("%s_%d_%s" % (console, page, tier), *out[(console, tier, page)])
+                if page == 2:
+                    assert _pmem1(ws) == 16, (console, tier, "the long bubble was not cut")
             ws.exit()
     return out
 
