@@ -55,6 +55,7 @@ import moy_carts
 import moy_catalogue
 import web_canvas
 import web_input
+import web_vfs
 from input import InputState
 from audio_session import PcmPump
 
@@ -203,7 +204,7 @@ WEB_TOUCH_INPUTS = (("touch", "touch"), ("local", "keys"), ("pad", "pad"))
 DESK_DIAGONAL_IN = 7.0
 
 
-def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
+def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
          windowed=False, font_scale=0, hud=True, coarse=False, scheme=None):
     """Build the shared Workstation over the RGB565 canvas + the VFS store.
     The page/harness wrote the cart bundle into `carts_root` before calling.

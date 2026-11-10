@@ -43,8 +43,9 @@ HEAD = ["icy-metaint", "icy-name"]
 
 
 def _asked(rid, icy):
+    import media_link
     return {"op": "mget", "id": rid, "url": URL, "send": {"Icy-MetaData": "1"} if icy else {},
-            "head": HEAD, "probe": not icy}
+            "head": HEAD, "probe": not icy, "spool": "%s/m%d" % (media_link.SPOOL, rid)}
 
 
 def _head(link, r, metaint=None, name=None, status=200):
@@ -69,7 +70,8 @@ def test_a_song_and_a_url_are_asked_of_the_worker(net):
     song = n.open(MUSIC + "/a b.mp3")
     url = n.open(URL)
     assert song.size == 1234 and url.size is None
-    assert _jobs(link) == [{"op": "mget", "id": song.rid, "song": "a b.mp3", "size": 1234, "at": 0},
+    assert _jobs(link) == [{"op": "mget", "id": song.rid, "song": "a b.mp3", "size": 1234, "at": 0,
+                            "spool": "%s/m%d" % (spool, song.rid)},
                            _asked(url.rid, True)]
     url.close()
     assert _jobs(link) == [{"op": "drop", "id": url.rid}]

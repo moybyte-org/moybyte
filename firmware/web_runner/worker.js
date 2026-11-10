@@ -191,8 +191,7 @@ const UPDATE_MS = 1000;
 // read between frames, which is exactly when these callbacks run.
 let cartsPoll = null, cartsEvent = null, lastCartsAt = 0;
 const CARTS_IDLE_MS = 100;
-const NET_DIR = "/moy/net";
-const cartsLive = new Map();          // id -> {ac, stream, path} or {pick}
+const cartsLive = new Map();          // id -> {ac, stream, path} or {pick, path}
 function cartsSay(ev) {
     if (!cartsEvent) return;
     try { cartsEvent(JSON.stringify(ev)); }
@@ -627,10 +626,11 @@ function mkdirs(p) {
     }
 }
 
-// The console's carts folder (web_boot.boot's), from which the VM's registry
-// places every other root (bindStore). Only the carts-specific export/import
-// code below names a root directly; everything else iterates store.roots().
-const CARTS_ROOT = "/moy/carts";
+// Where the console keeps things in the VFS (web_vfs), from the VM by
+// bindStore: the carts folder, from which the registry places every other
+// root, the seed's staging, Music's listing, a drop's and an export's file.
+let VFS = null;
+function dirOf(p) { return p.slice(0, p.lastIndexOf("/")); }
 // The files compiled carts wrote (moy-spec SPEC.md 16.12), the apps root, and
 // their store of record in OPFS: site mode only, where a page keeps its own
 // carts.
@@ -752,13 +752,12 @@ async function seedRoot(root, data, site) {
 // the VM reads, and back into OPFS what the VM wrote and removed, in its
 // order -- each cart's manifest last, so a reload part-way is seeded again.
 // "seed" (a first visit) vs "load" is the evidence the E2E reads back.
-const SEED_VFS = "/seed";
 async function seedLocal(root, s, data) {
     writeStore(root.vfs, await store.readAll(s));
-    writeStore(SEED_VFS, data);
+    writeStore(VFS.seed, data);
     mp.runPython("import moy_sync, moy_seed, json\n_moy_seeded = json.dumps(moy_sync.seed_store("
-                 + [root.id, SEED_VFS, CARTS_ROOT].map((v) => JSON.stringify(v)).join(", ")
-                 + "))\nmoy_seed._rmtree(" + JSON.stringify(SEED_VFS) + ")\n");
+                 + [root.id, VFS.seed, VFS.carts].map((v) => JSON.stringify(v)).join(", ")
+                 + "))\nmoy_seed._rmtree(" + JSON.stringify(VFS.seed) + ")\n");
     const got = JSON.parse(mp.globals.get("_moy_seeded"));
     mp.runPython("del _moy_seeded");
     for (const rel of got.removed) await store.removeFile(s, rel);
@@ -771,8 +770,10 @@ async function seedLocal(root, s, data) {
 // The store module's rules, from the VM before any store is opened
 // (moy_store.mjs's `bind`).
 function bindStore() {
+    const v = mp.pyimport("web_vfs");
+    VFS = { carts: v.CARTS, seed: v.SEED, listing: v.LISTING, drop: v.DROP, export: v.EXPORT };
     mp.runPython("import moy_sync\n_moy_roots = moy_sync.roots_json("
-                 + JSON.stringify(CARTS_ROOT) + ")\n");
+                 + JSON.stringify(VFS.carts) + ")\n");
     const roots = JSON.parse(mp.globals.get("_moy_roots"));
     mp.runPython("del _moy_roots");
     const native = mp.pyimport("moy_store"), sync = mp.pyimport("moy_sync");
@@ -886,7 +887,7 @@ function vfsExists(p) {
 // The shelf's cart folders (moy_sync.folders_json), from the moment the
 // store's rules are bound.
 function cartNames() {
-    return mp ? JSON.parse(mp.pyimport("moy_sync").folders_json(CARTS_ROOT)) : [];
+    return VFS ? JSON.parse(mp.pyimport("moy_sync").folders_json(VFS.carts)) : [];
 }
 
 // A dropped `.moy` zip onto the shelf, unpacked, named and adopted by the
@@ -896,10 +897,10 @@ function cartNames() {
 // next sweep writes them to the local store like any other commit.
 async function importZip(name, buf) {
     if (!importArchiveJson) throw new Error("this console cannot import zips");
-    mkdirs(P8_TMP);
-    const tmp = P8_TMP + "/drop.zip";
+    const tmp = VFS.drop;
+    mkdirs(dirOf(tmp));
     mp.FS.writeFile(tmp, new Uint8Array(buf));
-    const r = JSON.parse(importArchiveJson(tmp, name, CARTS_ROOT));
+    const r = JSON.parse(importArchiveJson(tmp, name, VFS.carts));
     if (r.error) throw new Error(r.error);
     if (rescan) rescan();
     return { dir: r.dir };
@@ -910,10 +911,10 @@ async function importZip(name, buf) {
 // skip rule: an exported zip carries exactly what a board would be sent.
 function exportZip(cart) {
     if (!exportCart) throw new Error("this console cannot export carts");
-    mkdirs(P8_TMP);
-    const tmp = P8_TMP + "/export.zip";
+    const tmp = VFS.export;
+    mkdirs(dirOf(tmp));
     try {
-        if (!vfsIsDir(CARTS_ROOT + "/" + cart) || !exportCart(CARTS_ROOT + "/" + cart, tmp))
+        if (!vfsIsDir(VFS.carts + "/" + cart) || !exportCart(VFS.carts + "/" + cart, tmp))
             throw new Error("no such cart");
         return mp.FS.readFile(tmp);
     } finally {
@@ -935,7 +936,6 @@ function exportZip(cart) {
 // converter already reads. That is the shape that cost this repo ten days of
 // carts imported two octaves flat. So the bytes go into the VFS and the
 // converter reads them there, in Python, exactly as it does on a desktop.
-const P8_TMP = "/moy/tmp";
 
 // A dropped song into this browser's music folder, where Music finds it; a
 // board-served page's songs are the board's own.
@@ -959,14 +959,14 @@ function dropped(name, buf) {
 
 async function importP8(name, buf) {
     if (!importP8Json) throw new Error("this console cannot import PICO-8 carts");
-    mkdirs(P8_TMP);
     // One fixed path rather than the dropped name: the name is attacker-shaped
     // text (it came off a file a browser handed us) and the converter only ever
     // needs SOME path to read. The real name still travels as `name`, which is
     // what upstream titles the cart from when its Lua has no title comment.
-    const tmp = P8_TMP + "/drop";
+    const tmp = VFS.drop;
+    mkdirs(dirOf(tmp));
     mp.FS.writeFile(tmp, new Uint8Array(buf));
-    const r = JSON.parse(importP8Json(tmp, name, CARTS_ROOT));
+    const r = JSON.parse(importP8Json(tmp, name, VFS.carts));
     if (!r.ok) return { ok: false, report: r.report || ["that cart could not be imported"] };
     // Same rule as importZip: do NOT rebase the sync watcher. An import is a
     // CHANGE, so the new files must stay pending and reach the local store on
@@ -1355,13 +1355,13 @@ async function init(search, coarse, channel, scheme, signin) {
         + JSON.stringify(seededRoots || []) + ")\n"
         // indexes.json: the shelves Get Carts lists, chosen by whoever SERVES
         // this page (a site-mode page's system/sources).
-        + (shelves ? "web_boot.site_sources(" + JSON.stringify(CARTS_ROOT) + ", "
+        + (shelves ? "web_boot.site_sources(" + JSON.stringify(VFS.carts) + ", "
             + JSON.stringify(JSON.stringify(shelves)) + ")\n" : "")
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
         // The console this page's address asks for: its tier, size and cart
         // (web_boot.page_boot), on the page's pointer and colour scheme
         // (page_tail.js: ?scheme= or prefers-color-scheme).
-        + "web_boot.page_boot(" + JSON.stringify(CARTS_ROOT) + ", "
+        + "web_boot.page_boot(" + JSON.stringify(VFS.carts) + ", "
         + JSON.stringify(JSON.stringify(Object.fromEntries(qs))) + ", "
         + (coarse ? "True" : "False") + ", " + JSON.stringify(scheme || "") + ")\n"
         // AFTER boot(), unlike gpio_enable: this one hangs the updater on the
@@ -1780,7 +1780,7 @@ function cartsPump() {
         else if (j.op === "wput") writtenKeep(j);
         else if (j.op === "wdel") writtenDrop(j);
         else if (j.op === "pick") {
-            cartsLive.set(j.id, { pick: true });
+            cartsLive.set(j.id, { pick: true, path: j.path });
             self.postMessage({ t: "pick", id: j.id, name: j.name, size: j.size, host: j.host });
         } else if (j.op === "unpick") {
             cartsDrop(j.id);
@@ -1790,8 +1790,8 @@ function cartsPump() {
 }
 
 async function cartsGet(j) {
-    mkdirs(NET_DIR);
-    const path = NET_DIR + "/" + j.id;
+    const path = j.path;
+    mkdirs(dirOf(path));
     mp.FS.writeFile(path, new Uint8Array(0));
     const live = { ac: new AbortController(), stream: null, path };
     cartsLive.set(j.id, live);
@@ -1843,29 +1843,29 @@ function cartsDrop(id) {
     if (live.stream) { try { mp.FS.close(live.stream); } catch (e) { } }
     if (live.segs !== undefined) {
         for (let k = 0; k <= live.segs; k++) {
-            try { mp.FS.unlink(segPath(id, k)); } catch (e) { }
+            try { mp.FS.unlink(live.spool + "." + k); } catch (e) { }
         }
         return;
     }
-    try { mp.FS.unlink(live.path || (NET_DIR + "/pick-" + id)); } catch (e) { }
+    try { mp.FS.unlink(live.path); } catch (e) { }
 }
 
 // -- Music's bytes (media_link.py): a song or a URL, into spool segments ----
 // A song is the browser's OPFS's (site) or the serving board's, read by its
 // sealed GET /media a range at a time (board); a URL is the page's fetch.
-// The bytes land in SEG-byte segments the console reads and removes, and
-// the read waits while AHEAD of them are unread, so a live stream holds a
-// few segments of the page's memory however long it plays.
-const SEG = 32768, AHEAD = 4, MEDIA_LIST = NET_DIR + "/media.json";
+// The bytes land in SEG-byte segments the console reads and removes, at
+// "<spool>.<k>" (the job's spool), and the read waits while AHEAD of them
+// are unread, so a live stream holds a few segments of the page's memory
+// however long it plays.
+const SEG = 32768, AHEAD = 4;
 const EACCES = 13, EIO = 5, EHOSTUNREACH = 113, ENOENT = 2;
-function segPath(id, k) { return NET_DIR + "/m" + id + "." + k; }
 
 // The songs this page plays and does not keep, listed for media_link.
 async function mediaList(fetchSongs) {
     let doc = null;
     try { doc = await fetchSongs(); } catch (e) { doc = null; }
-    mkdirs(NET_DIR);
-    mp.FS.writeFile(MEDIA_LIST, JSON.stringify(doc && typeof doc === "object" ? doc : {}));
+    mkdirs(dirOf(VFS.listing));
+    mp.FS.writeFile(VFS.listing, JSON.stringify(doc && typeof doc === "object" ? doc : {}));
 }
 function siteSongs() {
     const s = opfsStores.files;
@@ -1873,8 +1873,9 @@ function siteSongs() {
 }
 
 async function mediaGet(j) {
-    mkdirs(NET_DIR);
-    const live = { ac: new AbortController(), segs: 0, stream: null, low: 0, n: 0 };
+    mkdirs(dirOf(j.spool));
+    const live = { ac: new AbortController(), segs: 0, stream: null, low: 0, n: 0,
+                   spool: j.spool };
     cartsLive.set(j.id, live);
     const mine = () => cartsLive.get(j.id) === live;
     const fail = (errno, why) => {
@@ -1885,7 +1886,7 @@ async function mediaGet(j) {
     const put = (u8) => {
         let at = 0;
         while (at < u8.length) {
-            if (!live.stream) live.stream = mp.FS.open(segPath(j.id, live.segs), "w");
+            if (!live.stream) live.stream = mp.FS.open(j.spool + "." + live.segs, "w");
             const k = Math.min(SEG - live.n, u8.length - at);
             mp.FS.write(live.stream, u8, at, k);
             at += k;
@@ -1901,7 +1902,7 @@ async function mediaGet(j) {
     };
     const room = async () => {
         for (;;) {
-            while (live.low < live.segs && !vfsExists(segPath(j.id, live.low))) live.low++;
+            while (live.low < live.segs && !vfsExists(j.spool + "." + live.low)) live.low++;
             if (live.segs - live.low < AHEAD || !mine()) return;
             await new Promise((ok) => setTimeout(ok, 50));
         }
@@ -2072,12 +2073,12 @@ function cartsRoom() {
 // The player's answer to {t:"pick"}: the file into the VFS where the console
 // checks it against the index, or the question closed.
 function cartsPicked(m) {
-    if (!cartsLive.has(m.id)) return;
+    const live = cartsLive.get(m.id);
+    if (!live) return;
     if (m.cancel || !m.buf) { cartsSay({ id: m.id, cancel: 1 }); return; }
-    mkdirs(NET_DIR);
-    const path = NET_DIR + "/pick-" + m.id;
+    const path = live.path;
+    mkdirs(dirOf(path));
     mp.FS.writeFile(path, new Uint8Array(m.buf));
-    cartsLive.set(m.id, { pick: true, path });
     cartsSay({ id: m.id, picked: path });
 }
 
@@ -2355,18 +2356,18 @@ self.onmessage = async (ev) => {
             // hold megabytes hostage.
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
-            const at = (id) => sealed("GET", "/" + store.rootById(id).endpoint);
-            const [cr, fr, ar] = await Promise.all([at("carts"),
-                at("files").catch(() => ({ status: 0 })),
-                at("apps").catch(() => ({ status: 0 }))]);
-            if (cr.wait >= 0) { say(signInWaitSays(cr.wait)); return; }
-            const carts = cr.status === 200 ? sealedJson(cr) : null;
-            const files = fr.status === 200 ? sealedJson(fr) : null;
-            const apps = ar.status === 200 ? sealedJson(ar) : null;
-            if (!carts) { say("the console did not send its carts"); return; }
-            writeStore(CARTS_ROOT, carts);
-            if (files) writeStore(store.rootById("files").vfs, files);
-            if (apps) writeStore(store.rootById("apps").vfs, apps);
+            // The roots the VM pulls again (moy_sync.reload_json), the
+            // carts first: without them there is nothing to reload.
+            const roots = JSON.parse(mp.pyimport("moy_sync").reload_json())
+                .map((id) => store.rootById(id));
+            const got = await Promise.all(roots.map((r, i) => {
+                const pull = sealed("GET", "/" + r.endpoint);
+                return i ? pull.catch(() => ({ status: 0 })) : pull;
+            }));
+            if (got[0].wait >= 0) { say(signInWaitSays(got[0].wait)); return; }
+            const docs = got.map((r) => r.status === 200 ? sealedJson(r) : null);
+            if (!docs[0]) { say("the console did not send its carts"); return; }
+            roots.forEach((r, i) => { if (docs[i]) writeStore(r.vfs, docs[i]); });
             reload();
             self.postMessage({ t: "assets", json: assets() });
         } else if (m.t === "pod") {

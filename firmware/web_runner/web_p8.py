@@ -35,12 +35,6 @@ import json
 import p8_import
 import p8_writer
 
-# Where a dropped file is parked while the converter reads it. It is deleted on
-# the way out (both ways out) rather than left for the store sweep to find: the
-# carts watcher walks the cart root, and a stray .p8.png under it is neither a
-# cart nor something the far end should ever be sent.
-TMP_DIR = "/moy/tmp"
-
 
 class P8Problem(Exception):
     """An import that cannot happen, with a sentence a kid can read."""

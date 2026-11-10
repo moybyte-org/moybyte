@@ -175,6 +175,9 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   | `system/sources` from `indexes.json` | `cart_index.save_sources` | the page wrote it in place, the console through its atomic write | the VM's: `web_boot.site_sources` |
   | the export picker's cart folders | `moy_sync._skip`, the store walk | none | the VM's: `moy_sync.folders_json` |
   | tier select, the one-cart default, the kiosk, `?edit=` | none | -- | the VM's: `web_boot.page_boot`, `page_start` |
+  | the spool's names (a fetch's, a pick's, Music's segments and listing) | `carts_link.SPOOL`, `media_link`'s | none | the VM's: each job names its file (`path`, `spool`), the listing is `web_vfs.LISTING` |
+  | the carts folder, the seed's staging, a drop's and an export's file | `web_boot.boot`'s default carts folder | the VM named a drop folder of its own, which nothing used | `web_vfs` |
+  | the roots a reload pulls again | none | -- | the VM's: `moy_sync.reload_json` |
 
   What stays JavaScript decides nothing a console has a rule for: the mode
   probe and the sync link's reading of a board's answers (requeue, off,

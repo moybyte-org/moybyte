@@ -18,9 +18,10 @@ holds it there:
     (site/build.py), and no console has one.
 
 And worker.js may call only exported names on the store, names no file kind
-by its suffix (what a dropped file is, is web_boot.drop_kind's call) and no
-store's endpoint (the registry's), and no rule that moved into the VM comes
-back under its old name.
+by its suffix (what a dropped file is, is web_boot.drop_kind's call), no
+store's endpoint (the registry's) and no path of the VFS (web_vfs, and the
+jobs that name their spool), and no rule that moved into the VM comes back
+under its old name.
 """
 
 import re
@@ -79,6 +80,7 @@ MOVED = (
     "safeSegments", "localParts", "plainName", "writtenName", "isSong",
     "MUSIC_DIR", "RECORD_NAME", "STAGE_DIR", "WRITTEN_ROOT", "RECORD_VFS",
     "WRITTEN_VFS", "openWritten", "setSkip", "setRoots", "isP8Drop",
+    "CARTS_ROOT", "SEED_VFS", "P8_TMP", "NET_DIR", "MEDIA_LIST", "segPath",
 )
 
 _TOP = re.compile(r"^(export\s+)?(?:(?:async\s+)?function\*?|const|let|var)\s+"
@@ -145,3 +147,5 @@ def test_the_worker_names_no_file_kind_and_no_endpoint():
     assert not re.search(r"/\\\.\w+\$/", code), "a suffix pattern is the VM's"
     for root in moy_sync.SYNC_ROOTS:
         assert '"%s"' % root.endpoint not in code, root.endpoint
+    paths = re.findall(r'"(/(?:moy|seed|sd)\b[^"]*)"', code)
+    assert not paths, ("a VFS path is web_vfs's", paths)

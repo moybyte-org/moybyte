@@ -593,6 +593,15 @@ def seeds(root_id, site, served):
     return served or root_id == CARTS_ROOT_ID
 
 
+def reload_json():
+    """The roots a page a board serves pulls again when the board's carts
+    change (the worker's reload), as JSON ids, the carts first: every root
+    of files the console reads from its store, never the console's own
+    documents (a root of named files), which the live console holds and
+    sends back itself."""
+    return _json.dumps([r.id for r in SYNC_ROOTS if r.top is None])
+
+
 def local_segs(root_id, rel, dc=False):
     """How many segments `rel` has as a path the browser's store of record
     for `root_id` keeps (moy_store.mjs), 0 when it keeps none there: the

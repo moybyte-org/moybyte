@@ -15,13 +15,14 @@ is what a VM with no ASYNCIFY needs -- the worker cannot deliver a byte while
 Python is running.
 
 THE BYTES NEVER CROSS AS PYTHON OBJECTS. The worker streams a response body
-into a spool file in the VFS (`SPOOL/<id>`), chunk by chunk as fetch hands
-them over, and an answer here reads that file as far as it has grown. The VFS
-keeps a file's bytes in the page's own memory, outside the VM's 16 MB heap,
-so a 2 MB cart costs this heap the install pipeline's two fixed buffers and
-nothing per byte; the worker deletes the spool when the answer is closed.
-The same holds for a picked file (`SPOOL/pick-<id>`) and for a keeper commit,
-which the worker reads out of the VFS staging folder by path.
+into the spool file its job names (`path`: `SPOOL/<id>`, web_vfs), chunk by
+chunk as fetch hands them over, and an answer here reads that file as far as
+it has grown. The VFS keeps a file's bytes in the page's own memory, outside
+the VM's 16 MB heap, so a 2 MB cart costs this heap the install pipeline's
+two fixed buffers and nothing per byte; the worker deletes the spool when
+the answer is closed. The same holds for a picked file (the pick job's
+`path`, `SPOOL/pick-<id>`) and for a keeper commit, which the worker reads
+out of the VFS staging folder by path.
 
 Events the worker sends back (`event_json`), each a JSON object:
     {"id": n, "status": s}        a response head (0: no answer at all -- a
@@ -43,7 +44,7 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-SPOOL = "/moy/net"
+from web_vfs import SPOOL
 
 try:
     import moycore as _moycore
@@ -111,7 +112,7 @@ class CartsLink:
         p = _Pick(self, self._id())
         self._live[p.rid] = p
         self.queue({"op": "pick", "id": p.rid, "name": name, "size": size,
-                    "host": host})
+                    "host": host, "path": SPOOL + "/pick-%d" % p.rid})
         return p
 
 
@@ -122,7 +123,7 @@ class _Answer:
     def __init__(self, link, rid):
         self.link = link
         self.rid = rid
-        self.path = SPOOL + "/%d" % rid
+        self.path = SPOOL + "/%d" % rid       # the get job names it
         self.status = None
         self.length = None          # a cross-origin page cannot see the encoding
         self.ended = False
@@ -204,7 +205,7 @@ class WebCartNet:
     def open(self, url, span=None):
         a = _Answer(self.link, self.link._id())
         self.link._live[a.rid] = a
-        job = {"op": "get", "id": a.rid, "url": url}
+        job = {"op": "get", "id": a.rid, "url": url, "path": a.path}
         if span is not None:
             job["range"] = [span[0], span[0] + span[1] - 1]
         self.link.queue(job)

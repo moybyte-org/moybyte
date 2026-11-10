@@ -246,31 +246,27 @@ def test_get_carts_layout_agrees_across_languages():
     """Get Carts in the browser (#124) splits one layout between Python and
     the worker: the record and the staging folder beside the carts store
     (cart_index's names, which the worker hands the store and OPFS keeps
-    under the same ones), and the spool directory the worker streams a fetch
-    into and carts_link reads. A drift is an install the next boot cannot
-    find, or a response nobody reads."""
+    under the same ones), and the spool the worker streams a fetch into,
+    which the job names (carts_link, media_link: web_vfs's SPOOL). A drift
+    is an install the next boot cannot find, or a response nobody reads."""
     import sys
     from runtime import cart_index, moy_sync
     from runtime.moy_store_base import _sibling_path
 
     worker = _read("firmware", "web_runner", "worker.js")
-
-    def const(src, name):
-        m = re.search(r'const %s = "([^"]*)"' % name, src)
-        assert m, "no %s" % name
-        return m.group(1)
-
     # The worker writes the record into the system root's directory, the
     # carts folder's sibling as moy_store_base._sibling_path places it.
     assert 'store.rootById("system").vfs' in worker and "installRecord" in worker
-    assert _sibling_path("/moy/carts", cart_index.RECORD_NAME) == (
-        moy_sync.system_root("/moy/carts") + "/" + cart_index.RECORD_NAME)
     sys.path.insert(0, _RUNNER)
     try:
-        import carts_link
+        import web_vfs
     finally:
         sys.path.remove(_RUNNER)
-    assert const(worker, "NET_DIR") == carts_link.SPOOL
+    assert _sibling_path(web_vfs.CARTS, cart_index.RECORD_NAME) == (
+        moy_sync.system_root(web_vfs.CARTS) + "/" + cart_index.RECORD_NAME)
+    # Every spool file is the one its job names.
+    for field in ("j.path", "j.spool", "live.path", "live.spool"):
+        assert field in worker, field
 
 
 def _web_boot():
@@ -347,3 +343,11 @@ def test_the_export_picker_lists_the_folders_the_wire_carries(tmp_path):
         (tmp_path / name).mkdir()
     (tmp_path / "wifi.json").write_text("{}")
     assert json.loads(moy_sync.folders_json(str(tmp_path))) == ["a.moy", "b.moy"]
+
+
+def test_a_page_reloads_the_roots_of_files():
+    """A board's reload re-pulls the carts first and every root of files,
+    never the console's own documents, which the live console holds."""
+    import json
+    from runtime import moy_sync
+    assert json.loads(moy_sync.reload_json()) == ["carts", "files", "apps"]

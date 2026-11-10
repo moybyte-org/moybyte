@@ -251,7 +251,7 @@ nor those docs will warn you about:
     (`moy_store.readAll` leaves `files/Music/*.mp3` out; a dropped MP3 is
     written there), a board-served page's on the board, read through its
     sealed `GET /media` 32 KiB a request; the worker lists either into
-    `/moy/net/media.json` at boot, which is what Music's folder shows.
+    `web_vfs.LISTING` at boot, which is what Music's folder shows.
   - **A stream's bytes go through spool SEGMENTS** the console removes as it
     reads them, and the worker stops reading while four wait, so a radio
     station costs the page a few segments however long it plays.

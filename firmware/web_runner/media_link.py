@@ -26,7 +26,8 @@ remembered (PLAIN) and not asked again: its reader's `icy` is (0, name),
 with no now-playing text. Nothing is read from a URL's reader before its head came.
 
 THE BYTES GO THROUGH SPOOL SEGMENTS, never the VM's heap: the worker appends
-what arrives to SPOOL/m<id>.<k>, each segment SEG bytes, and says when one is
+what arrives to "<spool>.<k>", the job's `spool` (SPOOL/m<id>, web_vfs) and
+the segment's number, each segment SEG bytes, and says when one is
 whole; the reader reads a segment as far as it has grown and removes it once
 read, and the worker reads no further while AHEAD segments wait. A live
 stream therefore costs the page's memory a few segments, however long it
@@ -55,8 +56,7 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-SPOOL = "/moy/net"
-LISTING = SPOOL + "/media.json"
+from web_vfs import LISTING, SPOOL
 EIO = 5
 ICY_ASK = {"Icy-MetaData": "1"}
 ICY_HEAD = ["icy-metaint", "icy-name"]
@@ -124,7 +124,8 @@ class WebMediaNet:
         else:
             name = src.rpartition("/")[2]
             r.size = self._listing().get(name)
-            link.queue({"op": "mget", "id": r.rid, "song": name, "size": r.size, "at": at})
+            link.queue({"op": "mget", "id": r.rid, "song": name, "size": r.size, "at": at,
+                        "spool": r.spool})
         return r
 
 
@@ -150,12 +151,17 @@ class _Stream:
         self._pos = 0
         self._f = None
 
+    @property
+    def spool(self):
+        """Segment k is "<spool>.<k>"; a request read again has its own."""
+        return "%s/m%d" % (SPOOL, self.rid)
+
     def ask(self, icy):
         """The URL's request, asking for its ICY metadata where `icy`."""
         self.asked = icy
         self.link.queue({"op": "mget", "id": self.rid, "url": self.url,
                          "send": ICY_ASK if icy else {}, "head": ICY_HEAD,
-                         "probe": not icy})
+                         "probe": not icy, "spool": self.spool})
 
     def _plain(self):
         """The URL read again without asking for its metadata, as a new
@@ -198,7 +204,7 @@ class _Stream:
             self.err = int(ev.get("errno") or EIO)
 
     def _path(self, k):
-        return "%s/m%d.%d" % (SPOOL, self.rid, k)
+        return "%s.%d" % (self.spool, k)
 
     def _drop_seg(self):
         f, self._f = self._f, None
