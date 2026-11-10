@@ -79,11 +79,12 @@ const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean);
 // wait: on the Pages runners it prints D-Bus warnings and then takes over 20 s
 // to report its port (every stable-site build from 2026-11-05 16:50). A Chrome
 // that exited, or would not start, is not retried.
+// Its audio is muted: a scenario that plays music never reaches the speakers.
 function launch(waitMs) {
     const chrome = spawn(CHROME, [
         "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
         "--no-first-run", "--no-default-browser-check", "--disable-gpu",
-        "--window-size=1280,800", "--hide-scrollbars", ...EXTRA, "about:blank",
+        "--window-size=1280,800", "--hide-scrollbars", "--mute-audio", ...EXTRA, "about:blank",
     ], { stdio: ["ignore", "ignore", "pipe"] });
     const url = new Promise((ok, err) => {
         let buf = "";
