@@ -36,7 +36,7 @@ SENT, SHOWN = 1, 2                      # moy_screen_slot.h's MOY_SCREEN_SLOT_*
 class WasiApp:
     """A WASI app's run in the Player (this module's head)."""
 
-    def __init__(self, rt, ws, cart, run):
+    def __init__(self, rt, ws, cart, run, lay=None):
         self._rt = rt
         self._ws = ws
         self.pid = pid = ws.run.player.pid
@@ -62,6 +62,9 @@ class WasiApp:
         self._masks = [0, 0]
         self._mask_of = getattr(ws.input, "button_masks", None)
         self._words = array("i", bytes(4 * IN_WORDS))
+        # Its surface rides the frame words, as a native app's does
+        # (elf_run.ElfGame): its toolkit calls `_layout` when they change.
+        self._lay = list(lay) if lay is not None else None
         self._ptr = [0, 0, 0, 0]
         self._keys = key_ring()
         self._pressed = 0
@@ -71,8 +74,16 @@ class WasiApp:
         self._live = True
         self.draw_next = True
         self.init = None
+        self.layout = self._set_layout if self._lay is not None else None
         self.update = self._update
         self.draw = self._draw
+
+    def _set_layout(self, w, h, fs):
+        """The next frame message's layout words (elf_run.IN_LAYOUT_*)."""
+        lay = self._lay
+        lay[0] = w
+        lay[1] = h
+        lay[2] = fs
 
     def _release(self):
         self._px = None
@@ -87,7 +98,7 @@ class WasiApp:
         read_buttons(self._ws.input, self._mask_of, out)
         self._pressed |= out[1]
         self._shown = False             # the call lets the last frame go
-        fill_words(self._ws, self._words, self._ptr, self._keys)
+        fill_words(self._ws, self._words, self._ptr, self._keys, self._lay)
         tick = int(dt * 1000)
         self._ms += tick
         got = _E.screen_frame(self.pid, out[0], self._pressed, self._ms,

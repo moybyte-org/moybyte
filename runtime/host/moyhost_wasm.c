@@ -587,6 +587,33 @@ int hw_init(host_wasm *r, char *err, int errlen)
     return 0;
 }
 
+/* A responsive app's exported `_layout(w, h, fs)` (docs/app_api_v1.md §3),
+ * of three i32 parameters and no result: 1 called, 0 the module exports
+ * none, -1 with the trap in err (which ends the run). moycore_wasm.c's
+ * call_layout is the boards' twin. */
+int hw_layout(host_wasm *r, int32_t w, int32_t h, int32_t fs, char *err, int errlen)
+{
+    if (!r->bound || r->dead || !r->rh) {
+        put_err(err, errlen, "the cart is not running", NULL);
+        return -1;
+    }
+    wasm_function_inst_t fn = wasm_runtime_lookup_function(r->inst, "_layout");
+    if (!fn || wasm_func_get_param_count(fn, r->inst) != 3
+            || wasm_func_get_result_count(fn, r->inst) != 0)
+        return 0;
+    moycore_run_cur = &WRUN.c;
+    uint32_t argv[3] = {(uint32_t)w, (uint32_t)h, (uint32_t)fs};
+    if (wasm_runtime_call_wasm(r->env, fn, 3, argv)) return 1;
+    if (r->w.quitting) {
+        wasm_runtime_clear_exception(r->inst);
+        return 1;
+    }
+    const char *msg = wasm_runtime_get_exception(r->inst);
+    put_err(err, errlen, msg ? msg : "the cart trapped", NULL);
+    trapped(r);
+    return -1;
+}
+
 /* One tick: _update, then _draw unless `draw` is 0 (a logic-only tick, #217)
  * or the cart called quit(), which ends it where it stands. */
 int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen)

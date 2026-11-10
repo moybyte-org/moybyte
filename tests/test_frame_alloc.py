@@ -310,7 +310,7 @@ def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
 
 
 def wasm_open(module, head, pages, sha, path, swapped, allow_unsigned=False,
-              interp=False, writable=None, ring=0, app=None):
+              interp=False, writable=None, ring=0, app=None, layout=None):
     return None
 
 

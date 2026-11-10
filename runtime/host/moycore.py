@@ -175,8 +175,13 @@ def exec(src, name):  # noqa: A001 -- the module's verb is named exec on a board
     return _run().exec(src, name)
 
 
-def load(chunks):
-    return _run().load(list(chunks))
+def load(chunks, layout=None):
+    return _run().load(list(chunks), layout)
+
+
+def layout(w, h, fs):
+    r = _cur()
+    return r.layout(w, h, fs) if r is not None else False
 
 
 def tick(dt, draw=True):

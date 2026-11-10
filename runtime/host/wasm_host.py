@@ -85,7 +85,7 @@ class WasmHostRuntime:
         cart = getattr(self.ws, "cart", None) or {}
         if cart.get("wasi"):
             from runtime.wasi_run import WasiApp
-            return WasiApp(self, self.ws, cart, ns.get("_moy_app"))
+            return WasiApp(self, self.ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"))
         return WasmHostRun(self.ws, ns, src)
 
     def missing(self, cart):
@@ -106,6 +106,15 @@ class WasmHostRuntime:
         except OSError:
             return []
         return missing_imports(head, wasm_binding.table())
+
+    def wants_layout(self, cart):
+        """Whether the cart's main.wasm exports `_layout`, by the device
+        glue's one probe (`moycore_glue.wasm_wants_layout`)."""
+        try:
+            from device.moycore_glue import wasm_wants_layout
+        except ImportError:                          # pragma: no cover
+            from moycore_glue import wasm_wants_layout
+        return wasm_wants_layout(cart)
 
     def footprint(self, cart):
         """(total, block) by the boards' sizing, the host's module being
@@ -246,10 +255,13 @@ class WasmHostRun:
         if cells is not None:
             self._run.pmem_load(cells)
         self._buf = buf
-        # _init runs here, as the Lua tier's load() runs it: the Player's
-        # `init` hook has nothing left to do, and a trap in it is a start
-        # error the Player reports like any other.
-        err = self._run.init()
+        # _layout, then _init, run here, as the Lua tier's load() runs them:
+        # the Player's `init` hook has nothing left to do, and a trap in
+        # either is a start error the Player reports like any other.
+        lay = ns.get("_moy_layout") if hasattr(ns, "get") else None
+        err = self._run.layout(*lay) if lay is not None else None
+        if not isinstance(err, str):
+            err = self._run.init()
         if err:
             self._run.close()
             raise RuntimeError(err)
@@ -258,8 +270,16 @@ class WasmHostRun:
         if self._audio is not None and hasattr(self._audio, "stream"):
             self._audio.stream = self._run
         self.init = None
+        self.layout = self._relayout if lay is not None else None
         self.update = self._update
         self.draw = self._draw_noop
+
+    def _relayout(self, w, h, fs):
+        """A responsive app's surface changed: its exported `_layout(w, h,
+        fs)` where it has one (docs/app_api_v1.md §3)."""
+        err = self._run.layout(w, h, fs)
+        if isinstance(err, str):
+            raise RuntimeError(err)
 
     def _update(self, dt):
         # A tier that swaps framebuffers under the canvas re-points the run,

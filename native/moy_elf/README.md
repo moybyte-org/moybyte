@@ -124,7 +124,8 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
 - A game is a service's loop with a screen (`moy_os.h`, A GAME), started by
   the Player for its run's pid (`moy_os_game`) and never the scheduler's: it
   hears the system's `frame` message ([held, pressed, ms], and an app's
-  input words after them, `MOY_OS_FRAME_IN_*`) once a frame while it has
+  input words after them, `MOY_OS_FRAME_IN_*`, its layout words among
+  them) once a frame while it has
   read since the last, so a slow game is never flooded and a paused one is
   sent nothing, and it presents a whole screen with `moy_present`: palette
   indices, or an app's RGB565 (the screen's depth, `moy_os_game`'s), which COPIES it into the process's frame

@@ -466,7 +466,9 @@ def grant_devices(ctx, perms, cart=None):
 # -- the responsive opt-in ---------------------------------------------------
 
 def wants_layout(src):
-    """True when `src` defines a top-level `_layout` -- the RESPONSIVE opt-in.
+    """True when `src` defines a top-level `_layout` -- a Python cart's
+    RESPONSIVE opt-in (every other tier's runtime answers its own
+    `wants_layout(cart)`: Player._wants_layout).
 
     A source probe and not a manifest field, deliberately. The canvas a cart
     draws on has to be chosen BEFORE `make_api` closes over it, which is before

@@ -72,7 +72,62 @@ from array import array
 # moy_os.h's MOY_OS_FRAME_IN_*: an app's input words.
 IN_X, IN_Y, IN_PTR, IN_KEY, IN_WINDOW, IN_SWAP = range(6)
 IN_ROOM_X, IN_ROOM_Y, IN_ROOM_W, IN_ROOM_H = range(6, 10)
-IN_WORDS = 10
+IN_LAYOUT_W, IN_LAYOUT_H, IN_LAYOUT_FS = range(10, 13)
+IN_WORDS = 13
+
+
+def elf_defines(path, name):
+    """True when the module at `path` (an ELF shared object, signed or not:
+    a signature trails the module) defines dynamic symbol `name` -- what a
+    native app exports, as the SDK's `moybyte/ui.h` exports its `_layout`.
+    Reads the section headers, the dynamic symbol table and its strings,
+    nothing of the code."""
+    import struct
+    want = name.encode()
+    with open(path, "rb") as f:
+        ident = f.read(64)
+        if ident[:4] != b"\x7fELF" or ident[5] != 1:
+            return False
+        wide = ident[4] == 2
+        if wide:
+            shoff, = struct.unpack_from("<Q", ident, 40)
+            shentsize, shnum = struct.unpack_from("<HH", ident, 58)
+        else:
+            shoff, = struct.unpack_from("<I", ident, 32)
+            shentsize, shnum = struct.unpack_from("<HH", ident, 46)
+        f.seek(shoff)
+        shdrs = f.read(shentsize * shnum)
+
+        def sect(i):
+            o = i * shentsize
+            if wide:
+                t, = struct.unpack_from("<I", shdrs, o + 4)
+                off, size = struct.unpack_from("<QQ", shdrs, o + 24)
+                link, = struct.unpack_from("<I", shdrs, o + 40)
+                es, = struct.unpack_from("<Q", shdrs, o + 56)
+            else:
+                t, = struct.unpack_from("<I", shdrs, o + 4)
+                off, size, link = struct.unpack_from("<III", shdrs, o + 16)
+                es, = struct.unpack_from("<I", shdrs, o + 36)
+            return t, off, size, link, es
+
+        for i in range(shnum):
+            t, off, size, link, es = sect(i)
+            if t != 11 or link >= shnum:             # SHT_DYNSYM
+                continue
+            _t, soff, ssize, _l, _e = sect(link)
+            f.seek(soff)
+            strs = f.read(ssize)
+            f.seek(off)
+            syms = f.read(size)
+            es = es or (24 if wide else 16)
+            for k in range(es, size - es + 1, es):
+                nm, = struct.unpack_from("<I", syms, k)
+                shndx, = struct.unpack_from("<H", syms, k + (6 if wide else 14))
+                if shndx and strs[nm:nm + len(want) + 1] == want + b"\0":
+                    return True
+            return False
+    return False
 
 
 def read_buttons(inp, masks, out):
@@ -110,11 +165,12 @@ def key_sent(ring):
         ring[1] -= 1
 
 
-def fill_words(ws, words, ptr, ring):
+def fill_words(ws, words, ptr, ring, lay=None):
     """An app's input words for this frame (IN_*), into the array('i')
     `words`; `ptr` a four-item list pointer_state fills, `ring` the keys
     typed and not yet sent (key_ring): this frame's joins it, and the
-    oldest is the word."""
+    oldest is the word; `lay` the (w, h, fs) its `_layout` was last told
+    (the Player's), None for none."""
     inp = ws.input
     try:
         pointer_state(inp, ptr)
@@ -138,6 +194,10 @@ def fill_words(ws, words, ptr, ring):
         words[IN_ROOM_Y] = room[1]
         words[IN_ROOM_W] = room[2]
         words[IN_ROOM_H] = room[3]
+    if lay is not None:
+        words[IN_LAYOUT_W] = lay[0]
+        words[IN_LAYOUT_H] = lay[1]
+        words[IN_LAYOUT_FS] = lay[2]
 
 
 def stop_text(code, fault=None):
@@ -200,7 +260,19 @@ class ElfRuntime:
         cart = ws.cart or {}
         if cart.get("type") in ("command", "service"):
             raise RuntimeError("a native %s runs in the Terminal" % cart["type"])
-        return ElfGame(self, ws, cart, ns.get("_moy_app"))
+        return ElfGame(self, ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"))
+
+    def wants_layout(self, cart):
+        """Whether the cart's module for this console exports `_layout`
+        (`elf_defines`): a native app's responsive opt-in, answered before
+        the canvas is chosen."""
+        path = self.module(cart)
+        if path is None:
+            return False
+        try:
+            return elf_defines(path, "_layout")
+        except (OSError, ValueError):
+            return False
 
     def footprint(self, cart, w=320, h=240):
         """(total, block) a game's start takes: its module (its file bounds
@@ -333,7 +405,7 @@ def make_elf_runtime(ws):
 class ElfGame:
     """A native game's run in the Player (A GAME in this module's head)."""
 
-    def __init__(self, rt, ws, cart, run):
+    def __init__(self, rt, ws, cart, run, lay=None):
         self._e = rt.engine
         self._ws = ws
         path = rt.module(cart)
@@ -344,6 +416,9 @@ class ElfGame:
         self._w, self._h = canvas.w, canvas.h
         self._app = cart.get("type") == "app"
         self._words = array("i", bytes(4 * IN_WORDS)) if self._app else None
+        # A responsive app's surface rides its frame words: the toolkit it
+        # links calls its `_layout` when they change (sdk/src/moyui_link.c).
+        self._lay = list(lay) if lay is not None and self._app else None
         self._ptr = [0, 0, 0, 0]
         self._keys = key_ring()
         why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
@@ -360,8 +435,16 @@ class ElfGame:
         self._live = True
         self.draw_next = True
         self.init = None
+        self.layout = self._set_layout if self._lay is not None else None
         self.update = self._update
         self.draw = self._draw
+
+    def _set_layout(self, w, h, fs):
+        """The next frame message's layout words (IN_LAYOUT_*)."""
+        lay = self._lay
+        lay[0] = w
+        lay[1] = h
+        lay[2] = fs
 
     def _update(self, dt):
         if not self._live:
@@ -377,7 +460,7 @@ class ElfGame:
             wait = WAIT_US_MAX
         words = self._words
         if words is not None:
-            fill_words(self._ws, words, self._ptr, self._keys)
+            fill_words(self._ws, words, self._ptr, self._keys, self._lay)
         got = self._e.frame(self.pid, out[0], self._pressed, self._ms, wait, words)
         if got == ENDED or got < 0:
             self._end()

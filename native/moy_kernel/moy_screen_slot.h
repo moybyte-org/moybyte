@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 #define MOY_SCREEN_SLOTS 4u             // programs with a screen at once
-#define MOY_SCREEN_SLOT_IN 12           // input words a frame message carries at most
+#define MOY_SCREEN_SLOT_IN 13           // input words a frame message carries at most
 
 // The VM's task. Open: 0, or an errno negated (ENOSPC every slot another's,
 // EINVAL a size or depth refused, ENOMEM). Close: the slot freed, a present

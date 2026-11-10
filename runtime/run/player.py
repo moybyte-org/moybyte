@@ -1135,10 +1135,10 @@ class Player(PlayerDiag):
             # a kid cart hardcodes coordinates, and the manifest `canvas` (320x240
             # unless it says otherwise) is what the WM centres and integer-scales.
             # A cart that defines a top-level `_layout(w, h, fs)` is saying it can
-            # reflow, and gets the whole system surface instead. Probed from the
-            # SOURCE because the canvas has to be chosen before make_api closes
-            # over it -- see system_api.wants_layout.
-            if wants_layout(cart.get("src")):
+            # reflow, and gets the whole system surface instead. Probed before
+            # the cart runs because the canvas has to be chosen before make_api
+            # closes over it -- see `_wants_layout`.
+            if self._wants_layout(ws, cart):
                 ws.bind_app_canvas()
         # A SCRIPT is responsive by construction -- the SHELL draws it, and text
         # is the one thing an integer upscale of the 320x240 raster serves worst
@@ -1149,6 +1149,25 @@ class Player(PlayerDiag):
         elif self._script:
             ws.bind_app_canvas()
         return None
+
+    @staticmethod
+    def _wants_layout(ws, cart):
+        """Whether the app cart defines `_layout(w, h, fs)`, asked of its
+        tier before anything of it runs: a Python cart's source
+        (`system_api.wants_layout`); any other tier's runtime answers
+        `wants_layout(cart)` -- a Lua cart's scripts (lua_ext), a compiled or
+        WASI app's module exports, a native app's dynamic symbols (elf_run).
+        A runtime with no such answer, or one that fails, is fixed."""
+        rt = "elf" if cart.get("native") else cart.get("runtime", "python")
+        if rt == "python":
+            return wants_layout(cart.get("src"))
+        probe = getattr((getattr(ws, "runtimes", None) or {}).get(rt), "wants_layout", None)
+        if probe is None:
+            return False
+        try:
+            return bool(probe(cart))
+        except Exception:  # noqa: BLE001 -- a probe is advisory; the run stays fixed
+            return False
 
     def _prepare_world(self, ws, project, cart, t0):
         """Build the audio, reset the canvas state, install a declared palette
@@ -2013,6 +2032,7 @@ class Player(PlayerDiag):
         t_exec = -1
         t_init = -1
         lua = None
+        lay = None
         try:
             if runtime not in RUNTIME_NAMES:
                 raise ValueError("unknown cart runtime '%s'" % runtime)
@@ -2047,6 +2067,12 @@ class Player(PlayerDiag):
             # imports serve it. A game has none, and the console's state is
             # the one its `ui` reads the theme from (moy_app_wasm.h).
             ns["_moy_app"] = self._app_run(ws.cart)
+            # An app's `_layout(w, h, fs)` hears its surface before `_init`,
+            # as a Python app's does: the runtime calls it inside its load
+            # where the cart defines one, and answers `layout` for the calls
+            # after (a native or WASI app's frame words carry it instead).
+            lay = self._layout_args() if self._app_id is not None else None
+            ns["_moy_layout"] = lay
             if runtime == "wasm" and APP_EXT in ((ws.cart or {}).get("extensions") or ()):
                 # A compiled app hears its window events as messages.
                 _moybyte._compiled_events(ns, self.pid)
@@ -2124,6 +2150,10 @@ class Player(PlayerDiag):
                   self.cart_error)
             return False
         self._lua = lua
+        relayout = getattr(lua, "layout", None)
+        if lay is not None and relayout is not None:
+            self._app_layout = relayout
+            self._app_wh = lay
         self._lua_split = getattr(lua, "frame_split", None)
         self._flag_put = getattr(lua, "flag_xor", None)
         self.cart_error = None

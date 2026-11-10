@@ -210,9 +210,11 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
 // An app's input words: the pointer's x and y on the screen, its state
 // (lua_ext.snap_shared's flags, 0 none), the key typed this frame (0 none),
 // whether the screen is a window's body, whether the console's RGB565 words
-// are byte-swapped (its canvas's swapped565), and the rect its ui frame lies
-// in, its content_rect() (x, y, w, h: the screen less the host's bars).
-#define MOY_OS_FRAME_IN 10
+// are byte-swapped (its canvas's swapped565), the rect its ui frame lies
+// in, its content_rect() (x, y, w, h: the screen less the host's bars), and
+// the surface a responsive app lays out for, its `_layout`'s (w, h, fs): the
+// window's or the screen's size and the font scale (0, 0, 0 for a game).
+#define MOY_OS_FRAME_IN 13
 #define MOY_OS_FRAME_IN_X 0
 #define MOY_OS_FRAME_IN_Y 1
 #define MOY_OS_FRAME_IN_PTR 2
@@ -223,6 +225,9 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
 #define MOY_OS_FRAME_IN_ROOM_Y 7
 #define MOY_OS_FRAME_IN_ROOM_W 8
 #define MOY_OS_FRAME_IN_ROOM_H 9
+#define MOY_OS_FRAME_IN_LAYOUT_W 10
+#define MOY_OS_FRAME_IN_LAYOUT_H 11
+#define MOY_OS_FRAME_IN_LAYOUT_FS 12
 int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms,
                       uint32_t max_us, const int32_t *in, int n_in);
 // Game `pid`'s frame, w x h pixels of `depth` bytes, for the game's life (a

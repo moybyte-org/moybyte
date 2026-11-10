@@ -1318,13 +1318,41 @@ void moycore_lua_load_begin(void)
     HOOK(load_begin, RUN.L);
 }
 
-int moycore_lua_load_finish(char *err, size_t n)
+int moycore_lua_layout(int32_t w, int32_t h, int32_t fs, char *err, size_t n)
+{
+    lua_State *L = RUN.L;
+    if (!L) {
+        put_err(err, n, "moycore: no VM");
+        return -1;
+    }
+    if (lua_getglobal(L, "_layout") != LUA_TFUNCTION) {
+        lua_pop(L, 1);
+        return 0;
+    }
+    lua_pushinteger(L, w);
+    lua_pushinteger(L, h);
+    lua_pushinteger(L, fs);
+    if (lua_pcall(L, 3, 0, 0) != LUA_OK) {
+        const char *msg = lua_tostring(L, -1);
+        // quit() is an ending, not a failure, as in libmoy's hooks.
+        int quit = msg && strstr(msg, "moy.quit");
+        if (!quit) put_err(err, n, msg);
+        lua_pop(L, 1);
+        return quit ? 1 : -1;
+    }
+    return 1;
+}
+
+int moycore_lua_load_finish(const int32_t *layout, char *err, size_t n)
 {
     HOOK(load_end, RUN.L);
     // _init runs here, before any tick has stamped the frame base, and it may
     // call time(). Stamp it now so the elapsed term starts from zero instead
     // of from whatever the counter last held.
     moycore_run_tick_begin();
+    if (layout && moycore_lua_layout(layout[0], layout[1], layout[2], err, n) < 0) {
+        return -1;
+    }
     if (moy_lua_init(RUN.L, err, n) != 0) {
         return -1;
     }

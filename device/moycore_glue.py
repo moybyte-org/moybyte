@@ -4,8 +4,10 @@
 #   -- the compiled cart  aot_path, wasm_head, missing_imports, CartFrame, WasmRun
 #   aot_path              where a cart's compiled module for a chip lives
 #   missing_imports       what a module imports that this console's table lacks
+#   wasm_exports          the names a module exports
 #   CartFrame             a compiled cart's frame on its way to the glass
 #   WasmRun               one compiled cart run
+#   LuaRuntime            ws.runtimes["lua"]
 #   make_moycore_runtime  the Lua runtime factory
 #   WasmRuntime           ws.runtimes["wasm"]
 #   make_wasm_runtime     the compiled-cart runtime, or None
@@ -66,13 +68,14 @@ try:
                          install_handles, end_handles, put_scenes, layer_restore,
                          layer_restore_end,
                          snap_slots, audio_ops, snap_shared, run_room, sync_view,
-                         drain_audio, cfg_blob)
+                         drain_audio, cfg_blob, wants_layout)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                                  LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
                                  install_handles, end_handles, put_scenes,
                                  layer_restore, layer_restore_end, snap_slots, audio_ops,
-                                 snap_shared, run_room, sync_view, drain_audio, cfg_blob)
+                                 snap_shared, run_room, sync_view, drain_audio, cfg_blob,
+                                 wants_layout)
 
 try:
     from moy_input import pointer_state
@@ -341,7 +344,8 @@ class MoycoreRun:
         # -- what player_fit._lua_cart_line parses for the crash-to-code panel
         # (#24) -- and load() is where the verb profiler arms, ahead of the
         # first chunk rather than after a shim that already captured its verbs.
-        err = _moycore.load(cart_chunks(ns, src))
+        lay = ns.get("_moy_layout") if hasattr(ns, "get") else None
+        err = _moycore.load(cart_chunks(ns, src), lay)
         if err:
             try:
                 end_handles(self._pins)
@@ -353,9 +357,11 @@ class MoycoreRun:
         self.snap[_moycore.SNAP_PLAYERS] = 1   # refreshed every frame by _refresh
         self._view = None
         self._sync_view()          # a view declared in _init must land now
-        # init already ran inside run_begin (libmoy's moy_lua_init), so the
-        # Player's `lua.init()` step has nothing left to do.
+        # init already ran inside load (libmoy's moy_lua_init), after
+        # `_layout` where the Player gave its arguments, so the Player's
+        # `lua.init()` step has nothing left to do.
         self.init = None
+        self.layout = self._relayout if lay is not None else None
         self.update = self._update
         # Present but empty: tick() already drew. A None draw would change the
         # shape every other runtime presents, which the Player and its tests
@@ -433,6 +439,15 @@ class MoycoreRun:
         drain_audio(self.ws.run.audio, self._aq_ops,
                     ((aq[1 + i * slots], aq[2 + i * slots], aq[3 + i * slots])
                      for i in range(n)))
+
+    def _relayout(self, w, h, fs):
+        """A responsive app's surface changed: its `_layout(w, h, fs)`, a Lua
+        cart's global or a compiled cart's export, where it defines one
+        (docs/app_api_v1.md §3)."""
+        _moycore.use(self._h)
+        err = _moycore.layout(w, h, fs)
+        if isinstance(err, str):
+            raise RuntimeError(err)
 
     def _draw_noop(self):
         return None
@@ -792,6 +807,63 @@ def missing_imports(head, table):
     return out
 
 
+# The sections that follow the export section (7) in a module's order:
+# start, element, data count, code and data.
+_PAST_EXPORTS = (8, 9, 10, 11, 12)
+
+
+def wasm_exports(path):
+    """The names the module at `path` exports, read from its export
+    section and nothing after it (the code is never read). [] for a file
+    that is no module or does not parse."""
+    out = []
+    with open(path, "rb") as f:
+        if f.read(8)[:4] != b"\0asm":
+            return out
+        try:
+            while True:
+                sid = f.read(1)
+                if not sid or sid[0] in _PAST_EXPORTS:
+                    return out
+                n = shift = 0
+                while True:
+                    b = f.read(1)
+                    if not b:
+                        return out
+                    n |= (b[0] & 0x7F) << shift
+                    shift += 7
+                    if not b[0] & 0x80:
+                        break
+                if sid[0] != 7:
+                    f.seek(n, 1)
+                    continue
+                body = f.read(n)
+                count, i = _uleb(body, 0)
+                for _ in range(count):
+                    k, i = _uleb(body, i)
+                    out.append(body[i:i + k].decode("utf-8"))
+                    _, i = _uleb(body, i + k + 1)
+                return out
+        except (IndexError, ValueError):
+            return out
+
+
+def wasm_wants_layout(cart, gate=None):
+    """True when the compiled cart's main.wasm exports `_layout` -- a
+    compiled or WASI app's responsive opt-in, Python's
+    `system_api.wants_layout` for its tier, answered before the canvas is
+    chosen. `gate` runs the read under the board's bus gate."""
+    path = cart.get("path")
+    if not path:
+        return False
+    p = path + "/" + cart.get("main", "main.wasm")
+    try:
+        names = gate(lambda: wasm_exports(p)) if gate is not None else wasm_exports(p)
+    except OSError:
+        return False
+    return "_layout" in names
+
+
 def _sha256_file(path):
     import hashlib
     h = hashlib.sha256()
@@ -1075,10 +1147,12 @@ class WasmRun(MoycoreRun):
         # the app extension serve its grant, and its load is checked against it.
         app = ns.get("_moy_app")
 
+        lay = ns.get("_moy_layout") if hasattr(ns, "get") else None
+
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
                                       swapped, unsigned_ok, interp, joined, ring,
-                                      app)
+                                      app, lay)
 
         try:
             if has_module:
@@ -1112,7 +1186,8 @@ class WasmRun(MoycoreRun):
                 raise RuntimeError(err)
         self._view = None
         self._sync_view()
-        self.init = None                 # _init ran inside wasm_open
+        self.init = None                 # _init ran inside wasm_open, after _layout
+        self.layout = self._relayout if lay is not None else None
         self.update = self._update
         self.draw = self._draw_noop
         # Frames go to the glass from the cart's memory where the system
@@ -1151,14 +1226,25 @@ class WasmRun(MoycoreRun):
         MoycoreRun.close(self)
 
 
+class LuaRuntime:
+    """`ws.runtimes["lua"]`: called with `(ns, src)` it starts a
+    MoycoreRun; before it does, the Player asks whether the cart opts into
+    the responsive surface (`wants_layout`, lua_ext's probe)."""
+
+    wants_layout = staticmethod(wants_layout)
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def __call__(self, ns, src):
+        return MoycoreRun(self.ws, ns, src)
+
+
 def make_moycore_runtime(ws):
     """The Lua runtime factory, or None when unavailable."""
     if _moycore is None:
         return None
-
-    def _make(ns, src):
-        return MoycoreRun(ws, ns, src)
-    return _make
+    return LuaRuntime(ws)
 
 
 # The most linear memory a footprint is asked about: 1 GiB, past any board's
@@ -1183,7 +1269,7 @@ class WasmRuntime:
                 from wasi_run import WasiApp
             except ImportError:                      # the host: the runtime package
                 from runtime.wasi_run import WasiApp
-            return WasiApp(self, self.ws, cart, ns.get("_moy_app"))
+            return WasiApp(self, self.ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"))
         return WasmRun(self.ws, ns, src)
 
     def footprint(self, cart):
@@ -1247,6 +1333,10 @@ class WasmRuntime:
         except OSError:
             return []
         return missing_imports(head, table())
+
+    def wants_layout(self, cart):
+        """Whether the cart's module exports `_layout` (`wasm_wants_layout`)."""
+        return wasm_wants_layout(cart, getattr(self.ws, "_with_sd", None))
 
     def footprint_of(self, pages, module_len, interp):
         """`footprint` from the numbers alone: `pages` of declared memory and

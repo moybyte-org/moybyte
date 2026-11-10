@@ -165,7 +165,8 @@ _SIGS = (
     ("hl_layer_pixels", [_P, _I, ctypes.POINTER(_P), ctypes.POINTER(_I), ctypes.POINTER(_I)], _I),
     ("hl_exec", [_P, _C, _I, _C, _P, _I], _I),
     ("hl_load", [_P, ctypes.POINTER(_C), ctypes.POINTER(_I), ctypes.POINTER(_C), _I,
-                 _P, _I], _I),
+                 _P, _P, _I], _I),
+    ("hl_layout", [_P, _I, _I, _I, _P, _I], _I),
     ("hl_tick", [_P, _F, _I, _P, _I], _I),
     ("hl_pmem_image", [_P, _P, _I], _I),
     ("hl_pmem_load", [_P, _P, _I], None),
@@ -494,8 +495,9 @@ class HostLuaRun:
         return self._err(self._d.hl_exec(self._r, b, len(b), name.encode(),
                                          ctypes.cast(err, _P), 256), err)
 
-    def load(self, chunks):
-        """The cart's chunks in order, then `_init`: None, or the error.
+    def load(self, chunks, layout=None):
+        """The cart's chunks in order, then `_layout(*layout)` where `layout`
+        is given and the cart defines one, then `_init`: None, or the error.
         `chunks` is [(src, chunkname), ...], SPEC.md 4's `sources`."""
         n = len(chunks)
         bufs = [s.encode("utf-8") if isinstance(s, str) else bytes(s)
@@ -504,8 +506,17 @@ class HostLuaRun:
         lens = (_I * n)(*[len(b) for b in bufs])
         names = (_C * n)(*[nm.encode() for _, nm in chunks])
         err = ctypes.create_string_buffer(256)
+        lay = (_I * 3)(*layout) if layout is not None else None
         return self._err(self._d.hl_load(self._r, srcs, lens, names, n,
+                                         ctypes.cast(lay, _P) if lay is not None else None,
                                          ctypes.cast(err, _P), 256), err)
+
+    def layout(self, w, h, fs):
+        """The cart's `_layout(w, h, fs)`: True called, False none, or the
+        error text (moycore's `layout`)."""
+        err = ctypes.create_string_buffer(256)
+        rc = self._d.hl_layout(self._r, int(w), int(h), int(fs), ctypes.cast(err, _P), 256)
+        return err.value.decode("utf-8", "replace") if rc < 0 else rc > 0
 
     def tick(self, dt, draw=True):
         """One frame: _update, then _draw unless `draw` is False (a logic-only

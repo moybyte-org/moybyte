@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
 #   cart_chunks                       a cart's Lua scripts as chunks
+#   wants_layout                      a Lua cart's responsive opt-in
 #   -- the frame seam, once for both Lua tiers  snap_shared, sync_view, drain_audio
 #   snap_shared                       player two, the pointer and the clock into the cart
 #   sync_view                         apply the cart's view() to the console
@@ -58,6 +59,29 @@ def cart_chunks(ns, src):
     for name, text in ns.get("_moy_post") or ():
         out.append((text, "@" + name))
     return out
+
+
+_LAYOUT_DEFS = ("function _layout(", "_layout = function", "_layout=function")
+
+
+def wants_layout(cart):
+    """True when one of a Lua cart's scripts (`src_before`, main, then
+    `src_after`) defines a global `_layout` at column 0 -- the responsive
+    opt-in, Python's `system_api.wants_layout` for Lua: `function
+    _layout(` or `_layout = function`. A probe of the source because the
+    canvas is chosen before the VM opens; the run then calls `_layout` only
+    where the global is a function, as it finds `_init` (moycore's
+    `load`)."""
+    texts = [t for _n, t in cart.get("src_before") or ()]
+    texts.append(cart.get("src") or "")
+    texts += [t for _n, t in cart.get("src_after") or ()]
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        for d in _LAYOUT_DEFS:
+            if text.startswith(d) or ("\n" + d) in text:
+                return True
+    return False
 
 
 # libmoy's `moy_button` order (moy.h, SPEC.md 7.3). This is an ABI, not a

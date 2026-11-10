@@ -34,7 +34,7 @@
 // below is unconditional so qstr scanning, which does not see those defines,
 // finds every name.
 
-enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
+enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW, WCALL_LAYOUT };
 
 #if MOYCORE_WASM
 
@@ -54,6 +54,8 @@ typedef struct moycore_wrun {
     char keep_dir[320];          // where its written files are kept
     moy_files_t *files;          // its files' session (moy_files.h)
     char *writable;              // the manifest's "writable", libmoy's form
+    int32_t layout[3];           // the (w, h, fs) WCALL_LAYOUT passes `_layout`
+    int has_layout;              // the last WCALL_LAYOUT found the export
 #if MOYCORE_APP
     moy_app_run_t app;           // the app's run its imports from the extension serve
 #endif
@@ -469,10 +471,36 @@ static int lanes_start(char *err, size_t errlen)
 }
 #endif
 
+#if MOY_WASM
+// A responsive app's exported `_layout(w, h, fs)` (docs/app_api_v1.md §3)
+// with WR->layout: WR->has_layout says whether the module exports one, of
+// three i32 parameters and no result. Called outside libmoy's hook brackets,
+// as `_layout` draws nothing: the target between hooks is the screen.
+static int call_layout(char *err, size_t errlen)
+{
+    wasm_module_inst_t inst = WR->w.inst;
+    wasm_function_inst_t fn = wasm_runtime_lookup_function(inst, "_layout");
+    WR->has_layout = fn && wasm_func_get_param_count(fn, inst) == 3
+                     && wasm_func_get_result_count(fn, inst) == 0;
+    if (!WR->has_layout) return 0;
+    uint32_t argv[3];
+    memcpy(argv, WR->layout, sizeof argv);
+    if (wasm_runtime_call_wasm(WR->w.env, fn, 3, argv)) return 0;
+    if (WR->w.quitting) {                   // quit() is an ending, not a failure
+        wasm_runtime_clear_exception(inst);
+        return 0;
+    }
+    const char *msg = wasm_runtime_get_exception(inst);
+    snprintf(err, errlen, "%s", msg ? msg : "the cart trapped");
+    return 1;
+}
+#endif
+
 static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 {
     (void)user;
 #if MOY_WASM
+    if (what == WCALL_LAYOUT) return call_layout(err, errlen);
     if (what == WCALL_INIT) {
         if (moy_wasm_init(&WR->w, err, errlen) != 0) return 1;
         return lanes_start(err, errlen);
@@ -480,6 +508,11 @@ static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
     if (what == WCALL_UPDATE) return moy_wasm_update(&WR->w, dt, err, errlen);
     return moy_wasm_draw(&WR->w, err, errlen);
 #else
+    // The page's engine calls the cart's three hooks alone: no `_layout`.
+    if (what == WCALL_LAYOUT) {
+        WR->has_layout = 0;
+        return 0;
+    }
     // The page calls the export; the binding brackets the call. A trap the
     // binding raised names itself; anything else the cart threw (an
     // unreachable, an access outside its memory) is the engine's message.
@@ -567,7 +600,8 @@ static void wasm_trapped(void)
 int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
                        int swapped, int allow_unsigned, int interp, uint32_t ring,
-                       const struct moy_app_run *app, char *err, size_t errlen)
+                       const struct moy_app_run *app, const int32_t *layout,
+                       char *err, size_t errlen)
 {
     if (WR) {
         wrun_free(WR);
@@ -635,11 +669,35 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
     WR->sess = moy_wasm_session_current();
     RUN.wasm = 1;
     moycore_run_tick_begin();
+    if (layout) {
+        memcpy(WR->layout, layout, sizeof WR->layout);
+        if (moy_wasm_session_call(WCALL_LAYOUT, 0.0f, err, errlen) != 0) {
+            wasm_trapped();
+            return 1;
+        }
+    }
     if (moy_wasm_session_call(WCALL_INIT, 0.0f, err, errlen) != 0) {
         wasm_trapped();
         return 1;
     }
     return 0;
+}
+
+int moycore_wasm_layout(int32_t w, int32_t h, int32_t fs, char *err, size_t errlen)
+{
+    if (!WR || WR->dead) {
+        snprintf(err, errlen, "the cart is not running");
+        return -1;
+    }
+    WR->layout[0] = w;
+    WR->layout[1] = h;
+    WR->layout[2] = fs;
+    moy_wasm_session_use(WR->sess);
+    if (moy_wasm_session_call(WCALL_LAYOUT, 0.0f, err, errlen) != 0) {
+        wasm_trapped();
+        return -1;
+    }
+    return WR->has_layout;
 }
 
 int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen)
@@ -683,7 +741,8 @@ void moycore_wasm_end(void)
 #endif // MOYCORE_WASM
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
-//           allow_unsigned=False, interp=False, writable=None, ring=0, app=None)
+//           allow_unsigned=False, interp=False, writable=None, ring=0, app=None,
+//           layout=None)
 //           -> None, or the refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
@@ -702,8 +761,9 @@ void moycore_wasm_end(void)
 // cart's files are moy_files', above). `ring` is the manifest's "audio_ring",
 // the depth of `snd`'s queue in frames (0: moy-spec's 2,048). `app` is the
 // app's run (moycore_app_run), which the run holds for its imports from the
-// app extension and its load's grant check, or None for none. A refusal or a
-// trap closes nothing -- close() does.
+// app extension and its load's grant check, or None for none. `layout`, a
+// responsive app's (w, h, fs), is what its exported `_layout` hears before
+// _init. A refusal or a trap closes nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
     if (!RUN.open || RUN.L || RUN.wasm)
@@ -719,13 +779,24 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
     moycore_whead_len = hlen;
     moycore_wpages = (uint32_t)mp_obj_get_int(a[2]);
     const char *sha = a[3] == mp_const_none ? NULL : mp_obj_str_get_str(a[3]);
+    int32_t lay[3];
+    const int32_t *layout = NULL;
+    if (n_args > 11 && a[11] != mp_const_none) {
+        size_t nl = 0;
+        mp_obj_t *l = NULL;
+        mp_obj_get_array(a[11], &nl, &l);
+        if (nl != 3)
+            mp_raise_ValueError(MP_ERROR_TEXT("moycore: wasm_open's layout is (w, h, fs)"));
+        for (int i = 0; i < 3; i++) lay[i] = (int32_t)mp_obj_get_int(l[i]);
+        layout = lay;
+    }
     int rc = moycore_wasm_begin(mp_obj_str_get_str(a[0]), sha, mp_obj_str_get_str(a[4]),
                                 writable, wlen,
                                 mp_obj_is_true(a[5]), n_args > 6 && mp_obj_is_true(a[6]),
                                 n_args > 7 && mp_obj_is_true(a[7]),
                                 ring > 0 ? (uint32_t)ring : 0u,
                                 moycore_app_run(n_args > 10 ? a[10] : mp_const_none),
-                                err, sizeof(err));
+                                layout, err, sizeof(err));
     moycore_whead = NULL;
     moycore_whead_len = 0;
     if (rc) return mp_obj_new_str(err, strlen(err));
@@ -737,7 +808,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 11, mod_wasm_open);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 12, mod_wasm_open);
 
 // files_keep(on): the page's keeper is listening, or not (the browser's,
 // firmware/web_runner/carts_link.py); turning it off drops the log.

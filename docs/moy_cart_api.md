@@ -78,6 +78,7 @@ def _draw():                 # every frame; render here
 | `_init()` | once at cart start (and on restart) | optional; reset your state here |
 | `_update(dt)` | once per frame, before draw | optional; `dt` is **seconds** (float). Put game logic here |
 | `_draw()` | once per frame | render the frame; called every frame even if `_update` isn't defined |
+| `_layout(w, h, fs)` | an app's, before `_init` and whenever its surface or font scale changes | optional; defining it makes an app responsive, in Python, Lua or a compiled app alike (`docs/app_api_v1.md` §3) |
 
 An app cart (`"type": "app"`) is the exception: it is drawn on change, its
 `_update` and `_draw` running while input or its page moves and not while it

@@ -106,7 +106,10 @@ standing only where it lists the reason.
   which an app's module links before `libmoyos.a`. `moy_ui_link_frame`
   takes the frame and pulls the console's theme where it moved (the
   `moy_ui_pull` and `moy_ui_font_pull` rows), the rows draw on the app's
-  own canvas, and `moy_ui_link_show` presents it, RGB565.
+  own canvas, and `moy_ui_link_show` presents it, RGB565. An app that
+  defines `_layout(w, h, fs)` (declared weak and exported here) is
+  responsive: `moy_ui_link_frame` calls it when the frame's layout words
+  move (`docs/app_api_v1.md` §3).
 - libmoy's raster (**decision, owner, 2026-11-09, #246**: the game verbs
   are a library, not rows): `native/moy_gfx/libmoy`'s `moy_canvas.c`,
   `moy_sprite.c` and `moy_data.c`, the copy the console compiles, built

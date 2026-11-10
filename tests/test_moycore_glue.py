@@ -174,11 +174,12 @@ class FakeMoycore(types.ModuleType):
         # and its _init ran: the session stays open (wasm_ran) and, as the C
         # does, a further wasm_open before close() raises.
         self.wasm_open_errs = None
+        self.layout_ans = True
         self.ran = False
         self.owed_frame = None
         self.owed_lut = None
         self.kept = False
-        for verb in ("run_begin", "register", "exec", "load", "tick",
+        for verb in ("run_begin", "register", "exec", "load", "layout", "tick",
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
                      "get_global", "wasm_open", "wasm_ran", "take_frames", "frame",
@@ -231,10 +232,18 @@ class FakeMoycore(types.ModuleType):
         self._log("exec", src, chunk)
         return self.exec_err
 
-    def _load(self, chunks):
-        # SPEC.md 4: the WHOLE cart in one call -- a list of (src, chunkname).
-        self._log("load", list(chunks))
+    def _load(self, chunks, layout=None):
+        # SPEC.md 4: the WHOLE cart in one call -- a list of (src, chunkname),
+        # and an app's (w, h, fs) for its `_layout` before `_init`.
+        if layout is None:
+            self._log("load", list(chunks))
+        else:
+            self._log("load", list(chunks), layout)
         return self.load_err
+
+    def _layout(self, w, h, fs):
+        self._log("layout", w, h, fs)
+        return self.layout_ans
 
     def _tick(self, dt):
         self._log("tick", dt)
@@ -1916,7 +1925,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped,
-         allow_unsigned, interp, writable, ring, app) = world.core.calls[1]
+         allow_unsigned, interp, writable, ring, app, layout) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
@@ -1928,8 +1937,8 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert writable is None
         # nor an audio ring: `snd` keeps moy-spec's queue
         assert ring == 0
-        # nor an app run: the namespace hands none for a game
-        assert app is None
+        # nor an app run, nor a layout: the namespace hands neither for a game
+        assert app is None and layout is None
         assert not run.interp
         assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
@@ -1953,7 +1962,7 @@ def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
         world.mod.WasmRun(ws, make_ns(), None)
         call = world.core.calls[1]
         assert call[0] == "wasm_open"
-        assert len(call) == 12 and call[9] == "saves/\0options.cfg"
+        assert len(call) == 13 and call[9] == "saves/\0options.cfg"
         assert call[11] is None
     finally:
         world.close()
@@ -2078,7 +2087,7 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         (_v, module, head, pages, sha, _cdir, _sw, _unknown, interp,
-         _writable, _ring, _app) = opens[0]
+         _writable, _ring, _app, _layout) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:

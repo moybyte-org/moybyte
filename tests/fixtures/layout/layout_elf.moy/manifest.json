@@ -1,0 +1,10 @@
+{
+  "title": "Layout Elf",
+  "id": "layout.elf",
+  "moybyte": {
+    "type": "app",
+    "permissions": [
+      "full_access"
+    ]
+  }
+}

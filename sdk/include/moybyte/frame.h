@@ -20,10 +20,11 @@
 // An app's input words (moy_os.h's MOY_OS_FRAME_IN_*): the pointer's x and
 // y on the screen, its state (0 none), the key typed this frame (0 none),
 // whether the screen is a window's body, whether the console's RGB565 words
-// are byte-swapped, and the rect its ui frame lies in (its content_rect():
-// the screen less the host's bars; a width of 0, the whole screen). A
-// game's frames carry none: 0.
-#define MOY_FRAME_IN 10
+// are byte-swapped, the rect its ui frame lies in (its content_rect():
+// the screen less the host's bars; a width of 0, the whole screen), and the
+// surface it lays out for, `_layout`'s (w, h, fs) (moybyte/ui.h; a width of
+// 0, none told). A game's frames carry none: 0.
+#define MOY_FRAME_IN 13
 #define MOY_FRAME_X 0
 #define MOY_FRAME_Y 1
 #define MOY_FRAME_PTR 2
@@ -34,6 +35,9 @@
 #define MOY_FRAME_ROOM_Y 7
 #define MOY_FRAME_ROOM_W 8
 #define MOY_FRAME_ROOM_H 9
+#define MOY_FRAME_LAYOUT_W 10
+#define MOY_FRAME_LAYOUT_H 11
+#define MOY_FRAME_LAYOUT_FS 12
 
 // A frame: the buttons held and those pressed since the last frame, a bit
 // each in moy_button's order (MOY_BIT(MOY_BTN_A)), its milliseconds, and

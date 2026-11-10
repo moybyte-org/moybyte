@@ -249,6 +249,8 @@ def _lib():
             d.hw_load.restype = _I
             d.hw_init.argtypes = [_P, _P, _I]
             d.hw_init.restype = _I
+            d.hw_layout.argtypes = [_P, _I, _I, _I, _P, _I]
+            d.hw_layout.restype = _I
             d.hw_tick.argtypes = [_P, _F, _I, _P, _I]
             d.hw_tick.restype = _I
             d.hw_retarget.argtypes = [_P, _P]
@@ -581,6 +583,15 @@ class HostWasmRun:
         """The engine's handle this run's imports are called with (its exec
         env): what the app extension's natives find the run's grant by."""
         return self._d.hw_env(self._r)
+
+    def layout(self, w, h, fs):
+        """The cart's exported `_layout(w, h, fs)`: True called, False none,
+        or the trap's text."""
+        err = ctypes.create_string_buffer(256)
+        rc = self._d.hw_layout(self._r, int(w), int(h), int(fs), ctypes.cast(err, _P), 256)
+        if rc < 0:
+            return err.value.decode("utf-8", "replace") or "the cart trapped"
+        return rc > 0
 
     def init(self):
         """The cart's _init. None, or the trap's text."""

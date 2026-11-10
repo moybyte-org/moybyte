@@ -5,7 +5,9 @@
 // frame's input words (moycore_ui_snap), its milliseconds
 // (moycore_ui_dt_take), the canvas (moycore_ui_target) and the theme
 // (moy_app_wasm_theme), which the console's theme block brings in through the
-// moy_ui_pull and moy_ui_font_pull rows (moy_ui.h's moy_ui_theme_pull).
+// moy_ui_pull and moy_ui_font_pull rows (moy_ui.h's moy_ui_theme_pull). The
+// app's `_layout`, where it defines one, hears the surface the frame's layout
+// words name whenever they move.
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -18,6 +20,7 @@
 #include "moy_ui_wasm.h"
 #include "moybyte/frame.h"
 #include "moybyte/os.h"
+#include "moybyte/ui.h"
 
 // The run's snapshot as moycore_run.h lays it out (SNAP_LEN words).
 #define SNAP_LEN 19
@@ -30,6 +33,7 @@ static uint32_t s_tick;
 static int32_t s_dt;
 static uint16_t s_canon[MOY_PALETTE];   // the palette's words as the canvas began
 static int32_t s_swap;
+static int32_t s_lay[3];                // the (w, h, fs) `_layout` last heard
 
 int moy_ui_link_open(void) {
     if (s_px != NULL) {
@@ -85,6 +89,11 @@ int moy_ui_link_frame(moy_frame_t *f) {
         moy_canvas_wire(&s_cv, wire);
         moy_text_wire(f->in[MOY_FRAME_SWAP] != 0);
         s_swap = f->in[MOY_FRAME_SWAP];
+    }
+    if (_layout != NULL && f->in[MOY_FRAME_LAYOUT_W] > 0
+        && memcmp(s_lay, &f->in[MOY_FRAME_LAYOUT_W], sizeof s_lay) != 0) {
+        memcpy(s_lay, &f->in[MOY_FRAME_LAYOUT_W], sizeof s_lay);
+        _layout(s_lay[0], s_lay[1], s_lay[2]);
     }
     s_dt += (int32_t)f->ms;
     s_tick++;

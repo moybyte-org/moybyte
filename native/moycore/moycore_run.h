@@ -134,6 +134,7 @@ typedef struct {
     int swapped, allow_unsigned, interp;
     uint32_t ring;               // the manifest's "audio_ring": `snd`'s depth, 0 the default
     const struct moy_app_run *app;   // the app's run (native/moy_app/moy_app_run.h), or NULL
+    const int32_t *layout;       // a responsive app's (w, h, fs) for `_layout`, or NULL
 } moycore_open_c_t;
 
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);

@@ -229,6 +229,20 @@ rect-algebra layout pass, testing at more than one size, and reading
 `_layout`'s arguments rather than `W`/`H`, which are bound once at start.
 For a calculator or a notepad, fixed is the right answer.
 
+The opt-in is the same on every tier, each defining the one callback its
+own way and the console finding it before the cart runs
+(`Player._wants_layout`):
+
+| tier | `_layout` is | how the console finds it | how it hears a change |
+|---|---|---|---|
+| Python | a top-level `def _layout(w, h, fs)` | the source, at column 0 (`system_api.wants_layout`) | called by the Player |
+| Lua | a global `function _layout(w, h, fs)` (or `_layout = function`) | the scripts, at column 0 (`lua_ext.wants_layout`); called only where the global is a function, as `_init` is | called by the Player (moycore's `layout`) |
+| compiled (wasm) | an export `_layout` of three i32 and no result | the module's export section (`moycore_glue.wasm_exports`) | called by the Player (moycore's `layout`, the host's `hw_layout`) |
+| WASI and native apps | `void _layout(int32_t w, int32_t h, int32_t fs)`, which `moybyte/ui.h` declares weak and exported | the module's exports (WASI) or dynamic symbols (`elf_run.elf_defines`) | the frame message's layout words (`MOY_FRAME_LAYOUT_*`), on which the toolkit it links calls `_layout` before its loop sees the frame |
+
+A Python, Lua or compiled app hears `_layout` before `_init`; a WASI or
+native app, which has no `_init`, before the first frame its loop reads.
+
 **Text editing: the editor handle (#112).** `open_editor` hands the cart the
 console's own text editor over one document. You draw it into a rect and
 forward taps; it does the text, the caret, the selection, wrap, undo, the
@@ -1109,7 +1123,8 @@ item `moy_status_show` to `moy_status_remove` (above).
 ## 11. Lifecycle
 
 `_init()` once, then `_update(dt)` and `_draw()` (a game's three, in
-`docs/moy_cart_api.md`), `_layout(w, h, fs)` for a responsive app (§3), and
+`docs/moy_cart_api.md`), `_layout(w, h, fs)` for a responsive app on any
+tier (§3), and
 `quit()` to leave. Several apps run at once: an app the user minimises keeps
 its `_update` every frame with no `_draw` (a player, a download), hearing
 `_minimise()` going in and `_restore()` coming out; a minimised game is

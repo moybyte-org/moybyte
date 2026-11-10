@@ -583,9 +583,11 @@ static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 
-// load(chunks) -> None, or the error text. `chunks` is a sequence of
+// load(chunks, layout=None) -> None, or the error text. `chunks` is a sequence of
 // (src, chunkname) pairs -- THE WHOLE CART, in the order SPEC.md 4's `sources`
-// gives. Call AFTER any register()s and any exec()s.
+// gives. Call AFTER any register()s and any exec()s. `layout`, a responsive
+// app's (w, h, fs), is what its `_layout` hears before `_init`
+// (moycore_lua_load_finish).
 //
 // A LIST rather than one chunk, and the list has to be run HERE rather than
 // through exec(), because two things bracket the cart and a caller doing it by
@@ -594,10 +596,22 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 // (`spr = __moy_p8_spr or spr`), so wrapping after it leaves every draw call
 // the cart makes going to the unwrapped original -- which is silent, and
 // `verbs` is the only meter that sees this tier at all.
-static mp_obj_t mod_load(mp_obj_t chunks_obj)
+static mp_obj_t mod_load(size_t n_args, const mp_obj_t *args)
 {
+    mp_obj_t chunks_obj = args[0];
     if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
+    int32_t lay[3];
+    const int32_t *layout = NULL;
+    if (n_args > 1 && args[1] != mp_const_none) {
+        size_t nl = 0;
+        mp_obj_t *l = NULL;
+        mp_obj_get_array(args[1], &nl, &l);
+        if (nl != 3)
+            mp_raise_ValueError(MP_ERROR_TEXT("moycore: load's layout is (w, h, fs)"));
+        for (int i = 0; i < 3; i++) lay[i] = (int32_t)mp_obj_get_int(l[i]);
+        layout = lay;
+    }
     size_t nchunks = 0;
     mp_obj_t *chunks = NULL;
     mp_obj_get_array(chunks_obj, &nchunks, &chunks);
@@ -613,11 +627,32 @@ static mp_obj_t mod_load(mp_obj_t chunks_obj)
     }
     // _init, then the collector settled (moycore_lua_load_finish).
     char err[192];
-    if (moycore_lua_load_finish(err, sizeof(err)) != 0)
+    if (moycore_lua_load_finish(layout, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_load_obj, mod_load);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_load_obj, 1, 2, mod_load);
+
+// layout(w, h, fs) -> True, False, or the error text: the current run's
+// `_layout` called (a Lua cart's global, a compiled cart's export) where it
+// defines one, False where it defines none. A responsive app's surface
+// changed (docs/app_api_v1.md §3); its first call is load's or wasm_open's.
+static mp_obj_t mod_layout(mp_obj_t w, mp_obj_t h, mp_obj_t fs)
+{
+    char err[192];
+    int rc;
+    int32_t a = (int32_t)mp_obj_get_int(w), b = (int32_t)mp_obj_get_int(h);
+    int32_t c = (int32_t)mp_obj_get_int(fs);
+#if MOYCORE_WASM
+    if (RUN.wasm) rc = moycore_wasm_layout(a, b, c, err, sizeof(err));
+    else
+#endif
+    if (RUN.L) rc = moycore_lua_layout(a, b, c, err, sizeof(err));
+    else return mp_const_false;
+    if (rc < 0) return mp_obj_new_str(err, strlen(err));
+    return mp_obj_new_bool(rc > 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_layout_obj, mod_layout);
 
 // gc() -> the VM's heap in KB after a FULL collect, or None with no run.
 //
@@ -876,7 +911,7 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
     moycore_wpages = o->pages;
     int rc = moycore_wasm_begin(o->module, o->sha, o->dir, o->writable, o->writable_len,
                                 o->swapped, o->allow_unsigned, o->interp, o->ring, o->app,
-                                err, n);
+                                o->layout, err, n);
     moycore_whead = NULL;
     moycore_whead_len = 0;
     return rc;
@@ -1201,6 +1236,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layout),      MP_ROM_PTR(&mod_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_TICK_DRAW),   MP_ROM_INT(1) },
     // The compiled cart: 1 when the engine is in this build (wasm_open works).

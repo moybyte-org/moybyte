@@ -120,9 +120,14 @@ int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n);
 // with Lua's message in `err`.
 int moycore_lua_exec(const char *src, size_t len, const char *name, char *err, size_t n);
 // The load's two brackets: begin before the cart's first chunk, finish after
-// its last (it runs _init, then settles the collector). 0, or -1 with `err`.
+// its last (it runs _layout with `layout`'s three words where `layout` is not
+// NULL and the cart defines one, then _init, then settles the collector). 0,
+// or -1 with `err`.
 void moycore_lua_load_begin(void);
-int moycore_lua_load_finish(char *err, size_t n);
+int moycore_lua_load_finish(const int32_t *layout, char *err, size_t n);
+// A responsive app's _layout(w, h, fs) (docs/app_api_v1.md §3): 1 where the
+// cart defines one and it returned, 0 where it defines none, -1 with `err`.
+int moycore_lua_layout(int32_t w, int32_t h, int32_t fs, char *err, size_t n);
 // One frame: _update, then _draw unless `draw` is 0. 0, or -1 with `err`.
 int moycore_lua_tick(float dt, int draw, char *err, size_t n);
 // The frame's halves are the console's: moycore_run_split.

@@ -402,15 +402,24 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
     return moycore_lua_exec(src, (size_t)len, name, err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
-/* The cart's chunks in order, then _init (modmoycore.c's load). */
+/* The cart's chunks in order, then _layout with `layout`'s (w, h, fs) where it
+ * is not NULL, then _init (modmoycore.c's load). */
 int hl_load(host_lua *r, const char **srcs, const int *lens, const char **names,
-            int n, char *err, int errlen)
+            int n, const int32_t *layout, char *err, int errlen)
 {
     if (!LIVE(r) || !RUN.L) return hl_exec(r, "", 0, "", err, errlen);
     moycore_lua_load_begin();
     for (int i = 0; i < n; i++)
         if (hl_exec(r, srcs[i], lens[i], names[i], err, errlen)) return 1;
-    return moycore_lua_load_finish(err, errlen > 0 ? (size_t)errlen : 0) != 0;
+    return moycore_lua_load_finish(layout, err, errlen > 0 ? (size_t)errlen : 0) != 0;
+}
+
+/* The cart's _layout(w, h, fs) (modmoycore.c's layout): 1 called, 0 none,
+ * -1 with the message in err. */
+int hl_layout(host_lua *r, int32_t w, int32_t h, int32_t fs, char *err, int errlen)
+{
+    if (!LIVE(r) || !RUN.L) return 0;
+    return moycore_lua_layout(w, h, fs, err, errlen > 0 ? (size_t)errlen : 0);
 }
 
 /* One frame (moycore_frame); `draw` 0 is a logic-only tick. */

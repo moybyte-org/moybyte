@@ -180,7 +180,12 @@ MP_DECLARE_CONST_FUN_OBJ_0(moycore_perf_reset_obj);
 int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
                        int swapped, int allow_unsigned, int interp, uint32_t ring,
-                       const struct moy_app_run *app, char *err, size_t errlen);
+                       const struct moy_app_run *app, const int32_t *layout,
+                       char *err, size_t errlen);
+// A responsive app's `_layout(w, h, fs)` on the current compiled run: 1 where
+// its module exports one and it returned, 0 where it exports none, -1 with
+// `err` (a trap, which ends the run).
+int moycore_wasm_layout(int32_t w, int32_t h, int32_t fs, char *err, size_t errlen);
 int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen);
 void moycore_wasm_end(void);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj);
