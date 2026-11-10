@@ -13,7 +13,6 @@
 #   _Ring                    the base of the event-ring devices
 #   _Ble                     ble: GATT by handle
 #   _Usb                     usb: the USB host
-#   _Midi                    midi: the MIDI ports
 #   _Camera                  camera: a picture per read
 #   _media_roots             the folders a process's media handle plays from
 #   _Media                   media: the media service's stream by handle
@@ -22,13 +21,13 @@
 WASI program, an ELF module) holds where a Python program holds an object
 (docs/os_2026-11/hardware.md section 4). The rows are native/os_calls.json's
 `moybyte.dev_*`. The kernel's handle table serves every lease -- gpio<n>,
-pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora
-and mic on the calling program's own task (native/moy_kernel/moy_dev.h,
+pins, uart<n>, spi<n>, i2c, pwm<n> and adc<n> -- and the device APIs lora,
+mic and midi on the calling program's own task (native/moy_kernel/moy_dev.h,
 which says what they answer); the other device APIs are served here, by the door's Python half as the calling
 process (runtime/shell/shell_servers.py, ConsoleCalls), on the VM's task:
 
-  open(name, cfg) -> h      a device API ("http", "ble", "usb", "midi",
-                            "camera", "media", "net"),
+  open(name, cfg) -> h      a device API ("http", "ble", "usb", "camera",
+                            "media", "net"),
                             configured by `cfg`
   close(h)                  given back; the process's end closes the rest
   read(h, into) -> n        what waits, 0 when nothing does
@@ -75,18 +74,6 @@ answers:
             vid and pid (u16) and the name, REPORT's the HID report,
             DATA's the bytes the device sent. The open reads as an ATTACH
             for each device already plugged in
-  midi      one port a handle, named by the open's cfg: uart=<row> (baud=<n>,
-            31250 by default; the row's `lease:<row>` too), usb=<addr> (a
-            USB-MIDI device, as a usb handle's ATTACH names it) or
-            ble=aa:bb:cc:dd:ee:ff (a BLE-MIDI peripheral: connected, its
-            MIDI characteristic found and subscribed); write: MIDI bytes,
-            whole messages (no system exclusive), to it; read: the messages
-            it sent, 3 bytes each (status, data1, data2: 0 where the
-            message has fewer), whole messages only (FULL where one does
-            not fit); get port (the driver's), state (0 while a BLE port
-            connects, 1 once messages flow, 2 failed or gone); a write to a
-            BLE port before it is ready is ABSENT. A process holds the
-            `midi` API from its first port to its last
   camera    read: the latest frame, w * h RGB565 pixels big-endian (the
             glass's byte order), whole (FULL where `into` cannot hold it),
             0 bytes before the first; get w, h
@@ -132,10 +119,9 @@ answers:
 
 A handle is its process's: another process's number is ABSENT. Each answer
 that fails is moy_app.h's code, negated: DENIED without the permission the
-name needs (a device's own, `media` or `media:url` for media, and a midi
-port's UART its `lease:<row>`), BUSY where another process holds the
-device (a Python program's object, or another compiled program's handle; a
-process opens every device API but http and midi once), BAD for a name, a
+name needs (a device's own, `media` or `media:url` for media), BUSY where
+another process holds the device (a Python program's object, or another
+compiled program's handle; a process opens every device API but http once), BAD for a name, a
 key or a value this console does not take, ABSENT for a handle not open, a
 device this console lacks and a radio verb that needs a connection or a
 join, FULL where `into` cannot hold one record or a table has no room, IO
@@ -580,66 +566,6 @@ class _Usb(_Ring):
         self.f.sweep(pid)
 
 
-MIDI_BYTES = 3              # a message read: status, data1, data2
-_MIDI_STATE = {"connecting": 0, "finding": 0, "ready": 1, "failed": 2, "gone": 2}
-
-
-class _Midi(_Ring):
-    KIND = _moybyte.MIDI
-
-    def __init__(self, cfg):
-        f = _face("midi")
-        if _moybyte.WAKES.table is None:
-            raise OSError(ENODEV, "no input table")
-        _only(cfg, ("uart", "baud", "usb", "ble"))
-        ways = [k for k in ("uart", "usb", "ble") if k in cfg]
-        if len(ways) != 1:
-            raise OSError(EINVAL, "a midi handle is one port: uart=, usb= or ble=")
-        if "baud" in cfg and ways[0] != "uart":
-            raise OSError(EINVAL, "baud is a uart's")
-        way = ways[0]
-        v = cfg[way]
-        try:
-            self._reader(f.source())
-            if way == "uart":
-                if not isinstance(v, str) or not v.startswith("uart"):
-                    raise OSError(EINVAL, "uart=%r" % (v,))
-                self.port = f.uart(v, _int(cfg.get("baud", 31250), 1, 4000000, "baud"))
-            elif way == "usb":
-                self.port = f.usb(_int(v, 1, 127, "usb"))
-            else:
-                self.port = f.ble(_addr(v))
-        except BaseException:
-            self._free()
-            if not f.ports():
-                f.close()
-            raise
-        self.f = f
-
-    def _rec(self, port, a, b):
-        if port != self.port:
-            return None
-        return bytes((a & 0xFF, (a >> 8) & 0x7F, b & 0x7F))
-
-    def write(self, data):
-        self.f.send(self.port, data)
-        return len(data)
-
-    def get(self, what):
-        if what == "port":
-            return self.port
-        if what == "state":
-            return _MIDI_STATE.get(self.f.state(self.port), 2)
-        raise OSError(EINVAL, "no %s" % what)
-
-    def close(self, pid):
-        self._free()
-        if any(type(x) is _Midi for x in HANDLES.get(pid, {}).values()):
-            self.f.close(self.port)
-        else:
-            self.f.sweep(pid)
-
-
 class _Camera(_Handle):
     def __init__(self, cfg):
         _only(cfg, ())
@@ -904,8 +830,7 @@ class _Net(_Handle):
         self._let_go(_link()[0], pid)
 
 
-_DEVICES = {"http": _Http, "ble": _Ble, "usb": _Usb,
-            "midi": _Midi, "camera": _Camera,
+_DEVICES = {"http": _Http, "ble": _Ble, "usb": _Usb, "camera": _Camera,
             "media": _Media, "net": _Net}
 # A device with one holder: a process opens it once.
 _ONE = ("ble", "usb", "camera", "media")

@@ -160,6 +160,21 @@ int moy_usb_device(uint32_t i, moy_usb_dev_t *out) {
     return ok ? 0 : -MOY_USB_ENOENT;
 }
 
+int moy_usb_class_of(uint8_t addr) {
+    if (U == NULL) {
+        return -MOY_USB_ENOENT;
+    }
+    MOY_DRV_LOCK(&s_lock);
+    int r = -MOY_USB_ENOENT;
+    for (uint32_t i = 0; i < U->ndev; i++) {
+        if (U->dev[i].addr == addr) {
+            r = U->dev[i].cls;
+        }
+    }
+    MOY_DRV_UNLOCK(&s_lock);
+    return r;
+}
+
 // The holder's device at `addr` of class `cls` (any class: 0xff): its index.
 static int device(uint32_t owner, uint8_t addr, int cls) {
     if (!held(owner)) {

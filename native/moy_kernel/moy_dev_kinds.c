@@ -14,16 +14,19 @@
 
 extern const moy_dev_ops_t moy_dev_lora __attribute__((weak));
 extern const moy_dev_ops_t moy_dev_mic __attribute__((weak));
+extern const moy_dev_ops_t moy_dev_midi __attribute__((weak));
 
 static const struct {
     const char *name;
     uint32_t perm;
     uint8_t cls;                // the lease class its driver holds, 0: none
+    bool one;                   // one handle a process
     const moy_dev_ops_t *ops;
 } KINDS[] = {
-    { NULL, 0, 0, NULL },
-    { "lora", MOY_DEV_P_LORA, MOY_LEASE_LORA, &moy_dev_lora },
-    { "mic", MOY_DEV_P_MIC, MOY_LEASE_MIC, &moy_dev_mic },
+    { NULL, 0, 0, false, NULL },
+    { "lora", MOY_DEV_P_LORA, MOY_LEASE_LORA, true, &moy_dev_lora },
+    { "mic", MOY_DEV_P_MIC, MOY_LEASE_MIC, true, &moy_dev_mic },
+    { "midi", MOY_DEV_P_MIDI, 0, false, &moy_dev_midi },
 };
 #define NKINDS (sizeof KINDS / sizeof KINDS[0])
 
@@ -88,7 +91,7 @@ int32_t moy_dev_kind_open(uint32_t slot, int kind, uint32_t pid, uint32_t perms,
     if (!(perms & KINDS[kind].perm)) {
         return MOY_DEV_EDENIED;
     }
-    for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
+    for (uint32_t i = 0; KINDS[kind].one && i < MOY_DEV_HANDLES; i++) {
         if (s_kind[i].pid == pid && s_kind[i].kind == kind) {
             return MOY_DEV_EBUSY;               // one handle a process on the one device
         }
@@ -97,7 +100,7 @@ int32_t moy_dev_kind_open(uint32_t slot, int kind, uint32_t pid, uint32_t perms,
     if (o == NULL) {
         return MOY_DEV_EABSENT;
     }
-    int32_t r = o->open(slot, pid, cfg, cn);
+    int32_t r = o->open(slot, pid, perms, cfg, cn);
     if (r < 0) {
         return r;
     }
@@ -143,8 +146,10 @@ bool moy_dev_holds(uint32_t pid, uint8_t cls) {
     bool r = false;
     moy_lease_lock();
     for (uint32_t i = 0; i < MOY_DEV_HANDLES && !r; i++) {
-        r = pid != 0 && s_kind[i].pid == pid && s_kind[i].kind != 0
-            && KINDS[s_kind[i].kind].cls == cls;
+        const kind_t *k = &s_kind[i];
+        const moy_dev_ops_t *o = KINDS[k->kind].ops;
+        r = pid != 0 && cls != 0 && k->pid == pid && k->kind != 0
+            && (KINDS[k->kind].cls == cls || (o->holds != NULL && o->holds(i) == cls));
     }
     moy_lease_unlock();
     return r;

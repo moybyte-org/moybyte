@@ -609,6 +609,32 @@ static uint64_t bits_of(const bus_pins_t *p, int n) {
     return m;
 }
 
+int32_t moy_dev_uart_take(uint32_t pid, uint32_t perms, const char *row, size_t n,
+                          uint32_t baud, uint32_t *lease, uint8_t *unit) {
+    moy_lease_offer_t o;
+    int at = moy_lease_offer_find(row, n);
+    if (at < 0 || moy_lease_offer_at((uint32_t)at, &o) != MOY_LEASE_OK
+        || o.cls != MOY_LEASE_UART) {
+        return MOY_DEV_EBAD;
+    }
+    if (at >= 32 - MOY_DEV_P_ROW || !(perms & (1u << (MOY_DEV_P_ROW + at)))) {
+        return MOY_DEV_EDENIED;
+    }
+    moy_devbus_uart_t c = { baud, 8u, MOY_DEVBUS_PARITY_NONE, 1u, 256u, 512u };
+    int32_t rc = lease_rc(moy_lease_take(pid, MOY_LEASE_UART, o.unit,
+                                         1ull << o.pin[0] | 1ull << o.pin[1], 0, lease));
+    if (rc == 0 && (rc = moy_devbus_uart_open(o.unit, o.pin[0], o.pin[1], &c)) != 0) {
+        moy_lease_drop(*lease);
+    }
+    *unit = o.unit;
+    return rc;
+}
+
+void moy_dev_uart_give(uint32_t lease, uint8_t unit) {
+    moy_devbus_uart_close(unit);
+    moy_lease_drop(lease);
+}
+
 // uart<n> and spi<n>: a unit the board offers, under `lease:<row>`.
 static int32_t unit_open(dev_row_t *d, uint32_t perms, const char *name, size_t n,
                          const char *cfg, size_t cn) {

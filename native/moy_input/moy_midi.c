@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_gatt.h"
 #include "moy_input.h"
 
 #if defined(MOY_INPUT_BOARD)
@@ -20,6 +21,8 @@ typedef struct {
     uint8_t status, need, n, sysex;     // the parser: running status, data wanted and had
     uint8_t d[2];
     uint32_t unit;
+    uint8_t ble;                        // a BLE port's step (MOY_MIDI_BLE_*)
+    uint16_t chr;                       // ... its MIDI characteristic's value handle
     #if defined(MOY_INPUT_BOARD)
     TaskHandle_t reader;
     volatile uint8_t stop;
@@ -44,11 +47,29 @@ static void post(int port, uint8_t status, uint8_t d1, uint8_t d2, uint8_t prov)
     moy_input_post(t, M->src, MOY_EV_MIDI, (uint16_t)(status | d1 << 8), (uint16_t)port, d2);
 }
 
+// The lease table's lock (moy_lease.h, weak: an image without the kernel's
+// table has one task at the ports): the face on the VM's task and a compiled
+// program's handle on its own (moy_midi_dev.c) take and give ports under it.
+void moy_lease_lock(void) __attribute__((weak));
+void moy_lease_unlock(void) __attribute__((weak));
+
+static void lock(void) {
+    if (moy_lease_lock != NULL) {
+        moy_lease_lock();
+    }
+}
+
+static void unlock(void) {
+    if (moy_lease_unlock != NULL) {
+        moy_lease_unlock();
+    }
+}
+
 static int held(uint32_t owner) {
     return M != NULL && owner != 0 && owner == M->owner;
 }
 
-int moy_midi_open(uint32_t owner) {
+static int open_(uint32_t owner) {
     if (owner == 0) {
         return -MOY_MIDI_EBADF;
     }
@@ -96,7 +117,7 @@ static void unport(port_t *p) {
     memset(p, 0, sizeof(*p));
 }
 
-int moy_midi_close(uint32_t owner) {
+static int close_(uint32_t owner) {
     if (!held(owner)) {
         return -MOY_MIDI_EBADF;
     }
@@ -107,9 +128,6 @@ int moy_midi_close(uint32_t owner) {
     return 0;
 }
 
-uint32_t moy_midi_sweep(uint32_t owner) {
-    return moy_midi_close(owner) == 0 ? 1u : 0u;
-}
 
 uint32_t moy_midi_owner(void) {
     return M != NULL ? M->owner : 0;
@@ -119,7 +137,7 @@ uint32_t moy_midi_source(void) {
     return M != NULL ? M->src : 0;
 }
 
-int moy_midi_port(uint32_t owner, int transport, uint32_t unit) {
+static int port_(uint32_t owner, int transport, uint32_t unit) {
     if (!held(owner)) {
         return -MOY_MIDI_EBADF;
     }
@@ -154,7 +172,7 @@ static port_t *port_of(uint32_t owner, int port) {
     return &M->port[port];
 }
 
-int moy_midi_unport(uint32_t owner, int port) {
+static int unport_(uint32_t owner, int port) {
     port_t *p = port_of(owner, port);
     if (p == NULL) {
         return -MOY_MIDI_EBADF;
@@ -163,7 +181,7 @@ int moy_midi_unport(uint32_t owner, int port) {
     return 0;
 }
 
-int moy_midi_port_of(uint32_t owner, int port, int *transport, uint32_t *unit) {
+static int port_of_(uint32_t owner, int port, int *transport, uint32_t *unit) {
     port_t *p = port_of(owner, port);
     if (p == NULL) {
         return -MOY_MIDI_EBADF;
@@ -307,7 +325,7 @@ int moy_midi_usb_pack(const uint8_t *msg, size_t n, uint8_t *out, size_t cap) {
 // message in running status leaves out its status. A byte with bit 7 is a
 // status right after a timestamp, and a timestamp anywhere else.
 
-int moy_midi_ble_in(uint32_t owner, int port, const uint8_t *d, size_t n) {
+static int ble_in_(uint32_t owner, int port, const uint8_t *d, size_t n) {
     port_t *p = port_of(owner, port);
     if (p == NULL || p->transport != MOY_MIDI_BLE) {
         return -MOY_MIDI_EBADF;
@@ -347,6 +365,108 @@ int moy_midi_ble_pack(const uint8_t *msg, size_t n, uint32_t ms, uint8_t *out, s
     return (int)k;
 }
 
+int moy_midi_ble_in(uint32_t owner, int port, const uint8_t *d, size_t n) {
+    lock();
+    int r = ble_in_(owner, port, d, n);
+    unlock();
+    return r;
+}
+
+// -- the BLE port's machine ----------------------------------------------------------
+
+// The BLE-MIDI service's data I/O characteristic, little-endian.
+static const moy_gatt_uuid_t MIDI_IO = { 16, { 0xf3, 0x6b, 0x10, 0x9d, 0x66, 0xf2, 0xa9, 0xa1,
+                                               0x12, 0x41, 0x68, 0x38, 0xdb, 0xe5, 0x72,
+                                               0x77 } };
+
+static int ble_port(void) {
+    for (int i = 0; M != NULL && i < MOY_MIDI_PORTS; i++) {
+        if (M->port[i].used && M->port[i].transport == MOY_MIDI_BLE) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int ble_(uint32_t owner, int port, const uint8_t addr[6], uint8_t type) {
+    port_t *p = port_of(owner, port);
+    if (p == NULL || p->transport != MOY_MIDI_BLE) {
+        return -MOY_MIDI_EBADF;
+    }
+    p->ble = MOY_MIDI_BLE_CONNECTING;
+    p->chr = 0;
+    int rc = moy_gatt_connect(owner, addr, type);
+    if (rc < 0 && p->used) {
+        p->ble = MOY_MIDI_BLE_FAILED;
+    }
+    return rc;
+}
+
+void moy_midi_gatt(uint8_t ev, uint16_t a, int32_t b) {
+    lock();
+    int port = ble_port();
+    port_t *p = port >= 0 ? &M->port[port] : NULL;
+    uint32_t owner = M != NULL ? M->owner : 0;
+    if (p != NULL && owner == moy_gatt_owner()) {
+        if (ev == MOY_GATT_EV_CONNECTED && p->ble == MOY_MIDI_BLE_CONNECTING) {
+            p->ble = b == 0 ? MOY_MIDI_BLE_FINDING : MOY_MIDI_BLE_FAILED;
+            if (b == 0 && moy_gatt_find(owner, &MIDI_IO) < 0 && p->ble == MOY_MIDI_BLE_FINDING) {
+                p->ble = MOY_MIDI_BLE_FAILED;
+            }
+        } else if (ev == MOY_GATT_EV_FOUND && p->ble == MOY_MIDI_BLE_FINDING) {
+            p->ble = b == 0 ? MOY_MIDI_BLE_READY : MOY_MIDI_BLE_FAILED;
+            if (b == 0) {
+                p->chr = a;
+                moy_gatt_subscribe(owner, a, 1);
+            }
+        } else if (ev == MOY_GATT_EV_NOTIFY && p->ble == MOY_MIDI_BLE_READY) {
+            uint8_t note[MOY_GATT_VALUE];
+            uint16_t h;
+            int n;
+            while ((n = moy_gatt_notified(owner, note, sizeof note, &h)) > 0) {
+                if (h == p->chr) {
+                    ble_in_(owner, port, note, (size_t)n);
+                }
+            }
+        } else if (ev == MOY_GATT_EV_DISCONNECTED && p->ble != MOY_MIDI_BLE_FAILED) {
+            p->ble = MOY_MIDI_BLE_GONE;
+        }
+    }
+    unlock();
+}
+
+int moy_midi_ble(uint32_t owner, int port, const uint8_t addr[6], uint8_t type) {
+    lock();
+    int r = ble_(owner, port, addr, type);
+    unlock();
+    return r;
+}
+
+int moy_midi_ble_state(uint32_t owner, int port) {
+    lock();
+    port_t *p = port_of(owner, port);
+    int r = p == NULL || p->transport != MOY_MIDI_BLE ? -MOY_MIDI_EBADF : p->ble;
+    unlock();
+    return r;
+}
+
+int moy_midi_ble_send(uint32_t owner, int port, const uint8_t *msg, size_t n, uint32_t ms) {
+    uint8_t out[2u * MOY_MIDI_BLE_SEND + 2u];
+    if (n > MOY_MIDI_BLE_SEND) {
+        return -MOY_MIDI_EINVAL;
+    }
+    lock();
+    port_t *p = port_of(owner, port);
+    int r = p == NULL || p->transport != MOY_MIDI_BLE ? -MOY_MIDI_EBADF
+            : p->ble != MOY_MIDI_BLE_READY ? -MOY_MIDI_ENOTCONN
+            : moy_midi_ble_pack(msg, n, ms, out, sizeof out);
+    if (r >= 0) {
+        r = moy_gatt_write(owner, p->chr, out, (size_t)r, 0);
+    }
+    unlock();
+    return r;
+}
+
 // -- the UART reader ---------------------------------------------------------------
 
 #if defined(MOY_INPUT_BOARD)
@@ -374,7 +494,7 @@ static void reader(void *arg) {
     vTaskDelete(NULL);
 }
 
-int moy_midi_uart(uint32_t owner, int port) {
+static int uart_(uint32_t owner, int port) {
     port_t *p = port_of(owner, port);
     if (p == NULL || p->transport != MOY_MIDI_UART) {
         return -MOY_MIDI_EBADF;
@@ -396,12 +516,70 @@ int moy_midi_uart(uint32_t owner, int port) {
 
 #else
 
-int moy_midi_uart(uint32_t owner, int port) {
+static int uart_(uint32_t owner, int port) {
     port_t *p = port_of(owner, port);
     return p == NULL || p->transport != MOY_MIDI_UART ? -MOY_MIDI_EBADF : 0;
 }
 
 #endif
+
+// -- the verbs, each under the lock --------------------------------------------------
+
+int moy_midi_open(uint32_t owner) {
+    lock();
+    int r = open_(owner);
+    unlock();
+    return r;
+}
+
+int moy_midi_close(uint32_t owner) {
+    lock();
+    int r = close_(owner);
+    unlock();
+    return r;
+}
+
+uint32_t moy_midi_sweep(uint32_t owner) {
+    return moy_midi_close(owner) == 0 ? 1u : 0u;
+}
+
+int moy_midi_port(uint32_t owner, int transport, uint32_t unit) {
+    lock();
+    int r = port_(owner, transport, unit);
+    unlock();
+    return r;
+}
+
+int moy_midi_unport(uint32_t owner, int port) {
+    lock();
+    int r = unport_(owner, port);
+    unlock();
+    return r;
+}
+
+int moy_midi_port_of(uint32_t owner, int port, int *transport, uint32_t *unit) {
+    lock();
+    int r = port_of_(owner, port, transport, unit);
+    unlock();
+    return r;
+}
+
+int moy_midi_uart(uint32_t owner, int port) {
+    lock();
+    int r = uart_(owner, port);
+    unlock();
+    return r;
+}
+
+int moy_midi_ports(uint32_t owner) {
+    lock();
+    int n = 0;
+    for (int i = 0; held(owner) && i < MOY_MIDI_PORTS; i++) {
+        n += M->port[i].used != 0;
+    }
+    unlock();
+    return n;
+}
 
 void moy_midi_reset(void) {
     if (M != NULL) {

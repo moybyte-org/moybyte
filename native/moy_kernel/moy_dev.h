@@ -53,8 +53,8 @@
 //            for a pin with none, BUSY for a unit MicroPython's machine.ADC
 //            holds): get value (0..65535)
 //
-// THE DEVICE APIS (each its permission, MOY_DEV_P_*; one handle a process,
-// BUSY for a second):
+// THE DEVICE APIS (each its permission, MOY_DEV_P_*; one handle a process
+// but midi's, BUSY for a second):
 //   lora     the LoRa radio (native/moy_net/moy_lora.h; its one holder the
 //            lease table's MOY_LEASE_LORA, BUSY while another process holds
 //            it): cfg freq sf bw cr power sync preamble (868100000, 9, 125000,
@@ -77,6 +77,23 @@
 //            MOY_LEASE_MIC's): no cfg; read: PCM16 mono samples,
 //            little-endian, oldest first, as many whole samples as `cap`
 //            holds; get rate, drops
+//   midi     one MIDI port a handle (native/moy_input/moy_midi.h; the driver's
+//            one holder shared with the process's `moybyte.midi`, BUSY while
+//            another process holds it, the API let go with the process's
+//            last port), named by the open's cfg: uart=<row> (baud=<n>,
+//            31250; the row's `lease:<row>` too, leased and its driver up
+//            for the port's life), usb=<addr> (a USB-MIDI device, as a usb
+//            handle's ATTACH names it; ABSENT for none there) or
+//            ble=aa:bb:cc:dd:ee:ff (a BLE-MIDI peripheral: connected, its
+//            MIDI characteristic found and subscribed by the driver on the
+//            BLE driver's events, moy_midi_ble); write: MIDI bytes, whole
+//            messages (no system exclusive; at most 256 bytes, 120 to a BLE
+//            port), to it; read: the messages it sent, 3 bytes each
+//            (status, data1, data2: 0 where the message has fewer), whole
+//            messages only (FULL where one does not fit); get port (the
+//            driver's), state (0 while a BLE port connects, 1 once messages
+//            flow, 2 failed or gone); a write to a BLE port before it is
+//            ready is ABSENT. Many handles a process
 // A device a handle holds stays through the VM's end (moy_lease.h's THE
 // VM'S END, moy_dev_holds) and goes with its process.
 //

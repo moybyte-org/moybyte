@@ -51,10 +51,21 @@ static const moy_gatt_ops_t *ops(void) {
     return o != NULL ? o : sim_ops();
 }
 
+// The `midi` API's BLE port, whose machine steps on these events
+// (moy_midi.h, moy_midi_gatt): weak, for an image without it.
+void moy_midi_gatt(uint8_t ev, uint16_t a, int32_t b) __attribute__((weak));
+
+// An event posted for the holder's reader, then handed to the MIDI port's
+// machine (outside the driver's lock).
 static void post(uint8_t ev, uint16_t a, int32_t b) {
     moy_input_t *t = moy_input_kernel();
     if (t != NULL && G != NULL && G->src != 0) {
         moy_input_post(t, G->src, MOY_EV_BLE, a, ev, (uint32_t)b);
+    }
+    if (moy_midi_gatt != NULL && (ev == MOY_GATT_EV_CONNECTED || ev == MOY_GATT_EV_FOUND
+                                  || ev == MOY_GATT_EV_NOTIFY
+                                  || ev == MOY_GATT_EV_DISCONNECTED)) {
+        moy_midi_gatt(ev, a, b);
     }
 }
 

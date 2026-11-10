@@ -12,7 +12,9 @@ its end closes every port.
                         lists it)
   ble(addr) -> port     a BLE-MIDI peripheral: connected, its MIDI I/O
                         characteristic found and subscribed (moybyte.ble's
-                        host, which must be up); messages flow once it is
+                        host, which must be up) by the driver's own machine
+                        on the BLE driver's events (moy_midi_ble); messages
+                        flow once it is
   send(port, data)      MIDI bytes, whole messages (no system exclusive)
   on(fn)                fn(port, status, data1, data2) for each message
   ports() -> [(port, transport, unit)]   transport UART, USB or BLE
@@ -21,6 +23,11 @@ its end closes every port.
                         "finding", "failed" or "gone" before or after
   source()              the ring source its messages ride (a reader's)
   close(port=None)      one port, or all of them and the API
+
+A compiled program's ports are the kernel's handles (native/moy_kernel/
+moy_dev.h's midi row, native/moy_input/moy_midi_dev.c), which share the
+driver's one holder: a process holds the API while either side holds a
+port.
 
 A transport the console lacks refuses with OSError(ENODEV); `present()` is
 whether any is there."""
@@ -43,15 +50,13 @@ except ImportError:  # host: the runtime package
     from runtime.ticks import _ticks_ms
 
 UART, USB, BLE = _N.UART, _N.USB, _N.BLE
-# The BLE-MIDI service's data I/O characteristic.
-MIDI_IO = "7772e5db-3868-4112-a1a9-f2669d106bf3"
+_BLE_STATES = ("connecting", "finding", "ready", "failed", "gone")   # the driver's BLE_*
 
 # devices' sweep order: this one runs before the leases', so a UART's reader
 # stops before its driver goes.
 SWEEP_FIRST = True
 
 _wakes = {}         # pid -> wake id
-_gatt_wakes = {}    # pid -> the BLE port's wake id
 _took = {}          # pid -> the USB and BLE drivers it took through this API
 _ports = {}         # pid -> {port: [transport, unit, the UART lease | the BLE state]}
 
@@ -159,72 +164,13 @@ def ble(addr):
         if s is not None and s[0] == a:
             t = s[1]
     port = _D.check(_N.port(p, BLE, 0))
-    _ports[p][port] = [BLE, 0, {"handle": 0, "state": "connecting"}]
-    _gatt_wake(p, G)
-    rc = G.connect(p, a, t)
+    _ports[p][port] = [BLE, 0, None]
+    rc = _N.ble(p, port, a, t)
     if rc < 0:
         _N.unport(p, port)
         del _ports[p][port]
         raise _err(-rc)
     return port
-
-
-def _ble_port(p):
-    for port, v in _ports.get(p, {}).items():
-        if v[0] == BLE:
-            return port, v[2]
-    return None, None
-
-
-def _gatt_wake(p, G):
-    """The BLE port's steps on the `ble` driver's events: connected, its
-    characteristic found, subscribed; then each notification a packet."""
-    from array import array
-    buf = array("i", [0] * (_moybyte.EV_FIELDS * 4))
-    note = bytearray(244)
-    meta = array("i", [0])
-    F, K, ID, B = _moybyte.EV_FIELDS, _moybyte.EV_KIND, _moybyte.EV_ID, _moybyte.EV_B
-    A = _moybyte.EV_A
-    kind = _moybyte.BLE
-
-    def step(ev, a, status):
-        port, st = _ble_port(p)
-        if st is None:
-            return
-        if ev == G.EV_CONNECTED:
-            if status == 0:
-                st["state"] = "finding"
-                G.find(p, _ble().uuid_bytes(MIDI_IO))
-            else:
-                st["state"] = "failed"
-        elif ev == G.EV_FOUND:
-            if status == 0:
-                st["handle"] = a
-                st["state"] = "ready"
-                G.subscribe(p, a, True)
-            else:
-                st["state"] = "failed"
-        elif ev == G.EV_NOTIFY:
-            while True:
-                n = G.notified(p, note, meta)
-                if n <= 0:
-                    break
-                _N.ble_in(p, port, memoryview(note)[:n])
-        elif ev == G.EV_DISCONNECTED:
-            st["state"] = "gone"
-
-    def wake():
-        n = _moybyte.events(buf)
-        while n:
-            for i in range(n):
-                k = i * F
-                if buf[k + K] == kind:
-                    step(buf[k + ID], buf[k + A], buf[k + B])
-            n = _moybyte.events(buf) if n == 4 else 0
-    w = _gatt_wakes.get(p)
-    if w is not None:
-        _moybyte.WAKES.cancel(w)
-    _gatt_wakes[p] = _moybyte.WAKES.on_ring(G.source(), wake, 1 << kind)
 
 
 def send(port, data):
@@ -240,12 +186,7 @@ def send(port, data):
         n = _D.check(_N.usb_pack(data, out))
         _D.check(_usb().write(p, v[1], memoryview(out)[:n]))
     else:
-        st = v[2]
-        if st["state"] != "ready":
-            raise _err(107)                 # ENOTCONN
-        out = bytearray(2 * len(data) + 2)
-        n = _D.check(_N.ble_pack(data, _ticks_ms(), out))
-        _D.check(_gatt().write(p, st["handle"], memoryview(out)[:n], False))
+        _D.check(_N.ble_send(p, port, data, _ticks_ms()))
 
 
 def on(fn):
@@ -279,10 +220,11 @@ def ports():
 
 
 def state(port):
-    v = _ports.get(_D.pid(), {}).get(port)
+    p = _D.pid()
+    v = _ports.get(p, {}).get(port)
     if v is None:
         raise _err(_D.EBADF)
-    return v[2]["state"] if v[0] == BLE else "ready"
+    return _BLE_STATES[_D.check(_N.ble_state(p, port))] if v[0] == BLE else "ready"
 
 
 def source():
@@ -318,9 +260,6 @@ def sweep(pid):
     if w is not None:
         _moybyte.WAKES.cancel(w)
     held = _ports.pop(pid, {})
-    w = _gatt_wakes.pop(pid, None)
-    if w is not None:
-        _moybyte.WAKES.cancel(w)
     for port, v in held.items():
         _drop(pid, port, v)
     for d in _took.pop(pid, ()):

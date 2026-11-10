@@ -130,7 +130,9 @@ static int32_t lora_apply(uint32_t pid, lora_t *l, const words_out_t *o) {
     return moy_dev_errno(rc);
 }
 
-static int32_t lora_open(uint32_t slot, uint32_t pid, const char *cfg, size_t cn) {
+static int32_t lora_open(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg,
+                         size_t cn) {
+    (void)perms;
     lora_t *l = &s_lora[slot];
     *l = (lora_t){ .cfg = { .freq = 868100000u, .bw = 125000u, .sf = 9, .cr = 5, .power = 14,
                             .sync = 0x12, .preamble = 8 }, .dr = 5 };

@@ -87,6 +87,7 @@ uint32_t moy_usb_sweep(uint32_t owner);
 uint32_t moy_usb_owner(void);
 uint32_t moy_usb_count(void);
 int moy_usb_device(uint32_t i, moy_usb_dev_t *out);    // 0, or -ENOENT past the table
+int moy_usb_class_of(uint8_t addr);     // the device at `addr`'s class, or -ENOENT
 // A HID device's latest report: its length (0: none yet).
 int moy_usb_report(uint32_t owner, uint8_t addr, uint8_t *out, size_t cap);
 // A serial device's line at `baud` (8N1).

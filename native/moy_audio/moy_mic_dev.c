@@ -11,8 +11,9 @@
 
 #define CHUNK 128u              // samples a read takes from the ring at a time
 
-static int32_t mic_open(uint32_t slot, uint32_t pid, const char *cfg, size_t cn) {
-    (void)slot;
+static int32_t mic_open(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg,
+                        size_t cn) {
+    (void)slot, (void)perms;
     words_t it = { cfg, cfg + cn };
     word_t w;
     if (moy_dev_word(&it, &w) != 0) {

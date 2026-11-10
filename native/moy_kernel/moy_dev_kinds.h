@@ -35,12 +35,23 @@ int32_t moy_dev_errno(int rc);
 // anything else.
 bool moy_dev_hex(const char *v, size_t n, uint8_t *out, size_t len);
 
+// A UART row (`lease:<row>`, `row` n chars) for a device API's port: leased
+// to `pid` under `perms` and its driver up at `baud`, 8N1, with a 512-byte
+// transmit buffer (a write of up to that is taken whole): 0 with its lease
+// and unit, or a code (BAD for a row that is no UART the board offers,
+// DENIED without its permission, BUSY). Given back: the driver down, then
+// the lease.
+int32_t moy_dev_uart_take(uint32_t pid, uint32_t perms, const char *row, size_t n,
+                          uint32_t baud, uint32_t *lease, uint8_t *unit);
+void moy_dev_uart_give(uint32_t lease, uint8_t unit);
+
 // A device API's verbs, its driver module's (moy_<driver>_dev.c): each is
 // called for row `slot` of process `pid`, under the lease table's lock; open
-// answers 0 or a MOY_DEV_E* code, which leaves the row free again. A NULL
+// answers 0 or a MOY_DEV_E* code, which leaves the row free again
+// (MOY_DEV_PASS among them: the console's Python serves that cfg). A NULL
 // verb is BAD.
 typedef struct {
-    int32_t (*open)(uint32_t slot, uint32_t pid, const char *cfg, size_t cn);
+    int32_t (*open)(uint32_t slot, uint32_t pid, uint32_t perms, const char *cfg, size_t cn);
     void (*close)(uint32_t slot, uint32_t pid);
     int32_t (*read)(uint32_t slot, uint32_t pid, uint8_t *out, size_t cap);
     int32_t (*write)(uint32_t slot, uint32_t pid, const uint8_t *data, size_t n);
@@ -48,11 +59,15 @@ typedef struct {
                     size_t cap);
     int32_t (*set)(uint32_t slot, uint32_t pid, const char *cfg, size_t n);
     int32_t (*get)(uint32_t slot, uint32_t pid, const char *what, size_t n);
+    // The device lease class (moy_lease.h) the row's handle took beside its
+    // kind's own, 0 for none: kept through the VM's end as the kind's is.
+    uint8_t (*holds)(uint32_t slot);
 } moy_dev_ops_t;
 
 // The drivers' verbs (weak: an image without the driver answers ABSENT).
 extern const moy_dev_ops_t moy_dev_lora;
 extern const moy_dev_ops_t moy_dev_mic;
+extern const moy_dev_ops_t moy_dev_midi;
 
 // moy_dev.c's half: the device API `name` names, its kind (> 0) or 0.
 int moy_dev_kind(const char *name, size_t n);

@@ -774,7 +774,8 @@ def midi():
     yield midi_sim
     for pid in list(H.HANDLES):
         moybyte.end(pid)
-    while moy_midi.owner():
+    _K().moy_dev_reset()
+    if moy_midi.owner():
         moybyte.end(moy_midi.owner())
     devices.grants = None
     usb_sim.remove()
@@ -791,51 +792,92 @@ def _wakes(pid):
         _as(pid, lambda: moybyte.WAKES.call(wid))
 
 
+MIDI = 1 << 6                           # moy_dev.h's MOY_DEV_P_MIDI
+
+
+def _midi_perms():
+    return MIDI | _bit("lease:uart1")
+
+
 def test_a_midi_handle_a_port_on_a_uart_reads_whole_messages(midi):
     from runtime import moy_midi
     pid = L.spawn("t.midi")
-    h = _open(pid, "midi", "uart=uart1")
-    port = _get(pid, h, "port")
-    assert h > 0 and _get(pid, h, "state") == 1 and moy_midi.owner() == pid
-    assert leases.LEASES.of(pid, "uart1") is not None            # the lease is the caller's
+    h = _kopen(pid, "midi", "uart=uart1", _midi_perms())
+    port = _kget(pid, h, "port")
+    assert h > 0 and _kget(pid, h, "state") == 1 and moy_midi.owner() == pid
+    assert N.of_pin(47) and N.of_pin(48)                          # the row is the caller's
     midi.wire(port, b"\x90\x3c\x64\x3e\xf8\x50\x40\x00")          # running status, a clock
     midi.wire(port, b"\xf0\x7e\x01\x02\xf7\xc1\x05")              # sysex read past
-    assert _as(pid, lambda: H.read(pid, h, 2)) == H.FULL          # less than one message
-    assert _as(pid, lambda: H.read(pid, h, 7)) == b"\x90\x3c\x64\xf8\x00\x00"   # whole ones
-    assert _as(pid, lambda: H.read(pid, h, 64)) == b"\x90\x3e\x50\x90\x40\x00\xc1\x05\x00"
-    assert _as(pid, lambda: H.read(pid, h, 64)) == b""
-    assert _as(pid, lambda: H.write(pid, h, b"\x80\x3c\x00")) == 3
-    assert lease_sim.sent(1) == b"\x80\x3c\x00"
-    assert _as(pid, lambda: H.write(pid, h, b"\x3c\x00")) == H.BAD             # no status
-    assert _open(L.spawn("t.other"), "midi", "uart=uart1") == H.BUSY
-    assert _as(pid, lambda: H.close(pid, h)) == 0
-    assert moy_midi.owner() == 0 and leases.LEASES.of(pid, "uart1") is None
+    assert _kread(pid, h, 2) == H.FULL                            # less than one message
+    assert _kread(pid, h, 7) == b"\x90\x3c\x64\xf8\x00\x00"         # whole ones
+    assert _kread(pid, h, 64) == b"\x90\x3e\x50\x90\x40\x00\xc1\x05\x00"
+    assert _kread(pid, h, 64) == b""
+    assert _kwrite(pid, h, b"\x80\x3c\x00") == 3 and bus_sim.sent(1) == b"\x80\x3c\x00"
+    assert _kwrite(pid, h, b"\x3c\x00") == H.BAD                   # no status
+    assert _kopen(L.spawn("t.other"), "midi", "uart=uart1", _midi_perms()) == H.BUSY
+    assert _kclose(pid, h) == 0
+    assert moy_midi.owner() == 0 and not N.of_pin(47)
 
 
 def test_midi_handles_a_usb_and_a_ble_port_each_its_own_messages(midi):
-    from runtime import moy_midi
+    from runtime import moy_gatt, moy_midi, moy_usb
     from runtime.host import gatt_sim, usb_sim
     pid = L.spawn("t.midi")
     usb_sim.plug(3, 3, 0, 0x0499, 0x1503, "Keys 49")              # a USB-MIDI device
-    u = _open(pid, "midi", "usb=3")
-    b = _open(pid, "midi", "ble=" + KEYS)
-    assert _get(pid, b, "state") == 0
-    assert _as(pid, lambda: H.write(pid, b, b"\x80\x3c\x00")) == H.ABSENT     # not ready
-    for _ in range(3):
-        _wakes(pid)                                               # connected, found, subscribed
-    assert _get(pid, b, "state") == 1
+    u = _kopen(pid, "midi", "usb=3", MIDI)
+    b = _kopen(pid, "midi", "ble=" + KEYS, MIDI)
+    assert u > 0 and b > 0 and moy_usb.owner() == pid and moy_gatt.owner() == pid
+    assert _kget(pid, b, "state") == 1                            # connected, found, subscribed
     usb_sim.send(3, b"\x09\x91\x40\x7f")
-    assert gatt_sim.notify(KEYS, 0x0040, b"\x80\x81\x90\x3c\x64")
-    _wakes(pid)                                                   # the packet decoded
-    assert _as(pid, lambda: H.read(pid, u, 64)) == b"\x91\x40\x7f"
-    assert _as(pid, lambda: H.read(pid, b, 64)) == b"\x90\x3c\x64"
-    assert _as(pid, lambda: H.write(pid, u, b"\xb0\x07\x64")) == 3
+    assert gatt_sim.notify(KEYS, 0x0040, b"\x80\x81\x90\x3c\x64")   # decoded on the event
+    assert _kread(pid, u, 64) == b"\x91\x40\x7f"
+    assert _kread(pid, b, 64) == b"\x90\x3c\x64"
+    assert _kwrite(pid, u, b"\xb0\x07\x64") == 3
     assert usb_sim.sent(3)[0] == b"\x0b\xb0\x07\x64"
-    assert _as(pid, lambda: H.write(pid, b, b"\x80\x3c\x00")) == 3
+    assert _kwrite(pid, b, b"\x80\x3c\x00") == 3
     assert gatt_sim.written(KEYS, 0x0040)[2:] == b"\x80\x3c\x00"
-    assert _as(pid, lambda: H.close(pid, u)) == 0 and moy_midi.owner() == pid   # b still open
-    moybyte.end(pid)
-    assert moy_midi.owner() == 0 and pid not in H.HANDLES
+    assert _kclose(pid, u) == 0 and moy_midi.owner() == pid      # b still open
+    assert moy_usb.owner() == 0                                   # the host it took, let go
+    _end(pid)
+    assert moy_midi.owner() == 0 and moy_gatt.owner() == 0
+
+
+def test_a_ble_midi_port_reads_gone_once_its_link_drops(midi):
+    from runtime import moy_gatt
+    pid = L.spawn("t.midi")
+    b = _kopen(pid, "midi", "ble=" + KEYS, MIDI)
+    assert _kget(pid, b, "state") == 1
+    moy_gatt.disconnect(pid)
+    assert _kget(pid, b, "state") == 2 and _kwrite(pid, b, b"\x80\x3c\x00") == H.ABSENT
+
+
+def test_a_ble_midi_port_keeps_its_link_through_the_vm_s_end(midi):
+    """The BLE driver a handle took is no VM's (moy_lease_vm_stop keeps it,
+    moy_dev_holds): its port's machine still decodes what the peripheral
+    notifies, on the driver's events."""
+    from runtime import moy_gatt
+    from runtime.host import gatt_sim
+    pid = L.spawn("t.midi")
+    b = _kopen(pid, "midi", "ble=" + KEYS, MIDI)
+    assert _kget(pid, b, "state") == 1 and moy_gatt.owner() == pid
+    assert N.vm_stop() == 0 and moy_gatt.owner() == pid
+    assert gatt_sim.notify(KEYS, 0x0040, b"\x80\x81\x90\x3c\x64")
+    assert _kread(pid, b, 64) == b"\x90\x3c\x64"
+    _end(pid)
+    assert moy_gatt.owner() == 0
+
+
+def test_midi_shares_its_one_holder_with_the_python_face(midi):
+    from runtime import dev_midi, moy_midi
+    from runtime.host import usb_sim
+    pid = L.spawn("t.midi")
+    usb_sim.plug(3, 3, 0, 0x0499, 0x1503, "Keys 49")
+    h = _kopen(pid, "midi", "usb=3", MIDI)
+    port = _as(pid, lambda: dev_midi.uart("uart1"))               # the face's port beside it
+    assert moy_midi.ports(pid) == 2
+    assert _kclose(pid, h) == 0 and moy_midi.owner() == pid      # the face's port keeps it
+    _as(pid, lambda: dev_midi.close(port))
+    assert moy_midi.ports(pid) == 0
 
 
 def test_a_midi_handle_refuses_what_it_cannot_open_and_keeps_nothing(midi):
@@ -843,14 +885,11 @@ def test_a_midi_handle_refuses_what_it_cannot_open_and_keeps_nothing(midi):
     pid = L.spawn("t.midi")
     for bad in ("", "uart=uart1 usb=3", "usb=3 baud=9600", "uart=spi2", "usb=0", "ble=c0:ff",
                 "warp=1"):
-        assert _open(pid, "midi", bad) == H.BAD, bad
-    assert _open(pid, "midi", "usb=9") == H.ABSENT                # no such device
+        assert _kopen(pid, "midi", bad, _midi_perms()) == H.BAD, bad
+    assert _kopen(pid, "midi", "usb=9", MIDI) == H.ABSENT          # no such device
     assert moy_midi.owner() == 0
-    leases.LEASES.grants = lambda p: ()
-    assert _open(pid, "midi", "uart=uart1") == H.DENIED and moy_midi.owner() == 0
-    leases.LEASES.grants = None
-    devices.grants = lambda p: ("usb",)
-    assert _open(pid, "midi", "uart=uart1") == H.DENIED
+    assert _kopen(pid, "midi", "uart=uart1", MIDI) == H.DENIED and moy_midi.owner() == 0
+    assert _kopen(pid, "midi", "uart=uart1", _bit("lease:uart1")) == H.DENIED
 
 
 # -- the camera --------------------------------------------------------------------------

@@ -138,9 +138,9 @@ module) are the same objects held by HANDLE: the `moybyte.dev_*` rows
 whose driver has a C face safe on any task are the kernel's handle table's
 (`native/moy_kernel/moy_dev.h`: every lease, `gpio<n>`, `pins`, `uart<n>`,
 `spi<n>`, `i2c`, `pwm<n>` and `adc<n>`, over ESP-IDF's drivers in
-`native/moy_kernel/moy_devbus.h`, and the device APIs `lora` and `mic`, over
-their drivers' verbs in `native/moy_net/moy_lora_dev.c` and
-`native/moy_audio/moy_mic_dev.c`), served on the calling
+`native/moy_kernel/moy_devbus.h`, and the device APIs `lora`, `mic` and
+`midi`, over their drivers' verbs in `native/moy_net/moy_lora_dev.c`,
+`native/moy_audio/moy_mic_dev.c` and `native/moy_input/moy_midi_dev.c`), served on the calling
 program's own task under its grant's device permissions, so they answer with
 no VM and through an S3's VM stop; a pin's edges are read through an input
 reader the stop keeps. The other device APIs are the door's Python half's, hopped
@@ -275,9 +275,10 @@ there or not (`runtime/system/dev_handles.py`).
   with running status, realtime bytes through whole and system exclusive
   read past. A USB port is a USB-MIDI device `usb` enumerated (its event
   packets reach the driver from `moy_usb`'s IN completions). A BLE port is
-  a BLE-MIDI peripheral the face drives through `ble`'s central (connect,
+  a BLE-MIDI peripheral the driver drives through `ble`'s central, its
+  machine stepped on the BLE driver's events in C (`moy_midi_ble`: connect,
   find the MIDI I/O characteristic, subscribe; each notification's header
-  and timestamps read past). What an app sends is MIDI bytes, packed for the
+  and timestamps read past), so a port works with no VM. What an app sends is MIDI bytes, packed for the
   transport. The `midi` face's sweep runs ahead of the leases', so a UART's
   reader stops before its lease's driver goes.
 - **`camera`** (`runtime/system/dev_camera.py`): `size`, `capture` (the
@@ -612,7 +613,7 @@ Leases (Python gets them as `machine` objects, §1:
 subset every tier may hold), and on the compiled tiers leases and the
 `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera` and `media` devices, the
 `pins` and the radio link's ports (`net`) by handle (`native/moy_kernel/moy_dev.h`
-for the leases, `pins`, `lora` and `mic`, `runtime/system/dev_handles.py` for the
+for the leases, `pins`, `lora`, `mic` and `midi`, `runtime/system/dev_handles.py` for the
 other devices and `net`;
 moybyte.app's `moybyte_dev_*`, moybyte.os's `dev_*`, C's `moy_dev_*`):
 
@@ -679,7 +680,7 @@ pins, flags, &h)`, `moy_lease_drop(h)`, `moy_lease_sweep(owner)`,
 | design piece | today | what changes |
 |---|---|---|
 | hardware declaration | `[hardware]` in every ESP32 `board.toml`, every pin classified and checked (`tools/board_config.py`, `tests/test_board_toml.py`); the P4 READMEs' free pins are their `lease` rows (P2.1), with `uart1` and `spi2` riding them, offered as `MOY_LEASE_ROWS` | |
-| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects (Pin, UART, SPI, PWM, ADC, a SoftI2C on the pins), `pins` (P2.3; `tests/test_leases.py`); the compiled tiers' handles, `native/moy_kernel/moy_dev.h` (the leases, a hardware I²C unit among them, `lora` and `mic`) and `runtime/system/dev_handles.py` (the other devices) (`tests/test_dev_handles.py`, and each tier's fixture) | a hardware I²C unit as a class of the table |
+| the lease table | `native/moy_kernel/moy_lease.h` and `runtime/system/leases.py`: takes, the sweep, safe pins, `machine` objects (Pin, UART, SPI, PWM, ADC, a SoftI2C on the pins), `pins` (P2.3; `tests/test_leases.py`); the compiled tiers' handles, `native/moy_kernel/moy_dev.h` (the leases, a hardware I²C unit among them, `lora`, `mic` and `midi`) and `runtime/system/dev_handles.py` (the other devices) (`tests/test_dev_handles.py`, and each tier's fixture) | a hardware I²C unit as a class of the table |
 | the link ring | `native/moy_net/moy_link.h`, counting its drops | the link's records a ring source's (LINK) |
 | GPIO edges | `native/moy_input/moy_edge.h`: a leased pin's edges as an ISR ring source, opened through `moy_lease_edge` and closed by the drop (P2.3) | |
 | brightness | `runtime/system/settings_layer.py`: "stored and applied by nothing yet" | applied at boot and on change (P1.2); the backlight is a `class` row naming `brightness` on every console (P2.1), whose API is P2.3's |
