@@ -3,7 +3,7 @@
 reaches on each tier, with the permissions each answers under (any one of
 them), from native/os_calls.json."""
 
-VERSION = 124
+VERSION = 125
 SPEC_NAMES = ('print',)
 
 # a wasm app's "moybyte.app" imports
@@ -46,6 +46,7 @@ WASM_APP = {
     'moybyte_item_read': (),
     'moybyte_item_write': (),
     'moybyte_log': (),
+    'moybyte_name': (),
     'moybyte_notify': ('notifications',),
     'moybyte_on': (),
     'moybyte_open_with': ('front',),
@@ -164,6 +165,7 @@ WASM_OS = {
     'item_read': (),
     'item_write': (),
     'log': (),
+    'name': (),
     'nav_open_app': ('launch', 'front'),
     'notify': ('notifications',),
     'on': (),
@@ -314,6 +316,7 @@ ELF = {
     121: ('moy_aes_ctr', ()),
     122: ('moy_aes_ccm_seal', ()),
     123: ('moy_aes_ccm_open', ()),
+    124: ('moy_name', ()),
 }
 
 # the ordinals of the retired rows, which no module built now calls

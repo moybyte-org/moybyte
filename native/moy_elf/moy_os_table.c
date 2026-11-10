@@ -418,6 +418,13 @@ int32_t moy_os_moy_aes_ccm_open(const void *key, size_t key_len, const void *sea
     return moy_os_call(205u, MOY_OS_SEQ, a, 3, plain, plain_cap);   // moybyte.aes_ccm_open
 }
 
+int32_t moy_os_moy_name(void *name, size_t name_cap) {
+    const moy_os_arg_t a[1] = {
+        { NULL, 0u, (int32_t)(name_cap < 0x7fffffffu ? name_cap : 0x7fffffffu), MOY_OS_ARG_INT },
+    };
+    return moy_os_call(206u, MOY_OS_HOP, a, 1, name, name_cap);   // moybyte.name
+}
+
 // Retired 2026-11-08: one service model (docs/os_2026-11/processes.md section 1): a service's timer is the deadline it passes to poll, its events the messages it reads from its event descriptor.
 static int moy_os_retired_moy_timer_every(uint32_t period_us) {
     (void)period_us;
@@ -565,6 +572,7 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_aes_ctr,
         (void *)moy_os_moy_aes_ccm_seal,
         (void *)moy_os_moy_aes_ccm_open,
+        (void *)moy_os_moy_name,
     },
 };
 
@@ -693,4 +701,5 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_aes_ctr",
     "moy_aes_ccm_seal",
     "moy_aes_ccm_open",
+    "moy_name",
 };

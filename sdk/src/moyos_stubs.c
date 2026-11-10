@@ -1266,3 +1266,13 @@ int32_t moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, si
     return ((moy_os_fn_moy_aes_ccm_open *)__moy_os->fn[123])(key, key_len, sealed, sealed_len, tag, plain, plain_cap);
 }
 #endif
+
+#if MOY_OS_ROW(124)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_name(void *name, size_t name_cap);
+MOY_OS_USED(124);
+int32_t moy_name(void *name, size_t name_cap)
+{
+    return ((moy_os_fn_moy_name *)__moy_os->fn[124])(name, name_cap);
+}
+#endif

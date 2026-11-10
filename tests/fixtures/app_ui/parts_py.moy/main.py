@@ -8,6 +8,8 @@ def _layout(w, h, fs):
     pass
 
 
+import moybyte
+
 HOME = ("Srbija", "Planinari", "Ana Ridge", "Base Camp")
 CHANNELS = ("LongFast", "Planinari", "Base", "Open", "Family")
 
@@ -109,3 +111,5 @@ def _draw():
         ui.label("You hear only radios on ShortFast.")
         ui.toggle("Keep channels", True)
         ui.dialog()
+    elif page == 12:
+        ui.info("Name", moybyte.name())

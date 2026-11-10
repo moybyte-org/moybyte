@@ -612,6 +612,12 @@ static int u_check_123(const moy_u_space_t *u, const void *key, size_t key_len, 
         && U_BUF(plain, u_n((size_t)plain_cap, 1), MOY_U_W);
 }
 
+// 124 moy_name
+_Static_assert(U_REGS(void *) + U_REGS(size_t) <= 7, "moy_name's registers");
+static int u_check_124(const moy_u_space_t *u, void *name, size_t name_cap) {
+    return U_BUF(name, u_n((size_t)name_cap, 1), MOY_U_W);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -702,6 +708,7 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 121: fn = (u_check_fn *)(void *)u_check_121; break;
     case 122: fn = (u_check_fn *)(void *)u_check_122; break;
     case 123: fn = (u_check_fn *)(void *)u_check_123; break;
+    case 124: fn = (u_check_fn *)(void *)u_check_124; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

@@ -101,5 +101,7 @@ function _draw()
     ui.label("You hear only radios on ShortFast.")
     ui.toggle("Keep channels", true)
     ui.dialog()
+  elseif page == 12 then
+    ui.info("Name", moybyte.name())
   end
 end

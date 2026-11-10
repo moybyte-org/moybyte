@@ -708,6 +708,10 @@ class ConsoleCalls:
             return _DOOR_STALE
         return self._as(g, fn)
 
+    def name(self, g, cap):
+        d = str(self._as(g, _moybyte.name) or "").encode("utf-8")
+        return _DOOR_FULL if len(d) > cap else d
+
     def item_read(self, g, h, cap):
         it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
         if it is None:
@@ -823,6 +827,7 @@ DOOR_ARGS = {
     "moybyte.dev_set": "is",
     "moybyte.dev_get": "is",
     "moybyte.status_panel": "io",
+    "moybyte.name": "i",
 }
 # END GENERATED
 

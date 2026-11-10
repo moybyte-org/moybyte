@@ -244,5 +244,9 @@ EXPORT(_draw) void _draw(void) {
         ui_label(S("You hear only radios on ShortFast."), NULL, 0);
         ui_toggle(S("Keep channels"), 1, NULL, 0);
         ui_dialog("", 0, "", 0, 0, NULL, 0);
+    } else if (page == 12) {
+        char name[64];
+        int32_t n = moybyte_name(name, sizeof(name));
+        ui_info(S("Name"), name, n > 0 ? (uint32_t)n : 0, NULL, 0);
     }
 }

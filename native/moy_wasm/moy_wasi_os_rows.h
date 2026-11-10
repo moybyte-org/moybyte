@@ -48,6 +48,7 @@
     X(item_read, "(i*~)i") \
     X(item_write, "(i*~)i") \
     X(log, "(i*~)i") \
+    X(name, "(*~)i") \
     X(nav_open_app, "(*~)i") \
     X(notify, "(*~*~)i") \
     X(on, "(*~i)i") \
@@ -457,6 +458,11 @@ static int32_t w_os_aes_ccm_open(wasm_exec_env_t e, const uint8_t *key, uint32_t
                                  uint8_t *plain, uint32_t plain_cap) {
     const os_arg_t a[3] = { OS_O((const char *)key, key_n), OS_O((const char *)sealed, sealed_n), OS_I(tag) };
     return os_role(e, MOY_T_MOYBYTE_AES_CCM_OPEN, OS_SEQ, a, 3, plain, plain_cap);
+}
+
+static int32_t w_os_name(wasm_exec_env_t e, uint8_t *name, uint32_t name_cap) {
+    const os_arg_t a[1] = { OS_CAP(name_cap) };
+    return os_role(e, MOY_T_MOYBYTE_NAME, OS_HOP, a, 1, name, name_cap);
 }
 
 #endif // MOY_WASI_OS_BODIES

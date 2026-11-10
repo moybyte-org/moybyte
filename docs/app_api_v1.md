@@ -1020,7 +1020,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.aes_ctr` | none | `moybyte.aes_ctr` | `moybyte.aes_ctr` | `moybyte_aes_ctr`, `moybyte.os.aes_ctr` | `moy_aes_ctr` |
 | `moybyte.aes_ccm_seal` | none | `moybyte.aes_ccm_seal` | `moybyte.aes_ccm_seal` | `moybyte_aes_ccm_seal`, `moybyte.os.aes_ccm_seal` | `moy_aes_ccm_seal` |
 | `moybyte.aes_ccm_open` | none | `moybyte.aes_ccm_open` | `moybyte.aes_ccm_open` | `moybyte_aes_ccm_open`, `moybyte.os.aes_ccm_open` | `moy_aes_ccm_open` |
-| `moybyte.name` | none | `moybyte.name` | `moybyte.name` |  |  |
+| `moybyte.name` | none | `moybyte.name` | `moybyte.name` | `moybyte_name`, `moybyte.os.name` | `moy_name` |
 | `moybyte.key_make` | none | `moybyte.key_make` | `moybyte.key_make` |  |  |
 | `moybyte.key_public` | none | `moybyte.key_public` | `moybyte.key_public` |  |  |
 | `moybyte.key_shared` | none | `moybyte.key_shared` | `moybyte.key_shared` |  |  |

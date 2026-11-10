@@ -34,6 +34,8 @@ P4's desk as shipped (Moy dark). pmem 0 names the page each app draws:
      bytes keeps four), an off one (`o.disabled`) showing its hint, and a
      focused one whose text runs past it, its tail led by an ellipsis.
  11  a dialog with a stop in its body opening on its Cancel (`o.focus`).
+ 12  the console's name (`moybyte.name()`, a compiled app's moybyte_name
+     row) as an info row's value.
 """
 
 import os
@@ -51,7 +53,7 @@ DT = 1.0 / 30.0
 TIERS = ("python", "lua", "wasm")
 _EXT = {"python": "py", "lua": "lua", "wasm": "wasm"}
 _TITLE = {"python": "Parts Py", "lua": "Parts Lua", "wasm": "Parts Wasm"}
-PAGES = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+PAGES = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 CONSOLES = ("tdeck", "guition", "desk")
 SHOTS = os.environ.get("MOYBYTE_PARTS_SHOTS")     # a folder: each page as a PNG there
 
