@@ -1404,6 +1404,7 @@ def test_a_region_is_chosen_and_retunes(window):
 
 def test_a_name_is_edited_in_place(window):
     window.go('{kind="radio"}')
+    window.key("up", "up")
     assert window.where()[2] == "Name"
     window.type("\b" * 12 + "Trail Deck\r")
     window.frames(6)
@@ -1437,6 +1438,8 @@ def test_a_channel_link_from_the_clipboard_is_shown_then_applied(window):
 
 def test_a_pasted_link_is_read_by_enter(window):
     window.go('{kind="radio"}', '{kind="add", clip=false}')
+    window.key("up", "up")
+    assert window.where()[2] == "link"
     window.ws.clipboard.put_text(_url_of(window, SERBIA))
     window.drv.type_char(0x16)                    # Ctrl+V
     window.frames(3)
@@ -1537,3 +1540,35 @@ def test_every_page_and_state_renders_on_every_board(tmp_path, board):
         while N.owner():
             moybyte.end(N.owner())
         lora_sim.remove()
+
+
+@pytest.mark.parametrize("page, at", [('{kind="radio"}', "Preset"),
+                                      ('{kind="channel", ci=0}', "keys"),
+                                      ('{kind="add", clip=false}', "Add")])
+def test_a_page_with_fields_opens_off_them_so_k_goes_back(window, page, at):
+    """A page opens on its first row that is not a field, as Settings'
+    rows do: no text mode, so the T-Deck's K is back until the user moves
+    onto a field (the message composer opens on its field: typing is that
+    page's purpose)."""
+    window.go('{kind="radio"}', page) if page != '{kind="radio"}' else window.go(page)
+    assert window.where()[2] == at
+    assert not window.ws.input.text_mode
+    kind = window.where()[0]
+    window.key("b")
+    assert window.where()[0] != kind, "K steps back off the page"
+
+
+def test_mic_gives_a_channel_name_back(window):
+    window.go('{kind="radio"}', '{kind="channel", ci=0}')
+    window.key("up")
+    assert window.where()[2] == "Name" and window.ws.input.text_mode
+    window.run("__R = setup().channels[1].name")
+    name = window.get("__R")
+    window.type("xy")
+    assert window.ws.cancel_field(), "an edit in progress: Mic cancels it"
+    window.frames()
+    window.run("__R = stack[#stack].name or setup().channels[1].name")
+    assert window.get("__R") == name
+    window.run("__R = setup().channels[1].name")
+    assert window.get("__R") == name, "nothing was saved"
+    assert not window.ws.cancel_field(), "no edit now: Mic is the console's key"

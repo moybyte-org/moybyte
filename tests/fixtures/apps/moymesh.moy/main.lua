@@ -432,7 +432,7 @@ local function thread_hints(p, t, f)
     return { "confirm", "Details" }
   end
   if (drafts[p.key] or "") ~= "" then
-    return { "confirm", "Send", "cancel", "Back" }
+    return { "confirm", "Send", "cancel", "Cancel" }
   end
   return { "cancel", "Back" }
 end
@@ -816,6 +816,8 @@ local function draw_radio(p)
   if (f == "Name" and (p.long or long) ~= long)
       or (f == "Short name" and (p.short or short) ~= short) then
     ui.hints({ "confirm", "Save", "cancel", "Cancel" })
+  elseif f == "Name" or f == "Short name" then
+    ui.hints({ "confirm", "Done" })
   else
     ui.hints({ "confirm", "Edit", "back", "Back" })
   end
@@ -866,7 +868,7 @@ local function draw_radio(p)
   elseif add then
     push({ kind = "add" })
   end
-  if fresh and not p.back_from then ui.focus("Name") end
+  if fresh and not p.back_from then ui.focus("Preset") end
   if fresh and p.back_from then
     local b = p.back_from
     ui.focus(b.kind == "preset" and "Preset" or b.kind == "region" and "Region"
@@ -980,8 +982,10 @@ local function draw_channel(p)
   end
   ui.page(channel_name(s, i))
   local f = ui.focus()
-  if (f == "Name" and (p.name or c.name) ~= c.name) or (f == "Key" and p.paste) then
+  if (f == "Name" and (p.name or c.name) ~= c.name) or (f == "Key" and (p.paste or "") ~= "") then
     ui.hints({ "confirm", "Save", "cancel", "Cancel" })
+  elseif f == "Name" or f == "Key" then
+    ui.hints({ "confirm", "Done" })
   else
     ui.hints({ "confirm", "Edit", "back", "Back" })
   end
@@ -1079,7 +1083,7 @@ local function draw_channel(p)
       p.ask = nil
     end
   end
-  if fresh then ui.focus("Name") end
+  if fresh then ui.focus("keys") end
 end
 
 local function clip_link()
@@ -1118,12 +1122,16 @@ local function draw_add(p)
     p.clip = clip_link() or false
   end
   local f = ui.focus()
-  if p.clip and f ~= "link" then
-    ui.hints({ "confirm", "Paste", "back", "Back" })
-  elseif f == "link" then
+  if f == "link" and (p.url or "") ~= "" then
     ui.hints({ "confirm", "Read link", "cancel", "Cancel" })
+  elseif f == "Name" and (p.name or "") ~= "" then
+    ui.hints({ "confirm", "Add", "cancel", "Cancel" })
+  elseif f == "link" or f == "Name" then
+    ui.hints({ "confirm", "Done" })
+  elseif f == "paste" then
+    ui.hints({ "confirm", "Paste", "back", "Back" })
   else
-    ui.hints({ "confirm", "Edit", "back", "Back" })
+    ui.hints({ "confirm", "Add", "back", "Back" })
   end
   local L, bx, by, bw, bh = body("add", true)
   ui.group("From a link")
@@ -1164,7 +1172,7 @@ local function draw_add(p)
       _reload()
     end
   end
-  if fresh then ui.focus(p.clip and "paste" or "link") end
+  if fresh then ui.focus(p.clip and "paste" or "Add") end
 end
 
 local function from_to(a, b)
