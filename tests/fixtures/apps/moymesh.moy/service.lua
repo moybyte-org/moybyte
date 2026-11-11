@@ -22,9 +22,29 @@
 --     send(text, to)   a text: `to` nil or a channel's index (0 the primary,
 --                      1 to 7 a secondary) for that channel, "!xxxxxxxx" for
 --                      a direct message to that node under its key. A node
---                      whose key this one has not heard is not sent to: the
---                      message is logged failed, why "no key", and the node
---                      is sent this one's NodeInfo asking for its own.
+--                      whose User came with no key (older firmware) is sent
+--                      a legacy one under the channel it was last heard on
+--                      (pki false). A node whose User this one has not heard
+--                      is not sent to: the message is logged failed, why "no
+--                      key", and the node is sent this one's NodeInfo asking
+--                      for its own; nor is a node whose key changed until
+--                      the change is accepted (why "key changed").
+--     act(verb, ...)   what the window asks besides a text:
+--       act("ask", node)      this node's NodeInfo sent to "!xxxxxxxx",
+--                             asking for its own (its record's `asked` the
+--                             time)
+--       act("accept", node)   the key "!xxxxxxxx" announced in place of the
+--                             one held (its record's `key_new`) is its key
+--                             from now
+--       act("delete", i, text)  this node's own message at log index i (from
+--                             1) dropped, where its text is `text`
+--       act("resend", i, text)  ... dropped and sent again, to the same
+--                             channel or node
+--       act("key", ci, bytes) channel `ci` (0 the primary) given a random key
+--                             of 16 or 32 bytes; the setup saved and retuned
+--       act("retire")         every channel message kept so far marked
+--                             `old` = its channel's name, before a link
+--                             replaces the channels (its thread read-only)
 --     retune()         after it changed any of the prefs below: the radio
 --                      retuned, the channels and names read again, and,
 --                      where any changed, this node's NodeInfo announced.
@@ -38,9 +58,12 @@
 --     log         the messages, oldest first, at most KEEP of all threads
 --                 (the fullest thread gives up its oldest first): each
 --                 { from = "!xxxxxxxx" the sender, "" this node;
---                   text; t = os.time() when it was kept;
+--                   text; t = when it was kept (mesh.lua's wall(), Unix
+--                   seconds on every tier);
 --                   ch = the channel's index, for a channel's message
 --                   (a record with neither ch nor dm is the primary's);
+--                   old = the name of the channel it was on, for one a
+--                   link's channels replaced (act "retire");
 --                   dm = "!xxxxxxxx" the other node, for a direct message
 --                   either way; pki = true where it went under the nodes'
 --                   keys, false for a legacy one under a channel's key;
@@ -53,8 +76,11 @@
 --     nodes       the nodes heard, { ["!xxxxxxxx"] = { long, short (their
 --                 names), hw (HardwareModel), role (Config.DeviceConfig.
 --                 Role), key (their X25519 public key, 64 hex digits; a
---                 node with none takes no direct message), heard
---                 (os.time() of the last packet), rssi, snr, hops (how
+--                 node with none takes only a legacy direct message),
+--                 key_new (a key it announced since, which is not taken
+--                 until the window accepts it), asked (when this node
+--                 last asked it for its User), heard (wall() of the
+--                 last packet), rssi, snr, hops (how
 --                 many hops it came over, where the packet says), ch (the
 --                 channel it was last heard on) } }, at most NODES_MAX, the
 --                 longest unheard dropped first
@@ -111,10 +137,12 @@
 --                that changed it (asking for replies), every three hours
 --                (default_node_info_broadcast_secs) without; sent to a node
 --                that asks (want_response), to a node heard with no User yet
---                (asking for its own), and to a node whose NAK says it lacks
---                this one's key. A node's first key is the one kept: a
---                NodeInfo with another is dropped, as NodeDB::updateUser
---                drops it.
+--                (asking for its own), to a node the window asks of, and to
+--                a node whose NAK says it lacks this one's key. A node's
+--                first key is the one kept: a NodeInfo with another is
+--                dropped, as NodeDB::updateUser drops it, its key kept as
+--                key_new for the window to accept or not. A direct message
+--                under key_new still opens.
 --
 -- THE KEY PAIR is the console's (moybyte.key_make, key_public, key_shared):
 -- the console keeps its secret where no app reads it and the settings carry
@@ -519,7 +547,7 @@ local function thread(rec)
 end
 
 local function log(rec)
-    rec.t = os.time()
+    rec.t = wall()
     local l = prefs.get("log") or {}
     l[#l + 1] = rec
     while #l > KEEP do
@@ -590,7 +618,7 @@ end
 -- once, a known one's signal once in SAVE_TICKS.
 local function touch(frm, ci, rssi, snr, f)
     local n, new = node_of(frm)
-    n.heard, n.rssi, n.snr, n.hops, n.ch = os.time(), rssi, snr, hops_away(f), ci
+    n.heard, n.rssi, n.snr, n.hops, n.ch = wall(), rssi, snr, hops_away(f), ci
     S.dirty = true
     if new then
         save_nodes()
@@ -606,6 +634,10 @@ local function learn(frm, u)
     local n = node_of(frm)
     if n.key and (u.key == nil or hex(u.key) ~= n.key) then
         moybyte.log(moybyte.WARNING, node_name(frm) .. " announces a key it did not have")
+        if u.key and n.key_new ~= hex(u.key) then
+            n.key_new = hex(u.key)
+            save_nodes()
+        end
         return false
     end
     n.long, n.short, n.hw, n.role = u.long, u.short, u.hw, u.role
@@ -743,9 +775,9 @@ end
 local function open(packet, h)
     if h[5] == 0 and h[1] == S.node then
         local n = S.nodes[node_name(h[2])]
-        local key = n and dm_key(n.key)
-        if key then
-            local plain = pki_open(key, packet)
+        for _, k in ipairs({ n and n.key or false, n and n.key_new or false }) do
+            local key = k and dm_key(k)
+            local plain = key and pki_open(key, packet)
             local port, payload, x
             if plain then
                 port, payload, x = data_decode(plain)
@@ -847,21 +879,32 @@ end
 local function dm(text, peer)
     local to = node_number(peer)
     local n = S.nodes[peer]
-    if not (n and n.key) then
+    if not (n and (n.key or n.long)) then
         log({ from = "", dm = peer, text = text, state = "failed", why = "no key" })
         announce_to(S.asked, to, true, n and n.ch or 0)
         return
     end
-    local key = dm_key(n.key)
-    if key == nil then
-        log({ from = "", dm = peer, text = text, state = "failed", why = "its key is not a key" })
+    if n.key_new then
+        log({ from = "", dm = peer, text = text, state = "failed", why = "key changed" })
         return
     end
-    local pid = new_id()
-    local packet = pki_packet(key, to, S.node, pid, flags(S.hops, S.hops, true),
-                              data_encode(TEXT, text), moybyte.random(4), S.node & 0xFF)
+    local pid, packet = new_id(), nil
+    if n.key then
+        local key = dm_key(n.key)
+        if key == nil then
+            log({ from = "", dm = peer, text = text, state = "failed",
+                  why = "its key is not a key" })
+            return
+        end
+        packet = pki_packet(key, to, S.node, pid, flags(S.hops, S.hops, true),
+                            data_encode(TEXT, text), moybyte.random(4), S.node & 0xFF)
+    else
+        local c = S.chans[(n.ch or 0) + 1] or S.chans[1]
+        packet = header(to, S.node, pid, flags(S.hops, S.hops, true), c.hash, 0, S.node & 0xFF)
+            .. crypt(c.key, pid, S.node, data_encode(TEXT, text))
+    end
     fresh(S.node, pid)
-    log({ from = "", dm = peer, text = text, id = pid, pki = true, state = "sending" })
+    log({ from = "", dm = peer, text = text, id = pid, pki = n.key ~= nil, state = "sending" })
     local p = { packet = packet, to = to, tries = 1, due = nil }
     S.pending[pid] = p
     local function sent(ok)
@@ -908,9 +951,65 @@ local function send(_, text, to)
              end)
 end
 
+-- This node's own message at log index `i` whose text is `text`, taken out
+-- of the log; nil where there is none.
+local function unlog(i, text)
+    local l = prefs.get("log") or {}
+    local r = l[math.tointeger(i) or 0]
+    if r == nil or r.from ~= "" or r.text ~= text then
+        return nil
+    end
+    table.remove(l, i)
+    prefs.set("log", l)
+    moybyte.send(ME, "heard")
+    return r
+end
+
+local retune
+
+-- What the window asks besides a text (the header's act).
+local function act(_, verb, a, b)
+    local n, to = S.nodes[a], node_number(a)
+    if verb == "ask" and to and node_ok(to) and to ~= S.node then
+        announce(to, true, n and n.ch or 0)
+        n = n or node_of(to)
+        n.asked = wall()
+        save_nodes()
+    elseif verb == "accept" and n and n.key_new then
+        n.key, n.key_new = n.key_new, nil
+        save_nodes()
+    elseif verb == "delete" then
+        unlog(a, b)
+    elseif verb == "resend" then
+        local r = unlog(a, b)
+        if r and r.old == nil then
+            send(nil, r.text, r.dm or r.ch or 0)
+        end
+    elseif verb == "key" then
+        local s, ci = setup(), (math.tointeger(a) or -1) + 1
+        if s.channels[ci] and (b == 16 or b == 32) then
+            s.channels[ci].psk = b64(moybyte.random(b))
+            setup_save(s)
+            if retune() then
+                announce(BROADCAST, true, 0)
+            end
+        end
+    elseif verb == "retire" then
+        local l = prefs.get("log") or {}
+        for _, r in ipairs(l) do
+            if r.dm == nil and r.old == nil then
+                local c = S.chans[(r.ch or 0) + 1]
+                r.old = c and c.name or "?"
+            end
+        end
+        prefs.set("log", l)
+        moybyte.send(ME, "heard")
+    end
+end
+
 -- The prefs read again: the radio retuned where its setup moved, and this
 -- node announced where anything it announces or hears on moved.
-local function retune()
+function retune()
     S.setup = setup()
     S.chans = channel_keys(S.setup)
     S.hops = S.setup.hops
@@ -960,6 +1059,7 @@ function moy_start()
     moybyte.on("lora", radio)
     retune()
     moybyte.on("send", send)
+    moybyte.on("act", act)
     moybyte.on("retune", function()
         if retune() then
             announce(BROADCAST, true, 0)

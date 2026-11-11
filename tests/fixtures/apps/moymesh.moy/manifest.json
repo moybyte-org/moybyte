@@ -14,7 +14,8 @@
     "type": "app",
     "permissions": [
       "lora",
-      "prefs"
+      "prefs",
+      "clipboard"
     ],
     "required": [
       "lora",

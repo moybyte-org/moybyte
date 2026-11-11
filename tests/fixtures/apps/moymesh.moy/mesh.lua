@@ -34,6 +34,16 @@
 
 ME = "moymesh"
 
+-- The wall clock (moybyte.clock): Unix seconds on every tier, then the
+-- console's zone's offset from UTC (seconds east) and whether the clock
+-- holds real time (NTP has answered on a board). The service's stamps and
+-- the window's ages and day heads read it, so they count from one epoch.
+function wall()
+    local t = moybyte.clock()
+    local here = moybyte.clock(true)
+    return t, here and here - t or 0, here ~= nil
+end
+
 -- Meshtastic's regions an SX1262 reaches (RadioInterface.cpp, RDEF), in the
 -- order the window offers them: the band's start and end (Hz), its power
 -- limit (dBm) and its RegionCode (config.proto). REGIONS is their names in

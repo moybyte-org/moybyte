@@ -585,12 +585,13 @@ class _Window:
         err = self.lua.exec(src, "test")
         assert err is None, err
 
-    def row(self, i):
-        self.run("__R = rows[%d]" % i)
+    def last(self, key="ch0"):
+        """The newest message of thread `key` as the window holds it: its
+        sender's name, its signal's bars and its text."""
+        self.run("local t = threads[%r]; local r = t.msgs[#t.msgs].r\n"
+                 "__R = (r.from == '' and 'me' or name_of(r.from)) .. ' ' .. "
+                 "tostring(bars(r.rssi, r.snr)) .. ': ' .. r.text" % key)
         return self.get("__R")
-
-    def rows(self):
-        return [self.row(i + 1) for i in range(self.lua.get_global_len("rows"))]
 
 
 def _open_mesh(tmp_path, tweak=None, name=None):
@@ -613,7 +614,9 @@ def _open_mesh(tmp_path, tweak=None, name=None):
     return ws, pl, drv, svc
 
 
-def _close_mesh(svc):
+def _close_mesh(svc, ws=None):
+    if ws is not None:
+        ws.go_home()            # the window's run ends, and its process's queue
     S.SCHED.stop(svc.pid)
     S.SCHED.poll()
     while N.owner():
@@ -625,7 +628,7 @@ def _close_mesh(svc):
 def mesh(tmp_path):
     got = _open_mesh(tmp_path)
     yield got
-    _close_mesh(got[3])
+    _close_mesh(got[3], got[0])
 
 
 def _frames(drv, n=4):
@@ -738,8 +741,8 @@ def test_the_service_holds_the_radio_and_sends_what_the_window_typed(mesh):
     assert N.owner() == svc.pid
     name = _prefs(pl, "node")
     node = int(name[1:], 16)
-    assert 3 < node < 0xFFFFFFFF and win.get("node") == name == "!%08x" % node
-    win.run('send("hi from moybyte")')
+    assert 3 < node < 0xFFFFFFFF and win.get("me") == name == "!%08x" % node
+    win.run('moybyte.send(ME, "send", "hi from moybyte", 0)')
     (packet, freq, sf, bw, sync, iq, pre), = _sent(drv)
     assert (freq, sf, bw, sync, iq, pre) == (EU, 11, 250000, 0x2B, False, 16)
     to, frm, pid, flags, chash = struct.unpack("<IIIBB", packet[:14])
@@ -747,7 +750,7 @@ def test_the_service_holds_the_radio_and_sends_what_the_window_typed(mesh):
     block = struct.pack("<QII", pid, frm, 0)
     assert _ctr(DEFAULT_KEY, block, packet[16:]) == b"\x08\x01\x12\x0fhi from moybyte"
     _frames(drv)
-    assert win.row(1) == "me: hi from moybyte"
+    assert win.last() == "me nil: hi from moybyte"
     rec, = _prefs(pl, "log")
     assert (rec["ch"], _u32(rec["id"]), rec["from"]) == (0, pid, "")
 
@@ -758,7 +761,7 @@ def test_the_service_keeps_another_node_s_text_with_its_signal(mesh):
     _sent(drv)
     p = _node_packet(b"hello T-Deck", 0xA1B2C3D4, 4242)
     _hear(drv, p, rssi=-112, snr=-34)
-    assert win.rows() == ["!a1b2c3d4 -112 dBm -8.5 dB: hello T-Deck"]
+    assert win.last() == "C3D4 1: hello T-Deck"
     rec, = _prefs(pl, "log")
     assert {k: rec[k] for k in ("from", "text", "rssi", "snr", "ch")} == \
         {"from": "!a1b2c3d4", "text": "hello T-Deck", "rssi": -112, "snr": -8.5, "ch": 0}
@@ -969,8 +972,9 @@ def test_a_new_region_retunes_the_radio(mesh):
     assert lora_sim.air(_node_packet(b"us", 1234, 2), 906875000, 11)
     N.step(0)
     _frames(drv)
-    assert win.row(1).startswith("!000004d2 ") and win.row(1).endswith(": us")
-    assert win.get("region") == 3, "the window's region is the one prefs name"
+    assert win.last() == "04D2 4: us"
+    win.run("__R = setup_now.region")
+    assert win.get("__R") == "US", "the window's region is the one prefs name"
 
 
 def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
@@ -994,7 +998,7 @@ def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
         lora_sim.remove()
 
 
-def test_on_the_handheld_the_window_opens_on_the_field_below_the_bar(tmp_path):
+def test_on_the_handheld_the_window_opens_on_its_home_below_the_bar(tmp_path):
     from runtime import host_app
     lora_sim.install()
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(320, 240))
@@ -1018,7 +1022,7 @@ def test_on_the_handheld_the_window_opens_on_the_field_below_the_bar(tmp_path):
         room = [win.get(k) for k in ("CX", "CY", "CW", "CH")]
         assert room[1] > 0 and got == room          # the page lies below the bar
         win.run("FOCUS = ui.focus()")
-        assert win.get("FOCUS") == "Message"
+        assert win.get("FOCUS") == "convs", "it opens on its conversations"
     finally:
         S.SCHED.reset()         # opening Mesh started its service on the one scheduler
         while N.owner():
@@ -1046,11 +1050,490 @@ def test_on_the_desk_mesh_is_a_window_laid_out_for_its_room(tmp_path):
         assert [win.get(k) for k in ("room_w", "room_h", "room_fs")] == \
             [w, h, ws.look.effective_font_scale()]
         pl.ns["prefs"].set("log", [{"from": "!5e6f7a8b", "text": "hi", "rssi": -98, "snr": 6.5}])
-        win.run("_layout(200, %d, 1)" % h)
-        # the readout leads the text: a row the room cuts short loses its text
-        assert win.rows() == ["!5e6f7a8b -98 dBm 6.5 dB: hi"]
+        win.run("_reload()")
+        assert win.last() == "7A8B 4: hi"
     finally:
         S.SCHED.reset()         # opening Mesh started its service on the one scheduler
+        while N.owner():
+            moybyte.end(N.owner())
+        lora_sim.remove()
+
+
+# -- the window -------------------------------------------------------------------
+#
+# The window (main.lua) driven as a person drives it: by the keys (the
+# console's buttons) and by touch (taps at the rects the verbs answered), on
+# the service's own prefs. RECORD wraps the verbs a test aims at: each
+# bubble's and placed button's rect by its id, the page's rect, the focus and
+# the page on top after every frame.
+
+RECORD = """
+RECT, AT = {}, nil
+local at, bubble, button, page = ui.at, ui.bubble, ui.button, ui.page
+ui.at = function(x, y, w, h) AT = {x, y, w, h}; return at(x, y, w, h) end
+ui.bubble = function(t, side, o)
+  local x, y, w, h, st = bubble(t, side, o)
+  if o and o.id then RECT[o.id] = {x, y, w, h} end
+  AT = nil
+  return x, y, w, h, st
+end
+ui.button = function(l, k, o)
+  RECT[o and o.id or l] = AT
+  AT = nil
+  return button(l, k, o)
+end
+local popover = ui.popover
+ui.popover = function(...)
+  AT = nil
+  return popover(...)
+end
+ui.page = function(...)
+  local x, y, w, h = page(...)
+  PAGE = {x, y, w, h}
+  return x, y, w, h
+end
+local draw = _draw
+_draw = function()
+  draw()
+  FOCUS = ui.focus()
+  KIND = stack[#stack].kind
+  KEY = stack[#stack].key
+end
+"""
+
+ANA, BASE, MILO, ANON = "!5e6f7a8b", "!3a4b5c6d", "!7f8e9d0c", "!9c0d1e2f"
+SERBIA = {"region": "EU_868", "preset": "MEDIUM_FAST", "slot": 1, "hops": 3,
+          "channels": [{"name": "Srbija", "psk": "AQ=="},
+                       {"name": "Planinari", "psk": base64.b64encode(bytes(range(32))).decode()}]}
+
+
+def _nodes(now):
+    return {
+        BASE: dict(long="Base Camp", short="BASE", key="ab" * 32, rssi=-96, snr=7.5,
+                   heard=now - 10, ch=0),
+        ANA: dict(long="Ana Ridge", short="ANA", key="cd" * 32, rssi=-104, snr=2.0,
+                  heard=now - 150, ch=0),
+        ANON: dict(rssi=-112, snr=-3.5, heard=now - 330, ch=0),
+        MILO: dict(long="Milo's Deck", short="MILO", rssi=-121, snr=-12.0, heard=now - 3700, ch=0),
+    }
+
+
+def _chat(now):
+    return [
+        {"from": ANA, "text": "Anyone on the hill tonight?", "rssi": -98, "snr": 6.5, "t": now - 900},
+        {"from": "", "text": "On my way up", "t": now - 800},
+        {"from": "", "text": "Bring the blue tent", "failed": True, "t": now - 700},
+        {"from": ANON, "text": "Clear skies up here, wind from the north. Bring a warm layer.",
+         "rssi": -112, "snr": -3.5, "t": now - 600},
+        {"from": ANA, "text": "See you at the top", "rssi": -104, "snr": 2.0, "t": now - 400},
+        {"from": "", "text": "Ten minutes", "t": now - 300},
+    ]
+
+
+class _Mesh(_Window):
+    """The window with RECORD over it, and the driver that drives it."""
+
+    def __init__(self, ws, pl, drv):
+        super().__init__(pl)
+        self.ws, self.pl, self.drv = ws, pl, drv
+        self.run(RECORD)
+
+    def state(self, log=None, nodes=None, setup=None, **prefs):
+        p = self.pl.ns["prefs"]
+        for k in ("region", "preset", "slot", "hops", "channels", "seen"):
+            p.set(k, None)
+        for k, v in dict(setup or {}, **prefs).items():
+            p.set(k, v)
+        p.set("log", log or [])
+        p.set("nodes", nodes or {})
+
+    def go(self, *pages, lua=""):
+        self.run('stack = {%s}; fresh = true; _reload(); %s'
+                 % (", ".join(['{kind="home"}'] + list(pages)), lua))
+        self.frames()
+
+    def frames(self, n=4):
+        for _ in range(n):
+            self.ws.mark_dirty()
+            self.drv.frame(1 / 30)
+            S.SCHED.poll()
+        assert self.pl.cart_error is None, self.pl.cart_error
+
+    def key(self, *names):
+        for n in names:
+            self.drv.press(n)
+            self.frames(2)
+
+    def type(self, text):
+        for ch in text:
+            self.drv.type_char(ord(ch))
+            self.frames(2)              # a key typed again needs a frame between
+
+    def rect(self, rid):
+        self.run("__R = RECT[%r] and table.concat(RECT[%r], ',') or ''" % (rid, rid))
+        got = self.get("__R")
+        return [int(v) for v in got.split(",")] if got else None
+
+    def tap(self, rid):
+        x, y, w, h = self.rect(rid)
+        self.drv.click(x + w // 2, y + h // 2)
+        self.frames(3)
+
+    def where(self):
+        return self.get("KIND"), self.get("KEY"), self.get("FOCUS")
+
+
+@pytest.fixture
+def window(tmp_path):
+    ws, pl, drv, svc = _open_mesh(tmp_path)
+    _sent(drv)
+    w = _Mesh(ws, pl, drv)
+    yield w
+    _close_mesh(svc, ws)
+
+
+def _now():
+    return moybyte.clock()
+
+
+def test_the_service_stamps_its_records_on_the_wall_clock(mesh):
+    """os.time() counts from 2000 on a board: a record's `t` and a node's
+    `heard` are moybyte.clock()'s Unix seconds on every tier."""
+    ws, pl, drv, svc = mesh
+    _sent(drv)
+    _hear(drv, _node_packet(b"stamped", 0x0BADCAFE, 77))
+    now = _now()
+    (rec,) = [r for r in _prefs(pl, "log") if r["text"] == "stamped"]
+    assert abs(rec["t"] - now) <= 2
+    assert abs(_prefs(pl, "nodes")["!0badcafe"]["heard"] - now) <= 2
+
+
+def test_the_window_reads_ages_and_days_on_the_wall_clock(window):
+    now = _now()
+    window.run("now, zone, synced = wall()")
+    assert window.get("now") >= now
+    for ago, want in ((5, "now"), (150, "2 min"), (7300, "2 h"), (3 * 86400, "3 d")):
+        window.run("__R = age(now - %d)" % ago)
+        assert window.get("__R") == want
+    window.run("zone, synced = 0, true; __R = day_head(now)")
+    assert window.get("__R") == "Today"
+    window.run("__R = day_head(now - 86400)")
+    assert window.get("__R") == "Yesterday"
+    window.run("__R = day_head(1793664000)")      # 2026-11-03, a Tuesday
+    assert window.get("__R") == "Tue 3 Nov"
+
+
+def test_the_window_opens_on_its_home_and_the_first_conversation(window):
+    now = _now()
+    window.state(log=_chat(now), nodes=_nodes(now))
+    window.go()
+    assert window.where() == ("home", None, "convs")
+    window.key("run")
+    assert window.where() == ("thread", "ch0", "msg")
+
+
+def test_a_draft_is_sent_by_enter_and_by_the_send_key(window):
+    now = _now()
+    window.state(log=_chat(now), nodes=_nodes(now))
+    window.go('{kind="thread", key="ch0"}')
+    window.type("hi\r")
+    window.frames(6)
+    assert [r["text"] for r in _prefs(window.pl, "log")][-1] == "hi"
+    (packet, *_), = _sent(window.drv)
+    assert _open(packet)[1][2] == [b"hi"]
+    window.type("by touch")
+    window.tap("send")
+    window.frames(6)
+    assert [r["text"] for r in _prefs(window.pl, "log")][-1] == "by touch"
+    window.run("__R = drafts.ch0")
+    assert window.get("__R") == ""
+
+
+def test_a_heard_bubble_s_details_message_its_sender(window):
+    now = _now()
+    window.state(log=_chat(now)[:5], nodes=_nodes(now))
+    window.go('{kind="thread", key="ch0"}')
+    window.key("up")
+    assert window.where()[2] == "m5"
+    window.key("run")
+    window.run("__R = stack[#stack].pop and stack[#stack].pop.i or 0")
+    assert window.get("__R") == 5, "Enter opens the details"
+    window.key("run")
+    assert window.where()[:2] == ("thread", ANA), "Message Ana Ridge opens her thread"
+
+
+def test_a_failed_message_is_sent_again_by_enter_and_a_tap_opens_its_details(window):
+    now = _now()
+    log = _chat(now)[:5] + [{"from": "", "text": "Wait for me", "failed": True, "t": now - 60}]
+    window.state(log=log, nodes=_nodes(now))
+    window.go('{kind="thread", key="ch0"}')
+    window.tap("m6")
+    window.run("__R = stack[#stack].pop and stack[#stack].pop.i or 0")
+    assert window.get("__R") == 6, "a tap opens the details and never resends"
+    assert len(_prefs(window.pl, "log")) == 6
+    window.key("run")                     # the card opens on Send again
+    window.frames(6)
+    texts = [(r["text"], bool(r.get("failed"))) for r in _prefs(window.pl, "log")]
+    assert texts[-1] == ("Wait for me", False) and ("Wait for me", True) not in texts
+    assert _sent(window.drv), "it went out again"
+
+
+def test_more_opens_a_failed_message_s_details_and_delete_drops_it(window):
+    now = _now()
+    log = _chat(now)[:5] + [{"from": "", "text": "Wait for me", "failed": True, "t": now - 60}]
+    window.state(log=log, nodes=_nodes(now))
+    window.go('{kind="thread", key="ch0"}')
+    window.key("up")
+    assert window.where()[2] == "m6"
+    window.drv.type_char(ord("m"))
+    window.frames(3)
+    window.run("__R = stack[#stack].pop and stack[#stack].pop.i or 0")
+    assert window.get("__R") == 6
+    assert window.where()[2] == "Send again", "the card opens on its primary"
+    window.key("left", "run")
+    window.frames(6)
+    assert [r["text"] for r in _prefs(window.pl, "log")][-1] == "See you at the top"
+
+
+def test_a_cut_message_opens_on_its_own_page(window):
+    now = _now()
+    long = "Trail report: " + "the path is washed out past the bridge. " * 6
+    window.state(log=[{"from": ANON, "text": long, "rssi": -117, "snr": -9.0, "t": now - 50}],
+                 nodes=_nodes(now))
+    window.go('{kind="thread", key="ch0"}')
+    window.key("up", "run")
+    assert window.where()[0] == "message"
+    window.drv.escape()
+    window.frames(3)
+    assert window.where()[:2] == ("thread", "ch0"), "Back returns to the thread"
+
+
+def test_a_direct_thread_is_written_under_the_node_s_key(window):
+    _introduce(window.drv, window.pl, num=int(ANA[1:], 16))
+    window.go('{kind="thread", key="%s"}' % ANA)
+    window.type("Packed it\r")
+    window.frames(6)
+    rec = _prefs(window.pl, "log")[-1]
+    assert (rec["dm"], rec["pki"], rec["state"]) == (ANA, True, "sent")
+
+
+def test_a_node_without_a_key_takes_a_legacy_message_on_its_channel(window):
+    milo = int(MILO[1:], 16)
+    _hear(window.drv, _packet(_data(4, _user(milo, "Milo's Deck", "MILO", b"")), milo, 902))
+    window.go('{kind="thread", key="%s"}' % MILO)
+    window.run("__R = key_state(%r)" % MILO)
+    assert window.get("__R") == "none"
+    window.type("Is it open\r")
+    window.frames(6)
+    rec = _prefs(window.pl, "log")[-1]
+    assert (rec["dm"], rec["pki"]) == (MILO, False)
+    (packet, *_), = _sent(window.drv)
+    head, data = _open(packet)
+    assert head[0] == int(MILO[1:], 16) and head[3] & 0x08, "to the node, with want-ack"
+    assert data[2] == [b"Is it open"]
+
+
+def test_waiting_for_a_key_asks_for_it(window):
+    now = _now()
+    window.state(nodes=_nodes(now))
+    window.go('{kind="thread", key="%s"}' % ANON)
+    assert window.where()[2] == "ask"
+    window.key("run")
+    window.frames(4)
+    (packet, *_), = _sent(window.drv)
+    head, data = _open(packet)
+    assert head[0] == int(ANON[1:], 16) and data[1] == [4], "our NodeInfo, to it"
+    assert _prefs(window.pl, "nodes")[ANON]["asked"] >= now
+    window.frames(2)
+    assert window.rect("ask") is None or window.where()[2] != "ask"
+
+
+def test_a_changed_key_is_held_until_accepted(window):
+    now = _now()
+    window.state(nodes=_nodes(now))
+    _introduce(window.drv, window.pl, num=int(BASE[1:], 16))
+    first = _prefs(window.pl, "nodes")[BASE]["key"]
+    _introduce(window.drv, window.pl, num=int(BASE[1:], 16), secret=H(V.X25519_ALICE), pid=901)
+    n = _prefs(window.pl, "nodes")[BASE]
+    assert n["key"] == first and n["key_new"] != first
+    window.go('{kind="thread", key="%s"}' % BASE)
+    assert window.where()[2] == "notnow"
+    window.key("run")
+    assert window.where()[0] == "home", "Not now leaves the thread held"
+    window.go('{kind="thread", key="%s"}' % BASE)
+    window.tap("accept")
+    window.frames(4)
+    n = _prefs(window.pl, "nodes")[BASE]
+    assert n["key"] != first and "key_new" not in n
+
+
+def test_the_nodes_list_opens_a_node_s_thread(window):
+    now = _now()
+    window.state(nodes=_nodes(now))
+    window.go()
+    window.key("down")
+    window.key("run")
+    assert window.where()[0] == "nodes"
+    assert window.where()[2] == "n" + BASE, "the node heard last first"
+    window.key("down", "run")
+    assert window.where()[:2] == ("thread", ANA)
+
+
+def test_the_preset_asks_before_it_switches(window):
+    window.state(setup=SERBIA)
+    window.go('{kind="radio"}', '{kind="preset"}')
+    assert window.where()[2] == "presets"
+    window.key("down", "down", "run")
+    window.run("__R = stack[#stack].ask or 0")
+    assert window.get("__R") == 8
+    assert window.where()[2] == "Cancel", "the confirm opens on Cancel"
+    window.key("run")
+    assert _prefs(window.pl, "preset") == "MEDIUM_FAST"
+    window.key("run", "right", "run")
+    assert _prefs(window.pl, "preset") == "SHORT_FAST"
+
+
+def test_a_region_is_chosen_and_retunes(window):
+    window.go('{kind="radio"}', '{kind="region"}')
+    window.key("down", "down", "run")
+    assert _prefs(window.pl, "region") == "US"
+    window.frames(4)
+    _sent(window.drv)
+    assert lora_sim.air(_node_packet(b"us", 1234, 2), 906875000, 11)
+
+
+def test_a_name_is_edited_in_place(window):
+    window.go('{kind="radio"}')
+    assert window.where()[2] == "Name"
+    window.type("\b" * 12 + "Trail Deck\r")
+    window.frames(6)
+    assert _prefs(window.pl, "long_name") == "Trail Deck"
+    (packet, *_), = _sent(window.drv)
+    assert b"Trail Deck" in _open(packet)[1][2][0], "a saved name is announced"
+
+
+def test_a_channel_link_from_the_clipboard_is_shown_then_applied(window):
+    now = _now()
+    window.state(log=_chat(now), nodes=_nodes(now))
+    window.ws.clipboard.put_text(_url_of(window, SERBIA))
+    window.go('{kind="radio"}', '{kind="add"}')
+    assert window.where()[2] == "paste"
+    window.key("run")
+    assert window.where() == ("link", None, "Cancel")
+    window.key("run")
+    assert window.where()[0] == "add", "Cancel goes back, nothing set"
+    assert _prefs(window.pl, "channels") is None
+    window.key("run")
+    window.key("right", "run")
+    window.frames(6)
+    assert [c["name"] for c in _prefs(window.pl, "channels")] == ["Srbija", "Planinari"]
+    assert _prefs(window.pl, "preset") == "MEDIUM_FAST"
+    log = _prefs(window.pl, "log")
+    assert {r.get("old") for r in log} == {"LongFast"}, "the replaced channel's thread is kept"
+    assert window.where()[0] == "home"
+    window.run("__R = order[3].kind .. ':' .. order[3].name")
+    assert window.get("__R") == "old:LongFast"
+
+
+def test_a_pasted_link_is_read_by_enter(window):
+    window.go('{kind="radio"}', '{kind="add", clip=false}')
+    window.ws.clipboard.put_text(_url_of(window, SERBIA))
+    window.drv.type_char(0x16)                    # Ctrl+V
+    window.frames(3)
+    window.type("\r")
+    assert window.where()[0] == "link"
+
+
+def _url_of(window, setup):
+    window.run("__R = url_make(%s)" % _lua_table(setup))
+    return window.get("__R")
+
+
+def _lua_table(v):
+    if isinstance(v, dict):
+        return "{" + ", ".join("%s = %s" % (k, _lua_table(x)) for k, x in v.items()) + "}"
+    if isinstance(v, list):
+        return "{" + ", ".join(_lua_table(x) for x in v) + "}"
+    return json.dumps(v)
+
+
+# Every page and state the design draws, as the prefs and the page stack that
+# make it: (name, prefs, the pages over the home, Lua run after).
+def _states(now):
+    chat, nodes = _chat(now), _nodes(now)
+    dm = [dict(r, dm=ANA) for r in ({"from": ANA, "text": "Are you taking the ridge route?",
+                                     "rssi": -104, "snr": 2.0, "t": now - 600},
+                                    {"from": "", "text": "Yes, leaving at six", "t": now - 500,
+                                     "state": "delivered"})]
+    long = dict(chat[3], text=chat[3]["text"] * 4)
+    changed = dict(nodes, **{BASE: dict(nodes[BASE], key_new="ef" * 32)})
+    asked = dict(nodes, **{ANON: dict(nodes[ANON], asked=now - 40)})
+    return [
+        ("home", dict(setup=SERBIA, log=chat, nodes=nodes), [], ""),
+        ("chat", dict(log=chat, nodes=nodes), ['{kind="thread", key="ch0"}'], ""),
+        ("empty", dict(), ['{kind="thread", key="ch0"}'], ""),
+        ("details", dict(log=chat, nodes=nodes), ['{kind="thread", key="ch0"}'],
+         "stack[2].pop = threads.ch0.msgs[5]"),
+        ("unsent", dict(log=chat, nodes=nodes), ['{kind="thread", key="ch0"}'],
+         "stack[2].pop, stack[2].pop_fresh = threads.ch0.msgs[3], 2"),
+        ("message", dict(log=[long], nodes=nodes),
+         ['{kind="thread", key="ch0"}', '{kind="message", key="ch0", i=1}'], ""),
+        ("srbija", dict(setup=SERBIA, log=chat, nodes=nodes), ['{kind="thread", key="ch0"}'], ""),
+        ("dm", dict(log=dm + [{"from": "", "dm": ANA, "text": "Wait", "t": now, "state": "sent"}],
+                    nodes=nodes), ['{kind="thread", key="%s"}' % ANA], ""),
+        ("dm_waiting", dict(nodes=nodes), ['{kind="thread", key="%s"}' % ANON], ""),
+        ("dm_asked", dict(nodes=asked), ['{kind="thread", key="%s"}' % ANON], ""),
+        ("dm_nokey", dict(nodes=nodes), ['{kind="thread", key="%s"}' % MILO], ""),
+        ("dm_keychanged", dict(nodes=changed), ['{kind="thread", key="%s"}' % BASE], ""),
+        ("nodes", dict(nodes=nodes), ['{kind="nodes"}'], ""),
+        ("radio", dict(setup=SERBIA), ['{kind="radio"}'], ""),
+        ("region", dict(), ['{kind="radio"}', '{kind="region"}'], ""),
+        ("preset", dict(setup=SERBIA), ['{kind="radio"}', '{kind="preset"}'], ""),
+        ("preset_confirm", dict(setup=SERBIA), ['{kind="radio"}', '{kind="preset", ask=8}'], ""),
+        ("channel", dict(setup=SERBIA), ['{kind="radio"}', '{kind="channel", ci=1}'], ""),
+        ("add", dict(), ['{kind="radio"}', '{kind="add", clip=false}'], ""),
+        ("link", dict(), ['{kind="radio"}', '{kind="add"}'],
+         'push({kind="link", prev=url_parse(url_make(%s))})' % _lua_table(SERBIA)),
+        ("replaced", dict(setup=SERBIA, log=[dict(r, old="LongFast") for r in chat]),
+         ['{kind="thread", key="old:LongFast"}'], ""),
+    ]
+
+
+BOARDS = {
+    "tdeck": dict(sys_size=(320, 240), font_scale=1),
+    "guition": dict(sys_size=(480, 320), font_scale=1, panel_diagonal_in=3.5),
+    "desk": dict(sys_size=(1024, 600), font_scale=1, windowed=True, panel_diagonal_in=7.0),
+}
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_page_and_state_renders_on_every_board(tmp_path, board):
+    from runtime import host_app
+    lora_sim.install()
+    ws = host_app.build_workstation(str(tmp_path / "carts"), **BOARDS[board])
+    try:
+        if board == "desk":
+            ws.open_desk()
+        _install(ws)
+        open_cart(ws, TITLE)
+        pl = ws.run.player
+        assert pl.cart_error is None, pl.cart_error
+        drv = make_drv(ws)
+        w = _Mesh(ws, pl, drv)
+        w.frames()
+        seen = set()
+        for name, prefs, pages, lua in _states(_now()):
+            w.state(**prefs)
+            w.go(*pages, lua=lua)
+            kind = w.get("KIND")
+            src = lua if lua.startswith("push") else (pages[-1] if pages else 'kind="home"')
+            assert kind == src.split('kind="')[1].split('"')[0], name
+            cv = ws.glass_canvas
+            seen.add(bytes(cv._buf))
+        assert len(seen) == len(_states(0)), "every state draws its own picture"
+    finally:
+        ws.go_home()
+        S.SCHED.reset()
         while N.owner():
             moybyte.end(N.owner())
         lora_sim.remove()

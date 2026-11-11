@@ -864,6 +864,7 @@ def _surface_plan(ws, cfg):
     plan.append(("pick", lambda: _pick(ws, home)))
     plan.append(("app_files_document", lambda: _files_document(ws)))
     plan.append(("app_moymesh", _mesh_installed(ws, desktop)))
+    plan += [(name, _mesh_page(ws, lua)) for name, lua in MESH_PAGES]
     if desktop:
         plan.append(("desk_two_windows", _two_windows(ws)))
     return plan
@@ -1105,14 +1106,35 @@ def _notes_vault(ws, enter):
 
 # Moy Mesh's node, pinned: its service draws one at random where prefs hold none.
 MESH_NODE = "!0a1b2c3d"
-# What it heard and sent, oldest first as its service keeps them: the window
-# lists them newest first.
+# The window's clock, pinned (2026-11-10 12:00 UTC, the zone UTC): its ages
+# and day heads read against it.
+MESH_NOW = 1794312000
+# What it heard and sent, oldest first as its service keeps them.
 MESH_LOG = [
-    {"from": "!5e6f7a8b", "text": "Anyone on the hill tonight?", "rssi": -98, "snr": 6.5},
-    {"text": "On my way up"},
-    {"text": "Bring the blue tent", "failed": True},
-    {"from": "!5e6f7a8b", "text": "See you at the top", "rssi": -104, "snr": 2.0},
+    {"from": "!5e6f7a8b", "text": "Anyone on the hill tonight?", "rssi": -98, "snr": 6.5,
+     "t": MESH_NOW - 900},
+    {"from": "", "text": "On my way up", "t": MESH_NOW - 800},
+    {"from": "", "text": "Bring the blue tent", "failed": True, "t": MESH_NOW - 700},
+    {"from": "!9c0d1e2f", "text": "Clear skies up here, wind from the north. Bring a warm layer.",
+     "rssi": -112, "snr": -3.5, "t": MESH_NOW - 600},
+    {"from": "!5e6f7a8b", "text": "See you at the top", "rssi": -104, "snr": 2.0,
+     "t": MESH_NOW - 400},
+    {"from": "!5e6f7a8b", "dm": "!5e6f7a8b", "text": "Bring the spare headlamp",
+     "rssi": -104, "snr": 2.0, "t": MESH_NOW - 300},
 ]
+MESH_NODES = {
+    "!5e6f7a8b": {"long": "Ana Ridge", "short": "ANA", "key": "cd" * 32, "rssi": -104,
+                  "snr": 2.0, "heard": MESH_NOW - 300, "ch": 0},
+    "!9c0d1e2f": {"rssi": -112, "snr": -3.5, "heard": MESH_NOW - 600, "ch": 0},
+}
+# The window's pages over its home, as its page stack holds them, and the Lua
+# that opens each: the surfaces after the home.
+MESH_PAGES = (
+    ("app_moymesh_thread", 'stack = {{kind="home"}, {kind="thread", key="ch0"}}'),
+    ("app_moymesh_details",
+     'stack[2].pop, stack[2].pop_fresh = threads.ch0.msgs[3], 2'),
+    ("app_moymesh_radio", 'stack = {{kind="home"}, {kind="radio"}}'),
+)
 
 
 def _mesh_installed(ws, desktop):
@@ -1131,7 +1153,16 @@ def _mesh_installed(ws, desktop):
         assert pl.ns is not None, pl.cart_error
         pl.ns["prefs"].set("node", MESH_NODE)
         pl.ns["prefs"].set("log", MESH_LOG)
-        assert pl._lua.exec("_reload()", "golden") is None
+        pl.ns["prefs"].set("nodes", MESH_NODES)
+        wall = "wall = function() return %d, 0, true end; _reload()" % MESH_NOW
+        assert pl._lua.exec(wall, "golden") is None
+    return run
+
+
+def _mesh_page(ws, lua):
+    def run():
+        pl = ws.run.player
+        assert pl._lua.exec(lua + "; fresh = true; _reload()", "golden") is None
     return run
 
 
@@ -1962,6 +1993,7 @@ def surface_names(config_name):
         names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
                   "app_terminal_colours"]
     names += ["open_with", "pick", "app_files_document", "app_moymesh"]
+    names += [name for name, _lua in MESH_PAGES]
     if cfg["windowed"] and not cfg.get("console"):
         names.append("desk_two_windows")
     return names
