@@ -3113,7 +3113,6 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         // each button a row of the card's width
         int as_row = c->brow_was <= c->page.w - 2 * lp;
         if (!c->brow) {
-            c->brow = 1;
             c->brow_x = 0;
             if (as_row) {
                 b = mua_place(c, mua_row_h(c) + reach, &stacked);
@@ -3128,6 +3127,7 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         } else {
             b = mua_place(c, mua_row_h(c), &stacked);
         }
+        c->brow = 1;                    // placing a row ends a row: this one goes on
         c->brow_x = (int16_t)(c->brow_x + bw + gap);
         c->brow_w = (int16_t)(c->brow_x - gap);
     } else {

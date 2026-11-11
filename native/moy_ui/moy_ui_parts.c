@@ -671,6 +671,10 @@ static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int l
 enum { SIGN_ENTER = 4, SIGN_BALL_LR = 5, SIGN_DPAD_LR = 6, SIGN_BALL = 7, SIGNS = 8 };
 static int key_sign(moy_ui_span_t k);
 
+static const uint8_t s_dots[] = {0xE2, 0x80, 0xA6};
+static void text_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int y, int h, int room,
+                     uint16_t c, int sc);
+
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r) {
     pd_t d;
@@ -843,10 +847,31 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                     arrow_sign(&d, x, ky, sw, kh, sign, 1, cdim);
                 }
             } else {
+                // a value wider than the row (its label and icon aside) is
+                // cut with an ellipsis, leaving its label up to half the row
+                int iconed = r->icon_slot >= 0 || r->icon_glyph >= 0;
+                int lx = r->label.n || iconed ? b.x + pad + (iconed ? 16 * d.fs + gap : 0) : b.x;
+                int sig = 0;
+                if (r->signal > 0 && kind != MOY_UI_V_CYCLE) {
+                    int sh;
+                    moy_ui_signal_size(d.fs, d.desk ? MOY_UI_DESK : 0, &sig, &sh);
+                    sig += 4 * d.fs;
+                }
+                int all = x - sig - lx;
+                int lw = r->label.n ? tw(&fl, r->label.p, r->label.n, sc) + gap : 0;
+                int vroom = all - (lw < all / 2 ? lw : all / 2);
                 int vw = tw(&fl, r->value.p, r->value.n, sc);
-                x -= vw;
-                text(&d, &fl, r->value.p, r->value.n, x, b.y, b.h,
-                     kind == MOY_UI_V_CYCLE ? cink : cdim, sc);
+                uint16_t vc = kind == MOY_UI_V_CYCLE ? cink : cdim;
+                if (vw <= all) {
+                    x -= vw;
+                    text(&d, &fl, r->value.p, r->value.n, x, b.y, b.h, vc, sc);
+                } else {
+                    int ell = 0;
+                    size_t k = moy_text_cut_px(fl.id, r->value.p, r->value.n, vroom, sc, &ell);
+                    vw = tw(&fl, r->value.p, k, sc) + (ell ? tw(&fl, s_dots, sizeof(s_dots), sc) : 0);
+                    x -= vw;
+                    text_cut(&d, &fl, r->value, x, b.y, b.h, vroom, vc, sc);
+                }
             }
             if (r->signal > 0 && kind != MOY_UI_V_CYCLE) {
                 // the glyph a gap before the value, its foot a unit over the
@@ -1079,9 +1104,6 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     return MOY_UI_OK;
 }
 
-static const uint8_t s_dots[] = {0xE2, 0x80, 0xA6};
-static void text_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int y, int h, int room,
-                     uint16_t c, int sc);
 
 // Text centred across x..x+w in the rows y..y+h, cut to `room` with an
 // ellipsis where the font has one.

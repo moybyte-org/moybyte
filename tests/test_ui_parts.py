@@ -1044,6 +1044,36 @@ def test_an_icon_draws_before_the_label_and_moves_it_right():
     assert b[-1] > a[-1] + 12, "the label moved right past the icon"
 
 
+def test_a_long_value_is_cut_and_leaves_its_label_whole():
+    """A value wider than the row stays inside it, cut with an ellipsis, and
+    leaves its label up to half the row: it once ran left over the label and
+    past the card (Get Carts' "Needs" row on the desk)."""
+    st = {}
+    long = "game.wad from moybyte-org.github.io and the rest of a long host"
+
+    def page(value):
+        def draw():
+            st["rect"] = ui.page("")
+            ui.group("General")
+            ui.info("Needs", value)
+            ui.group()
+            return st
+        r = _Run(draw)
+        r.frame()
+        r.frame()
+        return r
+    short, cut = page("x"), page(long)
+    top = cut.out["rect"][1] + CAPTION
+    label = _ink_cols(short, top + 2, top + ROW - 2, INSET + PAD, 120)
+    assert label
+    lend = label[-1]
+    rows = range(top + 2, top + ROW - 2)
+    assert all(cut.px(x, y) == short.px(x, y) for x in range(0, lend + 1) for y in rows), \
+        "the label is drawn whole, and nothing over it or left of it"
+    assert not _ink_cols(cut, top + 2, top + ROW - 2, lend + 2, lend + 6), \
+        "a gap between the label and the value"
+
+
 def test_an_icon_applies_to_the_next_row_only():
     st = {}
 
@@ -2250,6 +2280,22 @@ def _card(r):
     got = ui_draw._C.api_box(r.ctx, "pause")
     assert got is not None, "the popover's card answers by its id"
     return got
+
+
+def test_buttons_one_after_another_in_a_popover_are_one_row():
+    def draw():
+        ui.page("")
+        ui.popover("ask", 220)
+        ui.info("Status", "Not sent")
+        ui.button("Delete")
+        ui.button("Send again", "primary")
+        ui.popover()
+    r = _Run(draw)
+    for _ in range(3):
+        r.frame()
+    a, b = _box(r, "Delete"), _box(r, "Send again")
+    assert a is not None and b is not None
+    assert a[1] == b[1] and a[0] + a[2] < b[0], "side by side, the primary last"
 
 
 def test_a_menu_is_a_stop_per_item_and_answers_the_one_activated():
