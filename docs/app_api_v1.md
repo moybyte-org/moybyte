@@ -321,12 +321,14 @@ T-Deck's K (its B), the bar's back chevron and a desk window's are the
 console's way back; the ui never reads them. Back steps out of the app's own
 views before it leaves the app, on every tier:
 
-1. a `ui.popover` the last frame drew is dismissed (it answers false);
-2. else, while the app lends the bar its way back (`ui.bar`'s fourth
+1. a focused `ui.field`'s edit in progress is cancelled, its text given
+   back (`docs/ui_api_2026-10.md`, Cancel), as the T-Deck's Mic does too;
+2. else a `ui.popover` the last frame drew is dismissed (it answers false);
+3. else, while the app lends the bar its way back (`ui.bar`'s fourth
    argument), the next `ui.bar` answers it -- `ui.UP` in Python, -1 in Lua,
    -2 in a compiled app -- and the app steps back itself; the console shows
    the chevron meanwhile, in a desk window's title strip too;
-3. else the chevron leaves the app, and Esc and B reach your `keyp` and
+4. else the chevron leaves the app, and Esc and B reach your `keyp` and
    `btnp` (Notes calls `quit()` on Esc there).
 
 A second page, a dialog, a picker: lend the way back while it shows. A

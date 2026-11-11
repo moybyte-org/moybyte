@@ -885,6 +885,17 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         st = 0;
     }
     int done = 0;
+    uint32_t id = at >= 0 ? c->cur[at].id : 0;
+    if (id != 0 && id == c->fe_undo && c->fe_n <= cap) {
+        memcpy(buf, c->fe_buf, c->fe_n);    // a cancel: the text the edit began from
+        len = c->fe_n;
+        c->fe_undo = 0;
+    }
+    if ((st & MOY_UI_ST_FOCUS) && id != 0 && id != c->fe_id && len <= sizeof c->fe_buf) {
+        c->fe_id = id;                      // focus came onto it: an edit begins here
+        memcpy(c->fe_buf, buf, len);
+        c->fe_n = (uint16_t)len;
+    }
     if ((st & MOY_UI_ST_FOCUS) && c->typed) {
         int k = c->typed;
         c->typed = 0;
@@ -916,6 +927,13 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     }
     if ((st & MOY_UI_ST_ACTIVATED) && c->tap_y == INT16_MIN) {
         done = 1;
+    }
+    if (id != 0 && id == c->fe_id) {
+        if (done && len <= sizeof c->fe_buf) {
+            memcpy(c->fe_buf, buf, len);    // Enter keeps what it confirmed
+            c->fe_n = (uint16_t)len;
+        }
+        c->fe_live = (uint8_t)(len != c->fe_n || memcmp(buf, c->fe_buf, len) != 0);
     }
     if (at >= 0) {
         // a field's stop keeps its text's hash in its gen: text that changed

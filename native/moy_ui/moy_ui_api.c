@@ -1261,6 +1261,30 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     int qe = key == c->last_key ? 0 : (key | 0x20) == 'q' ? -1 : (key | 0x20) == 'e' ? 1 : 0;
     c->last_key = key;
     const moy_ui_stop_t *f = fi >= 0 ? &v[fi] : NULL;
+    // A field's edit lasts while focus stays on it; a cancel taken over the
+    // frame drawn last gives the field its text back this pass and steps
+    // focus up off it, as Up would, where a stop lies above.
+    if (c->fe_id != c->focus) {
+        c->fe_id = 0;
+    }
+    c->fe_live = 0;
+    c->fe_undo = 0;
+    if (c->fe_cancel) {
+        c->fe_cancel = 0;
+        if (f != NULL && c->fe_id != 0 && f->id == c->fe_id && (f->flags & STOP_FIELD)) {
+            c->fe_undo = c->fe_id;
+            int t = nearest(v, n, f, MOY_UI_B_UP);
+            if (t >= 0) {
+                fi = t;
+                f = &v[t];
+                c->focus = f->id;
+                c->focus_box = f->b;
+                c->focus_name[0] = 0;
+                c->reveal = 1;
+            }
+            settled = 0;
+        }
+    }
     int off = f == NULL || (f->flags & STOP_HOLD)
               || (f->page != NO_PAGE && f->page < n && (v[f->page].flags & STOP_NAV_OFF));
     int field = f != NULL && (f->flags & STOP_FIELD);
@@ -4080,6 +4104,16 @@ int moy_ui_api_typing(const moy_ui_ctx_t *c) {
     }
     int i = mua_find(c->cur, c->n_cur, c->focus);
     return i >= 0 && (c->cur[i].flags & STOP_FIELD) != 0;
+}
+
+int moy_ui_api_cancel(moy_ui_ctx_t *c, int take) {
+    if (!c->fe_live || c->fe_id == 0 || c->fe_id != c->focus || !moy_ui_api_typing(c)) {
+        return 0;
+    }
+    if (take) {
+        c->fe_cancel = 1;
+    }
+    return 1;
 }
 
 void moy_ui_api_keys_back(moy_ui_ctx_t *c) {

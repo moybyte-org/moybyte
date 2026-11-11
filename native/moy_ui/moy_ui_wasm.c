@@ -231,6 +231,12 @@ int moy_ui_run_back(int take) {
     return s_ctx != NULL && s_live && serial == s_serial ? moy_ui_api_back(s_ctx, take) : 0;
 }
 
+int moy_ui_run_cancel(int take) {
+    uint32_t tick = 0, serial = 0;
+    (void)moycore_ui_snap(&tick, &serial);
+    return s_ctx != NULL && s_live && serial == s_serial ? moy_ui_api_cancel(s_ctx, take) : 0;
+}
+
 // The run's context while the run that drew in it is the one open, else NULL
 // (a native or WASI app draws with a toolkit of its own, and no run is open).
 static moy_ui_ctx_t *run_ctx_now(void) {

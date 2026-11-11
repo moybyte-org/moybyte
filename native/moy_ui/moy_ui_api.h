@@ -40,6 +40,7 @@
 #define MOY_UI_API_PANES 16         // the panes one pass's splits record (moy_ui_api_split_frame)
 #define MOY_UI_API_TROWS 48         // the rows of a carried table a frame keeps the record of
 #define MOY_UI_API_PASTE 240        // the bytes the console's paste brings a field at most
+#define MOY_UI_API_UNDO 256         // the bytes of a field's text a cancel gives back at most
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
 // and pressed this frame (bit i is MOY_INPUT_NAMES[i]: left, right, up, down,
@@ -734,6 +735,15 @@ typedef struct {
     // takes it; 0 none, and none once a frame begins.
     uint16_t paste_n;
     uint8_t paste[MOY_UI_API_PASTE];
+    // A field's edit (moy_ui_api_cancel): fe_id the field focus came onto
+    // and fe_buf the fe_n bytes it held then (or as Enter last left them);
+    // fe_live whether the frame drawn last left its text other than that;
+    // fe_cancel a cancel taken over the frame drawn last, and fe_undo the
+    // field this pass gives that text back to.
+    uint32_t fe_id, fe_undo;
+    uint16_t fe_n;
+    uint8_t fe_live, fe_cancel;
+    uint8_t fe_buf[MOY_UI_API_UNDO];
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one, of
@@ -1189,11 +1199,19 @@ const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at);
 // way back); the next ui.bar answers it.
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);
 // The host's back (the bar's chevron, a window's, Esc, B and the T-Deck's
-// K) over the frame drawn last: 1 where the app takes it -- a popover it
-// drew is dismissed next frame (ui.popover answers false), else the bar it
-// lent with MOY_UI_BAR_BACK answers MOY_UI_BAR_UP -- and 0 where it has no
-// view to step out of, so the host leaves the app. `take` 0 only asks.
+// K) over the frame drawn last: 1 where the app takes it -- a field's edit
+// is cancelled (moy_ui_api_cancel), else a popover it drew is dismissed next
+// frame (ui.popover answers false), else the bar it lent with
+// MOY_UI_BAR_BACK answers MOY_UI_BAR_UP -- and 0 where it has no view to
+// step out of, so the host leaves the app. `take` 0 only asks.
 int moy_ui_api_back(moy_ui_ctx_t *c, int take);
+// The host's cancel (the T-Deck's Mic, and the back above) over the frame
+// drawn last: 1 where the focused field has an edit in progress -- its text
+// other than it was when focus came onto it, or Enter last left it -- and
+// then, with `take`, the next pass gives the field that text back (the
+// app's ui.field answers it) and focus steps up off it as Up would, where
+// a stop lies above; 0 where none is, so the key keeps its own meaning.
+int moy_ui_api_cancel(moy_ui_ctx_t *c, int take);
 // Whether the frame drawn last owes the next though no input comes: a
 // dialog or a popover laid out from a stale measure, or a reveal its pass
 // set (a list's or a table's row stepped where begin could not reveal it, a

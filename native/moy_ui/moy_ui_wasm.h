@@ -168,6 +168,9 @@ int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size
 // The host's back over the run's frame drawn last (moy_ui_api_back): 1 where
 // the app takes it, 0 where the host leaves the app; `take` 0 only asks.
 int moy_ui_run_back(int take);
+// The host's cancel over the run's frame drawn last (moy_ui_api_cancel): 1
+// where its focused field has an edit in progress, which `take` gives back.
+int moy_ui_run_cancel(int take);
 // The host's bar over the run's frame drawn last, as moy_ui_api_bar_lent,
 // moy_ui_api_bar_chip and moy_ui_api_bar_tap are over a context: what a Lua
 // or compiled app lent it with ui.bar (0: nothing, or no run open), and a

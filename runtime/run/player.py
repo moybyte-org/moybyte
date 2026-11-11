@@ -1545,17 +1545,39 @@ class Player(PlayerDiag):
 
     def has_page(self):
         """Whether the running app has a view of its own open, which the
-        host's back steps out of before it leaves the app: a popover its last
-        frame drew, or a page it lent `ui.bar`'s way back for, on any tier
-        (docs/app_api_v1.md section 4). False for a game."""
+        host's back steps out of before it leaves the app: a field's edit in
+        progress, a popover its last frame drew, or a page it lent `ui.bar`'s
+        way back for, on any tier (docs/app_api_v1.md section 4). False for a
+        game."""
         return self._app_back(False)
 
     def back(self):
         """The host's back -- the bar's chevron, a window's, Esc, B and the
-        T-Deck's K -- into the running app: True where it steps out of a view
-        of its own (`has_page`), which the next frame shows; False where it
-        has none, and the host leaves it (`Workstation.app_back`)."""
+        T-Deck's K -- into the running app: True where it cancels a field's
+        edit in progress (`cancel_field`) or steps out of a view of its own
+        (`has_page`), which the next frame shows; False where it has none,
+        and the host leaves it (`Workstation.app_back`)."""
         if not self._app_back(True):
+            return False
+        self._owe = max(self._owe, 1)
+        self.ws.request_frame()
+        return True
+
+    def cancel_field(self):
+        """The host's cancel -- the T-Deck's Mic -- into the running app:
+        True where the field its page focuses has an edit in progress, which
+        the next frame gives back (its `ui.field` answers the text the edit
+        began from) as focus steps up off it; False where none is, and Mic
+        keeps its own meaning. Esc, B and the bar's chevron reach the same
+        cancel through `back`."""
+        if not self._is_tool or self.cart_error is not None:
+            return False
+        if self._lua is not None:
+            took = _ui_draw.run_cancel(True)
+        else:
+            ui = self._ui
+            took = ui is not None and _ui_draw.app_cancel(ui[0], True)
+        if not took:
             return False
         self._owe = max(self._owe, 1)
         self.ws.request_frame()

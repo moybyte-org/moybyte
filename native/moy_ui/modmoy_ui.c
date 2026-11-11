@@ -3694,8 +3694,8 @@ static mp_obj_t ui_api_bar_tap(mp_obj_t ctx, mp_obj_t i) {
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_bar_tap_obj, ui_api_bar_tap);
 
 // api_back(ctx, take) -> whether the app takes the host's back over the
-// frame drawn last (moy_ui_api_back): a popover it drew, or a page it lent
-// the bar's way back for; `take` false only asks
+// frame drawn last (moy_ui_api_back): a field's edit in progress, a popover
+// it drew, or a page it lent the bar's way back for; `take` false only asks
 static mp_obj_t ui_api_back(mp_obj_t ctx, mp_obj_t take) {
     return mp_obj_new_bool(moy_ui_api_back(ctx_of(ctx), mp_obj_is_true(take)));
 }
@@ -3707,6 +3707,20 @@ static mp_obj_t ui_api_run_back(mp_obj_t take) {
     return mp_obj_new_bool(moy_ui_run_back(mp_obj_is_true(take)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_back_obj, ui_api_run_back);
+
+// api_cancel(ctx, take) -> whether the focused field has an edit the host's
+// cancel gives back (moy_ui_api_cancel); `take` false only asks
+static mp_obj_t ui_api_cancel(mp_obj_t ctx, mp_obj_t take) {
+    return mp_obj_new_bool(moy_ui_api_cancel(ctx_of(ctx), mp_obj_is_true(take)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_cancel_obj, ui_api_cancel);
+
+// api_run_cancel(take): api_cancel over the running cart's own context
+// (moy_ui_run_cancel)
+static mp_obj_t ui_api_run_cancel(mp_obj_t take) {
+    return mp_obj_new_bool(moy_ui_run_cancel(mp_obj_is_true(take)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_cancel_obj, ui_api_run_cancel);
 
 // api_text(ctx, lines, centre, tone, role): the next label's text options.
 static mp_obj_t ui_api_text(size_t n_args, const mp_obj_t *a) {
@@ -4317,6 +4331,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_bar_lent), MP_ROM_PTR(&ui_api_bar_lent_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_bar_tap), MP_ROM_PTR(&ui_api_bar_tap_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_back), MP_ROM_PTR(&ui_api_back_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_cancel), MP_ROM_PTR(&ui_api_cancel_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_cancel), MP_ROM_PTR(&ui_api_run_cancel_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_back), MP_ROM_PTR(&ui_api_run_back_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_bar_lent), MP_ROM_PTR(&ui_api_run_bar_lent_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_bar_tap), MP_ROM_PTR(&ui_api_run_bar_tap_obj) },
