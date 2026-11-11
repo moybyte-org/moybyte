@@ -479,23 +479,6 @@ def r_settings(d, a):
 # -- pkg --------------------------------------------------------------------------------
 
 
-class _Bound:
-    """The install role's server with its grant argument bound, the object
-    Get Carts holds as `ctx.install`, and `carts()`, the shelf, which Get
-    Carts reads through its carts role."""
-
-    def __init__(self, server, ws):
-        self._s = server
-        self._ws = ws
-
-    def carts(self):
-        return self._ws.carts.all
-
-    def __getattr__(self, name):
-        fn = getattr(self._s, name)
-        return lambda *a: fn(None, *a)
-
-
 def _yes(d, question):
     d.out(question + " [y/N] ")
     line = _door.In(d.io).readline().strip().lower()
@@ -516,13 +499,13 @@ def _then_release(p, verb):
 def r_pkg(d, a):
     try:
         import pkg
-        from shell_servers import InstallServer
+        from shell_servers import ShellInstall
     except ImportError:  # host: the runtime package
         from runtime import pkg
-        from runtime.shell_servers import InstallServer
+        from runtime.shell_servers import ShellInstall
     yes = "-y" in a
     a = [w for w in a if w != "-y"]
-    p = pkg.Pkg(_Bound(InstallServer(d.ws), d.ws), d.out, lambda line: d.err("pkg", line),
+    p = pkg.Pkg(ShellInstall(d.ws), d.out, lambda line: d.err("pkg", line),
                 ask=lambda q: _yes(d, q), stopped=lambda: stopped(d))
     verb, rest = (a[0], a[1:]) if a else ("", [])
     try:

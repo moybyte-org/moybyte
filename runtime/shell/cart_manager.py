@@ -79,12 +79,16 @@ def _perms():
     return app_perms
 
 
-def _app_keys():
+def _removal():
+    """`(pkg, ShellInstall)`: a cart's one removal and the install server it
+    steps over, imported at the call."""
     try:
-        import app_keys
+        import pkg
+        from shell_servers import ShellInstall
     except ImportError:  # host: the runtime package
-        from runtime import app_keys
-    return app_keys
+        from runtime import pkg
+        from runtime.shell_servers import ShellInstall
+    return pkg, ShellInstall
 
 
 class CartManager:
@@ -399,11 +403,13 @@ class CartManager:
 
     def delete(self, cart=None):
         """Delete `cart` (a home's Delete), else the OPEN cart (the system
-        menu's "Delete cart"), for good: the folder goes, its consent record
-        with it, and no Trash holds a cart. Every route asks first
-        (`console_notices.DeleteConfirm`) and calls this on its Delete. Its
-        keys go too (runtime/system/app_keys.py). Keeps
-        at least one real cart on the device."""
+        menu's "Delete cart"), for good, by the one removal Get Carts' Remove
+        and `pkg remove` take (`pkg.removed`): the folder, its install-record
+        entry, the files it wrote, its consent and its keys all go, and no
+        Trash holds a cart. Every route asks first
+        (`console_notices.DeleteConfirm`) and calls this on its Delete, which
+        is done when this returns. Keeps at least one real cart on the
+        device."""
         ws = self.ws
         target = cart if cart is not None else ws.cart
         if target is not None and not target.get("path"):
@@ -411,16 +417,13 @@ class CartManager:
         if not self.store.writable() or target is None or len(self.all) <= 1:
             return
         path = target["path"]
+        pkg, install = _removal()
         try:
-            self.store.call(lambda: moy_catalogue.delete(target["h"]))
-            aid = _perms().app_id(target)
-            consent = getattr(ws, "consent", None)
-            if consent is not None:
-                consent.forget(aid)
-            self.store.call(lambda: _app_keys().forget(ws.carts_root, aid))
+            for _ in pkg.removed(install(ws), path.replace("\\", "/").rsplit("/", 1)[-1]):
+                pass
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
-        self.rescan([path])
+            self.rescan([path])
 
     # -- favorites + recents (#105) ------------------------------------------
 

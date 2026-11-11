@@ -26,6 +26,7 @@ already draw that -- but four things a whole-screen hash cannot see:
 """
 
 import ast
+import os
 import inspect
 from pathlib import Path
 from ws_helpers import shelf  # noqa: E402
@@ -467,6 +468,41 @@ def test_delete_with_no_cart_given_deletes_the_open_one(tmp_path):
     assert "Opened" not in titles and "Selected" in titles
     ws.carts.delete(next(c for c in ws.carts.all if c["title"] == "Selected"))
     assert "Selected" not in [c["title"] for c in ws.carts.all]
+
+
+def test_the_homes_delete_is_the_installers_removal(tmp_path):
+    """The home's Delete and `pkg remove` are one removal (`pkg.removed`):
+    the folder, its install-record entry, the files it wrote (`apps/<id>`),
+    its consent and its keys all go, and another cart's stay."""
+    from runtime import app_keys, app_perms, cart_files, cart_index
+    ws = build_ws(tmp_path)
+    root = str(ws.carts_root)
+    gone, kept = _mk(root, "Gone"), _mk(root, "Kept")
+    ws.carts.apply(shelf(root))
+    carts = {c["title"]: c for c in ws.carts.all if c["title"] in ("Gone", "Kept")}
+    rec, aids = {}, {}
+    for title, made in (("Gone", gone), ("Kept", kept)):
+        folder = made["path"].rsplit("/", 1)[-1]
+        rec[folder] = {"id": carts[title]["id"], "version": 1}
+        aids[title] = aid = app_perms.app_id(carts[title])
+        written = cart_files.folder_of(made["path"])
+        os.makedirs(written)
+        with open(written + "/save.dat", "w") as f:
+            f.write("1")
+        ws.consent.record(aid, ["internet"])
+        app_keys.make(root, aid, "node")
+    cart_index.save_record(root, rec)
+
+    ws.carts.delete(carts["Gone"])
+    assert not os.path.exists(gone["path"])
+    assert not os.path.exists(cart_files.folder_of(gone["path"]))
+    assert list(cart_index.load_record(root)) == [kept["path"].rsplit("/", 1)[-1]]
+    assert ws.consent.get(aids["Gone"]) is None
+    assert app_keys.public(root, aids["Gone"], "node") is None
+    assert gone["path"] not in [c["path"] for c in ws.carts.all]
+    assert os.path.exists(cart_files.folder_of(kept["path"]) + "/save.dat")
+    assert ws.consent.get(aids["Kept"]) is not None
+    assert app_keys.public(root, aids["Kept"], "node") is not None
 
 
 def test_delete_keeps_the_last_cart(tmp_path):

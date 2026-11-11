@@ -278,10 +278,10 @@ def _mark(p):
     return _gated(go)
 def _remove(folders):
     try:
-        import pkg, sh_roles, shell_servers
+        import pkg, shell_servers
     except ImportError:
-        from runtime import pkg, sh_roles, shell_servers
-    inst = sh_roles._Bound(shell_servers.InstallServer(ws), ws)
+        from runtime import pkg, shell_servers
+    inst = shell_servers.ShellInstall(ws)
     for f in folders:
         for _ in pkg.through(pkg.removed(inst, f)):
             pass

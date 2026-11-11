@@ -6,6 +6,7 @@
 #   NavServer        where the console goes next
 #   WallpaperServer  the desktop backdrop
 #   InstallServer    carts from outside: the radio lease, the store, the engine
+#   ShellInstall     that server as the shell drives it: pkg, the home's Delete
 #   ConsoleCalls     the moybyte role: console calls run as the calling process
 #   RoleDoor         the ROLE upcall's Python half: a compiled app's call
 #   serve_all        register every server on the console's app ABI
@@ -651,6 +652,25 @@ class InstallServer:
             return moy_wasm.CHIP, moy_wasm.FORMAT
         except (ImportError, AttributeError):
             return None, None
+
+
+class ShellInstall:
+    """The install role's server as the shell drives it, its grant argument
+    bound: the object Get Carts holds as `ctx.install`, and `carts()`, the
+    shelf, which Get Carts reads through its carts role. The shell's `pkg`
+    and the home's Delete (`CartManager.delete`) step `pkg.removed` over
+    one."""
+
+    def __init__(self, ws):
+        self._s = InstallServer(ws)
+        self._ws = ws
+
+    def carts(self):
+        return self._ws.carts.all
+
+    def __getattr__(self, name):
+        fn = getattr(self._s, name)
+        return lambda *a: fn(None, *a)
 
 
 # -- the console calls --------------------------------------------------------
