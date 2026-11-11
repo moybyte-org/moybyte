@@ -42,6 +42,10 @@ name: Web console E2E
 #                                  socket; the site's runs the shell in the
 #                                  wasm and its WASI commands on the page's
 #                                  engine (dist_site/, built below).
+#   tests/test_web_audio_stream_e2e.py  a live station plays a minute on each
+#                                  sink with every sample once, a stall
+#                                  starves into silence, a held main thread
+#                                  is counted.
 #   tests/test_web_music_e2e.py    #251: Music on the boards' MP3 decoder in the
 #                                  wasm -- a dropped song kept in OPFS plays
 #                                  from it, a board's song streams through
@@ -253,6 +257,7 @@ jobs:
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
             tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
             tests/test_web_music_e2e.py tests/test_web_first_run_e2e.py \
+            tests/test_web_audio_stream_e2e.py \
             tests/test_web_desk_input_e2e.py \
             tests/test_web_fonts.py tests/test_web_look_parity.py \
             tests/test_editor_ladder_icons.py
