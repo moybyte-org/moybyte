@@ -65,6 +65,20 @@ def _draw():
     focus = ui.focus()
 """
 
+LUA_TWO = """
+function _draw()
+  cls(0)
+  ui.page("Radio")
+  FIRST = ui.field("First", FIRST or "aa", 11)
+  SECOND = ui.field("Second", SECOND or "bb", 11)
+  if not STARTED then
+    ui.focus("Second")
+    STARTED = true
+  end
+  FOCUS = ui.focus()
+end
+"""
+
 LUA_TEXTMODE = """
 function _init() textmode(true) end
 function _draw() cls(0) end
@@ -267,3 +281,21 @@ def test_esc_cancels_a_field_edit_before_it_goes_back(tmp_path, how):
     assert _name(ws) == "Srbija"
     assert _focus(ws) == "Top"
     assert ws.screen == "desktop", "the first Esc cancels the edit, the app stays"
+
+
+def test_a_cancel_onto_the_field_above_gives_each_its_own_text(tmp_path):
+    """Focus steps up from the cancelled field onto another field: the one
+    it left gets its text back, the one it reaches keeps its own, and an
+    edit there cancels to that."""
+    ws, drv = _open(tmp_path, "Two Fields", LUA_TWO, "lua")
+    lua = ws.run.player._lua
+    assert _focus(ws) == "Second"
+    _type(drv, "x")
+    _mic(ws, drv)
+    assert (lua.get_global("FIRST"), lua.get_global("SECOND")) == ("aa", "bb")
+    assert _focus(ws) == "First" and ws.input.text_mode
+    _type(drv, "y")
+    assert lua.get_global("FIRST") == "aay"
+    _mic(ws, drv)
+    assert (lua.get_global("FIRST"), lua.get_global("SECOND")) == ("aa", "bb")
+    assert not ws.sysmenu.open

@@ -396,6 +396,12 @@ struct moy_ui_inst {               // moy_ui_inst_t (moy_ui_text.h)
     // at the next install.
     uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap);
     uint32_t font_from[MOY_UI_THEME_FONTS], font_local[MOY_UI_THEME_FONTS];
+    // The text a field held when focus came onto it, or as Enter last left
+    // it (moy_ui_api_cancel gives it back): one edit at a time, the keys'
+    // own, so the instance holds it for the context fe_ctx whose field it is.
+    const void *fe_ctx;
+    uint16_t fe_n;
+    uint8_t fe_buf[MOY_UI_API_UNDO];
 };
 
 // The main instance; an instance's size, for a face that owns it as bytes; a
@@ -735,15 +741,13 @@ typedef struct {
     // takes it; 0 none, and none once a frame begins.
     uint16_t paste_n;
     uint8_t paste[MOY_UI_API_PASTE];
-    // A field's edit (moy_ui_api_cancel): fe_id the field focus came onto
-    // and fe_buf the fe_n bytes it held then (or as Enter last left them);
-    // fe_live whether the frame drawn last left its text other than that;
-    // fe_cancel a cancel taken over the frame drawn last, and fe_undo the
-    // field this pass gives that text back to.
-    uint32_t fe_id, fe_undo;
-    uint16_t fe_n;
+    // A field's edit (moy_ui_api_cancel): fe_id the field focus came onto,
+    // whose text then its instance holds (moy_ui_inst's fe_buf); fe_live
+    // whether the frame drawn last left its text other than that; fe_cancel
+    // 1 a cancel taken over the frame drawn last, 2 this pass gives field
+    // fe_id that text back (and no field takes an edit before it has).
+    uint32_t fe_id;
     uint8_t fe_live, fe_cancel;
-    uint8_t fe_buf[MOY_UI_API_UNDO];
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one, of

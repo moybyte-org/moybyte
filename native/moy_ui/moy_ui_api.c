@@ -389,6 +389,9 @@ void moy_ui_api_reset_in(moy_ui_ctx_t *c, moy_ui_inst_t *I) {
     c->inst = I;
     moy_ui_text_views_drop(I, c);
     mua_kept_drop(c);
+    if (I->fe_ctx == c) {
+        I->fe_ctx = NULL;           // its field's edit goes with it
+    }
     memset(c, 0, sizeof(*c));
     c->magic = MAGIC;
     c->inst = I;
@@ -1268,11 +1271,10 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         c->fe_id = 0;
     }
     c->fe_live = 0;
-    c->fe_undo = 0;
     if (c->fe_cancel) {
         c->fe_cancel = 0;
         if (f != NULL && c->fe_id != 0 && f->id == c->fe_id && (f->flags & STOP_FIELD)) {
-            c->fe_undo = c->fe_id;
+            c->fe_cancel = 2;           // this pass's field c->fe_id takes its text back
             int t = nearest(v, n, f, MOY_UI_B_UP);
             if (t >= 0) {
                 fi = t;
@@ -4107,7 +4109,8 @@ int moy_ui_api_typing(const moy_ui_ctx_t *c) {
 }
 
 int moy_ui_api_cancel(moy_ui_ctx_t *c, int take) {
-    if (!c->fe_live || c->fe_id == 0 || c->fe_id != c->focus || !moy_ui_api_typing(c)) {
+    if (!c->fe_live || c->fe_id == 0 || c->fe_id != c->focus || c->inst->fe_ctx != c
+        || !moy_ui_api_typing(c)) {
         return 0;
     }
     if (take) {
