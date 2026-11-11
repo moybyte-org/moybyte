@@ -4,6 +4,14 @@
 
 #include <string.h>
 
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define JOINED_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
+#else
+#include <stdlib.h>
+#define JOINED_ALLOC(n) malloc(n)
+#endif
+
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/objstr.h"
@@ -2444,6 +2452,7 @@ static void over_vals(mp_map_t *m, mp_obj_t *v) {
 // The override table (§3) straight from the app's dict, as runtime/toolkit/ui.py's
 // block reads: no block is built, so a verb given a table allocates nothing.
 #define OPTS_BUF 512
+#define JOINED_BUF (2 * OPTS_BUF)
 static void opts_cap(mp_obj_t o, uint8_t *buf, size_t cap, mp_buffer_info_t *out);
 
 static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
@@ -2559,9 +2568,15 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         mp_int_t g = mp_obj_get_int_truncated(v);
         out->signal = (int8_t)(g < 0 ? 0 : g > 4 ? 5 : g + 1);
     }
-    // a list's texts a row, joined into the module's own buffer
-    static uint8_t joined[2 * OPTS_BUF];
-    size_t used = 0;
+    // a list's texts a row, joined into the module's own buffer: made at the
+    // first list that names them (JOINED_ALLOC: PSRAM where the board has
+    // it) and kept, where a static would hold it in internal SRAM from boot;
+    // without one they join on the heap
+    static uint8_t *joined;
+    if (joined == NULL) {
+        joined = JOINED_ALLOC(JOINED_BUF);
+    }
+    size_t used = 0, room = joined != NULL ? JOINED_BUF : 0;
     static const uint8_t keys[] = {OV_VALUES, OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS};
     moy_ui_span_t *spans[] = {&out->values, &out->subs, &out->icons, &out->counts, &out->tags,
                               &out->marks};
@@ -2569,8 +2584,8 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         v = vals[keys[i]];
         if (v != MP_OBJ_NULL) {
             mp_buffer_info_t b;
-            opts_cap(v, joined + used, sizeof(joined) - used, &b);
-            if ((uint8_t *)b.buf == joined + used) {
+            opts_cap(v, joined != NULL ? joined + used : NULL, room - used, &b);
+            if (joined != NULL && (uint8_t *)b.buf == joined + used) {
                 used += b.len;
             }
             spans[i]->p = (const uint8_t *)b.buf;

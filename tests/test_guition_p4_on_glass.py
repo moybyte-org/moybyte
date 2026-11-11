@@ -137,8 +137,14 @@ BATCH6_SRAM = 80
 # heap's start sits where it was at eb0498275 or lower, and the largest
 # block with it.
 MOVED_SRAM = 4560
+# And TAP_FONTS_SRAM, the tap floor's two font roles in the UI's font tables
+# (native/moy_ui/moy_ui.c's `s_font`, 8, and the main instance's `font_from`
+# and `font_local`, native/moy_ui/moy_ui_api.h, 16): ids the draw path reads
+# every row, so they stay internal. 24 bytes of .bss by the link map against
+# dev 57dfc2d20, 2026-11-11.
+TAP_FONTS_SRAM = 24
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM - CORE_DUMP_SRAM - BATCH6_SRAM
-                      + MOVED_SRAM, 94208)
+                      + MOVED_SRAM - TAP_FONTS_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
 
