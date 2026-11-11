@@ -52,63 +52,63 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 4314,
+   "bytes": 4332,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 11242,
+   "bytes": 11288,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 15802,
+   "bytes": 15898,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 5463,
+   "bytes": 5481,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 13946,
+   "bytes": 14002,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 19179,
+   "bytes": 19275,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 4437,
+   "bytes": 4455,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 11493,
+   "bytes": 11539,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 15830,
+   "bytes": 15926,
    "layer": "ink",
    "set": "luna",
    "size": 24
