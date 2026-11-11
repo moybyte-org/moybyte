@@ -199,6 +199,7 @@ def test_resize_grows_the_map_from_its_popover(hh):
     w = tm.w
     _tap(drv, page.host.box("Resize"))
     assert page.pop == "resize"
+    drv.frame(DT)                    # the card's first frame measures its row
     _tap(drv, page.host.box("Wider"))
     assert tm.w == w + 1
     drv.press("b")
