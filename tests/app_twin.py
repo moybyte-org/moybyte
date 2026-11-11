@@ -74,7 +74,9 @@ _ROWS = ("damage.all", "damage.again",
          # by nothing here
          "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove",
          # the crypto rows appended after them
-         "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open")
+         "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open",
+         # the wall clock (moy_net_time), counted by nothing here
+         "moybyte.clock")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",
