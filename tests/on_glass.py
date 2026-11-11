@@ -1461,10 +1461,12 @@ def the_shell_answers_with_the_vm_down(board, title="Doom"):
     line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
     assert line is not None and "force" in line, line
     try:
+        at = len(board.lines)
         board.ser.write(("run %s\r\n" % title.lower()).encode())
         board.ser.flush()
-        assert board.wait_line("STOP 1/1 down", 60) is not None, "the VM never stopped"
-        assert board.wait_line("STOP running", 60) is not None, "the run never started"
+        line, at = _line_since(board, at, "STOP 1/1 down", 60)
+        assert line is not None, "the VM never stopped"
+        assert _said_since(board, at, "STOP running", 60), "the run never started"
         st, ps = _sh(board, "ps")
         rows = [r.split() for r in ps[1:]]
         assert st == 0 and ["1", "0", "shell", "stopped", "console"] in rows, ps
@@ -1475,8 +1477,9 @@ def the_shell_answers_with_the_vm_down(board, title="Doom"):
         assert st == 0, log
         st, out = _sh(board, "perm list")
         assert st == 1 and out == ["perm: needs the console"], out
+        at = len(board.lines)
         assert _sh(board, "kill %s" % pid, retry=False)[0] == 0
-        assert board.wait_line("STOP 1/1 ended", 30) is not None, "kill did not end the run"
+        assert _said_since(board, at, "STOP 1/1 ended", 30), "kill did not end the run"
         _desk_back(board)
         st, ps = _sh(board, "ps")
         assert ["1", "0", "shell", "running", "shell"] in [r.split()[:5] for r in ps[1:]], ps
@@ -2678,11 +2681,12 @@ def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     2026-11-08) and free never falls more than KSTOP_JITTER below it (the
     Guition S3 reads 8 B higher every fourth cycle)."""
     import time
+    at = len(board.lines)
     board.cmd("kstop %d" % n, wait_for="REMOTE kstop")
     after = []
     end = time.time() + n * per_cycle
     while len(after) < n and time.time() < end:
-        line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
+        line, at = _line_since(board, at, "KSTOP ", max(0.1, end - time.time()))
         if line is not None and " after " in line:
             after.append(_kstop_after(line))
     assert len(after) == n, "only %d of %d soft resets came back" % (len(after), n)
@@ -2729,11 +2733,12 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     # The clipboard is the app ABI's kernel row (native/moy_app): text put
     # before the stops reads back after them.
     assert board.pyexec("ws.clipboard.put_text('kept across stops')"), board.last_error
+    at = len(board.lines)
     board.cmd("kstop %d stop" % n, wait_for="REMOTE kstop")
     down, grants = [], []
     end = time.time() + n * per_cycle
     while len(down) < n and time.time() < end:
-        line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
+        line, at = _line_since(board, at, "KSTOP ", max(0.1, end - time.time()))
         if line is not None and " down " in line:
             assert "route=kstop lease=kstop" in line, line
             grants.append(line.split("grants=", 1)[1].split()[0])
@@ -2782,12 +2787,13 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
             # Written raw and waited for by the stop's own line: the stop can
             # print in the same burst as the run's echo, which `cmd` reads
             # past.
+            at = len(board.lines)
             board.ser.write(("run %s\r\n" % title.lower()).encode())
             board.ser.flush()
-            line = board.wait_line("STOP 1/1 down", 60)
+            line, at = _line_since(board, at, "STOP 1/1 down", 60)
             assert line is not None, "the VM never stopped"
             psram.append(_stop_psram(line))
-            assert board.wait_line("STOP running", 60) is not None, "the run never started"
+            assert _said_since(board, at, "STOP running", 60), "the run never started"
             st = board.state()
             assert st.get("front") is True and st.get("vm") is False, st
             assert st["run"]["vm_down"] is True and st["run"]["stop"] == "stops", st
@@ -2796,12 +2802,13 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
             st = board.state()
             assert st["frames"] > f0 and st["vm"] is False, st
             assert st["play"]["upcalls"] == [0, 0, 0, 0, 0, 0], st
+            at = len(board.lines)
             if ctrl_c:
                 board.ser.write(b"\x03")
                 board.ser.flush()
             else:
                 board.cmd("end", wait_for="REMOTE end")
-            assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
+            assert _said_since(board, at, "STOP 1/1 ended", 30), "the run never ended"
             back = _desk_back(board)
             info = board.pyval("__import__('moy_play').info()", strict=True)
             assert info[12] is True and info[10] == (5 if ctrl_c else 2), info
@@ -2877,8 +2884,9 @@ def a_stuck_run_with_the_vm_down_is_ended(board):
     try:
         line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
         assert line is not None and title in line, line
-        assert board.wait_line("STOP running", 60) is not None, "the run never started"
-        said = board.wait_line("PLAY stuck:", STUCK_BUDGET_MS / 1000.0 + 10.0)
+        line, at = _line_since(board, n0, "STOP running", 60)
+        assert line is not None, "the run never started"
+        said = _line_since(board, at, "PLAY stuck:", STUCK_BUDGET_MS / 1000.0 + 10.0)[0]
         assert said is not None and "stuck: one frame ran over 2 s" in said, said
         # (the stop's line can share the stuck line's burst: read from it)
         assert _said_since(board, n0, "STOP refused or raised", 10), "the stop never said it raised"
@@ -2897,23 +2905,39 @@ def a_stuck_run_with_the_vm_down_is_ended(board):
             # ends it and brings one back, or nothing after answers
             board.ser.write(b"\x03")
             board.ser.flush()
-            board.wait_line("STOP 1/1 ended", 30)
+            _said_since(board, n0, "STOP 1/1 ended", 30)
             _desk_back(board)
         board.pyval("__import__('moy_play').watch(0)", strict=True)
         board.cmd("vmstop need", wait_for="REMOTE vmstop")
 
 
+def _line_since(board, n0, needle, timeout):
+    """The first line from line `n0` of the board's transcript on that holds
+    `needle`, waiting up to `timeout` s for one, and the index after it:
+    (line, next) to pass as the next call's `n0`, or (None, n0).
+
+    A wait for a SEQUENCE of lines walks the transcript by this index, never
+    by `board.wait_line`: that one reads only the lines still to come, and a
+    serial read appends every line it holds at once, so the second of two
+    lines that came in one read (`KSTOP i/n before` and `after`, a run's echo
+    and its stop) is already behind the next wait."""
+    import time
+    end = time.time() + timeout
+    i = n0
+    while True:
+        while i < len(board.lines):
+            i += 1
+            if needle in board.lines[i - 1]:
+                return board.lines[i - 1], i
+        if time.time() >= end:
+            return None, n0
+        board.drain(0.05)
+
+
 def _said_since(board, n0, needle, timeout):
     """Whether a line the board said since line `n0` of its transcript holds
     `needle`, waiting up to `timeout` s for one."""
-    import time
-    end = time.time() + timeout
-    while True:
-        if any(needle in ln for ln in board.lines[n0:]):
-            return True
-        if time.time() >= end:
-            return False
-        board.drain(0.2)
+    return _line_since(board, n0, needle, timeout)[0] is not None
 
 
 def mem_reports_the_heap(board):
