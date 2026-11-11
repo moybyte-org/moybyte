@@ -17,7 +17,7 @@ WAMR_VERSION="${WAMR_VERSION:-2.4.5}"
 # commit (native/moy_wasm/wamr_vendor.json; tests/test_wamr_vendor.py pins both).
 WAMR_REPO="${WAMR_REPO:-https://github.com/moybyte-org/wasm-micro-runtime.git}"
 WAMR_BRANCH="${WAMR_BRANCH:-moybyte-2.4.5}"
-WAMR_PIN="${WAMR_PIN:-3d56d06d79160073d86b386cdcf1ecfec17ab0ee}"
+WAMR_PIN="${WAMR_PIN:-7011ffb83bbc1f16f46384c76ecce5896efbf12f}"
 # TARGET=p4 (riscv32, the prebuilt wamrc) or TARGET=s3 (xtensa: needs the
 # wamrc toolchain/build_wamrc_xtensa.sh builds -- the prebuilt one has no
 # Xtensa backend, measured 2026-09-24).

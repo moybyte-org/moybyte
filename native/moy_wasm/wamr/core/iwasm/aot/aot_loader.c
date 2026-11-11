@@ -1166,6 +1166,19 @@ load_memory_info(const uint8 **p_buf, const uint8 *buf_end, AOTModule *module,
         read_uint32(buf, buf_end, module->memories[i].num_bytes_per_page);
         read_uint32(buf, buf_end, module->memories[i].init_page_count);
         read_uint32(buf, buf_end, module->memories[i].max_page_count);
+
+        /* The sizes a memory claims, which its instance allocates and
+           checks every access against, within what a linear memory holds */
+        uint64 max_size = GET_MAX_LINEAR_MEMORY_SIZE(
+            module->memories[i].flags & MEMORY64_FLAG ? true : false);
+        if (module->memories[i].init_page_count
+                > module->memories[i].max_page_count
+            || (uint64)module->memories[i].num_bytes_per_page
+                       * module->memories[i].max_page_count
+                   > max_size) {
+            set_error_buf(error_buf, error_buf_size, "invalid memory size");
+            return false;
+        }
     }
 
     read_uint32(buf, buf_end, module->mem_init_data_count);
@@ -2733,6 +2746,10 @@ load_text_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
 
     /* The layout is: literal size + literal + code (with plt table) */
     read_uint32(buf, buf_end, module->literal_size);
+    if (module->literal_size > (uint32)(buf_end - buf)) {
+        set_error_buf(error_buf, error_buf_size, "invalid literal size");
+        return false;
+    }
 
     /* literal data is at beginning of the text section */
     module->literal = (uint8 *)buf;
@@ -2765,6 +2782,10 @@ load_text_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
 #endif
 
     if ((module->code_size > 0) && !module->is_indirect_mode) {
+        if (module->code_size < get_plt_table_size()) {
+            set_error_buf(error_buf, error_buf_size, "invalid code size");
+            return false;
+        }
         plt_base = (uint8 *)buf_end - get_plt_table_size();
         init_plt_table(plt_base);
     }
@@ -3224,7 +3245,7 @@ do_text_relocation(AOTModule *module, AOTRelocationGroup *group,
         if (!strncmp(symbol, AOT_FUNC_PREFIX, strlen(AOT_FUNC_PREFIX))) {
             p = symbol + strlen(AOT_FUNC_PREFIX);
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size,
                                 "invalid import symbol %s", symbol);
                 goto check_symbol_fail;
@@ -3256,7 +3277,7 @@ do_text_relocation(AOTModule *module, AOTRelocationGroup *group,
                           strlen("_" AOT_FUNC_PREFIX))) {
             p = symbol + strlen("_" AOT_FUNC_PREFIX);
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size, "invalid symbol %s",
                                 symbol);
                 goto check_symbol_fail;
@@ -3267,7 +3288,7 @@ do_text_relocation(AOTModule *module, AOTRelocationGroup *group,
                           strlen("_" AOT_FUNC_INTERNAL_PREFIX))) {
             p = symbol + strlen("_" AOT_FUNC_INTERNAL_PREFIX);
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size, "invalid symbol %s",
                                 symbol);
                 goto check_symbol_fail;
@@ -3457,7 +3478,7 @@ do_data_relocation(AOTModule *module, AOTRelocationGroup *group,
             char *p = symbol + strlen(AOT_FUNC_PREFIX);
             uint32 func_index;
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size,
                                 "invalid relocation symbol %s", symbol);
                 return false;

@@ -4,5 +4,5 @@
  * format (wasm_format_version.json). Do not edit. */
 #ifndef MOY_WASM_PIN_H
 #define MOY_WASM_PIN_H
-#define MOY_WASM_FORK_COMMIT "3d56d06d79160073d86b386cdcf1ecfec17ab0ee"
+#define MOY_WASM_FORK_COMMIT "7011ffb83bbc1f16f46384c76ecce5896efbf12f"
 #endif

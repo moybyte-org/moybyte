@@ -553,7 +553,12 @@ trusts. A malformed trailer, a signature for another chip, a byte changed
 anywhere or a key the image does not trust is refused as `refused: malformed
 signature` / `bad signature`, and the runtime never sees it; an unsigned
 module is `refused: unsigned module` unless the cart's consent admits it
-(below). `tools/wasm_module.py` signs every module it builds with the OTA
+(below). Until the signature verifies, the trailer is the only part of the
+file anything parses -- its magic, its length and the signature -- and the
+module itself is only hashed; the AOT loader first reads a byte of a
+module that verified or that the consent admits unsigned
+(`tools/wasm_fuzz.py`'s `aot_*` targets fuzz both sides of that line).
+`tools/wasm_module.py` signs every module it builds with the OTA
 signing key (`$MOYBYTE_OTA_SIGNING_KEY`, else the file `make ota-keygen`
 writes) and its `verify` IS the board's call, through the host's binding
 (`runtime/host/net_binding.py`; `--consented` answers for a cart granted
@@ -795,6 +800,14 @@ console's task until the loop returns.
   at all goes straight to the interpreter with one `wasm_open` call -- and the
   runtime's fit report (what it asks `footprint()`, sizing against main.wasm
   itself when there is no module for this chip).
+- `tests/test_wasm_hostile.py`: what fuzzing the engine kept
+  (`tests/fixtures/wasm_fuzz/`, its README), replayed through the fork's
+  runtime at the pin as the host builds it and, where the machine has a
+  32-bit libc, through each chip's AOT loader, admission and key check
+  (`tools/wasm_fuzz.py`, which fuzzes the same harnesses under libFuzzer);
+  and an import a par item makes refused on the app ABI's table as on
+  libmoy's. `tests/test_wasi_commands.py`'s hostile test drives WASI's
+  imports raw with the arguments a hostile module passes.
 - `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
   for Linux at this pin (`runtime/wasm_binding.py`, which always runs
   main.wasm directly -- there is no per-chip AOT concept on the host) — the
