@@ -148,8 +148,9 @@ its USB-C is the Serial/JTAG, whose other PHY's pad is its panel's reset, so
 it denies the driver, as the Guition S3 does (each board.toml says why).
 **No migration** (CLAUDE.md
 "Settled"): `written/<cart>/` → `apps/<id>/` shipped as a strict reader, a
-legacy `written/` folder reading as absent until wiped by hand (owner,
-2026-11-03); a compiled cart's saves on a dev board are disposable.
+legacy `written/` folder reading as absent (owner, 2026-11-03); a compiled
+cart's saves on a dev board are disposable, and the store's once-per-store
+sweep deletes the folder (`RETIRED_SIBLINGS` in `runtime/carts/moy_seed.py`).
 
 ## 3. Clock and alarms
 

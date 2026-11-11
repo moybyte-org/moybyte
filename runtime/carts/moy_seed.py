@@ -561,9 +561,13 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # Settings' panel became the one Wi-Fi implementation. Generation 8 takes the
 # seed Mesh, which left the seed set 2026-11-10 for moybyte-org/carts: by its
 # folder, never its title, whose bare folder (mesh.moy) is the installed one.
+# It also takes RETIRED_SIBLINGS, folders beside the carts folder: `written/`
+# held a compiled cart's written files until they moved to `apps/<id>/`
+# (bd4d890a9, 2026-11-08), and nothing reads it.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
     "wallpaper_space", "wifi", "mesh"))
+RETIRED_SIBLINGS = ("written",)
 RETIRED_GEN = 8
 RETIRED_VER_NAME = "retired.ver"
 
@@ -584,9 +588,10 @@ def load_retired_version(root=CARTS_DIR):
 
 
 def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN,
-                  folders=()):
+                  folders=(), siblings=()):
     """Remove the folders of seeds that no longer ship, once per store: each
-    title's bare folder, and each of `folders` by name.
+    title's bare folder, each of `folders` by name, and each of `siblings`
+    beside the carts folder.
 
     Returns the number of folders removed (0 when the store is already at this
     generation, which is the warm-boot path and costs one small file read)."""
@@ -594,8 +599,8 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN,
         return 0
     gone = 0
     names = [cart_folder(t) for t in titles] + list(folders)
-    for name in names:
-        d = cart_path(root, name)
+    paths = [cart_path(root, n) for n in names] + [_sibling_path(root, n) for n in siblings]
+    for d in paths:
         if _exists(d):
             _rmtree(d)
             gone += 1
@@ -619,7 +624,7 @@ def sweep_store(root=CARTS_DIR, seed=None):
     titles = list(RETIRED)
     if seed:
         titles += [item[0] if is_packed(seed) else item["title"] for item in seed]
-    return prune_retired(root, titles, folders=RETIRED_FOLDERS)
+    return prune_retired(root, titles, folders=RETIRED_FOLDERS, siblings=RETIRED_SIBLINGS)
 
 
 def seed_any(seed, root, present, progress=None):
