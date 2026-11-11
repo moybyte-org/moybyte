@@ -82,7 +82,9 @@ class TextVerbs:
         search box closes, cleared; Settings' Name gets its text back and
         focus leaves it, its password prompt closes. The T-Deck's Mic does
         this inside a field (owner call, 2026-10-18), where its K types a
-        letter; anywhere else Mic is the console's key. The same key closes
+        letter; anywhere else Mic is the console's key. A running app's field
+        with an edit in progress gets back the text the edit began from
+        (`Player.cancel_field`); with none, Mic stays the console's key. The same key closes
         what sits over the Editor's typing (See why's popover, the Make it
         mine and Blocks dialogs) and stops a script reading a line. True if it
         did."""
@@ -110,6 +112,9 @@ class TextVerbs:
         if (self.screen == "settings" or self.wm.input_holder() == "settings") \
                 and self.settings_layer.cancel_field():
             self._dirty = True
+            return True
+        if self.wm.top_is_player() and self.run.player.cancel_field():
+            self._dirty = True          # a running app's field (Player.cancel_field)
             return True
         app = self._apps_by_id.get(self.wm.top_kind())
         cancel = getattr(app, "cancel_field", None) if app is not None else None

@@ -220,13 +220,14 @@ def test_a_command_runs_main_over_the_session_streams(console):
 def test_a_command_is_a_process_under_its_own_consent(console):
     _ws, door = console
     io, d = door()
+    before = {id(w) for w in moybyte_wakes()}
     assert call(d, "spawn", "0", "exits") == 5
     kind, name, granted = io.out.split(" ", 2)
     assert (kind, name) == ("command", "exits")
     assert granted.split() == ["http", "notifications"]
     assert not [p for p in S.SCHED.procs.values() if p.kind == S.COMMAND]
-    assert not [w for w in moybyte_wakes() if w[1] not in (1,)
-                and w[1] not in S.SCHED.procs]          # its wakes swept
+    assert not [w for w in moybyte_wakes() if id(w) not in before
+                and w[1] not in (1,) and w[1] not in S.SCHED.procs]   # its wakes swept
     io, d = door()
     assert call(d, "spawn", "0", "needy") == 126
     assert io.err.startswith('needy: needs "mic"')

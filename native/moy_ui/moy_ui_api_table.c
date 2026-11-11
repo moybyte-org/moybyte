@@ -885,6 +885,23 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         st = 0;
     }
     int done = 0;
+    uint32_t id = at >= 0 ? c->cur[at].id : 0;
+    moy_ui_inst_t *I = c->inst;
+    if (c->fe_cancel == 2 && id != 0 && id == c->fe_id) {
+        if (I->fe_ctx == c && I->fe_n <= cap) {
+            memcpy(buf, I->fe_buf, I->fe_n);    // a cancel: the text the edit began from
+            len = I->fe_n;
+        }
+        c->fe_cancel = 0;
+    }
+    if ((st & MOY_UI_ST_FOCUS) && id != 0 && !c->elsewhere && c->fe_cancel != 2
+        && (id != c->fe_id || I->fe_ctx != c)
+        && len <= sizeof I->fe_buf) {
+        c->fe_id = id;                      // focus came onto it: an edit begins here
+        I->fe_ctx = c;
+        memcpy(I->fe_buf, buf, len);
+        I->fe_n = (uint16_t)len;
+    }
     if ((st & MOY_UI_ST_FOCUS) && c->typed) {
         int k = c->typed;
         c->typed = 0;
@@ -916,6 +933,13 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     }
     if ((st & MOY_UI_ST_ACTIVATED) && c->tap_y == INT16_MIN) {
         done = 1;
+    }
+    if (id != 0 && id == c->fe_id && I->fe_ctx == c) {
+        if (done && len <= sizeof I->fe_buf) {
+            memcpy(I->fe_buf, buf, len);    // Enter keeps what it confirmed
+            I->fe_n = (uint16_t)len;
+        }
+        c->fe_live = (uint8_t)(len != I->fe_n || memcmp(buf, I->fe_buf, len) != 0);
     }
     if (at >= 0) {
         // a field's stop keeps its text's hash in its gen: text that changed

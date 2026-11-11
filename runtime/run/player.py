@@ -168,12 +168,14 @@ _FACE_WINDOW, _FACE_DESK, _FACE_LOOK, _FACE_TAP, _FACE_FS_SHIFT = 1, 2, 4, 8, 8
 
 try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
-    from ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+    from ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE,
+                         _IN_REP as _UI_IN_REP, _IN_KEYREP as _UI_IN_KEYREP)
     from moy_input import pointer_state as _pointer_state
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import cart_text as _cart_text
-    from runtime.ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+    from runtime.ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE,
+                         _IN_REP as _UI_IN_REP, _IN_KEYREP as _UI_IN_KEYREP)
     from runtime.moy_input import pointer_state as _pointer_state
     from runtime import layout_base as _layout_base
 try:
@@ -182,6 +184,21 @@ except ImportError:  # pragma: no cover - host
     from runtime import ui_draw as _ui_draw
 from array import array as _array
 _UI_MASKS = [0, 0]                      # reused: the frame's button masks
+_RUN_STEPS = _array("i", [0, 0])        # reused: a run face's frame's steps
+
+
+def _steps(inp, a, i):
+    """The frame's steps beyond its presses for an app's page into a[i] and
+    a[i + 1] (moy_ui_api.h's MOY_UI_IN_REP and MOY_UI_IN_KEYREP): the input
+    table's `rep_word` (a held direction's repeats, the trackball's steps) and
+    a held key's typing repeats, as an app's host gathers them
+    (ui_host.AppHost.keys)."""
+    rw = getattr(inp, "rep_word", 0)
+    kn = getattr(inp, "key_repeats", 0)
+    a[i] = rw - 0x100000000 if rw >> 31 else rw
+    a[i + 1] = (inp.repeat_key & 0xFFFF) | kn << 16 if kn else 0
+
+
 _P_LIVE = 1                             # moy_ui_api.h's MOY_UI_P_LIVE: a pointer over the page
 _UI_POINTER = [0, 0, 0, 0]              # reused: moy_input.pointer_state's answer
 try:
@@ -340,6 +357,10 @@ class Player(PlayerDiag):
                                       # responsive app's, whose `ui` verbs do
         self._responsive = False      # the app defines `_layout` (Player._wants_layout)
         self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
+        # Whether the app's page had a field in focus last frame, and the text
+        # mode the run had before it did (`_sync_typing`).
+        self._typing = False
+        self._text_was = False
         self._on_change = False       # an app on the verbs: drawn on change (animates())
         self._masks = None            # ws.input.button_masks, bound for an app's run
         self._owe = 0                 # drawn frames it still owes after the last change
@@ -1076,6 +1097,7 @@ class Player(PlayerDiag):
         self._ui = None
         self._uh = None
         self._on_change = False
+        self._typing = False
         self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         self.run.view = None      # the `view(w, h)` verb is per-run (cart_quit
@@ -1332,6 +1354,36 @@ class Player(PlayerDiag):
         ui = self._ui
         return ui[0] if ui else None
 
+    def ball_steps(self):
+        """Whether the trackball steps this run's page, as it steps every
+        surface that takes the keys (`Workstation.ball_steps`): an app's,
+        unless a caret holds the keyboard (its editor handle takes the roll
+        as arrows, `Workstation.nav`); a game's trackball is its pointer."""
+        return self._is_tool and self._focus_editor is None
+
+    def _sync_typing(self, ws):
+        """An app's page with a field in focus holds the keyboard in text
+        mode, as the shell's own pages do (Settings' name, Files' rename):
+        on a T-Deck W A S D then type and press no direction
+        (native/moy_input/moy_kbd.c), and the mode the run had comes back
+        when focus leaves the field. One rule for every runtime: the Python
+        verbs' context, or the run face a Lua or compiled app draws through."""
+        lua = self._lua
+        if lua is not None:
+            on = not getattr(lua, "own_ui", False) and _ui_draw._C.api_run_typing()
+        elif self._ui is not None:
+            on = _ui_draw._C.api_typing(self._ui[0])
+        else:
+            on = False
+        if on == self._typing:
+            return
+        self._typing = on
+        if on:
+            self._text_was = bool(ws.input.text_mode)
+            ws._set_text_mode(True)
+        else:
+            ws._set_text_mode(self._text_was)
+
     def _ui_begin(self, ws, render=True):
         """Begin a Python app's frame of `ui` verbs (runtime/toolkit/ui.py) over the
         input its btn() and touch() read, in the run snapshot's shape, before
@@ -1364,14 +1416,17 @@ class Player(PlayerDiag):
         a[6] = int(getattr(inp, "mods", 0) or 0)
         a[7] = getattr(inp, "wheel_x", 0)
         a[8] = getattr(inp, "wheel_y", 0)
+        _steps(inp, a, _UI_IN_REP)
         if getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE:
             a[4] |= _P_MIDDLE
         fed = self._focus_editor
         deaf = self.deaf or self.detached
         if deaf:
             a[0] = a[1] = a[5] = a[6] = 0   # the keys are another window's
+            a[_UI_IN_REP] = a[_UI_IN_KEYREP] = 0
         elif fed is not None:
             a[0] = a[1] = a[5] = 0      # the keys are the focused editor handle's
+            a[_UI_IN_REP] = a[_UI_IN_KEYREP] = 0
         if fed is not None:
             if a[4] and fed.claims(a[2], a[3]):
                 a[4] = _P_LIVE          # its own gesture (a mouse's, a selection's): a hover
@@ -1490,17 +1545,39 @@ class Player(PlayerDiag):
 
     def has_page(self):
         """Whether the running app has a view of its own open, which the
-        host's back steps out of before it leaves the app: a popover its last
-        frame drew, or a page it lent `ui.bar`'s way back for, on any tier
-        (docs/app_api_v1.md section 4). False for a game."""
+        host's back steps out of before it leaves the app: a field's edit in
+        progress, a popover its last frame drew, or a page it lent `ui.bar`'s
+        way back for, on any tier (docs/app_api_v1.md section 4). False for a
+        game."""
         return self._app_back(False)
 
     def back(self):
         """The host's back -- the bar's chevron, a window's, Esc, B and the
-        T-Deck's K -- into the running app: True where it steps out of a view
-        of its own (`has_page`), which the next frame shows; False where it
-        has none, and the host leaves it (`Workstation.app_back`)."""
+        T-Deck's K -- into the running app: True where it cancels a field's
+        edit in progress (`cancel_field`) or steps out of a view of its own
+        (`has_page`), which the next frame shows; False where it has none,
+        and the host leaves it (`Workstation.app_back`)."""
         if not self._app_back(True):
+            return False
+        self._owe = max(self._owe, 1)
+        self.ws.request_frame()
+        return True
+
+    def cancel_field(self):
+        """The host's cancel -- the T-Deck's Mic -- into the running app:
+        True where the field its page focuses has an edit in progress, which
+        the next frame gives back (its `ui.field` answers the text the edit
+        began from) as focus steps up off it; False where none is, and Mic
+        keeps its own meaning. Esc, B and the bar's chevron reach the same
+        cancel through `back`."""
+        if not self._is_tool or self.cart_error is not None:
+            return False
+        if self._lua is not None:
+            took = _ui_draw.run_cancel(True)
+        else:
+            ui = self._ui
+            took = ui is not None and _ui_draw.app_cancel(ui[0], True)
+        if not took:
             return False
         self._owe = max(self._owe, 1)
         self.ws.request_frame()
@@ -2343,6 +2420,11 @@ class Player(PlayerDiag):
                 # once put ~4.7ms of Brick Siege's frame under CHROME and sent
                 # #172 hunting the shell for a regression that was never there.
                 lua = getattr(self, "_lua", None)
+                if (self._is_tool and lua is not None and not (self.deaf or self.detached)
+                        and not getattr(lua, "own_ui", False)):
+                    s = _RUN_STEPS              # into the run face's frame begun next
+                    _steps(ws.input, s, 0)
+                    _ui_draw._C.api_run_steps(s[0], s[1])
                 if self._ui is not None and lua is None:
                     self._ui_begin(ws, render)
                 elif (lua is not None and getattr(ws.input, "last_key", 0) == _ui_draw.KEY_PASTE
@@ -2620,6 +2702,8 @@ class Player(PlayerDiag):
         # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
         # latency; no-op on the host. Done every running-cart frame so a mid-cart
         # toggle (e.g. wifi entering/leaving its password screen) takes effect.
+        if self._is_tool:
+            self._sync_typing(ws)
         ws._sync_cart_text_mode()
         # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
         # its own UI overlays, so they're never offset/clipped/recoloured. A

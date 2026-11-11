@@ -853,6 +853,9 @@ void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i) {
 }
 
 int moy_ui_api_back(moy_ui_ctx_t *c, int take) {
+    if (moy_ui_api_cancel(c, take)) {
+        return 1;
+    }
     if (c->pop_card.w > 0) {
         if (take) {
             c->pop_back = 1;

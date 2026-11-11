@@ -95,6 +95,9 @@ int moy_ui_run_split(void *target, moy_ui_span_t id, int32_t *sizes, int n, cons
                      const int32_t *opt, int32_t *out, int32_t *cur);
 int moy_ui_run_focus(void *target, moy_ui_span_t id, char *buf, size_t cap);
 int moy_ui_run_keys_taken(void *target);
+// Whether the run open now drew a page whose focus is a field
+// (moy_ui_api_typing): 0 where it drew none. Begins no frame.
+int moy_ui_run_typing(void);
 void moy_ui_run_at(void *target, int x, int y, int w, int h);
 int moy_ui_run_group(void *target, moy_ui_span_t caption, const moy_ui_over_t *o);
 // `kind` MOY_UI_V_INFO or MOY_UI_V_LINK (moy_ui.h); *out: activated.
@@ -165,6 +168,9 @@ int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size
 // The host's back over the run's frame drawn last (moy_ui_api_back): 1 where
 // the app takes it, 0 where the host leaves the app; `take` 0 only asks.
 int moy_ui_run_back(int take);
+// The host's cancel over the run's frame drawn last (moy_ui_api_cancel): 1
+// where its focused field has an edit in progress, which `take` gives back.
+int moy_ui_run_cancel(int take);
 // The host's bar over the run's frame drawn last, as moy_ui_api_bar_lent,
 // moy_ui_api_bar_chip and moy_ui_api_bar_tap are over a context: what a Lua
 // or compiled app lent it with ui.bar (0: nothing, or no run open), and a
@@ -178,6 +184,11 @@ void moy_ui_run_bar_tap(int i);
 // for the "paste" message its console posts ahead of the frame carrying
 // Ctrl+V (sdk/src/moyui_link.c).
 void moy_ui_run_paste(const uint8_t *text, size_t n);
+// The frame's steps beyond its presses, for the run's frame begun next
+// (moy_ui_api.h's MOY_UI_IN_REP and MOY_UI_IN_KEYREP: a held key's repeats,
+// the trackball's steps, a held key's typing): the console's host calls it
+// each frame of a Lua or compiled app, as an app's own host fills them.
+void moy_ui_run_steps(int32_t rep, int32_t keyrep);
 
 // The rows, in the role table's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an

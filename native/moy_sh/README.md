@@ -1,6 +1,6 @@
 # moy_sh — the terminal's shell
 
-The C shell of `docs/os_2026-11/system.md` §1: bash-compatible syntax over
+The C shell of `docs/os_2026-11/system.md` §1: POSIX `sh` syntax over
 the kernel's processes and the store, derived from dash (`UPSTREAM.md`). How a
 session runs — the push-model input, the fork as an arena snapshot, the exec as
 a host spawn, the built-ins — is `moy_sh.h`'s header.

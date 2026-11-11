@@ -112,7 +112,11 @@ class _PlayerLayer(Layer):
 
     id = "desktop"
     domain = "game"
-    ball_steps = False              # the trackball is the running cart's pointer
+
+    def ball_steps(self):
+        """An app's page takes the trackball as its W A S D (`Player.ball_steps`);
+        a game's trackball is its pointer."""
+        return self.ws.run.player.ball_steps()
 
     def draw(self, dt):
         self.ws.run.player.tick(dt)

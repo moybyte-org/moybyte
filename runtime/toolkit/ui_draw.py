@@ -1964,9 +1964,10 @@ def paste(ctx, text):
 def app_back(ctx, take=True):
     """The host's back -- the bar's chevron, a window's, Esc, B and the
     T-Deck's K -- over the frame `ctx` drew last: True where the app takes
-    it (a popover it drew is dismissed, else the page it lent `ui.bar`'s
-    `back` for answers UP next frame), False where it has no view to step
-    out of and the host leaves it. `take` False only asks."""
+    it (a field's edit is cancelled, `app_cancel`; else a popover it drew is
+    dismissed, else the page it lent `ui.bar`'s `back` for answers UP next
+    frame), False where it has no view to step out of and the host leaves
+    it. `take` False only asks."""
     return _C.api_back(ctx, take)
 
 
@@ -1974,6 +1975,20 @@ def run_back(take=True):
     """`app_back` over the running cart's own context: a Lua, compiled,
     WASI or native app's."""
     return _C.api_run_back(take)
+
+
+def app_cancel(ctx, take=True):
+    """The host's cancel -- the T-Deck's Mic -- over the frame `ctx` drew
+    last: True where its focused field has an edit in progress (its text
+    other than when focus came onto it), which the next frame gives back,
+    focus stepping up off the field; False where none is, and the key keeps
+    its own meaning. `take` False only asks."""
+    return _C.api_cancel(ctx, take)
+
+
+def run_cancel(take=True):
+    """`app_cancel` over the running cart's own context."""
+    return _C.api_run_cancel(take)
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")

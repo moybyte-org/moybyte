@@ -423,8 +423,8 @@ class InputVerbs:
     def ball_steps(self):
         """Whether the trackball is the W A S D of the surface that holds
         the keys: every popover and menu, About, and every fullscreen
-        surface -- the home, the apps, the Editor's tabs -- but one whose
-        `ball_steps` says otherwise: a running cart, a canvas whose cursor
+        surface -- the home, the apps (a cart's page too), the Editor's tabs --
+        but one whose `ball_steps` says otherwise: a running game, a canvas whose cursor
         it moves (the sprite tab and Paint until a popover opens, the map,
         the scene) and a caret, which takes it as arrows (`nav`). The desk's
         windows are pointed at."""

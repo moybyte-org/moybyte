@@ -14,9 +14,11 @@ screen's kernel chrome, and it fits "the kernel is C": it keeps working
 while an S3's Python VM is stopped (`ps`, `kill`, `log`, `reboot` stay
 available over the serial and web faces and on screen through the
 kernel's text renderer, the recovery console's, §2) and on the headless Zero, which has no console Python. Its
-syntax is **bash-compatible**: pipes, redirection (`>`, `>>`, `<`) into the
-files tree, variables and `$(...)`, `if`/`for`/`while`/`case`, functions
-and scripts, `&`/`jobs`/`fg`/`kill`, history and completion. **Where bash
+syntax is **POSIX `sh`**, the part of bash a `/bin/sh` script uses: pipes,
+redirection (`>`, `>>`, `<`) into the files tree, variables and `$(...)`,
+`if`/`for`/`while`/`case`, functions and scripts, `&`/`jobs`/`fg`/`kill`,
+history and completion. bash's own extensions (arrays, `[[`, brace
+expansion, `source`, `<(...)`) are not in dash and are not added. **Where bash
 would fork and exec, the shell asks the OS to spawn a process** of any tier
 (`processes.md` §1). Real bash cannot be ported: it needs fork, exec, signals, process
 groups and termios, none of which the kernel has. **It derives from dash**
