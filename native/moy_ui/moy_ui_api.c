@@ -4074,6 +4074,14 @@ int moy_ui_api_keys_taken(const moy_ui_ctx_t *c) {
     return c->keys;
 }
 
+int moy_ui_api_typing(const moy_ui_ctx_t *c) {
+    if (c->focus == 0 || c->elsewhere) {
+        return 0;
+    }
+    int i = mua_find(c->cur, c->n_cur, c->focus);
+    return i >= 0 && (c->cur[i].flags & STOP_FIELD) != 0;
+}
+
 void moy_ui_api_keys_back(moy_ui_ctx_t *c) {
     c->elsewhere = 0;
 }

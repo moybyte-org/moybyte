@@ -3663,6 +3663,20 @@ static mp_obj_t ui_api_run_paste(mp_obj_t text) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_paste_obj, ui_api_run_paste);
 
+// api_run_steps(rep, keyrep): the frame's steps, into the running cart's own
+// frame begun next
+static mp_obj_t ui_api_run_steps(mp_obj_t rep, mp_obj_t keyrep) {
+    moy_ui_run_steps(mp_obj_get_int(rep), mp_obj_get_int(keyrep));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_run_steps_obj, ui_api_run_steps);
+
+// api_run_typing() -> whether the running cart's own page has a field in focus
+static mp_obj_t ui_api_run_typing(void) {
+    return mp_obj_new_bool(moy_ui_run_typing());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_run_typing_obj, ui_api_run_typing);
+
 // api_rule(ctx, cv, look)
 static mp_obj_t ui_api_rule(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
     moy_ui_sink_t s;
@@ -4103,6 +4117,12 @@ static mp_obj_t ui_api_keys_taken(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_keys_taken_obj, ui_api_keys_taken);
 
+// api_typing(ctx) -> whether the page's focus is a field it is typed into
+static mp_obj_t ui_api_typing(mp_obj_t ctx) {
+    return mp_obj_new_bool(moy_ui_api_typing(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_typing_obj, ui_api_typing);
+
 // api_edge(ctx) -> whether this frame's up press went past the page's top
 static mp_obj_t ui_api_edge(mp_obj_t ctx) {
     return mp_obj_new_bool(moy_ui_api_edge(ctx_of(ctx)));
@@ -4302,6 +4322,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_run_bar_tap), MP_ROM_PTR(&ui_api_run_bar_tap_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_paste), MP_ROM_PTR(&ui_api_paste_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_paste), MP_ROM_PTR(&ui_api_run_paste_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_steps), MP_ROM_PTR(&ui_api_run_steps_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_typing), MP_ROM_PTR(&ui_api_run_typing_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_rule), MP_ROM_PTR(&ui_api_rule_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text), MP_ROM_PTR(&ui_api_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_mark), MP_ROM_PTR(&ui_api_card_mark_obj) },
@@ -4339,6 +4361,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_keep), MP_ROM_PTR(&ui_api_keep_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_audit), MP_ROM_PTR(&ui_api_audit_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_typing), MP_ROM_PTR(&ui_api_typing_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_edge), MP_ROM_PTR(&ui_api_edge_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_tap_armed), MP_ROM_PTR(&ui_api_tap_armed_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },

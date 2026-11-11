@@ -250,6 +250,7 @@ class MoycoreRun:
         self._split_us = array("i", bytearray(8))   # reused: tick_split's
         self._split = [0.0, 0.0]         # reused: frame_split's answer
         self._I_QUIT = _moycore.SNAP_QUIT
+        self._I_TEXT = _moycore.SNAP_TEXTMODE
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
@@ -508,6 +509,7 @@ class MoycoreRun:
             inp = getattr(self.ws, "input", None)
             if inp is not None:
                 inp.cart_quit = True
+        self._sync_textmode()
         self._sync_view()
         self._drain_audio()
         if err:
@@ -579,6 +581,20 @@ class MoycoreRun:
                 inp.cart_quit = True
             if bits & _moy_play.VIEW:
                 self._sync_view()
+        self._sync_textmode()
+
+    _textmode = 0                       # the SNAP_TEXTMODE last put on the input
+
+    def _sync_textmode(self):
+        """The cart's `textmode()` (libmoy's host callback writes
+        SNAP_TEXTMODE) on the console's input as it changes, as a Python
+        cart's writes it: the keyboard's mode follows (`Player.tick`)."""
+        t = self.snap[self._I_TEXT]
+        if t != self._textmode:
+            self._textmode = t
+            inp = getattr(self.ws, "input", None)
+            if inp is not None:
+                inp.text_mode = bool(t)
 
     def mute(self, on):
         """A run held aside (runtime/shell/procs.py) reads no input while
@@ -1108,6 +1124,7 @@ class WasmRun(MoycoreRun):
         self._split_us = array("i", bytearray(8))
         self._split = [0.0, 0.0]
         self._I_QUIT = _moycore.SNAP_QUIT
+        self._I_TEXT = _moycore.SNAP_TEXTMODE
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))

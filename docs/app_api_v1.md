@@ -310,7 +310,9 @@ is built on it.
 every board, and every surface must also work with a gamepad alone and with
 touch alone (#242, #239). The `ui` engine gives you all three: arrows (the
 T-Deck's WASD and trackball, a pad's d-pad) move focus between stops,
-Enter, A or a tap activates, a drag scrolls. So: every action is a stop
+Enter, A or a tap activates, a drag scrolls. A `ui.field` in focus takes
+the keyboard as text: on the T-Deck its WASD type there, and the trackball
+steps focus off it. So: every action is a stop
 (a button, a list row, a menu item), and a key shortcut only ever doubles
 one.
 

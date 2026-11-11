@@ -144,6 +144,7 @@ static uint32_t s_tick, s_serial;
 static int s_live;
 static uint8_t s_paste[MOY_UI_API_PASTE];  // moy_ui_run_paste's, for the frame begun next
 static size_t s_paste_n;
+static int32_t s_rep, s_keyrep;            // moy_ui_run_steps', likewise
 
 static moy_ui_ctx_t *run_ctx(const void *target) {
     const moy_canvas *c = (const moy_canvas *)target;
@@ -174,6 +175,9 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
             in[MOY_UI_IN_PTR] = snap[MOYCORE_UI_SNAP_PTR];
             in[MOY_UI_IN_KEY] = snap[MOYCORE_UI_SNAP_KEY];
         }
+        in[MOY_UI_IN_REP] = s_rep;
+        in[MOY_UI_IN_KEYREP] = s_keyrep;
+        s_rep = s_keyrep = 0;
         in[MOY_UI_IN_DT] = moycore_ui_dt_take();   // the ticks' clock since the last frame
         // an app's frame is its content_rect() (the snapshot's room), a
         // game's the whole canvas
@@ -206,6 +210,11 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
         s_tick = tick;
     }
     return s_ctx;
+}
+
+void moy_ui_run_steps(int32_t rep, int32_t keyrep) {
+    s_rep = rep;
+    s_keyrep = keyrep;
 }
 
 void moy_ui_run_paste(const uint8_t *text, size_t n) {
@@ -394,6 +403,12 @@ int32_t moy_ui_run_slot(void *target, moy_ui_span_t name, int32_t gen, int mint)
 int32_t moy_ui_run_slot_next(void *target) {
     moy_ui_ctx_t *c = run_ctx(target);
     return c != NULL ? moy_ui_api_slot_next(c) : -1;
+}
+
+int moy_ui_run_typing(void) {
+    uint32_t tick = 0, serial = 0;
+    (void)moycore_ui_snap(&tick, &serial);
+    return s_ctx != NULL && s_live && serial == s_serial ? moy_ui_api_typing(s_ctx) : 0;
 }
 
 int moy_ui_run_keys_taken(void *target) {

@@ -382,6 +382,12 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         b = bytes(text)
         lib.moy_ui_run_paste(b, len(b))
 
+    def api_run_steps(rep, keyrep):
+        lib.moy_ui_run_steps(int(rep), int(keyrep))
+
+    def api_run_typing():
+        return bool(lib.moy_ui_run_typing())
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -678,6 +684,10 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_keys_taken(p))
 
+    def api_typing(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_typing(p))
+
     def api_edge(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_edge(p))
@@ -820,8 +830,8 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
               api_split_toward, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_note, api_bubble, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_back, api_run_back, api_run_bar_lent,
-              api_run_bar_tap, api_paste, api_run_paste, api_rule,
-              api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,
+              api_run_bar_tap, api_paste, api_run_paste, api_run_steps, api_run_typing, api_rule,
+              api_focus, api_focus_ahead, api_keys_taken, api_typing, api_edge, api_tap_armed, api_at,
               api_dup, api_lost):
         setattr(m, f.__name__, f)
     m.calls = lambda: lib.moy_ui_calls()

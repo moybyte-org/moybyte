@@ -1,6 +1,6 @@
 """The trackball where a surface takes the keys (owner call 2026-10-26): a
 roll is the W A S D press it matches and the click is Enter, and no cursor
-shows -- the home and every fullscreen surface; a running cart keeps the
+shows -- the home and every fullscreen surface; a running game keeps the
 pointer, and a caret takes it as the arrows
 (`Workstation.ball`). The host's arrows-as-trackball (`ConsoleDriver.pan`,
 `ball_click`) spend it the way the T-Deck's handle_input does.
