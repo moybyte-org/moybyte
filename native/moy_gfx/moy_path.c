@@ -7,6 +7,7 @@
 #endif
 
 #include "moy_path.h"
+#include "moy_gfx_base.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -27,16 +28,6 @@
 #define ONE 64                  // 26.6: a pixel
 #define FULL (2 * ONE * ONE)    // a covered pixel's area, doubled (the half is kept whole)
 #define CURVE_STEPS 16          // the most lines a quadratic curve flattens into
-
-static int s_swapped = 1;
-
-void moy_path_wire_swapped(int swapped) {
-    s_swapped = swapped != 0;
-}
-
-static inline uint16_t can(uint16_t w) {
-    return s_swapped ? (uint16_t)((w << 8) | (w >> 8)) : w;
-}
 
 // -- the scratch ------------------------------------------------------------------
 
@@ -181,7 +172,7 @@ static int raster(uint16_t *dst, size_t cap, int dw, int n, int bx0, int by0, in
         return -1;
     }
     int touched = 0;
-    uint16_t cc = can(col);         // the colour's channels, canonical
+    uint16_t cc = moy_gfx_order(col);    // the colour's channels, canonical
     int cr = cc >> 11, cg = (cc >> 5) & 63, cb = cc & 31;
     for (int ry = by0; ry < by1; ry++) {
         int64_t top = (int64_t)ry * ONE, bot = top + ONE;
@@ -248,12 +239,12 @@ static int raster(uint16_t *dst, size_t cap, int dw, int n, int bx0, int by0, in
                 continue;
             }
             int al = (int)((a * 256) / FULL);       // 0..255
-            uint16_t p = can(dst[at]);
+            uint16_t p = moy_gfx_order(dst[at]);
             int pr = p >> 11, pg = (p >> 5) & 63, pb = p & 31;
             pr += ((cr - pr) * al + 128) >> 8;
             pg += ((cg - pg) * al + 128) >> 8;
             pb += ((cb - pb) * al + 128) >> 8;
-            dst[at] = can((uint16_t)((pr << 11) | (pg << 5) | pb));
+            dst[at] = moy_gfx_order((uint16_t)((pr << 11) | (pg << 5) | pb));
         }
     }
     return touched;

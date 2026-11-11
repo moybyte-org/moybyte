@@ -471,14 +471,14 @@ import moy_gfx, binascii
 _SHAPE_CASES = %r
 def _shapes(order):
     out = []
-    moy_gfx.shape_order(1)
+    moy_gfx.wire(1)
     try:
         for src in _SHAPE_CASES:
             buf = bytearray((i * 37 + 11) & 255 for i in range(%d))
             eval(src, {'buf': buf, 'rrect': moy_gfx.rrect, 'shadow': moy_gfx.shadow})
             out.append(binascii.crc32(buf) & 0xffffffff)
     finally:
-        moy_gfx.shape_order(order)
+        moy_gfx.wire(order)
     return out
 """ % ([c[1] for c in SHAPE_CASES], SHAPE_W * SHAPE_H * 2)
 
@@ -488,7 +488,7 @@ def shapes_host():
     sys.path.insert(0, ROOT)
     from runtime import gfx_binding
     out = []
-    gfx_binding.shape_order(1)
+    gfx_binding.wire(1)
     for _name, src in SHAPE_CASES:
         buf = bytearray((i * 37 + 11) & 255 for i in range(SHAPE_W * SHAPE_H * 2))
         eval(src, {"buf": buf, "rrect": gfx_binding.rrect,   # noqa: S307 -- fixed text

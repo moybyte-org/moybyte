@@ -52,6 +52,7 @@ _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_present.h",
             # ...and the text path and the raster under it, as gfx_binding
             # builds them (libmoy at RGB565: the flag is in build() below)
             "moy_text.h", "moy_text.c", "moy_gfx_kernels.h", "moy_gfx_kernels.c",
+            "moy_gfx_base.h", "moy_gfx_base.c",
             "moy_shape.h", "moy_shape.c",
             "moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c")
 

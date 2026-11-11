@@ -82,7 +82,8 @@ def _lua_names():
 PART = native_build.Part("lua", list(_RASTER) + [
     "moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
     "moycore_lua.c", "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
-    "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
+    "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_gfx_base.h", "moy_gfx_base.c",
+    "moy_text.h", "moy_text.c",
     "moy_shape.h", "moy_shape.c",
     "moy_json.h", "moy_json.c", "moy_htab.h", "moy_htab.c",
     "moy_play.h", "moy_play.c", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",

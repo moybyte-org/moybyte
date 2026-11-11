@@ -822,16 +822,6 @@ static mp_obj_t ui_font_reset(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_font_reset_obj, ui_font_reset);
 
-// text_wire() -> bool: whether the glyph lane blends byte-swapped words;
-// text_wire(swapped) sets it (moy_text.h) and answers what it was.
-static mp_obj_t ui_text_wire(size_t n_args, const mp_obj_t *a) {
-    int was = moy_text_wire_swapped();
-    if (n_args > 0) {
-        moy_text_wire(mp_obj_is_true(a[0]));
-    }
-    return mp_obj_new_bool(was);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_wire_obj, 0, 1, ui_text_wire);
 
 // text_lanes() -> (store, read): the version 2 glyphs drawn since boot that
 // read nothing and that read the target (moy_text_lanes).
@@ -4240,7 +4230,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_text_wire), MP_ROM_PTR(&ui_text_wire_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_lanes), MP_ROM_PTR(&ui_text_lanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_print_font), MP_ROM_PTR(&ui_print_font_obj) },
     { MP_ROM_QSTR(MP_QSTR_cart_text), MP_ROM_PTR(&ui_cart_text_obj) },

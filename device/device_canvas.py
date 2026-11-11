@@ -291,12 +291,6 @@ except ImportError:
 # byte first -- the S3 boards, and the host and the browser, which keep that order
 # -- and False on the P4's DPI.
 WIRE_SWAPPED = PAL565_WIRE is PAL565_SW
-# The glyph lane blends in that order too (moy_text.h's moy_text_wire).
-try:
-    import moy_ui as _moy_ui_wire
-    _moy_ui_wire.text_wire(WIRE_SWAPPED)
-except (ImportError, AttributeError):
-    pass
 
 # Buffer form of PAL565_WIRE for the native blit_indices kernel (#63): the C reads the
 # palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with
@@ -578,8 +572,8 @@ class DeviceCanvas:
         # None: one persistent buffer, shifted in place.
         self._comp_shift = getattr(compositor, "shift_last", None)
         self._comp_shift_fence = getattr(compositor, "shift_fence", None)
-        # The shapes blend over the buffer, so they read its word order.
-        self._gfx.shape_order(WIRE_SWAPPED)
+        # Text, shapes and paths blend over the buffer in its word order.
+        self._gfx.wire(WIRE_SWAPPED)
         # Native petme128 text (#62): the kernel's text op over the staged
         # moy_font glyph blob.
         self._gfx_text = self._gfx.text

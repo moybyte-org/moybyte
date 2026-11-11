@@ -88,8 +88,6 @@ _SIGS = (
     ("moy_text_print_font", [], c.c_uint32),
     ("moy_font_reset", [], None),
     ("moy_ui_font_reset", [], None),
-    ("moy_text_wire", [_I], None),
-    ("moy_text_wire_swapped", [], _I),
     ("moy_text_lanes", [c.c_void_p], None),
     ("moy_text_print_font_use", [c.c_uint32], c.c_int64),
     ("moy_ui_cart_text", [_I], _I),

@@ -26,7 +26,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
-from runtime import glass_binding, ui_draw
+from runtime import gfx_binding, glass_binding, ui_draw
 from runtime.host_canvas import make_system_canvas
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -110,9 +110,9 @@ def _lib():
 
 @pytest.fixture(params=[True, False], ids=["swapped", "canonical"])
 def wire(request):
-    was = moy_ui.text_wire(request.param)
+    was = gfx_binding.wire(request.param)
     yield request.param
-    moy_ui.text_wire(was)
+    gfx_binding.wire(was)
 
 
 @pytest.fixture(params=_v2_files(), ids=os.path.basename)

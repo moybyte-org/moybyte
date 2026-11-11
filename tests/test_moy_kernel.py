@@ -85,6 +85,7 @@ def _lib():
         "moy_kernel_host", os.path.join(KERNEL, "moy_recovery.c"),
         ["moy_crash.c", "moy_crash.h", "moy_recovery.h", "moy_boot.c", "moy_boot.h",
          "moy_scr.c", "moy_scr.h", "moy_path.c", "moy_path.h", "moy_path_faces.h",
+         "moy_gfx_base.h", "moy_gfx_base.c",
          "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c"],
         os.path.join(ROOT, ".build", "host_kernel"),
         cflags=native_build.BASE_CFLAGS + ["-Wall", "-Werror"],

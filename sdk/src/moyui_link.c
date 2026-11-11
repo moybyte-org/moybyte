@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "moy.h"
+#include "moy_gfx_base.h"
 #include "moy_text.h"
 #include "moy_ui.h"
 #include "moy_ui_api.h"
@@ -113,7 +114,7 @@ int moy_ui_link_frame(moy_frame_t *f) {
                                             : s_canon[i];
         }
         moy_canvas_wire(&s_cv, wire);
-        moy_text_wire(f->in[MOY_FRAME_SWAP] != 0);
+        moy_gfx_wire(f->in[MOY_FRAME_SWAP] != 0);
         s_swap = f->in[MOY_FRAME_SWAP];
     }
     if (_layout != NULL && f->in[MOY_FRAME_LAYOUT_W] > 0

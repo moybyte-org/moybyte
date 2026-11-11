@@ -14,6 +14,16 @@ installs at a begin, when the theme's generation has moved.
     writes, and every name they keep says why (a scan of the C: a static
     that creeps back in is one two tasks' frames would share); each name the
     theme block owns is one of its records;
+  * so does the raster every instance draws through (native/moy_gfx), whose
+    caches and scratch are one drawing task's: no two tasks draw through one
+    copy of it at once. The VM's frame draws on its task; the kernel's
+    front, the recovery floor and the splash draw while no VM frame runs; a
+    compiled cart's session draws on its own task while the VM's waits on it
+    (`sess_wait`, native/moy_wasm/modmoy_wasm.c); a program linked as an ELF
+    carries its own copy of moy_text.c and moy_shape.c (tools/elf_cart.py);
+    a WASI program has no screen and a cart's `par` lane may not draw.
+    Their one shared fact, the board's wire order, has one setter
+    (`moy_gfx_wire`);
   * an instance's blocks are its own, and freeing it gives them back;
   * a context made into an instance counts its frames' fades there;
   * an instance whose theme is pulled draws the main instance's pixels from
@@ -33,10 +43,12 @@ from ws_helpers import build_ws, use_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI_DIR = os.path.join(ROOT, "native", "moy_ui")
+GFX_DIR = os.path.join(ROOT, "native", "moy_gfx")
 
-# The toolkit's C a program links: every file but the MicroPython face and
-# the generated tables (constants).
+# The toolkit's C and the raster's (libmoy, vendored, aside): every file but
+# the MicroPython faces, the generated tables (constants) and the fuzz driver.
 NOT_LINKED = {"modmoy_ui.c": "the MicroPython face: one VM's, never linked into a program",
+              "modmoy_gfx.c": "the MicroPython face: one VM's, never linked into a program",
               "moy_ui_tables.c": "generated from style.json, constants only",
               "fuzz_theme.c": "the loader's fuzz driver, a host program of its own"}
 
@@ -90,6 +102,36 @@ SHARED = {
     ("moy_theme.c", "sh"): "the backdrop's scratch: the console's calls alone",
     ("moy_theme.c", "looks"): "the loader's scratch: the console's calls alone",
 }
+# The raster (native/moy_gfx): one drawing task's at a time (the module's
+# docstring has why), the wire order, counts and the console's settings.
+DRAWER = "one drawing task's: no two tasks draw through one copy at once"
+SHARED.update({
+    ("moy_gfx_base.c", "moy_gfx_swapped"): "the board's wire order: one value a board, "
+                                           "set by moy_gfx_wire before a frame draws",
+    ("moy_shape.c", "s_st"): "a count the meters read",
+    ("moy_shape.c", "s_cov"): DRAWER,
+    ("moy_shape.c", "s_cov_r"): DRAWER,
+    ("moy_shape.c", "s_cov_use"): DRAWER,
+    ("moy_shape.c", "s_tick"): DRAWER,
+    ("moy_shape.c", "s_mask"): DRAWER,
+    ("moy_shape.c", "s_run"): DRAWER,
+    ("moy_shape.c", "s_io"): DRAWER + ": set for the shadow drawn next",
+    ("moy_path.c", "s_edges"): DRAWER,
+    ("moy_path.c", "s_edge_cap"): DRAWER,
+    ("moy_path.c", "s_acc"): DRAWER,
+    ("moy_path.c", "s_acc_cap"): DRAWER,
+    ("moy_path.c", "s_lent"): DRAWER,
+    ("moy_path.c", "s_own_edges"): DRAWER,
+    ("moy_path.c", "s_own_edge_cap"): DRAWER,
+    ("moy_path.c", "s_own_acc"): DRAWER,
+    ("moy_path.c", "s_own_acc_cap"): DRAWER,
+    ("moy_text.c", "s_fonts"): "the font slots: loaded and freed by the console between "
+                               "frames, read by a draw",
+    ("moy_text.c", "s_print"): "the print font: the console's, set between frames",
+    ("moy_text.c", "s_lanes"): "a count the meters read",
+    ("moy_text.c", "s_dma"): "the board's DMA hook (moy_target_dma), set once at boot",
+    ("moy_text.c", "s_dma_least"): "the board's DMA hook (moy_target_dma), set once at boot",
+})
 for _n in ("s_gen", "s_gen_serial", "s_ctx", "s_tick", "s_serial", "s_live",
            "s_tp_on", "s_tp_clip", "s_tp_in", "s_wl", "s_paste", "s_paste_n", "s_rep", "s_keyrep"):
     SHARED[("moy_ui_wasm.c", _n)] = "the console's one compiled run, on the main instance"
@@ -123,11 +165,20 @@ def _state(path):
     out = []
     depth = 0
     pp = False                          # inside a directive's continued lines
+    body = None                         # the depth a `static struct {` variable opened at
     for line in src.split("\n"):
         s = line.strip()
         if pp or s.startswith("#"):
             pp = s.endswith("\\")
             continue
+        if body is not None and s.startswith("}") and depth - 1 == body:
+            m = re.match(r"\}\s*([A-Za-z_]\w*)", s)
+            if m:
+                out.append(m.group(1))   # `} s_run = {...};`: the variable it declares
+            body = None
+        elif re.match(r"(static\s+)?(struct|union)\s*\{$", s) and \
+                (depth == 0 or s.startswith("static ")):
+            body = depth
         if s.startswith(("static const ", "const ")) and not re.search(r"\*\s*(?!const)\w+\s*;", s):
             pass                        # (a constant; a pointer to const is state)
         elif s.startswith("static inline "):
@@ -146,27 +197,33 @@ def _state(path):
 
 
 def _sources():
-    return sorted(f for f in os.listdir(UI_DIR) if f.endswith(".c") and f not in NOT_LINKED)
+    return sorted(os.path.join(d, f) for d in (UI_DIR, GFX_DIR) for f in os.listdir(d)
+                  if f.endswith(".c") and f not in NOT_LINKED)
+
+
+def _path(f):
+    return os.path.join(UI_DIR if os.path.exists(os.path.join(UI_DIR, f)) else GFX_DIR, f)
 
 
 def test_the_toolkit_keeps_no_state_a_frame_writes_outside_its_instances():
     found = []
-    for f in _sources():
-        for name in _state(os.path.join(UI_DIR, f)):
+    for path in _sources():
+        f = os.path.basename(path)
+        for name in _state(path):
             if (f, name) not in SHARED:
                 found.append("%s: %s" % (f, name))
     assert not found, ("state at file scope in the toolkit, which every task's frames "
                        "would share: move it into moy_ui_inst_t (or the context, or the "
                        "sink), or list it in SHARED with why it is not a frame's: %s" % found)
     for (f, name) in SHARED:
-        assert name in _state(os.path.join(UI_DIR, f)), "SHARED names %s in %s, gone" % (name, f)
+        assert name in _state(_path(f)), "SHARED names %s in %s, gone" % (name, f)
 
 
 def test_each_name_the_block_owns_is_one_of_its_records():
     for (f, name), why in SHARED.items():
         if why != BLOCK:
             continue
-        src = open(os.path.join(UI_DIR, f), encoding="utf-8").read()
+        src = open(_path(f), encoding="utf-8").read()
         m = re.search(r"\nint moy_ui_recs_\w+\(moy_ui_rec_t \*r\) \{\n(.*?)\n\}\n", src, re.S)
         assert m, "%s keeps the theme block's %s and has no records function" % (f, name)
         assert re.search(r"\b%s\b" % name, m.group(1)), (

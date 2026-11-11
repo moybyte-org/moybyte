@@ -55,9 +55,9 @@
  * coverage. A TINT copies a sub-rect out with a colour over it, the dimmed
  * neighbour a cache keeps rather than a blend every frame.
  *
- * COLOURS are RGB565 in the buffer's wire order; moy_shape_wire_swapped says
- * which order that is (the S3 boards, the host and the browser hold it high
- * byte first, the P4's DPI does not: device/device_canvas.py's WIRE_SWAPPED).
+ * COLOURS are RGB565 in the buffer's wire order, which moy_gfx_wire sets
+ * (moy_gfx_base.h: the S3 boards, the host and the browser hold it high byte
+ * first, the P4's DPI does not).
  */
 
 #ifndef MOY_SHAPE_H
@@ -103,9 +103,7 @@ typedef struct {
     uint8_t stepped;                // a hard shadow's corners
 } moy_shape_shadow_t;
 
-// The buffer's word order (1: high byte first). Process-wide; 1 until set.
-void moy_shape_wire_swapped(int swapped);
-// A canonical RGB565 word in that order.
+// A canonical RGB565 word in the wire order (moy_gfx_wire).
 uint16_t moy_shape_wire(uint16_t canonical);
 
 // A rect with corners `r` (each clamped to half the shorter side and to

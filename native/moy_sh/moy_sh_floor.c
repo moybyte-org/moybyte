@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "moy_canvas.h"
+#include "moy_gfx_base.h"
 #include "moy_shape.h"
 #include "moy_sh_board.h"
 #include "moy_sh_floor.h"
@@ -73,8 +74,7 @@ static void look(moy_sh_floor_t *fl) {
     moy_theme_shape(name, n, fl->shape);
     moy_ui_shape_use(fl->shape);
     moy_ui_depth_use(name, n, 0);
-    moy_text_wire(fl->g.swap);
-    moy_shape_wire_swapped(fl->g.swap);
+    moy_gfx_wire(fl->g.swap);
     moy_ui_set_input(fl->g.input);
     moy_ui_set_hint_input(fl->g.input);
 }

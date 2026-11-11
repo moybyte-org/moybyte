@@ -127,7 +127,7 @@ class _FakeGfx:
     shadow = staticmethod(gfx_binding.shadow)
     cover = staticmethod(gfx_binding.cover)
     tint = staticmethod(gfx_binding.tint)
-    shape_order = staticmethod(gfx_binding.shape_order)
+    wire = staticmethod(gfx_binding.wire)
     shape_stats = staticmethod(gfx_binding.shape_stats)
     shape_reset = staticmethod(gfx_binding.shape_reset)
     blit565_scale = staticmethod(gfx_binding.blit565_scale)

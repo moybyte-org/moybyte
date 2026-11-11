@@ -19,7 +19,8 @@ add_library(usermod_moy_gfx INTERFACE)
 # the one UI text path, over its rasterizer; moy_backdrop.c a theme's
 # backdrop; moy_shape.c the 2026-10 look's shapes and shadows; moy_scr.c a
 # whole screen with no canvas (the boot splash, the kernel's screens); moy_path.c
-# filled paths and the outline faces (each its header).
+# filled paths and the outline faces; moy_gfx_base.c the wire order they all
+# write in (each its header).
 # THIS LIST AND
 # micropython.mk'S ARE TWINS -- the .mk is what the unix build reads, and the
 # two have drifted before (when six verbs became libmoy calls, cmake gained the
@@ -27,6 +28,7 @@ add_library(usermod_moy_gfx INTERFACE)
 target_sources(usermod_moy_gfx INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_gfx.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_gfx_kernels.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_gfx_base.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_text.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_backdrop.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_shape.c

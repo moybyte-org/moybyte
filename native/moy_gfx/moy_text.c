@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "moy_text.h"
+#include "moy_gfx_base.h"
 #include "moy_gfx_kernels.h"
 #include "moy.h"
 
@@ -56,7 +57,6 @@ typedef struct {
 
 static font_slot_t s_fonts[MOY_FONT_SLOTS];
 static uint32_t s_print = MOY_FONT_PETME128;
-static int s_wire_swapped = 1;
 static uint32_t s_lanes[2];     // glyphs that read nothing, and that read
 
 static font_slot_t *slot_of(uint32_t font) {
@@ -299,14 +299,6 @@ void moy_font_reset(void) {
 
 void moy_text_vm_stop(void) {
     moy_font_reset();
-}
-
-void moy_text_wire(int swapped) {
-    s_wire_swapped = swapped ? 1 : 0;
-}
-
-int moy_text_wire_swapped(void) {
-    return s_wire_swapped;
 }
 
 void moy_text_lanes(uint32_t out[2]) {
@@ -748,7 +740,7 @@ static void draw2(const moy_text_target_t *t, const row_t *r, const uint8_t *s, 
                   const int k[4]) {
     pass_t p = {t, r, {0}, scale, k[0], k[1], k[2], k[3], INT32_MIN,
                 r->f2.bpp == 1 && alpha == 256};
-    mg_ink(&p.ink, col, r->f2.bpp, alpha, bg, s_wire_swapped);
+    mg_ink(&p.ink, col, r->f2.bpp, alpha, bg, moy_gfx_swapped);
     if (bg < 0) {
         p.kx0 = 1;
         p.kx1 = 0;
@@ -799,7 +791,7 @@ int moy_text_glyph(const moy_text_target_t *t, uint32_t font, int index, int x, 
     const font2_t *f = &r->f2;
     if (t != NULL && t->px != NULL) {
         pass_t p = {t, r, {0}, scale, 1, 0, 0, 0, INT32_MIN, f->bpp == 1};
-        mg_ink(&p.ink, col, f->bpp, 256, MOY_TEXT_BG_READ, s_wire_swapped);
+        mg_ink(&p.ink, col, f->bpp, 256, MOY_TEXT_BG_READ, moy_gfx_swapped);
         glyph2(&p, index, x, y);
     }
     return rec_of(f, index)[7] * scale;

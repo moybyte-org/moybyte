@@ -1278,14 +1278,6 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.font_file = font_file
     m.font_reset = lib.moy_ui_font_reset
 
-    def text_wire(*swapped):
-        was = bool(lib.moy_text_wire_swapped())
-        if swapped:
-            lib.moy_text_wire(1 if swapped[0] else 0)
-        return was
-
-    m.text_wire = text_wire
-
     def text_lanes():
         n = (c.c_uint32 * 2)()
         lib.moy_text_lanes(c.addressof(n))

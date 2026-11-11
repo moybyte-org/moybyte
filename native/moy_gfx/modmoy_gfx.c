@@ -23,6 +23,7 @@
 // The C draw API exported to sibling native modules (moy_lua's libmoy-direct
 // verbs, #189) -- declarations only; the definitions sit with the DrawCtx
 // machinery they wrap, below.
+#include "moy_gfx_base.h"
 #include "moy_gfx_capi.h"
 
 // The draw gates read their canvas's row (native/moy_glass): its pixels, its
@@ -1041,7 +1042,7 @@ static mp_obj_t moy_gfx_tint(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tint_obj, 9, 12, moy_gfx_tint);
 
-// shape_stats() -> moy_shape.h's counters; shape_reset(caches); shape_order(swapped).
+// shape_stats() -> moy_shape.h's counters; shape_reset(caches).
 static mp_obj_t moy_gfx_shape_stats(void) {
     uint32_t st[MOY_SHAPE_STATS];
     moy_shape_stats(st);
@@ -1059,12 +1060,12 @@ static mp_obj_t moy_gfx_shape_reset(mp_obj_t caches) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_reset_obj, moy_gfx_shape_reset);
 
-static mp_obj_t moy_gfx_shape_order(mp_obj_t swapped) {
-    moy_shape_wire_swapped(mp_obj_is_true(swapped));
-    moy_path_wire_swapped(mp_obj_is_true(swapped));
-    return mp_const_none;
+// wire() -> bool: whether text, shapes and paths write byte-swapped words;
+// wire(swapped) sets it for all three (moy_gfx_base.h) and answers what it was.
+static mp_obj_t moy_gfx_wire_fn(size_t n_args, const mp_obj_t *a) {
+    return mp_obj_new_bool(moy_gfx_wire(n_args > 0 ? mp_obj_is_true(a[0]) : -1));
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_order_obj, moy_gfx_shape_order);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_wire_obj, 0, 1, moy_gfx_wire_fn);
 
 // -- paths and the outline faces (moy_path.h) --------------------------------------
 //
@@ -2418,7 +2419,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tint),       MP_ROM_PTR(&moy_gfx_tint_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_stats), MP_ROM_PTR(&moy_gfx_shape_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_reset), MP_ROM_PTR(&moy_gfx_shape_reset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_shape_order), MP_ROM_PTR(&moy_gfx_shape_order_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wire), MP_ROM_PTR(&moy_gfx_wire_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_fill),  MP_ROM_PTR(&moy_gfx_path_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_text),  MP_ROM_PTR(&moy_gfx_path_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_width), MP_ROM_PTR(&moy_gfx_path_width_obj) },

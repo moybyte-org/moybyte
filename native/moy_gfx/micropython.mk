@@ -21,12 +21,14 @@
 # moy_backdrop.c rasterises a theme's backdrop (its header); moy_shape.c the
 # 2026-10 look's shapes and shadows (its header); moy_path.c filled paths and the
 # outline faces at any size (its header); moy_scr.c a whole screen with no
-# canvas: the boot splash and the kernel's screens (its header).
+# canvas: the boot splash and the kernel's screens (its header); moy_gfx_base.c
+# the wire order they all write in (its header).
 
 MOY_GFX_MOD_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/modmoy_gfx.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_gfx_kernels.c
+SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_gfx_base.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_text.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_backdrop.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_shape.c

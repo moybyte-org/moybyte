@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "moy_backdrop.h"
+#include "moy_gfx_base.h"
 
 #define FX 256
 #define STRIP 64      // a wave's columns evaluated at once
@@ -197,23 +198,6 @@ static int level(int cov, int alpha) {
 
 // -- geometry ---------------------------------------------------------------------
 
-static uint32_t isqrt64(uint64_t v) {
-    uint64_t r = 0, b = (uint64_t)1 << 62;
-    while (b > v) {
-        b >>= 2;
-    }
-    while (b) {
-        if (v >= r + b) {
-            v -= r + b;
-            r = (r >> 1) + b;
-        } else {
-            r >>= 1;
-        }
-        b >>= 2;
-    }
-    return (uint32_t)r;
-}
-
 static int32_t floor_fx(int32_t v) {
     return v >> 8;
 }
@@ -286,7 +270,7 @@ static int spans(const geo_t *g, int32_t yc, int32_t *l, int32_t *r) {
                 dy = yc - (g->y1 - g->r);
             }
             if (dy) {
-                in = g->r - (int32_t)isqrt64((uint64_t)((int64_t)g->r * g->r - (int64_t)dy * dy));
+                in = g->r - (int32_t)mg_isqrt64((uint64_t)((int64_t)g->r * g->r - (int64_t)dy * dy));
             }
             l[0] = g->x0 + in;
             r[0] = g->x1 - in;
@@ -297,7 +281,7 @@ static int spans(const geo_t *g, int32_t yc, int32_t *l, int32_t *r) {
             if (g->ry <= 0 || g->rx <= 0 || dy <= -g->ry || dy >= g->ry) {
                 return 0;
             }
-            uint32_t s = isqrt64((uint64_t)((int64_t)g->ry * g->ry - (int64_t)dy * dy));
+            uint32_t s = mg_isqrt64((uint64_t)((int64_t)g->ry * g->ry - (int64_t)dy * dy));
             int32_t hw = (int32_t)((int64_t)g->rx * s / g->ry);
             int32_t cl = g->cx - hw, cr = g->cx + hw;
             if (g->kind != MG_BD_PIE || g->pie == 3) {
