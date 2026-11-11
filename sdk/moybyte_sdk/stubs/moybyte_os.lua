@@ -148,3 +148,5 @@ function moybyte.key_make(...) end
 function moybyte.key_public(...) end
 --- moybyte.key_shared(name: str, peer: str): the row moybyte.key_shared
 function moybyte.key_shared(...) end
+--- moybyte.clock(local: int): the row moybyte.clock
+function moybyte.clock(...) end

@@ -151,9 +151,9 @@ enum {
     MOY_T_MOYBYTE_STATUS_STATE, MOY_T_MOYBYTE_STATUS_PANEL, MOY_T_MOYBYTE_STATUS_REMOVE,
     MOY_T_MOYBYTE_AES_CTR, MOY_T_MOYBYTE_AES_CCM_SEAL, MOY_T_MOYBYTE_AES_CCM_OPEN,
     MOY_T_MOYBYTE_NAME, MOY_T_MOYBYTE_KEY_MAKE, MOY_T_MOYBYTE_KEY_PUBLIC,
-    MOY_T_MOYBYTE_KEY_SHARED,
+    MOY_T_MOYBYTE_KEY_SHARED, MOY_T_MOYBYTE_CLOCK,
 };
-#define MOY_APP_TABLE_N 210u
+#define MOY_APP_TABLE_N 211u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -367,6 +367,7 @@ enum {
     { "moybyte.key_make", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.key_public", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.key_shared", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.clock", MOY_ROLE_MOYBYTE, -1 }, \
 }
 
 // The permission each role is granted by: a role absent here is never

@@ -167,6 +167,12 @@ app (the shell) is answered None.
   clock_synced()     whether the wall clock holds real time: NTP has answered
                      on a board since power-on (runtime/system/wallclock.py);
                      until then `time.time()` counts from power-on
+  clock(local=False) the wall clock in Unix seconds, one epoch on every tier
+                     (`time.time()` and a Lua service's `os.time()` count
+                     from 2000 on a board; until NTP answers it counts from
+                     power-on); with `local`, the time of day in the
+                     console's zone as seconds from 1970-01-01 there, None
+                     while the clock does not hold real time
 
 THE CRYPTO (native/moy_net/moy_crypto.h, the one C body every tier calls;
 docs/app_api_v1.md section 10). Pure computation over what it is handed: no
@@ -1149,6 +1155,17 @@ def clock_synced():
     except ImportError:  # host: the runtime package
         from runtime import wallclock
     return wallclock.synced()
+
+
+def clock(local=False):
+    try:
+        import wallclock
+    except ImportError:  # host: the runtime package
+        from runtime import wallclock
+    t = wallclock.now()
+    if not local:
+        return t
+    return t + wallclock.offset(t) if wallclock.synced() else None
 
 
 def __getattr__(name):

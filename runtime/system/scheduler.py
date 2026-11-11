@@ -247,6 +247,7 @@ _CALLS = {
     "moybyte.key_make": _moybyte.key_make,
     "moybyte.key_public": _moybyte.key_public,
     "moybyte.key_shared": _moybyte.key_shared,
+    "moybyte.clock": _moybyte.clock,
 }
 # END GENERATED
 

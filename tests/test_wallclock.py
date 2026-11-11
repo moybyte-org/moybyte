@@ -226,6 +226,19 @@ def test_an_app_asks_whether_the_clock_is_synced():
     assert moybyte.clock_synced() is True
 
 
+def test_an_app_reads_the_clock_in_unix_seconds_and_local_time_once_synced(monkeypatch):
+    """moybyte.clock() is one epoch on every tier (a board's time.time()
+    counts from 2000); its local half is the zone's, absent until synced."""
+    from runtime import moybyte
+    monkeypatch.setattr(wc, "_now", lambda: _at(2026, 7, 1, 12))
+    wc.set_zone(BELGRADE)
+    _kernel(0)
+    assert moybyte.clock() == _at(2026, 7, 1, 12)
+    assert moybyte.clock(True) is None
+    _kernel(1)
+    assert moybyte.clock(True) == _at(2026, 7, 1, 14), "Belgrade's summer, UTC+2"
+
+
 # -- the time a certificate's dates are read against ----------------------------------
 
 LEAP = 400 * 86400                                 # moy_net.h's MOY_CLOCK_LEAP_MAX

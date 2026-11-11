@@ -167,7 +167,10 @@ process whose output goes to the log. The `alarms` permission gates
 
 As built (phase 6 step 3): NTP, the TZ string (Settings' Time zone) and
 `moybyte.clock_synced()` are `runtime/system/wallclock.py` over
-`native/moy_net/moy_wifi.c`'s clock. An alarm is a wake of the registry's
+`native/moy_net/moy_wifi.c`'s clock. `moybyte.clock()` is that clock in Unix
+seconds on every tier and in every language (a board's `time.time()` and a
+Lua state's `os.time()` count from 2000), and `moybyte.clock(true)` the
+console's local time, `nil`/None while NTP has not answered. An alarm is a wake of the registry's
 on the wall clock (`runtime/system/moybyte.py`): `moybyte.at(t, fn)`, Unix
 seconds, refused with EPERM without `alarms` (a Lua app's and a Lua
 service's alike, `tiers.md` §2; a Lua service's and a compiled program's is

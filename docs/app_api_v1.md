@@ -846,8 +846,9 @@ C app that pings a service and reads the answer.
 ## 9. Alarms, connectivity and achievements
 
 **Alarms** (`alarms`): `moybyte.at(t, fn)` calls `fn()` once, no
-earlier than `t` in Unix seconds on the wall clock (`time.time()`, Lua's
-`os.time()`; `moybyte.clock_synced()` says whether NTP has set it), answers
+earlier than `t` in Unix seconds on the wall clock (`moybyte.clock()`, on
+every tier: a board's `time.time()` and Lua's `os.time()` count from 2000;
+`moybyte.clock_synced()` says whether NTP has set it), answers
 an id `moybyte.cancel` takes, refuses without the permission (Python's
 `OSError`, a Lua error), and lights the screen if the console had gone dark,
 so a background app can wake its player
@@ -1044,6 +1045,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.key_make` | none | `moybyte.key_make` | `moybyte.key_make` |  |  |
 | `moybyte.key_public` | none | `moybyte.key_public` | `moybyte.key_public` |  |  |
 | `moybyte.key_shared` | none | `moybyte.key_shared` | `moybyte.key_shared` |  |  |
+| `moybyte.clock` | none | `moybyte.clock` | `moybyte.clock` |  |  |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first

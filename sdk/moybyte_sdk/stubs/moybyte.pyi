@@ -126,3 +126,6 @@ def key_public(*args: Any, **kwargs: Any) -> Any:
 
 def key_shared(*args: Any, **kwargs: Any) -> Any:
     """moybyte.key_shared(name: str, peer: str): the row moybyte.key_shared"""
+
+def clock(*args: Any, **kwargs: Any) -> Any:
+    """moybyte.clock(local: int): the row moybyte.clock"""
