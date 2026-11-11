@@ -344,3 +344,13 @@ def test_a_beta_board_says_so_and_why(site):
         else:
             assert 'class="beta"' not in card and "betanote" not in card
             assert "(beta)" not in option
+
+
+def test_the_heros_play_mark_styles_leave_the_flash_button_alone():
+    """The hero's play mark and every board's Flash button share the class
+    `go`. A bare `.go` rule placed the Flash button absolutely, off its card,
+    with no pointer events, so it could be neither seen nor pressed."""
+    import re
+    src = open(os.path.join(ROOT, "site", "build.py")).read()
+    bare = re.findall(r"(?m)^\.go\b[^{]*\{", src)
+    assert not bare, bare

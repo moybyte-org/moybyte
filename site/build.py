@@ -1000,11 +1000,11 @@ h1 em{font-style:normal;color:var(--accent)}
 .still img{display:block;width:100%%;height:100%%;image-rendering:pixelated}
 @media (max-width:1100px){.still img{image-rendering:auto}}
 .stage.live .still,.stage:not(.idle) .go{display:none}
-.go{position:absolute;left:50%%;top:50%%;transform:translate(-50%%,-50%%);
+.still .go{position:absolute;left:50%%;top:50%%;transform:translate(-50%%,-50%%);
   display:flex;align-items:center;gap:10px;padding:12px 20px;font-size:16px;
   color:var(--night-ink);background:color-mix(in srgb,var(--night-bg) 82%%,transparent);
   border:1px solid var(--night-accent);pointer-events:none;white-space:nowrap}
-.go i{width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;
+.still .go i{width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;
   border-left:13px solid var(--night-accent)}
 .still:hover .go{background:var(--night-accent);color:var(--night-bg)}
 .still:hover .go i{border-left-color:var(--night-bg)}
