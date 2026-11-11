@@ -181,8 +181,11 @@ def test_a_change_settles_every_buffer_then_rests(tmp_path, monkeypatch, bufs):
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, bufs, False)
     for t in ("apps", "games"):           # the tab's covers in the cache
         ws.set_home_tab(t)
-        for _ in range(20):
-            frame()
+        quiet = 0
+        for _ in range(200):              # until the covers stop popping in
+            quiet = quiet + 1 if frame() is None else 0
+            if quiet >= 5:
+                break
     ws.set_home_tab("apps")
     shots = [s for s in (frame() for _ in range(10)) if s is not None]
     assert len(shots) == bufs, len(shots)
