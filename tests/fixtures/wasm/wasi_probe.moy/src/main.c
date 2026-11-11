@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -75,6 +76,72 @@ static int files(void) {
     return 0;
 }
 
+// `hostile CASE`: preview1's imports called raw, with the arguments a
+// hostile module passes, each answer printed as its errno (a trap ends the
+// program): `abs` an absolute path whose bytes go on past its length, `end`
+// a path in the last byte of memory, `wrap` a pointer and length that wrap,
+// `iov` an iovec array past the end of memory, `iovlen` a buffer that runs
+// off it, `badfd` descriptors that were never opened, `prestat0` a name
+// buffer of no length, `poll0` no subscriptions, `renum` a descriptor
+// renumbered past the table.
+#define WASI(name) __attribute__((import_module("wasi_snapshot_preview1"), import_name(#name)))
+int32_t raw_path_open(int32_t fd, int32_t dirflags, int32_t path, int32_t path_len, int32_t oflags,
+                      int64_t base, int64_t inheriting, int32_t fdflags, int32_t out)
+    WASI(path_open);
+int32_t raw_fd_write(int32_t fd, int32_t iovs, int32_t n, int32_t out) WASI(fd_write);
+int32_t raw_fd_close(int32_t fd) WASI(fd_close);
+int32_t raw_fd_prestat_get(int32_t fd, int32_t out) WASI(fd_prestat_get);
+int32_t raw_fd_prestat_dir_name(int32_t fd, int32_t buf, int32_t n) WASI(fd_prestat_dir_name);
+int32_t raw_poll_oneoff(int32_t in, int32_t out, int32_t n, int32_t nout) WASI(poll_oneoff);
+int32_t raw_fd_renumber(int32_t fd, int32_t to) WASI(fd_renumber);
+
+static char g_path[] = "/files/Documents/a.txt" "XYZ";
+
+static int hostile(const char *how) {
+    uint32_t end = (uint32_t)__builtin_wasm_memory_size(0) * 65536u;
+    uint32_t got = 0, word[2];
+    int32_t dir = -1;
+    for (int32_t fd = 3; fd < 16 && dir < 0; fd++) {
+        if (raw_fd_prestat_get(fd, (int32_t)(uintptr_t)word) == 0) {
+            dir = fd;
+        }
+    }
+    int64_t read = 1 << 1;
+    if (strcmp(how, "abs") == 0) {
+        printf("abs %d\n", (int)raw_path_open(dir, 0, (int32_t)(uintptr_t)g_path, 22, 0, read, 0,
+                                               0, (int32_t)(uintptr_t)&got));
+    } else if (strcmp(how, "end") == 0) {
+        *(volatile char *)(uintptr_t)(end - 1) = '/';
+        int32_t r = raw_path_open(dir, 0, (int32_t)(end - 1), 1, 0, read, 0, 0,
+                                  (int32_t)(uintptr_t)&got);
+        printf("end %s\n", r >= 0 ? "answered" : "?");
+    } else if (strcmp(how, "wrap") == 0) {
+        printf("wrap %d\n", (int)raw_path_open(dir, 0, (int32_t)0xfffffff0u, 0x20, 0, read, 0, 0,
+                                                (int32_t)(uintptr_t)&got));
+    } else if (strcmp(how, "iov") == 0) {
+        printf("iov %d\n", (int)raw_fd_write(1, (int32_t)(end - 4), 1, (int32_t)(uintptr_t)&got));
+    } else if (strcmp(how, "iovlen") == 0) {
+        word[0] = end - 2;
+        word[1] = 16;
+        printf("iovlen %d\n", (int)raw_fd_write(1, (int32_t)(uintptr_t)word, 1,
+                                                 (int32_t)(uintptr_t)&got));
+    } else if (strcmp(how, "badfd") == 0) {
+        printf("badfd %d %d\n", (int)raw_fd_write(77, (int32_t)(uintptr_t)word, 0,
+                                                  (int32_t)(uintptr_t)&got),
+               (int)raw_fd_close(-1));
+    } else if (strcmp(how, "prestat0") == 0) {
+        printf("prestat0 %d\n", (int)raw_fd_prestat_dir_name(dir, (int32_t)(uintptr_t)word, 0));
+    } else if (strcmp(how, "poll0") == 0) {
+        printf("poll0 %d\n", (int)raw_poll_oneoff((int32_t)(uintptr_t)word, (int32_t)(uintptr_t)word,
+                                                   0, (int32_t)(uintptr_t)&got));
+    } else if (strcmp(how, "renum") == 0) {
+        printf("renum %d\n", (int)raw_fd_renumber(dir, 9999));
+    } else {
+        return 64;
+    }
+    return 0;
+}
+
 static void said(const char *what, int32_t r, char *buf) {
     if (r < 0) {
         printf("%s -1 errno %d\n", what, errno);
@@ -129,6 +196,9 @@ int main(int argc, char **argv) {
     }
     if (strcmp(verb, "app") == 0) {
         return app();
+    }
+    if (strcmp(verb, "hostile") == 0 && argc > 2) {
+        return hostile(argv[2]);
     }
     if (strcmp(verb, "open") == 0 && argc > 2) {
         FILE *f = fopen(argv[2], "r");

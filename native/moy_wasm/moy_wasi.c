@@ -551,7 +551,7 @@ static uint32_t resolve(call_t *c, uint32_t fd, uint32_t p, uint32_t n, char *ou
     if (memchr(rel, 0, n) != NULL) {
         return W_INVAL;
     }
-    if (moy_sh_abs(c->w->s, n && rel[0] == '/' ? rel : path, out, PATH_CAP) != 0) {
+    if (moy_sh_abs(c->w->s, n && rel[0] == '/' ? path + dn + 1 : path, out, PATH_CAP) != 0) {
         return W_NAMETOOLONG;
     }
     return moy_sh_prog_reaches(&c->w->prog, out) ? W_OK : W_NOTCAPABLE;

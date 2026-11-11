@@ -383,3 +383,23 @@ def test_a_built_command_keeps_everything_but_its_dwarf():
     dwarf = custom(b".debug_info", b"\1\2\3")
     names = custom(b"name", b"\0")
     assert wasm_cart.strip_debug(blob + dwarf + names + dwarf) == blob + names
+
+
+def test_hostile_arguments_answer_an_errno_or_trap(term):
+    """preview1's imports called raw with what a hostile module passes
+    (wasi_probe's `hostile`): an absolute path is the bytes its length says
+    and no more, a pointer at the end of memory or a range off it is FAULT
+    or the engine's trap, a descriptor never opened BADF -- and the console
+    reads nothing outside the module's memory."""
+    _ws, app = term
+    run(app, "printf 'x\\n' > a.txt")
+    assert out(app, "wasi.probe/probe hostile abs") == ["abs 0"]
+    assert out(app, "wasi.probe/probe hostile end") == ["end answered"]
+    got = out(app, "wasi.probe/probe hostile wrap; echo status $?")
+    assert got[-1] == "status 134" and "out of bounds memory access" in "".join(got), got
+    assert out(app, "wasi.probe/probe hostile iov") == ["iov 21"]
+    assert out(app, "wasi.probe/probe hostile iovlen") == ["iovlen 21"]
+    assert out(app, "wasi.probe/probe hostile badfd") == ["badfd 8 8"]
+    assert out(app, "wasi.probe/probe hostile prestat0") == ["prestat0 37"]
+    assert out(app, "wasi.probe/probe hostile poll0") == ["poll0 28"]
+    assert out(app, "wasi.probe/probe hostile renum") == ["renum 8"]
