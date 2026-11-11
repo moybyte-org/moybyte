@@ -44,6 +44,8 @@ from pathlib import Path
 
 import pytest
 
+import pixel_goldens
+
 # The matrix lives in ONE place. pytest puts tests/ on sys.path, so this is a
 # plain module import; an ImportError here is a loud lockstep failure rather
 # than the silent divergence a copied dict would give.
@@ -163,12 +165,21 @@ _UPDATE_PHASES = ("checking", "nopublish", "uptodate", "confirm_online",
 # capture
 # ---------------------------------------------------------------------------
 
+# The digests the running test expects, and the frames of the shots that hash
+# to none of them (the moved ones, which a failure writes as PNGs).
+_HELD = set()
+_FRAMES = {}
+
+
 def _shot(ws, fn):
     """Draw ONE sub-surface onto a cleared canvas and hash it."""
     cv = ws.sys_canvas
     cv.cls(0)
     fn()
-    return hashlib.sha256(bytes(cv._buf)).hexdigest()
+    got = hashlib.sha256(bytes(cv._buf)).hexdigest()
+    if got not in _HELD:
+        _FRAMES[got] = (bytes(cv._buf), cv.w, cv.h)
+    return got
 
 
 def blank_digest(ws):
@@ -394,7 +405,20 @@ def _write_goldens_on_teardown(request):
 
 @pytest.mark.parametrize("config_name", sorted(CONFIGS))
 def test_sub_surfaces_match_goldens(config_name, tmp_path, request):
-    got = capture(CONFIGS[config_name], tmp_path / "carts")
+    stored = json.loads(GOLDEN_FILE.read_text(encoding="utf-8")) \
+        if GOLDEN_FILE.exists() else {}
+    _HELD.clear()
+    if not pixel_goldens.dumping():
+        _HELD.update((stored.get(config_name) or {}).values())
+    _FRAMES.clear()
+    try:
+        got = capture(CONFIGS[config_name], tmp_path / "carts")
+    finally:
+        frames, _ = dict(_FRAMES), _FRAMES.clear()
+    if pixel_goldens.dumping():
+        for name, have in got.items():
+            buf, w, h = frames[have]
+            pixel_goldens.dump(name, lambda: pixel_goldens.rgb565_rows(buf, w, h), w, h)
 
     if _updating(request):
         assert not hasattr(request.config, "workerinput"), (
@@ -429,7 +453,14 @@ def test_sub_surfaces_match_goldens(config_name, tmp_path, request):
         lines.append("  If the change is INTENDED and you can say which pixel "
                      "moved and why, re-baseline deliberately:")
         lines.append("    " + REBASELINE_CMD)
-        raise AssertionError("\n".join(lines))
+        pngs = []
+        for name, want, have in moved:
+            if have in frames:
+                buf, w, h = frames[have]
+                pngs.append(pixel_goldens.check(
+                    name, have, want,
+                    lambda: pixel_goldens.rgb565_rows(buf, w, h), w, h))
+        raise AssertionError("\n".join(lines) + pixel_goldens.message(pngs))
 
 
 def test_goldens_file_covers_exactly_the_matrix(request):

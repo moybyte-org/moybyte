@@ -39,6 +39,7 @@ import pytest
 
 from runtime import audio_session, host_app
 from tools import wasm_cart, wat
+import pixel_goldens
 from ws_helpers import open_cart, settle_badges
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -142,7 +143,8 @@ def test_the_hello_cart_golden_at_the_320x240_row(tmp_path, request):
     _frames(ws, GOLDEN_FRAMES)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (320, 240)
-    got = hashlib.sha256(bytes(ws.sys_canvas._buf)).hexdigest()
+    cv = ws.sys_canvas
+    got = hashlib.sha256(bytes(cv._buf)).hexdigest()
     update = (os.environ.get(UPDATE_ENV)
               or request.config.getoption("--update-goldens", default=False))
     if update:
@@ -152,10 +154,14 @@ def test_the_hello_cart_golden_at_the_320x240_row(tmp_path, request):
         return
     with open(GOLDEN_FILE) as f:
         want = json.load(f)[GOLDEN_ROW]
+    png = pixel_goldens.check("hello", got, want,
+                              lambda: pixel_goldens.rgb565_rows(cv._buf, cv.w, cv.h),
+                              cv.w, cv.h)
     assert got == want, (
         "the hello cart's frame moved (%s != %s). Re-baseline only if you can "
         "say which pixel moved and why: %s=1 .venv/bin/python -m pytest "
-        "tests/test_wasm_cart.py -k golden" % (got, want, UPDATE_ENV))
+        "tests/test_wasm_cart.py -k golden%s"
+        % (got, want, UPDATE_ENV, pixel_goldens.message([png])))
 
 
 def test_the_tier_cart_frame_is_the_one_every_tier_holds(tmp_path, request):
@@ -173,16 +179,22 @@ def test_the_tier_cart_frame_is_the_one_every_tier_holds(tmp_path, request):
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     cv = ws.sys_canvas
     assert (cv.w, cv.h) == (tier_frame.W, tier_frame.H)
-    got = tier_frame.digest(tier_frame.from_canvas(cv._buf, dc.PAL565_WIRE is not dc.PAL565))
+    swapped = dc.PAL565_WIRE is not dc.PAL565
+    got = tier_frame.digest(tier_frame.from_canvas(cv._buf, swapped))
     if os.environ.get(UPDATE_ENV) or request.config.getoption("--update-goldens",
                                                               default=False):
         tier_frame.GOLDEN.write_text(json.dumps({tier_frame.ROW: got}, indent=2,
                                                 sort_keys=True) + "\n")
         return
-    assert got == tier_frame.golden(), (
+    want = tier_frame.golden()
+    png = pixel_goldens.check(
+        "tier", got, want,
+        lambda: pixel_goldens.rgb565_rows(cv._buf, cv.w, cv.h, big_endian=swapped),
+        cv.w, cv.h)
+    assert got == want, (
         "the tier cart's frame moved. Re-baseline only if you can say which "
         "pixel moved and why: %s=1 .venv/bin/python -m pytest "
-        "tests/test_wasm_cart.py -k tier" % UPDATE_ENV)
+        "tests/test_wasm_cart.py -k tier%s" % (UPDATE_ENV, pixel_goldens.message([png])))
 
 
 def test_the_tier_cart_streams_and_traps_on_the_host(tmp_path):

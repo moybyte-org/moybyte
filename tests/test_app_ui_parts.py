@@ -172,10 +172,11 @@ def _pixels(ws):
 
 
 def _shot(name, size, px):
-    from tools import golden_png, pngwrite
+    from tools import pngwrite
+    from pixel_goldens import rgb565_rows
     w, h = size
     pngwrite.write_png(os.path.join(SHOTS, name + ".png"),
-                       golden_png.rgb565be_rows(px, w, h), w, h)
+                       rgb565_rows(px, w, h), w, h)
 
 
 def _offset(ws, x, y):

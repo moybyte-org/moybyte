@@ -221,7 +221,10 @@ or  .venv/bin/python -m pytest tests/test_shell_goldens.py --update-goldens -p n
 
 Nothing re-baselines automatically. If a golden moves and you cannot say in
 one sentence which pixel moved and why, the change is a revert, not an update
-(`docs/history/ui_refactor_2026-08.md` Section 8).
+(`docs/history/ui_refactor_2026-08.md` Section 8). A failure writes each
+moved surface as a PNG and prints the command that shows it against a ref:
+`tools/golden_diff.py REF` (before, after and a marked diff, with an index
+page; `tests/pixel_goldens.py`).
 """
 
 import hashlib
@@ -232,6 +235,7 @@ from pathlib import Path
 
 import pytest
 
+import pixel_goldens
 from cart_store_fixtures import INDEX_URL, MemNet, snapshot
 from ws_helpers import open_cart, settle_badges
 
@@ -2004,8 +2008,10 @@ def _ui():
     return ui_draw
 
 
-def capture(config_name, carts_dir):
-    """{surface: sha256} for one configuration."""
+def capture(config_name, carts_dir, golden=None, moved=None):
+    """{surface: sha256} for one configuration. With `golden`, a surface that
+    moved from it is written as a PNG (`pixel_goldens`) and its path added to
+    `moved`."""
     cfg = CONFIGS[config_name]
     ws = _build(cfg, carts_dir)
     expect_bytes = ws.glass_canvas.w * ws.glass_canvas.h * 2  # RGB565
@@ -2019,6 +2025,12 @@ def capture(config_name, carts_dir):
                 "%s/%s: the glass is %d bytes, expected %d (w*h*2)"
                 % (config_name, name, len(bytes(ws.glass_canvas._buf)), expect_bytes))
             out[name] = _render(ws, name, config_name)
+            if golden is not None:
+                cv = ws.glass_canvas
+                moved.append(pixel_goldens.check(
+                    name, out[name], golden.get(name),
+                    lambda: pixel_goldens.rgb565_rows(cv._buf, cv.w, cv.h),
+                    cv.w, cv.h))
     finally:
         ws.go_home()                   # the run in front ends: its canvas is the glass's
         from runtime import scheduler
@@ -2111,7 +2123,11 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
     from runtime import ui_draw
     del ui_draw.primary_warnings[:]
     ui_draw._PRIMARY_WARNED.clear()
-    got = capture(config_name, tmp_path / "carts")
+    updating = _updating(request)
+    golden = None if updating else _load_goldens().get(config_name)
+    pngs = []
+    got = capture(config_name, tmp_path / "carts",
+                  None if updating else golden or {}, pngs)
     assert ui_draw.primary_warnings == [], (
         "a surface draws more than one primary button in a frame (DESIGN.md, "
         "'Button kinds'): %r" % ui_draw.primary_warnings)
@@ -2119,15 +2135,13 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
     assert not many, (
         "a frame draws more than one focus mark (DESIGN.md, the marks: "
         "exactly one a screen, never in a window behind): %r" % many)
-    if _updating(request):
+    if updating:
         assert not hasattr(request.config, "workerinput"), (
             "re-baselining under xdist would have every worker rewrite the "
             "goldens file. Run it serially:\n    " + REBASELINE_CMD)
         _CAPTURED[config_name] = got
         pytest.skip("re-baselining %s (%d surfaces)" % (config_name, len(got)))
 
-    stored = _load_goldens()
-    golden = stored.get(config_name)
     assert golden is not None, (
         "no goldens stored for config %r (axes: %s). Baseline it:\n    %s"
         % (config_name, _axes(CONFIGS[config_name]), REBASELINE_CMD))
@@ -2156,7 +2170,7 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
         lines.append("  If the change is INTENDED and you can say which pixel "
                      "moved and why, re-baseline deliberately:")
         lines.append("    " + REBASELINE_CMD)
-        raise AssertionError("\n".join(lines))
+        raise AssertionError("\n".join(lines) + pixel_goldens.message(pngs))
 
     pinned = json.loads(COUNTS_FILE.read_text(encoding="utf-8")).get(config_name, {})
     drawn = {s: list(_DRAWN[(config_name, s)]) for s in got}

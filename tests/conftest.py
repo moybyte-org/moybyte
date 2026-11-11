@@ -280,6 +280,12 @@ def pytest_configure(config):
         "(app_perms.asks_first), as a cart that arrived as files is")
 
 
+def pytest_runtest_setup(item):
+    """A pixel test's moved frames (`pixel_goldens`) are its last run's."""
+    import pixel_goldens
+    pixel_goldens.clear(item.nodeid)
+
+
 # Whether the running test is marked `first_run` (`_carts_are_made_here`).
 _FIRST_RUN = [False]
 

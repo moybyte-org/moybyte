@@ -119,7 +119,7 @@ left:
   (`docs/history/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
   from the formulas every tier runs, so a widget or a layout formula change
   moves the T-Deck rows too, and `tests/test_layout_base.py` fails a `_base`
-  coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`. `tools/golden_png.py CONFIG` renders a config's goldens to PNGs to look at.
+  coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`. `tools/golden_png.py CONFIG` renders a config's goldens to PNGs to look at. A pixel test that fails writes its moved frames under `.build/goldens/` (`tests/pixel_goldens.py`), and `tools/golden_diff.py REF` sets each beside its picture at REF with a marked diff and an index page: a re-bake's commit names its surfaces and its review reads that page.
 - **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist):
   an `"app"` block in the identity cart's manifest, and `runtime/shell/app_decls.py`, its
   generated frozen copy. The five hand-lists it replaced failed silently and on

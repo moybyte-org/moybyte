@@ -142,6 +142,27 @@ jobs:
           .venv/bin/python -m pytest --durations=25 \
             $(.venv/bin/python tools/ci_shard.py 4 ${{ matrix.shard }})
 
+      # A pixel golden that moved left its frames under .build/goldens
+      # (tests/pixel_goldens.py): render the same tests at the base, write
+      # before, after and a marked diff of each, and upload the lot.
+      - name: Before, after and a diff of the moved pixel goldens
+        if: failure() && hashFiles('.build/goldens/**/node.txt') != ''
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git fetch -q --depth=1 origin "$BASE"
+          .venv/bin/python tools/golden_diff.py "$BASE" || true
+
+      - name: Upload the moved pixel goldens
+        if: failure() && hashFiles('.build/goldens/**/node.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: moved-goldens-py${{ matrix.python-version }}-shard${{ matrix.shard }}
+          path: |
+            .build/goldens/
+            .build/golden_diff/
+          if-no-files-found: ignore
+
       - name: Run redraw-on-change tests in isolation
         if: matrix.shard == 1
         run: .venv/bin/python -m pytest tests/test_redraw_on_change.py

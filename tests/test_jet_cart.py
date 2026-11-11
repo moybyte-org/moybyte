@@ -48,6 +48,7 @@ import sys
 import pytest
 
 from runtime import host_app
+import pixel_goldens
 from ws_helpers import open_cart, settle_badges
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -231,13 +232,14 @@ def _golden_frame(tmp_path, jet, width, pose):
     for frames, hold in legs:
         _frames(ws, frames, hold)
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (W, H)
-    return hashlib.sha256(bytes(ws.sys_canvas._buf)).hexdigest()
+    return bytes(ws.sys_canvas._buf)
 
 
-def _check_golden(request, path, key, got, test):
-    """`got` against the committed table at `path`. Re-baseline deliberately,
-    as the shell goldens are: `MOYBYTE_UPDATE_GOLDENS=1` or
-    `--update-goldens`."""
+def _check_golden(request, path, key, buf, test):
+    """The frame `buf` (the system canvas's RGB565) against the committed table
+    at `path`. Re-baseline deliberately, as the shell goldens are:
+    `MOYBYTE_UPDATE_GOLDENS=1` or `--update-goldens`."""
+    got = hashlib.sha256(buf).hexdigest()
     update = (os.environ.get(UPDATE_ENV)
               or request.config.getoption("--update-goldens", default=False))
     table = {}
@@ -251,10 +253,13 @@ def _check_golden(request, path, key, got, test):
             f.write("\n")
         return
     assert key in table, "no golden for %s; record it with %s=1" % (key, UPDATE_ENV)
+    png = pixel_goldens.check(key, got, table[key],
+                              lambda: pixel_goldens.rgb565_rows(buf, W, H), W, H)
     assert got == table[key], (
         "the frame %s moved (%s != %s). Re-baseline only if you can say "
         "which pixel moved and why: %s=1 .venv/bin/python -m pytest "
-        "tests/test_jet_cart.py -k %s" % (key, got, table[key], UPDATE_ENV, test))
+        "tests/test_jet_cart.py -k %s%s"
+        % (key, got, table[key], UPDATE_ENV, test, pixel_goldens.message([png])))
 
 
 @pytest.mark.parametrize("width", WIDTHS)
@@ -428,8 +433,7 @@ def test_the_film_frame_golden(tmp_path, request, jet, pose):
     row = 2 * W
     assert not any(buf[:FILM_TOP * row]) and not any(buf[(FILM_TOP + FILM_H) * row:])
     assert any(buf[FILM_TOP * row:(FILM_TOP + FILM_H) * row])
-    _check_golden(request, FILM_GOLDEN_FILE, name, hashlib.sha256(buf).hexdigest(),
-                  "film_frame")
+    _check_golden(request, FILM_GOLDEN_FILE, name, buf, "film_frame")
 
 
 def test_the_film_s_buttons_step_the_cuts_and_show_the_hud(tmp_path, jet):
